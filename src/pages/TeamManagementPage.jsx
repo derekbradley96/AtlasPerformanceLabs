@@ -364,7 +364,7 @@ export default function TeamManagementPage() {
               <h2 className="text-sm font-semibold mb-3" style={{ color: colors.text }}>
                 Team members
               </h2>
-              {data.members.length === 0 ? (
+              {(data?.members?.length === 0 ? (
                 <Card style={{ padding: spacing[20], textAlign: 'center' }}>
                   <p className="text-sm" style={{ color: colors.muted }}>
                     No members yet. Invite coaches above.
@@ -419,7 +419,7 @@ export default function TeamManagementPage() {
                     </li>
                   ))}
                 </ul>
-              )}
+              ))}
             </div>
           </>
         )}
