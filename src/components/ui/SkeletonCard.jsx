@@ -1,5 +1,5 @@
 import React from 'react';
-import Skeleton from './Skeleton';
+import Skeleton from './skeleton';
 import { colors, radii, spacing } from '@/ui/tokens';
 
 export default function SkeletonCard({ lines = 3 }) {
