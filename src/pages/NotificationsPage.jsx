@@ -20,7 +20,7 @@ import {
   AlertCircle,
   Check,
   RefreshCw,
-  Pills,
+  Pill,
 } from 'lucide-react';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
@@ -65,9 +65,9 @@ function getIconForType(type) {
     pose_check_submitted: Camera,
     client_flag_created: Flag,
     billing_failed: AlertCircle,
-    supplement_morning_reminder: Pills,
-    supplement_evening_reminder: Pills,
-    supplement_missed_reminder: Pills,
+    supplement_morning_reminder: Pill,
+    supplement_evening_reminder: Pill,
+    supplement_missed_reminder: Pill,
   };
   return map[type] || Bell;
 }

@@ -13,7 +13,7 @@ import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { isCoach } from '@/lib/roles';
 import { useAuth } from '@/lib/AuthContext';
-import { Search, Users, Pills, CheckCircle2 } from 'lucide-react';
+import { Search, Users, Pill, CheckCircle2 } from 'lucide-react';
 
 async function fetchCoachClients() {
   if (!hasSupabase()) return [];
@@ -188,7 +188,7 @@ export default function SupplementStackBuilder() {
           <Card style={{ padding: spacing[16] }}>
             <div className="flex items-center justify-between gap-2 mb-3">
               <div className="flex items-center gap-2">
-                <Pills size={16} style={{ color: colors.muted }} />
+                <Pill size={16} style={{ color: colors.muted }} />
                 <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: colors.muted, margin: 0 }}>
                   Supplement library
                 </p>

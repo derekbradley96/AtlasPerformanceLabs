@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { colors, spacing, radii } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
-import { Pills, CheckCircle2, Circle } from 'lucide-react';
+import { Pill, CheckCircle2, Circle } from 'lucide-react';
 
 function todayISODate() {
   const d = new Date();
@@ -116,7 +116,7 @@ export default function ClientSupplementStack() {
           <p style={{ color: colors.muted }}>Loading…</p>
         ) : stack.length === 0 ? (
           <Card style={{ padding: spacing[24], textAlign: 'center' }}>
-            <Pills className="w-10 h-10 mx-auto mb-3" style={{ color: colors.muted }} />
+            <Pill className="w-10 h-10 mx-auto mb-3" style={{ color: colors.muted }} />
             <p style={{ color: colors.muted }}>No supplements assigned yet.</p>
             <p className="text-sm mt-2" style={{ color: colors.muted }}>
               Your coach can add your supplement plan from their dashboard.

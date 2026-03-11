@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
 import { useAlertStatus } from '@/components/hooks/useAlertStatus';
-import { UserCircle, MessageSquare, Palette, HelpCircle, Trophy, Phone, Link2, Users, CheckSquare, Award, BarChart3, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Dumbbell, Store, Inbox, Bell, Gift, Calendar, Building2, Building, Pills, Activity, LayoutDashboard } from 'lucide-react';
+import { UserCircle, MessageSquare, Palette, HelpCircle, Trophy, Phone, Link2, Users, CheckSquare, Award, BarChart3, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Dumbbell, Store, Inbox, Bell, Gift, Calendar, Building2, Building, Pill, Activity, LayoutDashboard } from 'lucide-react';
 import { createPageUrl } from '@/utils';
 import { seedIfEmpty, resetSandbox, addClient } from '@/lib/sandboxStore';
 import { getTrainerId } from '@/lib/getTrainerId';
@@ -91,7 +91,7 @@ const TRAINER_ROWS = [
   { label: 'Capacity', icon: BarChart3, path: '/capacity' },
   { label: 'Session calendar', icon: Calendar, path: '/calendar' },
   { label: 'Gym overview', icon: Building2, path: '/gym' },
-  { label: 'Supplement stacks', icon: Pills, path: '/supplements/stacks' },
+  { label: 'Supplement stacks', icon: Pill, path: '/supplements/stacks' },
   { label: 'Competition Prep', icon: Award, path: '/comp-prep' },
   { label: 'Marketplace profile', icon: Store, path: '/marketplace-profile' },
   { label: 'Inquiry inbox', icon: Inbox, path: '/inquiry-inbox' },
@@ -522,7 +522,7 @@ function MoreContent() {
             style={{ marginBottom: spacing[8] }}
           />
           <Row
-            left={<Pills size={20} style={{ color: colors.muted }} />}
+            left={<Pill size={20} style={{ color: colors.muted }} />}
             title="My supplements"
             showChevron={true}
             onPress={() => { impactLight(); navigate('/client/supplements'); }}

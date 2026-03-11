@@ -9,7 +9,7 @@ import {
   Dumbbell,
   TrendingUp,
   UtensilsCrossed,
-  Pills,
+  Pill,
   Activity,
   ChevronRight,
   Target,
@@ -309,7 +309,7 @@ export default function AthleteDashboard() {
         <Card style={{ padding: spacing[16] }}>
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
-              <Pills size={18} style={{ color: colors.primary }} />
+              <Pill size={18} style={{ color: colors.primary }} />
               <h2 className="text-sm font-semibold uppercase tracking-wide" style={{ color: colors.muted, margin: 0 }}>
                 Supplement stack
               </h2>
