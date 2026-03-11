@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
-import Button from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
