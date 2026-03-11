@@ -1,0 +1,480 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global: no horizontal scroll, iOS-safe layout */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Retro Corporate Neon theme (single source: src/ui/tokens.js) */
+:root {
+  --tabbar-height: 76px;
+  --atlas-bg-primary: #0B1220;
+  --atlas-surface1: #111827;
+  --atlas-surface2: #1F2937;
+  --atlas-brand: #3B82F6;
+  --atlas-primary: #3B82F6;
+  --atlas-accent: #3B82F6;
+  --atlas-accent-glow: #3B82F6;
+  --atlas-text-primary: #E5E7EB;
+  --atlas-text-secondary: #9CA3AF;
+  --atlas-text-muted: #9CA3AF;
+  --atlas-border: rgba(255,255,255,0.08);
+  --atlas-border-active: rgba(59,130,246,0.25);
+  --atlas-success: #22C55E;
+  --atlas-warning: #EAB308;
+  --atlas-danger: #EF4444;
+  --atlas-radius-card: 16px;
+  --atlas-radius-button: 14px;
+  --atlas-glow: 0 0 24px rgba(59,130,246,0.12);
+  --atlas-brand-glow: 0 4px 20px rgba(59,130,246,0.25);
+  --atlas-header-border: rgba(255,255,255,0.04);
+  --atlas-page-padding: 16px;
+  --atlas-section-spacing: 16px;
+  --tabbar-height: 76px;
+}
+
+/* Atlas typography hierarchy (use on all role-based pages) */
+.atlas-page-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--atlas-text-primary);
+  margin-bottom: var(--atlas-section-spacing);
+}
+.atlas-section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--atlas-text-primary);
+}
+.atlas-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--atlas-text-primary);
+}
+.atlas-meta {
+  font-size: 0.875rem;
+  color: var(--atlas-text-muted);
+}
+.atlas-pill-text {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Atlas CTA buttons – use same height and radius globally */
+.atlas-btn-primary {
+  background: var(--atlas-primary);
+  color: #fff;
+  min-height: 44px;
+  border-radius: var(--atlas-radius-button);
+  font-weight: 600;
+  border: none;
+}
+.atlas-btn-secondary {
+  background: transparent;
+  color: var(--atlas-text-primary);
+  border: 1px solid var(--atlas-border);
+  min-height: 44px;
+  border-radius: var(--atlas-radius-button);
+  font-weight: 500;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  overflow-x: hidden;
+  margin: 0;
+  background: var(--atlas-bg-primary);
+  color: var(--atlas-text-primary);
+}
+html,
+body {
+  height: 100%;
+  min-height: 100%;
+  max-width: 100%;
+}
+#root {
+  max-width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+
+/* Atlas: disable text selection + iOS Copy/Look Up/Translate callout globally */
+html,
+body,
+#root {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.allow-select,
+.allow-select * {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Always allow editing + selection in fields */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Reinforce no selection/callout on chat bubbles (e.g. long-press opens Atlas sheet) */
+.no-select-callout {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@keyframes app-shell-push-in {
+  from {
+    opacity: 0.92;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (min-width: 640px) {
+  .program-details-row {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+body {
+  touch-action: pan-y;
+}
+input,
+textarea {
+  touch-action: manipulation;
+}
+
+/* iOS: prevent zoom on focus – inputs/select/button must be at least 16px */
+input,
+textarea,
+select,
+button {
+  font-size: 16px;
+}
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select,
+  button {
+    font-size: 16px !important;
+  }
+}
+/* Touch devices: ensure no zoom when focusing any form control */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1rem);
+  }
+}
+
+img,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@layer base {
+  /* Mobile app design tokens */
+  :root {
+    --app-bg: #0B1220;
+    --app-card: #111827;
+    --app-accent: #3B82F6;
+    --app-text: #E5E7EB;
+    --app-muted: rgba(229, 231, 235, 0.65);
+    --app-border: rgba(255, 255, 255, 0.08);
+    --app-space-4: 4px;
+    --app-space-8: 8px;
+    --app-space-12: 12px;
+    --app-space-16: 16px;
+    --app-space-20: 20px;
+    --app-space-24: 24px;
+    --app-radius-sm: 12px;
+    --app-radius-md: 16px;
+    --app-radius-lg: 20px;
+    --app-topbar: 56px;
+    --app-tabbar: 64px;
+    --app-row-height: 64px;
+  }
+
+  /* Atlas dark theme as default – no white page/card backgrounds */
+  :root {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 13%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 13%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 28% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 215 28% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 221 83% 53%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 215 28% 25%;
+    --input: 215 28% 25%;
+    --ring: 221 83% 53%;
+    --chart-1: 221 83% 53%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 0 84% 60%;
+    --chart-5: 215 20% 55%;
+    --radius: 0.5rem;
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 28% 17%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 215 28% 25%;
+    --sidebar-ring: 221 83% 53%;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 13%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 13%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 28% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 215 28% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 221 83% 53%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 215 28% 25%;
+    --input: 215 28% 25%;
+    --ring: 221 83% 53%;
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 215 28% 17%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 215 28% 25%;
+    --sidebar-ring: 221 83% 53%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    margin: 0;
+    background: #0B1220;
+    color: #E5E7EB;
+    @apply min-h-full;
+  }
+}
+
+/* Shared mobile list/card styles: top-aligned, no centering */
+.app-screen {
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  background: var(--app-bg);
+  color: var(--app-text);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.app-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.app-card {
+  background: var(--app-card);
+  border: 1px solid var(--atlas-border);
+  border-radius: var(--atlas-radius-card);
+  box-shadow: var(--atlas-glow);
+  overflow: hidden;
+}
+.app-card-inner {
+  background: var(--app-card);
+  border: 1px solid var(--atlas-border);
+  border-radius: var(--atlas-radius-card);
+  padding: var(--app-space-16);
+}
+.app-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--app-space-12);
+  min-height: var(--app-row-height);
+  padding-left: var(--app-space-16);
+  padding-right: var(--app-space-16);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-text);
+  transition: background 0.15s;
+}
+.app-list-row:last-child {
+  border-bottom: none;
+}
+.app-list-row:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Chat thread: iOS-style layout and bubbles; no horizontal scroll */
+.chat-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  background: #0B1220;
+}
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 16px 8px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+/* iOS 17 style blur input bar */
+.chat-input-bar {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--atlas-header-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  background: rgba(11, 18, 32, 0.92);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  backdrop-filter: blur(18px) saturate(180%);
+}
+@supports (backdrop-filter: blur(18px)) or (-webkit-backdrop-filter: blur(18px)) {
+  .chat-input-bar {
+    background: rgba(11, 18, 32, 0.72);
+  }
+}
+.chat-scroll-to-bottom {
+  position: absolute;
+  right: 16px;
+  z-index: 10;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 22px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(37, 99, 235, 0.25);
+  color: #93C5FD;
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  -webkit-tap-highlight-color: transparent;
+}
+.chat-scroll-to-bottom:active {
+  opacity: 0.9;
+}
+.message-bubble {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 240ms ease-out, transform 240ms ease-out;
+}
+.message-bubble.animate-in {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+/* Typing indicator dots */
+.chat-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--app-muted);
+  animation: chat-typing-bounce 0.6s ease-in-out infinite;
+}
+.chat-typing-dot:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.chat-typing-dot:nth-child(3) {
+  animation-delay: 0.2s;
+}
+@keyframes chat-typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes earnings-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.earnings-fade-in {
+  animation: earnings-fade-in 240ms ease-out;
+}
+
+/* CountPill: value change animation (slide + fade), 160ms ease */
+.count-pill-value-wrap {
+  vertical-align: middle;
+}
+.count-pill-value {
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+.count-pill-value-exit {
+  transform: translateY(0);
+  opacity: 1;
+}
+.count-pill-value-exit.count-pill-exit-active {
+  transform: translateY(-6px);
+  opacity: 0;
+}
+.count-pill-value-enter {
+  transform: translateY(6px);
+  opacity: 0;
+}
+.count-pill-value-enter.count-pill-enter-active,
+.count-pill-value-enter.count-pill-value-idle {
+  transform: translateY(0);
+  opacity: 1;
+}

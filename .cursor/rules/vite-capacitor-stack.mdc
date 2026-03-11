@@ -1,0 +1,14 @@
+---
+description: Project stack is Vite + Capacitor, not Expo. Use this for all implementation and prompts.
+globs: 
+alwaysApply: true
+---
+
+# Atlas Performance Labs – Vite + Capacitor (not Expo)
+
+This codebase is a **Vite + Capacitor** app, not Expo.
+
+- **Build / dev:** Vite (`npm run dev`, `npm run build`). Entry and config are Vite-based (e.g. `index.html`, `vite.config.*`).
+- **Native:** Capacitor for iOS and Android (`npm run ios`, `npm run android`, `npx cap sync`). Native projects live under `ios/` and `android/`.
+- **Do not** use Expo, `expo start`, `expo-cli`, or Expo-specific APIs (e.g. `expo-constants`, `expo-linking`) unless explicitly added to the project.
+- When adding or describing the app, say **Vite + Capacitor** (or "Vite/Capacitor app"), not "Expo" or "Expo + web".

@@ -1,0 +1,50 @@
+# Dependencies and build output (reduces indexing and context load)
+node_modules
+.pnp
+.pnp.js
+dist
+dist-ssr
+build
+.next
+out
+*.tsbuildinfo
+
+# Version control
+.git
+
+# Lockfiles (large, rarely needed in context)
+*.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# iOS/Android native build artifacts
+ios/App/App/public
+ios/App/App/build
+ios/Pods
+ios/build
+android/app/build
+android/build
+*.xcworkspace
+*.xcodeproj
+
+# Logs and caches
+*.log
+.cache
+.parcel-cache
+.eslintcache
+.turbo
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and OS
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

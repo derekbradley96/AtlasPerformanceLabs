@@ -1,0 +1,197 @@
+/**
+ * Prep header for clients with an active contest prep: weeks/days out, peak week badge, pose check status, quick actions.
+ * When showPrepInsights is true (competition/integrated coaches), fetches and shows prep-specific insight summaries.
+ */
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
+import { isCoach } from '@/lib/roles';
+import Card from '@/ui/Card';
+import { Button } from '@/components/ui/button';
+import { colors, spacing } from '@/ui/tokens';
+import { getPrepInsightSummaries } from '@/lib/prepInsights';
+import { generatePrepInsight } from '@/lib/atlasInsights';
+import InsightCard from '@/components/review/InsightCard';
+import { Calendar, ImageIcon, Zap } from 'lucide-react';
+
+async function fetchPrepHeader(clientId) {
+  if (!hasSupabase || !clientId) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('v_client_prep_header')
+      .select('*')
+      .eq('client_id', clientId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchPrepHeaderWithInsights(clientId) {
+  if (!hasSupabase || !clientId) return { header: null, metrics: null, poseChecksLast4w: 0 };
+  const supabase = getSupabase();
+  if (!supabase) return { header: null, metrics: null, poseChecksLast4w: 0 };
+  const fourWeeksAgo = new Date();
+  fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+  try {
+    const [headerRes, metricsRes, poseRes] = await Promise.all([
+      supabase.from('v_client_prep_header').select('*').eq('client_id', clientId).maybeSingle(),
+      supabase.from('v_client_progress_metrics').select('*').eq('client_id', clientId).maybeSingle(),
+      supabase.from('pose_checks').select('id', { count: 'exact', head: true }).eq('client_id', clientId).gte('submitted_at', fourWeeksAgo.toISOString()),
+    ]);
+    return {
+      header: headerRes.data ?? null,
+      metrics: metricsRes.data ?? null,
+      poseChecksLast4w: poseRes.count ?? 0,
+    };
+  } catch (_) {
+    return { header: null, metrics: null, poseChecksLast4w: 0 };
+  }
+}
+
+export default function PrepHeader({ clientId, showPrepInsights = false }) {
+  const navigate = useNavigate();
+  const { effectiveRole } = useAuth();
+  const [prep, setPrep] = useState(null);
+  const [insightsData, setInsightsData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const isCoachRole = isCoach(effectiveRole);
+
+  useEffect(() => {
+    if (!clientId) {
+      setPrep(null);
+      setInsightsData(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    if (showPrepInsights) {
+      fetchPrepHeaderWithInsights(clientId).then((out) => {
+        if (!cancelled) {
+          setPrep(out.header);
+          setInsightsData(out);
+          setLoading(false);
+        }
+      });
+    } else {
+      fetchPrepHeader(clientId).then((row) => {
+        if (!cancelled) {
+          setPrep(row);
+          setInsightsData(null);
+          setLoading(false);
+        }
+      });
+    }
+    return () => { cancelled = true; };
+  }, [clientId, showPrepInsights]);
+
+  if (loading || !prep) return null;
+
+  const weeksOut = prep.weeks_out != null ? Number(prep.weeks_out) : null;
+  const daysOut = prep.days_out != null ? Number(prep.days_out) : null;
+  const isPeakWeek = prep.is_peak_week === true;
+  const poseSubmitted = prep.pose_check_submitted_this_week === true;
+  const showDate = prep.show_date ? new Date(prep.show_date).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '';
+  const showPassed = daysOut != null && daysOut < 0;
+
+  const prepData = prep ? {
+    has_active_prep: true,
+    days_out: prep.days_out ?? insightsData?.metrics?.days_out,
+    show_date: prep.show_date,
+    pose_check_submitted_this_week: prep.pose_check_submitted_this_week === true,
+    weight_change: insightsData?.metrics?.weight_change,
+    show_name: prep.show_name,
+    division: prep.division,
+  } : null;
+  const atlasPrepInsight = prepData ? generatePrepInsight(prepData) : null;
+  const showAtlasPrep = atlasPrepInsight && atlasPrepInsight.title !== 'No active prep';
+
+  const summaries = showPrepInsights && insightsData
+    ? getPrepInsightSummaries(insightsData.header, insightsData.metrics, {
+        poseChecksLast4w: insightsData.poseChecksLast4w,
+        poseSubmittedThisWeek: prep.pose_check_submitted_this_week === true,
+      })
+    : [];
+
+  return (
+    <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
+      <div className="flex items-center gap-2 mb-2" style={{ color: colors.muted }}>
+        <Calendar size={16} />
+        <span className="text-xs font-medium">Contest prep</span>
+        {showDate && (
+          <span className="text-xs">· {showDate}</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium" style={{ color: colors.text }}>
+          {showPassed ? 'Show passed' : null}
+          {!showPassed && weeksOut != null && weeksOut >= 0 && `${weeksOut} weeks out`}
+          {!showPassed && weeksOut != null && weeksOut >= 0 && daysOut != null && ' · '}
+          {!showPassed && daysOut != null && daysOut >= 0 && `${daysOut} days out`}
+        </span>
+        {isPeakWeek && (
+          <span
+            className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded"
+            style={{ background: colors.primary, color: '#fff' }}
+          >
+            <Zap size={12} /> Peak week
+          </span>
+        )}
+        <span className="text-xs" style={{ color: colors.muted }}>
+          Pose check: {poseSubmitted ? 'Submitted' : 'Due'}
+        </span>
+      </div>
+      {(showAtlasPrep || summaries.length > 0) && (
+        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
+          <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Prep insights</p>
+          {showAtlasPrep && (
+            <InsightCard
+              level={atlasPrepInsight.level === 'warning' ? 'warning' : atlasPrepInsight.level === 'positive' ? 'positive' : 'neutral'}
+              title={atlasPrepInsight.title}
+              detail={atlasPrepInsight.summary}
+            />
+          )}
+          {summaries.map((s, i) => (
+            <InsightCard key={i} level={s.level} title={s.title} detail={s.detail} />
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2 mt-3">
+        {isCoachRole && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/clients/${clientId}/peak-week`)}
+            >
+              Open Peak Week Plan
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/clients/${clientId}/pose-timeline`)}
+            >
+              Pose Timeline
+            </Button>
+          </>
+        )}
+        {!isCoachRole && !poseSubmitted && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/pose-check')}
+          >
+            <ImageIcon size={14} className="mr-1.5" />
+            Submit Pose Check
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}

@@ -1,0 +1,22 @@
+---
+description: Before implementing, correct the user's prompt to match the repo so nothing gets confusing or breaks.
+globs: 
+alwaysApply: true
+---
+
+# Correct the prompt first (all additions)
+
+**If anything is wrong or unclear in the user's prompt, correct it for what we are doing and for all prompts coming.**
+
+Before writing code or making changes:
+
+1. **Align with the repo**  
+   Check stack (React, Vite, Capacitor, Supabase), existing patterns (single Supabase client at `@/lib/supabaseClient`, React Router, roles in `@/lib/roles`), and schema (e.g. `clients.trainer_id` / `clients.user_id`, `message_threads`, `checkins`).
+
+2. **Correct the prompt**  
+   Fix table/column names, ownership logic, file paths, or output format so the request matches this codebase. Do not guess; use existing migrations and modules as the source of truth.
+
+3. **Then implement**  
+   Apply changes without introducing a second Supabase client, Expo, or other stack mismatches.
+
+This rule applies to every addition or change so nothing gets confusing and nothing breaks.

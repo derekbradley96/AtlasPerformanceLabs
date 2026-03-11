@@ -1,0 +1,2 @@
+# Invoked by Scheduled Trigger (cron); no user JWT
+verify_jwt = false

@@ -1,0 +1,17 @@
+/* Atlas Performance Labs – brand theme utilities */
+.atlas-card {
+  background-color: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  border-radius: 1rem;
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
