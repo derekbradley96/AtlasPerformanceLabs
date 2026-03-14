@@ -11,6 +11,9 @@ const config: CapacitorConfig = {
   appName: 'Atlas Performance Labs',
   webDir: 'dist',
   plugins: {
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
     Keyboard: {
       resize: 'none',
       style: 'dark',
@@ -25,7 +28,14 @@ const config: CapacitorConfig = {
     },
   },
   server: {
-    allowNavigation: ['capacitor://localhost', 'https://*.supabase.co'],
+    allowNavigation: [
+      'capacitor://localhost',
+      'https://*.supabase.co',
+      'https://*.vercel.app',
+      'https://*.atlasperformancelabs.com',
+      'https://checkout.stripe.com',
+      'https://*.stripe.com',
+    ],
     ...(serverUrl
       ? { url: serverUrl, cleartext: true }
       : { hostname: 'localhost' }),
