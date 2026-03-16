@@ -31,7 +31,9 @@ jobs:
         continue-on-error: false
 
       - name: OSV Scanner (lockfile)
-        run: npx osv-scanner@latest --lockfile=package-lock.json
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/google/osv-scanner/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+          osv-scanner --lockfile=package-lock.json
         continue-on-error: false
 
       - name: Lint
