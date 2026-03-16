@@ -32,9 +32,9 @@ jobs:
 
       - name: OSV Scanner (lockfile)
         run: |
-          curl -sSfL -o osv-scanner https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64
-          chmod +x osv-scanner
-          sudo mv osv-scanner /usr/local/bin/osv-scanner
+          curl -LO https://github.com/google/osv-scanner/releases/latest/download/osv-scanner-linux-amd64
+          chmod +x osv-scanner-linux-amd64
+          sudo mv osv-scanner-linux-amd64 /usr/local/bin/osv-scanner
           osv-scanner --lockfile=package-lock.json
         continue-on-error: false
 
