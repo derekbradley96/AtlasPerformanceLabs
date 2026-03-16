@@ -30,14 +30,6 @@ jobs:
         run: npm audit --audit-level=high
         continue-on-error: false
 
-      - name: OSV Scanner (lockfile)
-        run: |
-          curl -LO https://github.com/google/osv-scanner/releases/latest/download/osv-scanner-linux-amd64
-          chmod +x osv-scanner-linux-amd64
-          sudo mv osv-scanner-linux-amd64 /usr/local/bin/osv-scanner
-          osv-scanner --lockfile=package-lock.json
-        continue-on-error: false
-
       - name: Lint
         run: npm run lint
 
@@ -46,3 +38,14 @@ jobs:
 
       - name: Test unit (Vitest)
         run: npm run test:unit
+
+  osv-scan:
+    name: OSV Scanner (lockfile)
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.3.3
+    with:
+      scan-args: |
+        --lockfile=package-lock.json
+    permissions:
+      actions: read
+      security-events: write
+      contents: read
