@@ -262,7 +262,7 @@ export async function runAutomationRules(eventType, payload, options = {}) {
  * @returns {Promise<{ eventId: string | null; run: Awaited<ReturnType<typeof runAutomationRules>> }>}
  */
 export async function processEvent(eventType, payload = {}, options = {}) {
-  const client = options.client ?? (hasSupabase() ? getSupabase() : null);
+  const client = options.client ?? (hasSupabase ? getSupabase() : null);
   const safePayload = payload && typeof payload === 'object' ? payload : {};
   let eventId = null;
 

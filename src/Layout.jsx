@@ -32,7 +32,7 @@ export default function Layout({ children, currentPageName }) {
   ];
   const showBackButton = !rootPages.includes(currentPageName) && !isOnboardingPage;
 
-  const userRole = resolvedUser?.user_type || resolvedUser?.role || 'general';
+  const userRole = resolvedUser?.user_type || resolvedUser?.role || 'personal';
   const isMobileLayout = useIsMobileLayout();
 
   /* Shared app shell: deep slate so no white shows */

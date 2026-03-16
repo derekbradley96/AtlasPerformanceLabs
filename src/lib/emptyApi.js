@@ -1,7 +1,8 @@
 /**
- * Empty API stub for legacy call sites. No Base44 dependency.
- * Replace with AuthContext (user, isAuthenticated, navigateToLogin) and
- * Supabase Edge Functions (invokeSupabaseFunction from @/lib/supabaseApi) when implementing features.
+ * Legacy API stub for call sites not yet migrated to Supabase.
+ * Base44 has been removed from the project. Prefer useAuth() and invokeSupabaseFunction()
+ * (or Supabase client/repos) for new code. This stub returns empty data so existing
+ * pages render without errors until they are wired to Supabase.
  */
 
 const noop = () => {};

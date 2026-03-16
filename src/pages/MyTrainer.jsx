@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { 
@@ -14,48 +15,14 @@ import { motion } from 'framer-motion';
 
 export default function MyTrainer() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    let mounted = true;
-    const timeout = setTimeout(() => {
-      if (mounted && loading) {
-        console.error('[MyTrainer] Load timeout - 8 seconds elapsed');
-        setLoading(false);
-        setError('timeout');
-      }
-    }, 8000);
-
-    const loadUser = async () => {
-      try {
-        const u = await base44.auth.me();
-        if (mounted) {
-          setUser(u);
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error('[MyTrainer] User fetch failed:', err);
-        if (mounted) {
-          setError('user_fetch');
-          setLoading(false);
-        }
-      }
-    };
-    
-    loadUser();
-    return () => {
-      mounted = false;
-      clearTimeout(timeout);
-    };
-  }, []);
+  const { user } = useAuth();
 
   const { data: clientProfile, isLoading: profileLoading, error: profileError } = useQuery({
     queryKey: ['client-profile', user?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.ClientProfile.filter({ user_id: user.id });
-      return profiles[0] || null;
+      const { data } = await invokeSupabaseFunction('client-profile-list', { user_id: user?.id });
+      const list = Array.isArray(data) ? data : [];
+      return list[0] || null;
     },
     enabled: !!user?.id,
     retry: 1,
@@ -65,21 +32,11 @@ export default function MyTrainer() {
   const { data: trainer, isLoading: trainerLoading } = useQuery({
     queryKey: ['trainer-profile', clientProfile?.trainer_id],
     queryFn: async () => {
-      const trainers = await base44.entities.TrainerProfile.filter({ id: clientProfile.trainer_id });
-      return trainers[0] || null;
+      const { data } = await invokeSupabaseFunction('trainer-profile-get', { id: clientProfile?.trainer_id });
+      const list = Array.isArray(data) ? data : (data ? [data] : []);
+      return list[0] ?? null;
     },
     enabled: !!clientProfile?.trainer_id,
-    retry: 1,
-    staleTime: 30000
-  });
-
-  const { data: trainerUser } = useQuery({
-    queryKey: ['trainer-user', trainer?.user_id],
-    queryFn: async () => {
-      const users = await base44.entities.User.filter({ id: trainer.user_id });
-      return users[0] || null;
-    },
-    enabled: !!trainer?.user_id,
     retry: 1,
     staleTime: 30000
   });
@@ -87,12 +44,8 @@ export default function MyTrainer() {
   const { data: latestCheckin } = useQuery({
     queryKey: ['latest-checkin-trainer', clientProfile?.id],
     queryFn: async () => {
-      const checkins = await base44.entities.CheckIn.filter(
-        { client_id: clientProfile.id },
-        '-created_date',
-        1
-      );
-      const list = Array.isArray(checkins) ? checkins : [];
+      const { data } = await invokeSupabaseFunction('checkin-list', { client_id: clientProfile?.id });
+      const list = Array.isArray(data) ? data : [];
       return list[0] ?? null;
     },
     enabled: !!clientProfile?.id,
@@ -100,7 +53,7 @@ export default function MyTrainer() {
   });
 
   // Error state
-  if (error === 'timeout' || error === 'user_fetch' || profileError) {
+  if (profileError) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24">
         <div className="text-center">
@@ -109,7 +62,7 @@ export default function MyTrainer() {
           </div>
           <h3 className="text-lg font-semibold text-white mb-2">Couldn't load data</h3>
           <p className="text-slate-400 text-sm max-w-sm mb-6">
-            {error === 'timeout' ? 'Loading took too long' : 'Failed to fetch trainer info'}
+            Failed to fetch trainer info
           </p>
           <Button onClick={() => window.location.reload()} className="bg-blue-500 hover:bg-blue-600">
             Retry
@@ -120,7 +73,7 @@ export default function MyTrainer() {
   }
 
   // Initial loading
-  if (loading || !user) return <PageLoader />;
+  if (!user) return <PageLoader />;
 
   // Profile still loading
   if (profileLoading) return <PageLoader />;

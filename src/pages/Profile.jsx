@@ -27,8 +27,8 @@ export default function Profile() {
     }
   };
 
-  const roles = ['trainer', 'client', 'solo'];
-  const roleLabels = { trainer: 'Coach', client: 'Client', solo: 'Personal' };
+  const roles = ['coach', 'client', 'personal'];
+  const roleLabels = { coach: 'Coach', client: 'Client', personal: 'Personal' };
   const currentRole = getUserRole(profile ?? displayUser);
   const currentRoleIndex = roles.indexOf(currentRole);
 
@@ -80,7 +80,7 @@ export default function Profile() {
           >
             <div><strong>role</strong> (profiles.role): {rawRole || '—'}</div>
             <div><strong>resolved</strong>: {currentRole}</div>
-            {(currentRole === 'trainer') && <div><strong>coach_focus</strong>: {String(coachFocusLabel)}</div>}
+            {(currentRole === 'coach') && <div><strong>coach_focus</strong>: {String(coachFocusLabel)}</div>}
           </div>
         )}
         {/* Profile Card */}
@@ -169,6 +169,15 @@ export default function Profile() {
               <Shield className="w-4 h-4" />
               {displayUser?.email === ADMIN_EMAIL ? 'Admin' : 'Dev Tools'}
             </h3>
+            {displayUser?.email === ADMIN_EMAIL && (
+              <Button
+                onClick={() => navigate('/admin')}
+                className="w-full bg-purple-500 hover:bg-purple-600 text-white mb-3"
+              >
+                <Shield className="w-4 h-4 mr-2" />
+                Open Platform Admin
+              </Button>
+            )}
             <Button
               onClick={() => navigate('/admin-dev-panel')}
               className="w-full bg-purple-600 hover:bg-purple-700 text-white mb-3"

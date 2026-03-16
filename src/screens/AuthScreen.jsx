@@ -1,6 +1,7 @@
 /**
  * Auth screen: Atlas branding, Log in / Sign up, client code entry, role-aware signup.
  * Polished for native iOS feel (haptics, loading states, keyboard UX, micro-animations).
+ * Production auth flow is unified through /auth. Legacy role-select pages are DEV/demo only.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -16,6 +17,7 @@ import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
 import { toast } from 'sonner';
 
 import AtlasLogo from '@/components/Brand/AtlasLogo';
+import { getPendingInvite } from '@/pages/ClientCode';
 
 const ATLAS_BLUE = colors.brand;
 
@@ -60,10 +62,16 @@ export default function AuthScreen() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { signIn, signUp, isLoadingAuth, supabaseUser, profile } = useAuth();
-  const [mode, setMode] = useState('login');
+  const paramMode = searchParams.get('mode');
+  const paramAccount = searchParams.get('account');
+  const [mode, setMode] = useState(() => (paramMode === 'signup' ? 'signup' : 'login'));
   const [logoMounted, setLogoMounted] = useState(false);
   const [cardMounted, setCardMounted] = useState(false);
-  const [signupRole, setSignupRole] = useState('coach');
+  const [signupRole, setSignupRole] = useState(() => {
+    if (paramAccount === 'client') return 'client';
+    if (paramAccount === 'personal') return 'personal';
+    return 'coach';
+  });
   const [signupCoachFocus, setSignupCoachFocus] = useState('transformation');
   const [displayName, setDisplayName] = useState('');
   const [pressing, setPressing] = useState(false);
@@ -71,6 +79,16 @@ export default function AuthScreen() {
   const passwordRef = useRef(null);
 
   const referralCodeFromUrl = (searchParams.get('ref') ?? '').trim() || null;
+
+  useEffect(() => {
+    if (paramMode === 'signup') setMode('signup');
+    else if (paramMode === 'login') setMode('login');
+  }, [paramMode]);
+  useEffect(() => {
+    if (paramAccount === 'coach' || paramAccount === 'personal' || paramAccount === 'client') {
+      setSignupRole(paramAccount);
+    }
+  }, [paramAccount]);
 
   useEffect(() => {
     const t = requestAnimationFrame(() => setLogoMounted(true));
@@ -82,9 +100,21 @@ export default function AuthScreen() {
     return () => clearTimeout(t);
   }, []);
 
+  // Navigate to home when auth state is ready (after login/signup state has flushed).
+  // If user has a pending client invite (from coach code flow), send to client onboarding first.
   useEffect(() => {
-    if (supabaseUser && profile?.role) navigate('/home', { replace: true });
-  }, [supabaseUser, profile?.role, navigate]);
+    if (!supabaseUser) return;
+    const pending = getPendingInvite();
+    if (pending?.code) {
+      navigate('/clientonboarding', { replace: true });
+      return;
+    }
+    if (profile?.role) {
+      navigate('/home', { replace: true });
+      return;
+    }
+    if (!isLoadingAuth) navigate('/home', { replace: true });
+  }, [supabaseUser, profile?.role, isLoadingAuth, navigate]);
 
   useEffect(() => {
     const el = emailRef.current;
@@ -150,8 +180,9 @@ export default function AuthScreen() {
     const coachFocus = signupRole === 'coach' && signupCoachFocus
       ? (signupCoachFocus ?? '').toString().trim().toLowerCase() || 'transformation'
       : null;
-    if (!isLogin && import.meta.env.DEV) {
-      console.warn('[SIGNUP DEBUG]', { role: signupRole, coachFocus, display_name: (displayName ?? '').trim(), email: eTrim });
+    if (import.meta.env.DEV) {
+      if (isLogin) console.log('[AUTH] login submit', { account: signupRole, email: eTrim });
+      else console.log('[AUTH] signup submit', { account: signupRole, coachFocus, display_name: (displayName ?? '').trim(), email: eTrim });
     }
     try {
       const result = isLogin
@@ -176,12 +207,12 @@ export default function AuthScreen() {
       }
       if (isLogin) {
         toast.success('Signed in');
-        navigate('/home', { replace: true });
+        // Don't navigate here: let the useEffect run when supabaseUser/profile update so protected routes see the new session.
         return;
       }
       if (result?.data?.session) {
         toast.success('Account created');
-        navigate('/home', { replace: true });
+        // Same: let useEffect handle navigation once state has updated.
         return;
       }
       if (result?.data?.user) {
@@ -251,26 +282,15 @@ export default function AuthScreen() {
         }}
       >
         <div className="w-full max-w-sm">
-          <p className="text-center mb-4" style={{ color: colors.text }}>
-            Supabase is not configured. Use local mode.
+          <p className="text-center mb-2" style={{ color: colors.text, fontWeight: 600 }}>
+            Sign-in unavailable
           </p>
-          <button
-            type="button"
-            aria-label="Continue with local mode"
-            onClick={async () => { await lightHaptic(); navigate('/role-select', { replace: true }); }}
-            style={{
-              width: '100%',
-              minHeight: touchTargetMin,
-              background: colors.accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: radii.sm,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Continue with local mode
-          </button>
+          <p className="text-center text-sm mb-2" style={{ color: colors.muted }}>
+            Supabase is not configured. The app was built without <code className="text-xs bg-white/10 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="text-xs bg-white/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code>.
+          </p>
+          <p className="text-center text-sm" style={{ color: colors.muted }}>
+            Add them to a <code className="text-xs bg-white/10 px-1 rounded">.env</code> file (copy from <code className="text-xs bg-white/10 px-1 rounded">.env.example</code>), then run <code className="text-xs bg-white/10 px-1 rounded">npm run build</code> and <code className="text-xs bg-white/10 px-1 rounded">npm run cap:sync:all</code> (or <code className="text-xs bg-white/10 px-1 rounded">npx cap sync ios</code>).
+          </p>
         </div>
       </div>
     );

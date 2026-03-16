@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ArrowRight, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { base44 } from '@/lib/emptyApi';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
@@ -20,18 +20,18 @@ export default function ClientOnboardingCode({ onValidCode }) {
     setError('');
 
     try {
-      const { data } = await base44.functions.invoke('validateInviteCode', {
-        code: code.toUpperCase()
+      const { data, error } = await invokeSupabaseFunction('validateInviteCode', {
+        code: code.toUpperCase().trim()
       });
 
-      if (!data.valid) {
-        setError(data.error || 'Invalid trainer code');
+      if (error || !data?.valid) {
+        setError(data?.error || error || 'Invalid coach code');
         setTrainerInfo(null);
         return;
       }
 
       setTrainerInfo(data.trainer);
-      toast.success('Trainer found!');
+      toast.success('Coach found!');
       onValidCode(data.trainer);
     } catch (error) {
       console.error('Validation error:', error);

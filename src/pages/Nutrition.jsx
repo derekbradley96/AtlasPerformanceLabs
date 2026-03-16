@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { Apple, Target, MessageSquare, UtensilsCrossed, Scale, TrendingUp, Zap } from 'lucide-react';
@@ -80,8 +80,7 @@ function TrainerNutritionPlaceholder() {
 export default function Nutrition() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { role } = useAuth();
-  const [user, setUser] = useState(null);
+  const { user, role } = useAuth();
   const [showTargetForm, setShowTargetForm] = useState(false);
   const [targetCalories, setTargetCalories] = useState('');
   const [targetProtein, setTargetProtein] = useState('');
@@ -89,61 +88,49 @@ export default function Nutrition() {
   const [targetFats, setTargetFats] = useState('');
   const [deleting, setDeleting] = useState(null);
   const { trigger, reason } = useCoachingUpgradeTriggers(null, null);
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
-
-  // Update trigger when user is loaded
   const { trigger: coachTrigger, reason: coachReason } = useCoachingUpgradeTriggers(user?.id, user?.user_type);
 
-  // Client/Trainer flow
+  // Client flow: client profile + nutrition plan
   const { data: clientProfile } = useQuery({
     queryKey: ['client-profile', user?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.ClientProfile.filter({ user_id: user.id });
-      return profiles[0];
+      const { data } = await invokeSupabaseFunction('client-profile-list', { user_id: user?.id });
+      const list = Array.isArray(data) ? data : [];
+      return list[0] ?? null;
     },
-    enabled: !!user?.id && user?.user_type === 'client'
+    enabled: !!user?.id && (role === 'client' || user?.user_type === 'client')
   });
 
   const { data: nutritionPlan } = useQuery({
     queryKey: ['nutrition-plan', clientProfile?.id],
     queryFn: async () => {
-      const plans = await base44.entities.NutritionPlan.filter({
-        client_id: clientProfile.id,
+      const { data } = await invokeSupabaseFunction('nutrition-plan-list', {
+        client_id: clientProfile?.id,
         is_active: true
       });
-      return plans[0];
+      const list = Array.isArray(data) ? data : (data ? [data] : []);
+      return list[0] ?? null;
     },
     enabled: !!clientProfile?.id
   });
 
-  // Solo user flow
+  // Personal (solo) user flow
   const { data: soloTarget } = useQuery({
     queryKey: ['solo-nutrition-target', user?.id],
     queryFn: async () => {
-      const targets = await base44.entities.SoloNutritionTarget.filter({
-        user_id: user.id,
-        is_active: true
-      });
-      return targets[0];
+      const { data } = await invokeSupabaseFunction('solo-nutrition-target-list', { user_id: user?.id, is_active: true });
+      const list = Array.isArray(data) ? data : (data ? [data] : []);
+      return list[0] ?? null;
     },
-    enabled: !!user?.id && user?.user_type === 'solo'
+    enabled: !!user?.id && (role === 'personal' || user?.user_type === 'solo')
   });
 
   const { data: todayMeals = [] } = useQuery({
     queryKey: ['today-meals', user?.id],
     queryFn: async () => {
       const today = new Date().toISOString().split('T')[0];
-      return base44.entities.MealLog.filter({
-        user_id: user.id,
-        meal_date: today
-      });
+      const { data } = await invokeSupabaseFunction('meal-log-list', { user_id: user?.id, meal_date: today });
+      return Array.isArray(data) ? data : [];
     },
     enabled: !!user?.id
   });
@@ -151,12 +138,13 @@ export default function Nutrition() {
   const logMealMutation = useMutation({
     mutationFn: async (mealData) => {
       const today = new Date().toISOString().split('T')[0];
-      return base44.entities.MealLog.create({
-        user_id: user.id,
+      const { data } = await invokeSupabaseFunction('meal-log-create', {
+        user_id: user?.id,
         meal_date: today,
         logged_at: new Date().toISOString(),
         ...mealData
       });
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['today-meals'] });
@@ -165,7 +153,9 @@ export default function Nutrition() {
   });
 
   const deleteMealMutation = useMutation({
-    mutationFn: (mealId) => base44.entities.MealLog.delete(mealId),
+    mutationFn: async (mealId) => {
+      await invokeSupabaseFunction('meal-log-delete', { id: mealId });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['today-meals'] });
       setDeleting(null);
@@ -174,11 +164,12 @@ export default function Nutrition() {
 
   const createTargetMutation = useMutation({
     mutationFn: async (targetData) => {
-      return base44.entities.SoloNutritionTarget.create({
-        user_id: user.id,
+      const { data } = await invokeSupabaseFunction('solo-nutrition-target-create', {
+        user_id: user?.id,
         is_active: true,
         ...targetData
       });
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['solo-nutrition-target'] });
@@ -193,7 +184,7 @@ export default function Nutrition() {
 
   if (!user) return <PageLoader />;
 
-  if (role === 'trainer') return <TrainerNutritionPlaceholder />;
+  if (role === 'coach') return <TrainerNutritionPlaceholder />;
 
   // Client with trainer
   if (user.user_type === 'client' && !clientProfile) return <PageLoader />;

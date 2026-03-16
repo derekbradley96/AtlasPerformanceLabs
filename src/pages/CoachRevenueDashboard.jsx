@@ -53,7 +53,7 @@ function MetricCard({ icon: Icon, label, value, formatter }) {
 export default function CoachRevenueDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const supabase = hasSupabase() ? getSupabase() : null;
+  const supabase = hasSupabase ? getSupabase() : null;
 
   const { data: metrics, isLoading } = useQuery({
     queryKey: ['coach-revenue-metrics', user?.id],
@@ -80,10 +80,20 @@ export default function CoachRevenueDashboard() {
             <MetricCard icon={UserMinus} label="Client churn" value={metrics.clientChurn} />
             <MetricCard icon={TrendingUp} label="Avg revenue per client" value={metrics.avgRevenuePerClient} formatter={formatCurrency} />
           </div>
-        ) : (
+        ) : !isLoading ? (
           <Card style={{ padding: spacing[24], textAlign: 'center', border: `1px solid ${colors.border}` }}>
             <p className="text-sm" style={{ color: colors.muted }}>Unable to load revenue metrics.</p>
           </Card>
+        ) : null}
+        {!isLoading && (
+          <button
+            type="button"
+            className="w-full mt-4 py-2.5 rounded-xl text-sm font-medium border flex items-center justify-center gap-2"
+            style={{ borderColor: colors.border, color: colors.primary }}
+            onClick={() => navigate('/revenue-analytics')}
+          >
+            Revenue analytics
+          </button>
         )}
       </div>
     </div>

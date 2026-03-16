@@ -66,7 +66,7 @@ export function useData(): {
   }
 
   const listClientsFn = useCallback(
-    () => repo.clients.list(trainerId, effectiveDemoMode),
+    () => (typeof repo?.clients?.list === 'function' ? repo.clients.list(trainerId, effectiveDemoMode) : Promise.resolve([])),
     [trainerId, effectiveDemoMode]
   );
   const getClientFn = useCallback(
@@ -85,7 +85,10 @@ export function useData(): {
     (id: string) => repo.clients.delete(id, trainerId, effectiveDemoMode),
     [trainerId, effectiveDemoMode]
   );
-  const listThreadsFn = useCallback(() => repo.threads.list(trainerId), [trainerId]);
+  const listThreadsFn = useCallback(
+    () => (typeof repo?.threads?.list === 'function' ? repo.threads.list(trainerId) : Promise.resolve([])),
+    [trainerId]
+  );
   const listMessagesFn = useCallback((threadId: string) => repo.messages.list(threadId, trainerId), [trainerId]);
   const deleteThreadFn = useCallback((clientId: string) => repo.threads.deleteByClientId(clientId, trainerId), [trainerId]);
   const sendMessageFn = useCallback(async (threadId: string, text: string) => {
@@ -113,7 +116,11 @@ export function useData(): {
   const listReviewItemsFn = useCallback(() => repo.inbox.list(trainerId), [trainerId]);
   const completeReviewItemFn = useCallback((id: string) => repo.inbox.completeReviewItem(id), []);
   const getCoachFn = useCallback(() => repo.getCoach(trainerId), [trainerId]);
-  const listCheckInsForTrainerFn = useCallback((): Promise<CheckIn[]> => repo.checkIns.listForTrainer(trainerId), [trainerId]);
+  const listCheckInsForTrainerFn = useCallback(
+    (): Promise<CheckIn[]> =>
+      typeof repo?.checkIns?.listForTrainer === 'function' ? repo.checkIns.listForTrainer(trainerId) : Promise.resolve([]),
+    [trainerId]
+  );
   const listCheckInsForClientFn = useCallback((clientId: string): Promise<CheckIn[]> => repo.checkIns.list(clientId, trainerId), [trainerId]);
   const getClientProgramsFn = useCallback((clientId: string) => repo.programs.list(clientId), []);
   const getThreadFn = useCallback((clientId: string) => repo.threads.getByClientId(clientId, trainerId), [trainerId]);

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { UserCircle, Mail, Award, MessageSquare, HelpCircle } from 'lucide-react';
+import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store } from 'lucide-react';
 import { getRouteTitle } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { createPageUrl } from '@/utils';
@@ -69,6 +69,14 @@ export default function Account() {
           showChevron={true}
           onPress={() => { impactLight(); openSupport(); }}
         />
+        {(role === 'coach' || role === 'trainer') && (
+          <Row
+            left={<Store size={20} style={{ color: colors.muted }} />}
+            title="Marketplace listing"
+            showChevron={true}
+            onPress={() => { impactLight(); navigate('/marketplace-setup'); }}
+          />
+        )}
         {displayUser?.email && (
           <div
             className="flex items-center gap-3 w-full"
@@ -87,7 +95,7 @@ export default function Account() {
           </div>
         )}
 
-        {role === 'trainer' && (
+        {(role === 'coach' || role === 'trainer') && (
           <div
             style={{
               padding: spacing[16],

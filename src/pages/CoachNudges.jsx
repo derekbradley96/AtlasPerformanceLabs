@@ -54,7 +54,7 @@ export default function CoachNudges() {
     const loadUser = async () => {
       const u = await base44.auth.me();
       setUser(u);
-      if (u?.user_type !== 'trainer') {
+      if (u?.user_type !== 'coach' && u?.user_type !== 'trainer') {
         navigate(createPageUrl('Home'));
       }
     };

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { Plus, FileText, Edit } from 'lucide-react';
@@ -11,32 +12,28 @@ import NotAuthorized from '@/components/NotAuthorized';
 
 export default function CheckInTemplates() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
+  const { user } = useAuth();
 
   const { data: profile } = useQuery({
     queryKey: ['trainer-profile', user?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.TrainerProfile.filter({ user_id: user.id });
-      return profiles[0] || null;
+      const { data } = await invokeSupabaseFunction('trainer-profile-list', { user_id: user?.id });
+      const list = Array.isArray(data) ? data : (data ? [data] : []);
+      return list[0] ?? null;
     },
     enabled: !!user?.id
   });
 
   const { data: templates = [], isLoading } = useQuery({
     queryKey: ['checkin-templates', profile?.id],
-    queryFn: () => base44.entities.CheckInTemplate.filter({ trainer_id: profile?.id }),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('checkin-template-list', { trainer_id: profile?.id });
+      return Array.isArray(data) ? data : [];
+    },
     enabled: !!profile?.id
   });
 
-  if (user && user.user_type !== 'trainer') {
+  if (user && user.user_type !== 'coach' && user.user_type !== 'trainer') {
     return <NotAuthorized />;
   }
 

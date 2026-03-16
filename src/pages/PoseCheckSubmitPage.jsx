@@ -18,6 +18,8 @@ import {
   uploadPoseCheckPhoto,
   updatePoseCheckPhotos,
 } from '@/lib/poseChecks';
+import { trackPoseCheckSubmitted, trackProgressPhotoUploaded } from '@/services/engagementTracker';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { ImagePlus } from 'lucide-react';
 
 function isClientOrPersonal(role) {
@@ -86,6 +88,18 @@ export default function PoseCheckSubmitPage() {
       setExisting({ ...row, client_notes: clientNotes.trim() || null, photos: paths });
       setPhotoFiles([]);
       setClientNotes('');
+      let coachId = null;
+      if (hasSupabase && clientId) {
+        try {
+          const supabase = getSupabase();
+          const { data: clientRow } = await supabase.from('clients').select('coach_id, trainer_id').eq('id', clientId).maybeSingle();
+          coachId = clientRow?.coach_id ?? clientRow?.trainer_id ?? null;
+        } catch (_) {}
+      }
+      trackPoseCheckSubmitted(clientId, coachId, { pose_check_id: row.id, photo_count: paths.length }).catch(() => {});
+      if (paths.length > 0) {
+        trackProgressPhotoUploaded(clientId, coachId, { pose_check_id: row.id, photo_count: paths.length }).catch(() => {});
+      }
     } catch (err) {
       toast.error('Failed to submit pose check');
     } finally {

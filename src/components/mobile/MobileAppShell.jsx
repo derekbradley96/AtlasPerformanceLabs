@@ -22,7 +22,7 @@ export default function MobileAppShell({ children }) {
   const showBack = !isTabRoute(pathname);
   const title = getRouteTitle(location.pathname);
 
-  const homePath = effectiveRole === 'client' ? '/client-dashboard' : effectiveRole === 'solo' ? '/solo-dashboard' : '/trainer';
+  const homePath = effectiveRole === 'client' ? '/client-dashboard' : (effectiveRole === 'personal' || effectiveRole === 'solo') ? '/solo-dashboard' : '/home';
 
   const handleBack = useCallback(() => {
     navigate(-1);

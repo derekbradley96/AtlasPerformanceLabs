@@ -176,7 +176,7 @@ VITE_SUPABASE_ANON_KEY=your_anon_key`;
   const handleStartSandboxTrainer = async () => {
     await lightHaptic();
     const email = (sandboxEmail || '').trim() || 'dev@atlas.local';
-    setFakeSession('trainer', email);
+    setFakeSession('coach', email);
     navigate('/home', { replace: true });
   };
 
@@ -184,7 +184,7 @@ VITE_SUPABASE_ANON_KEY=your_anon_key`;
     await lightHaptic();
     const email = (user?.email || sandboxEmail || '').trim() || 'dev@atlas.local';
     setFakeSession(newRole, email);
-    if (newRole === 'trainer') navigate('/home', { replace: true });
+    if (newRole === 'coach') navigate('/home', { replace: true });
     else if (newRole === 'client') navigate('/messages', { replace: true });
     else navigate('/home', { replace: true });
   };

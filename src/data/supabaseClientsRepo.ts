@@ -20,13 +20,22 @@ export interface SupabaseClientRow {
 export async function listClients(trainerId: string): Promise<SupabaseClientRow[]> {
   if (!hasSupabase || !supabase) throw new Error('Supabase not configured');
   if (import.meta.env?.DEV) console.log('[ATLAS] listClients query coachId/trainerId=', trainerId, 'from(clients).or(coach_id|trainer_id)');
-  const { data, error } = await supabase
+  const q = supabase
     .from('clients')
     .select('*')
-    .or(`coach_id.eq.${trainerId},trainer_id.eq.${trainerId}`)
-    .order('created_at', { ascending: false });
+    .or(`coach_id.eq.${trainerId},trainer_id.eq.${trainerId}`);
+  const { data, error } = await q.order('created_at', { ascending: false });
   if (error) {
-    console.error('[ATLAS] listClients error trainerId=', trainerId, 'message=', error.message, 'code=', error.code, 'details=', error.details);
+    const msg = (error as { message?: string }).message ?? String(error);
+    if (msg.includes('created_at') || (error as { code?: string }).code === 'PGRST204') {
+      const { data: dataFallback, error: errorFallback } = await supabase
+        .from('clients')
+        .select('*')
+        .or(`coach_id.eq.${trainerId},trainer_id.eq.${trainerId}`)
+        .order('id', { ascending: false });
+      if (!errorFallback) return Array.isArray(dataFallback) ? dataFallback : [];
+    }
+    console.error('[ATLAS] listClients error trainerId=', trainerId, 'message=', msg, 'code=', (error as { code?: string }).code);
     throw error;
   }
   return Array.isArray(data) ? data : [];

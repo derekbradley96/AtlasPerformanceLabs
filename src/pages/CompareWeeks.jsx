@@ -18,7 +18,7 @@ export default function CompareWeeks() {
   useEffect(() => {
     const loadUser = async () => {
       const u = await base44.auth.me();
-      if (u?.user_type !== 'trainer') {
+      if (u?.user_type !== 'coach' && u?.user_type !== 'trainer') {
         navigate(createPageUrl('Home'));
       }
     };

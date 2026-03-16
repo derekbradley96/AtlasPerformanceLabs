@@ -3,13 +3,13 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/AuthContext';
 import GeneralDashboard from '@/components/dashboards/GeneralDashboard';
 
-const DEMO_USER = { id: 'demo-user', full_name: 'Demo User', user_type: 'general', email: 'demo@atlasperformancelabs.app', isDemo: true };
+const DEMO_USER = { id: 'demo-user', full_name: 'Demo User', user_type: 'personal', email: 'demo@atlasperformancelabs.app', isDemo: true };
 
 const mountTransition = { duration: 0.24, ease: 'easeOut' };
 
 export default function SoloDashboardPage() {
   const { user: authUser, isDemoMode, isAdminBypass } = useAuth();
-  const user = authUser || (isDemoMode ? DEMO_USER : null) || (isAdminBypass ? { id: 'admin', full_name: 'Admin', user_type: 'general' } : null);
+  const user = authUser || (isDemoMode ? DEMO_USER : null) || (isAdminBypass ? { id: 'admin', full_name: 'Admin', user_type: 'personal' } : null);
   if (!user) {
     return (
       <div className="min-h-[200px] flex items-center justify-center bg-[#0B1220]" style={{ paddingTop: 24, paddingBottom: 24 }}>

@@ -41,7 +41,7 @@ export default function ImportClientsPage() {
       toast.error('Parse a CSV first');
       return;
     }
-    if (!hasSupabase()) {
+    if (!hasSupabase) {
       toast.error('Supabase is not available');
       return;
     }
@@ -77,7 +77,7 @@ export default function ImportClientsPage() {
       toast.error('Import clients first');
       return;
     }
-    if (!hasSupabase()) {
+    if (!hasSupabase) {
       toast.error('Supabase is not available');
       return;
     }

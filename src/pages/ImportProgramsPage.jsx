@@ -26,7 +26,7 @@ import { trackFriction } from '@/services/frictionTracker';
 import { User, CheckCircle2, AlertCircle } from 'lucide-react';
 
 async function fetchCoachClients() {
-  if (!hasSupabase()) return [];
+  if (!hasSupabase) return [];
   const supabase = getSupabase();
   if (!supabase) return [];
   const {
@@ -63,7 +63,7 @@ export default function ImportProgramsPage() {
   const { data: clients = [], isLoading: loadingClients } = useQuery({
     queryKey: ['coach_clients_for_program_import'],
     queryFn: fetchCoachClients,
-    enabled: hasSupabase() && isCoachRole,
+    enabled: hasSupabase && isCoachRole,
   });
 
   const handleFileChange = (e) => {
@@ -116,7 +116,7 @@ export default function ImportProgramsPage() {
       toast.error('Select a client.');
       return;
     }
-    if (!hasSupabase()) {
+    if (!hasSupabase) {
       toast.error('Supabase is not available.');
       return;
     }

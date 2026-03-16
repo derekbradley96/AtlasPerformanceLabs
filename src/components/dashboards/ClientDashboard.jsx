@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
@@ -8,14 +8,20 @@ import {
 } from 'lucide-react';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { getMyClientId, getWeekStartISO } from '@/lib/checkins';
+import { trackAppOpened } from '@/services/engagementTracker';
 import { motion } from 'framer-motion';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { getAthleteProgressInsights } from '@/lib/athleteProgressInsights';
+import { calculateMomentumScore, getMomentumStatus, MOMENTUM_STATUS } from '@/lib/momentumEngine';
 import PaymentIssueBanner from '@/components/PaymentIssueBanner';
 import PrepHeader from '@/components/PrepHeader';
 import OnboardingChecklist from '@/components/OnboardingChecklist';
 import HabitProgressCard from '@/components/habits/HabitProgressCard';
-import { PageLoader, CardSkeleton } from '@/components/ui/LoadingState';
+import HabitAdherenceCard from '@/components/habits/HabitAdherenceCard';
+import MilestonesCard from '@/components/milestones/MilestonesCard';
+import { PageLoader, CardSkeleton, MomentumCardSkeleton } from '@/components/ui/LoadingState';
+import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
+import EmptyState from '@/components/ui/EmptyState';
 import Card from '@/ui/Card';
 import { colors, shell, spacing, radii } from '@/ui/tokens';
 import { standardCard } from '@/ui/pageLayout';
@@ -39,8 +45,9 @@ const MOMENTUM_CATEGORIES = [
  */
 export default function ClientDashboard({ user }) {
   const navigate = useNavigate();
+  const appOpenedTracked = useRef(false);
 
-  const { data: profile, isLoading: profileLoading } = useQuery({
+  const { data: profile, isLoading: profileLoading, isError: profileError, refetch: refetchProfile } = useQuery({
     queryKey: ['client-profile', user?.id],
     queryFn: async () => {
       const { data } = await invokeSupabaseFunction('client-profile-list', { user_id: user?.id });
@@ -99,6 +106,12 @@ export default function ClientDashboard({ user }) {
     enabled: !!profile?.id,
   });
 
+  useEffect(() => {
+    if (!profile?.id || appOpenedTracked.current) return;
+    appOpenedTracked.current = true;
+    trackAppOpened(profile.id, profile.trainer_id ?? profile.coach_id).catch(() => {});
+  }, [profile?.id, profile?.trainer_id, profile?.coach_id]);
+
   const { data: prepHeaderClientId } = useQuery({
     queryKey: ['prep-header-client-id', user?.id],
     queryFn: () => getMyClientId(),
@@ -146,6 +159,24 @@ export default function ClientDashboard({ user }) {
     [progressMetrics, momentumRow]
   );
 
+  const momentumResult = React.useMemo(() => {
+    if (!momentumRow) return null;
+    return calculateMomentumScore(momentumRow);
+  }, [momentumRow]);
+
+  const momentumStrongestWeakest = React.useMemo(() => {
+    const b = momentumResult?.breakdown;
+    if (!b) return { strongest: null, weakest: null };
+    const labels = { workouts: 'Workouts', habits: 'Habits', checkins: 'Check-ins', engagement: 'Engagement' };
+    const entries = Object.entries(b).filter(([, v]) => v != null && Number.isFinite(v));
+    if (entries.length === 0) return { strongest: null, weakest: null };
+    const sorted = [...entries].sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
+    return {
+      strongest: labels[sorted[0][0]] ?? sorted[0][0],
+      weakest: labels[sorted[sorted.length - 1][0]] ?? sorted[sorted.length - 1][0],
+    };
+  }, [momentumResult?.breakdown]);
+
   const [checklistDismissed, setChecklistDismissed] = React.useState(
     localStorage.getItem('client_checklist_dismissed') === 'true'
   );
@@ -189,6 +220,32 @@ export default function ClientDashboard({ user }) {
     return (
       <div style={{ padding: shell.pagePaddingH, paddingTop: spacing[16], paddingBottom: spacing[24] }}>
         <CardSkeleton count={4} />
+      </div>
+    );
+  }
+
+  if (profileError) {
+    return (
+      <div style={{ padding: shell.pagePaddingH, paddingTop: spacing[16], paddingBottom: spacing[24] }}>
+        <LoadErrorFallback
+          title="Couldn't load your dashboard"
+          description="Check your connection and try again."
+          onRetry={() => refetchProfile()}
+        />
+      </div>
+    );
+  }
+
+  if (!profileLoading && !profile && user) {
+    return (
+      <div style={{ padding: shell.pagePaddingH, paddingTop: spacing[24], paddingBottom: spacing[24] }}>
+        <EmptyState
+          title="Get started"
+          description="Connect with a coach to see your program, check-ins, and messages here."
+          icon={User}
+          actionLabel="Find a coach"
+          onAction={() => navigate(createPageUrl('FindTrainer'))}
+        />
       </div>
     );
   }
@@ -453,17 +510,39 @@ export default function ClientDashboard({ user }) {
               </h3>
             </div>
             {momentumLoading ? (
-              <div style={{ minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ width: 24, height: 24, border: `2px solid ${colors.border}`, borderTopColor: colors.primary, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-              </div>
+              <MomentumCardSkeleton />
             ) : momentumRow ? (
               <>
-                <div style={{ textAlign: 'center', marginBottom: spacing[20] }}>
+                <div style={{ textAlign: 'center', marginBottom: spacing[8] }}>
                   <span style={{ fontSize: 42, fontWeight: 700, color: colors.primary, lineHeight: 1 }}>
-                    {momentumRow.total_score != null ? Math.round(Number(momentumRow.total_score)) : '—'}
+                    {momentumResult?.total_score ?? (momentumRow.total_score != null ? Math.round(Number(momentumRow.total_score)) : '—')}
                   </span>
                   <span style={{ fontSize: 16, color: colors.muted, marginLeft: 4 }}>/ 100</span>
                 </div>
+                {momentumResult?.status && (
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: spacing[12] }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        background: momentumResult.status === MOMENTUM_STATUS.ON_TRACK ? colors.successSubtle : momentumResult.status === MOMENTUM_STATUS.WATCH ? colors.warningSubtle : 'rgba(239,68,68,0.2)',
+                        color: momentumResult.status === MOMENTUM_STATUS.ON_TRACK ? colors.success : momentumResult.status === MOMENTUM_STATUS.WATCH ? colors.warning : colors.danger,
+                      }}
+                    >
+                      {momentumResult.status === MOMENTUM_STATUS.ON_TRACK ? 'On track' : momentumResult.status === MOMENTUM_STATUS.WATCH ? 'Watch' : 'Off track'}
+                    </span>
+                  </div>
+                )}
+                {(momentumStrongestWeakest.strongest || momentumStrongestWeakest.weakest) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: spacing[12], marginBottom: spacing[12], fontSize: 12, color: colors.muted }}>
+                    {momentumStrongestWeakest.strongest && <span>Strongest: <strong style={{ color: colors.text }}>{momentumStrongestWeakest.strongest}</strong></span>}
+                    {momentumStrongestWeakest.weakest && <span>Focus: <strong style={{ color: colors.text }}>{momentumStrongestWeakest.weakest}</strong></span>}
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[12] }}>
                   {MOMENTUM_CATEGORIES.map(({ key, label, icon: Icon }) => {
                     const value = momentumRow[key];
@@ -500,9 +579,14 @@ export default function ClientDashboard({ user }) {
                 </div>
               </>
             ) : (
-              <p style={{ fontSize: 14, color: colors.muted, margin: 0, textAlign: 'center', padding: spacing[16] }}>
-                No momentum data for this week yet. Complete workouts and check-ins to see your score.
-              </p>
+              <div style={{ textAlign: 'center', padding: spacing[16] }}>
+                <p style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0, marginBottom: spacing[8] }}>
+                  No momentum data yet
+                </p>
+                <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>
+                  Complete workouts and check-ins this week to see your momentum score here.
+                </p>
+              </div>
             )}
           </Card>
         </motion.div>
@@ -580,10 +664,18 @@ export default function ClientDashboard({ user }) {
         </motion.div>
       )}
 
-      {/* Habit progress */}
+      {/* Habit adherence (compact) + Habit progress */}
       {profile?.id && (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} style={{ marginBottom: sectionGap }}>
+          <HabitAdherenceCard clientId={profile.id} />
           <HabitProgressCard clientId={profile.id} />
+        </motion.div>
+      )}
+
+      {/* Milestones */}
+      {profile?.id && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.085 }} style={{ marginBottom: sectionGap }}>
+          <MilestonesCard clientId={profile.id} title="Milestones" />
         </motion.div>
       )}
 

@@ -18,7 +18,7 @@ import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
 
 async function fetchCoachClients() {
-  if (!hasSupabase()) return [];
+  if (!hasSupabase) return [];
   const supabase = getSupabase();
   if (!supabase) return [];
   const { data: { user } } = await supabase.auth.getUser();
@@ -55,7 +55,7 @@ export default function SessionBookingModal({ open, onOpenChange, defaultClientI
   const { data: clients = [] } = useQuery({
     queryKey: ['coach_clients_for_booking'],
     queryFn: fetchCoachClients,
-    enabled: open && hasSupabase(),
+    enabled: open && hasSupabase,
   });
 
   useEffect(() => {

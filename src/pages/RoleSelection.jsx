@@ -95,8 +95,8 @@ export default function RoleSelection() {
       await invokeSupabaseFunction('user-update-role', { user_type });
       setRole(roleKey);
 
-      if (roleKey === 'trainer') {
-        toast.success('Welcome, Trainer');
+      if (roleKey === 'coach') {
+        toast.success('Welcome, Coach');
         navigate(createPageUrl('Home'), { replace: true });
       } else if (roleKey === 'client') {
         toast.success('Welcome');
@@ -114,9 +114,9 @@ export default function RoleSelection() {
   };
 
   const roles = [
-    { key: 'trainer', title: 'Trainer', icon: Dumbbell },
+    { key: 'coach', title: 'Coach', icon: Dumbbell },
     { key: 'client', title: 'Client', icon: Users },
-    { key: 'solo', title: 'Personal', icon: User },
+    { key: 'personal', title: 'Personal', icon: User },
   ];
 
   return (

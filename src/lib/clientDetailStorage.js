@@ -1,5 +1,6 @@
 /**
  * Persist client detail UI state: quick notes, coach notes (trainer-only), and "marked paid" (overrides mock payment_overdue for display).
+ * Note: Notes are semi-sensitive. Prefer server-backed storage (e.g. client_notes table) for production; see SECURITY_NOTES.md.
  */
 const NOTES_PREFIX = 'atlas_client_notes_';
 const COACH_NOTES_PREFIX = 'atlas_coach_notes_';

@@ -32,7 +32,7 @@ function endOfDay(d) {
 }
 
 async function fetchCommandCenterData() {
-  if (!hasSupabase()) return null;
+  if (!hasSupabase) return null;
   const supabase = getSupabase();
   if (!supabase) return null;
   const { data: { user } } = await supabase.auth.getUser();
@@ -144,10 +144,10 @@ export default function CoachCommandCenter() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['coach-command-center'],
     queryFn: fetchCommandCenterData,
-    enabled: hasSupabase(),
+    enabled: hasSupabase,
   });
 
-  if (!hasSupabase()) {
+  if (!hasSupabase) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }}>
         <p style={{ color: colors.muted }}>Sign in to view the command center.</p>

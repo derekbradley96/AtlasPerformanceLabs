@@ -1,6 +1,6 @@
 /**
  * Prep header for clients with an active contest prep: weeks/days out, peak week badge, pose check status, quick actions.
- * When showPrepInsights is true (competition/integrated coaches), fetches and shows prep-specific insight summaries.
+ * Integrates Peak Week engine: active status, days out, check-in due today; Open Peak Week, Set Up Peak Week, Review Peak Check-In.
  */
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -13,7 +13,59 @@ import { colors, spacing } from '@/ui/tokens';
 import { getPrepInsightSummaries } from '@/lib/prepInsights';
 import { generatePrepInsight } from '@/lib/atlasInsights';
 import InsightCard from '@/components/review/InsightCard';
-import { Calendar, ImageIcon, Zap } from 'lucide-react';
+import { Calendar, ImageIcon, Zap, ClipboardList } from 'lucide-react';
+
+function toISODate(d) {
+  if (!d) return '';
+  const x = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(x.getTime())) return '';
+  return x.toISOString().slice(0, 10);
+}
+
+/** Fetch active peak_week for client and whether a peak week check-in is due today. */
+async function fetchPeakWeekStatus(clientId) {
+  if (!hasSupabase || !clientId) return { peakWeek: null, checkInDueToday: false };
+  const supabase = getSupabase();
+  if (!supabase) return { peakWeek: null, checkInDueToday: false };
+  try {
+    const { data: week } = await supabase
+      .from('peak_weeks')
+      .select('id, show_date')
+      .eq('client_id', clientId)
+      .eq('is_active', true)
+      .order('show_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!week) return { peakWeek: null, checkInDueToday: false };
+    const showDate = week.show_date ? new Date(week.show_date) : null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = toISODate(today);
+    let daysOut = null;
+    if (showDate) {
+      showDate.setHours(0, 0, 0, 0);
+      daysOut = Math.ceil((showDate - today) / (24 * 60 * 60 * 1000));
+    }
+    const inPeakWindow = daysOut != null && daysOut >= -7 && daysOut <= 0;
+    let checkInDueToday = false;
+    if (inPeakWindow) {
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = toISODate(tomorrow);
+      const { data: checkinsToday } = await supabase
+        .from('peak_week_checkins')
+        .select('id')
+        .eq('peak_week_id', week.id)
+        .gte('created_at', `${todayStr}T00:00:00`)
+        .lt('created_at', `${tomorrowStr}T00:00:00`)
+        .limit(1);
+      checkInDueToday = !(checkinsToday && checkinsToday.length > 0);
+    }
+    return { peakWeek: { ...week, days_out: daysOut }, checkInDueToday };
+  } catch (_) {
+    return { peakWeek: null, checkInDueToday: false };
+  }
+}
 
 async function fetchPrepHeader(clientId) {
   if (!hasSupabase || !clientId) return null;
@@ -59,6 +111,7 @@ export default function PrepHeader({ clientId, showPrepInsights = false }) {
   const { effectiveRole } = useAuth();
   const [prep, setPrep] = useState(null);
   const [insightsData, setInsightsData] = useState(null);
+  const [peakWeekStatus, setPeakWeekStatus] = useState({ peakWeek: null, checkInDueToday: false });
   const [loading, setLoading] = useState(true);
 
   const isCoachRole = isCoach(effectiveRole);
@@ -67,23 +120,26 @@ export default function PrepHeader({ clientId, showPrepInsights = false }) {
     if (!clientId) {
       setPrep(null);
       setInsightsData(null);
+      setPeakWeekStatus({ peakWeek: null, checkInDueToday: false });
       setLoading(false);
       return;
     }
     let cancelled = false;
     if (showPrepInsights) {
-      fetchPrepHeaderWithInsights(clientId).then((out) => {
+      Promise.all([fetchPrepHeaderWithInsights(clientId), fetchPeakWeekStatus(clientId)]).then(([out, pwStatus]) => {
         if (!cancelled) {
           setPrep(out.header);
           setInsightsData(out);
+          setPeakWeekStatus(pwStatus);
           setLoading(false);
         }
       });
     } else {
-      fetchPrepHeader(clientId).then((row) => {
+      Promise.all([fetchPrepHeader(clientId), fetchPeakWeekStatus(clientId)]).then(([row, pwStatus]) => {
         if (!cancelled) {
           setPrep(row);
           setInsightsData(null);
+          setPeakWeekStatus(pwStatus);
           setLoading(false);
         }
       });
@@ -146,6 +202,19 @@ export default function PrepHeader({ clientId, showPrepInsights = false }) {
         <span className="text-xs" style={{ color: colors.muted }}>
           Pose check: {poseSubmitted ? 'Submitted' : 'Due'}
         </span>
+        {peakWeekStatus.peakWeek && (
+          <>
+            <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: colors.surface2, color: colors.text }}>
+              Peak week active
+              {peakWeekStatus.peakWeek.days_out != null && ` · ${peakWeekStatus.peakWeek.days_out} days out`}
+            </span>
+            {peakWeekStatus.checkInDueToday && (
+              <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: colors.warningSubtle, color: colors.warning }}>
+                Check-in due today
+              </span>
+            )}
+          </>
+        )}
       </div>
       {(showAtlasPrep || summaries.length > 0) && (
         <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
@@ -165,30 +234,34 @@ export default function PrepHeader({ clientId, showPrepInsights = false }) {
       <div className="flex flex-wrap gap-2 mt-3">
         {isCoachRole && (
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate(`/clients/${clientId}/peak-week`)}
-            >
-              Open Peak Week Plan
+            {peakWeekStatus.peakWeek ? (
+              <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/peak-week-editor`)}>
+                Open Peak Week
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/peak-week-editor`)}>
+                Set Up Peak Week
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => navigate('/review-center/peak-week-checkins')}>
+              <ClipboardList size={14} className="mr-1.5" />
+              Review Peak Check-In
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate(`/clients/${clientId}/pose-timeline`)}
-            >
+            <Button variant="outline" size="sm" onClick={() => navigate(`/clients/${clientId}/pose-timeline`)}>
               Pose Timeline
             </Button>
           </>
         )}
         {!isCoachRole && !poseSubmitted && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate('/pose-check')}
-          >
+          <Button variant="outline" size="sm" onClick={() => navigate('/pose-check')}>
             <ImageIcon size={14} className="mr-1.5" />
             Submit Pose Check
+          </Button>
+        )}
+        {!isCoachRole && peakWeekStatus.peakWeek && (
+          <Button variant="outline" size="sm" onClick={() => navigate('/peak-week-checkin')}>
+            <ClipboardList size={14} className="mr-1.5" />
+            Peak Week Check-In
           </Button>
         )}
       </div>

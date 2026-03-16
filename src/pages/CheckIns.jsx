@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
 import { safeDate } from '@/lib/format';
+import { listForTrainer } from '@/data/supabaseCheckinsRepo';
+import { listClients } from '@/data/supabaseClientsRepo';
 import {
   Calendar, AlertCircle, Clock, CheckCircle2, User
 } from 'lucide-react';
@@ -15,48 +16,23 @@ import NotAuthorized from '@/components/NotAuthorized';
 
 export default function CheckIns() {
   const navigate = useNavigate();
-  const { user: authUser, isDemoMode } = useAuth();
-  const [user, setUser] = useState(null);
-  const displayUser = isDemoMode ? authUser : user;
-
-  useEffect(() => {
-    if (isDemoMode) return;
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, [isDemoMode]);
-
-  const { data: profile } = useQuery({
-    queryKey: ['trainer-profile', displayUser?.id],
-    queryFn: async () => {
-      const profiles = await base44.entities.TrainerProfile.filter({ user_id: displayUser.id });
-      return profiles[0] || null;
-    },
-    enabled: !!displayUser?.id && displayUser?.user_type === 'trainer' && !isDemoMode
-  });
+  const { user: displayUser, isDemoMode } = useAuth();
+  const coachId = displayUser?.id ?? null;
 
   const { data: checkinsData = [], isLoading } = useQuery({
-    queryKey: ['trainer-checkins-queue', profile?.id],
-    queryFn: () => base44.entities.CheckIn.filter({ trainer_id: profile?.id }, '-created_date', 50),
-    enabled: !!profile?.id && !isDemoMode
+    queryKey: ['trainer-checkins-queue', coachId],
+    queryFn: () => listForTrainer(coachId),
+    enabled: !!coachId && (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer') && !isDemoMode
   });
   const checkins = Array.isArray(isDemoMode ? [] : checkinsData) ? (isDemoMode ? [] : checkinsData) : [];
 
   const { data: clients = [] } = useQuery({
-    queryKey: ['trainer-clients-checkins', profile?.id],
-    queryFn: () => base44.entities.ClientProfile.filter({ trainer_id: profile?.id }),
-    enabled: !!profile?.id && !isDemoMode
+    queryKey: ['trainer-clients-checkins', coachId],
+    queryFn: () => listClients(coachId),
+    enabled: !!coachId && !isDemoMode
   });
 
-  const { data: allUsers = [] } = useQuery({
-    queryKey: ['all-users-checkins'],
-    queryFn: () => base44.entities.User.list(),
-    enabled: !!profile?.id && !isDemoMode
-  });
-
-  if (displayUser && displayUser.user_type !== 'trainer') {
+  if (displayUser && displayUser.user_type !== 'coach' && displayUser?.user_type !== 'trainer') {
     return <NotAuthorized />;
   }
 
@@ -129,7 +105,6 @@ export default function CheckIns() {
             {sortedCheckins.map((checkin, index) => {
               if (checkin == null) return null;
               const client = Array.isArray(clients) ? clients.find(c => c?.id === checkin?.client_id) : null;
-              const clientUser = Array.isArray(allUsers) ? allUsers.find(u => u?.id === client?.user_id) : null;
               const dueDate = safeDate(checkin?.due_date);
               const isOverdue = dueDate && dueDate < new Date() && checkin?.status === 'pending';
               const isSubmitted = checkin?.status === 'submitted';
@@ -166,7 +141,7 @@ export default function CheckIns() {
                         <User className="w-5 h-5 text-slate-400" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-semibold text-white">{clientUser?.full_name || 'Client'}</h3>
+                        <h3 className="font-semibold text-white">{client?.name ?? client?.full_name ?? 'Client'}</h3>
                         <p className="text-sm text-slate-400">
                           Due: {dueDate ? dueDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}
                         </p>

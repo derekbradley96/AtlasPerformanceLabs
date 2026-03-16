@@ -71,6 +71,28 @@ export async function getCoachClients() {
 }
 
 /**
+ * Returns the coach (trainer) profile id for a client.
+ * @param {string} clientId - public.clients.id
+ * @returns {Promise<string | null>} Coach profile id (trainer_id or coach_id) or null.
+ */
+export async function getClientCoachId(clientId) {
+  if (!hasSupabase || !clientId) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('trainer_id, coach_id')
+      .eq('id', clientId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data.trainer_id ?? data.coach_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Returns the existing checkin for the given client and week start, or null.
  * weekStart must be YYYY-MM-DD (Monday).
  * @param {string} clientId - public.clients.id
@@ -263,6 +285,21 @@ export async function markCheckinReviewed(checkinId) {
 }
 
 const CHECKIN_PHOTO_SIGNED_EXPIRY_SEC = 60 * 60;
+
+/**
+ * Upload a photo for peak week check-in (store in checkin_photos/peak_week/...).
+ * @param {{ clientId: string, file: File }}
+ * @returns {Promise<string|null>} Storage path or null.
+ */
+export async function uploadPeakWeekCheckinPhoto({ clientId, file }) {
+  if (!hasSupabase || !clientId || !file) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const ext = (file.name || '').split('.').pop() || 'jpg';
+  const name = `peak_week/${clientId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage.from(CHECKIN_PHOTOS_BUCKET).upload(name, file, { contentType: file.type || 'image/jpeg', upsert: true });
+  return error ? null : name;
+}
 
 /**
  * Create a signed URL for a checkin_photos storage path (private bucket).

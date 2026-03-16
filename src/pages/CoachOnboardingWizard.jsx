@@ -10,7 +10,7 @@ import { trackFriction } from '@/services/frictionTracker';
 import { impactLight } from '@/lib/haptics';
 import { colors, spacing } from '@/ui/tokens';
 import Button from '@/ui/Button';
-import { UserPlus, FileText, Link2, CheckCircle } from 'lucide-react';
+import { UserPlus, FileText, Link2, CheckCircle, Store } from 'lucide-react';
 
 const ONBOARDING_STEP_OFFSET = 1; // Step 1 = coach focus (separate page). Wizard = steps 2–5.
 
@@ -171,6 +171,12 @@ export default function CoachOnboardingWizard() {
         {current.ctaPath && (
           <Button variant="secondary" onClick={handleCta} style={{ width: '100%' }}>
             {current.ctaLabel}
+          </Button>
+        )}
+        {current.id === 'finish' && (
+          <Button variant="secondary" onClick={() => navigate('/marketplace-setup')} style={{ width: '100%' }}>
+            <Store size={18} className="mr-2 inline" />
+            Set up marketplace listing
           </Button>
         )}
         <div className="flex gap-3">

@@ -9,6 +9,7 @@ import { getStoredRetention } from '@/lib/retention/retentionRepo';
 import { listActiveRetentionItems } from '@/lib/retention/retentionRepo';
 import { getClientMarkedPaid } from '@/lib/clientDetailStorage';
 import { getWeeklyCloseoutHistory } from '@/lib/closeoutStore';
+import { notifyCoachPaymentOverdue } from '@/services/notificationTriggers';
 import { filterCriticalQueueItems } from '@/lib/silentMode/silentModeRules';
 import { evaluateFatigue } from '@/lib/energy/fatigueRules';
 
@@ -167,6 +168,7 @@ export async function getDailyBriefing(
         clientName: c.full_name ?? 'Client',
         route: `/clients/${c.id}`,
       });
+      notifyCoachPaymentOverdue(trainerId, c.id).catch(() => {});
     }
   }
 

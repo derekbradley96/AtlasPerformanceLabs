@@ -110,12 +110,19 @@ export default function HabitProgressCard({ clientId }) {
     );
   }
 
+  const hasAnyHabit = habits.length > 0;
+
   return (
     <div style={{ marginBottom: spacing[16] }}>
       <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
         Habit progress
       </p>
       <Card style={{ padding: spacing[16], border: `1px solid ${colors.border}`, borderRadius: shell.cardRadius ?? 8 }}>
+        {!hasAnyHabit && (
+          <p className="text-sm" style={{ color: colors.muted, marginBottom: spacing[12] }}>
+            No habits set up yet. Habits will show here when they&apos;re added.
+          </p>
+        )}
         <div className="grid gap-3">
           {HABIT_SLOTS.map((slot) => {
             const habit = habitsBySlot[slot.key];

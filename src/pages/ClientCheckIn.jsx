@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import React, { useState } from 'react';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
@@ -9,11 +10,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { toast } from 'sonner';
+import { trackCheckinSubmitted, trackProgressPhotoUploaded } from '@/services/engagementTracker';
+import { notifyCoachCheckinSubmitted } from '@/services/notificationTriggers';
 
 export default function ClientCheckIn() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [user, setUser] = useState(null);
+  const { user } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState({
@@ -26,19 +29,12 @@ export default function ClientCheckIn() {
     photo_urls: []
   });
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
-
   const { data: clientProfile } = useQuery({
     queryKey: ['client-profile', user?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.ClientProfile.filter({ user_id: user.id });
-      return profiles[0] || null;
+      const { data } = await invokeSupabaseFunction('client-profile-list', { user_id: user?.id });
+      const list = Array.isArray(data) ? data : [];
+      return list[0] || null;
     },
     enabled: !!user?.id
   });
@@ -46,11 +42,12 @@ export default function ClientCheckIn() {
   const { data: template } = useQuery({
     queryKey: ['client-template', clientProfile?.trainer_id],
     queryFn: async () => {
-      const templates = await base44.entities.CheckInTemplate.filter({ 
-        trainer_id: clientProfile.trainer_id,
+      const { data } = await invokeSupabaseFunction('checkin-template-list', {
+        trainer_id: clientProfile?.trainer_id,
         is_active: true
       });
-      return templates[0] || null;
+      const list = Array.isArray(data) ? data : (data ? [data] : []);
+      return list[0] ?? null;
     },
     enabled: !!clientProfile?.trainer_id
   });
@@ -58,11 +55,11 @@ export default function ClientCheckIn() {
   const { data: pendingCheckin } = useQuery({
     queryKey: ['pending-checkin', clientProfile?.id],
     queryFn: async () => {
-      const checkins = await base44.entities.CheckIn.filter({
-        client_id: clientProfile.id,
+      const { data } = await invokeSupabaseFunction('checkin-list', {
+        client_id: clientProfile?.id,
         status: 'pending'
-      }, '-created_date', 1);
-      const list = Array.isArray(checkins) ? checkins : [];
+      });
+      const list = Array.isArray(data) ? data : [];
       return list[0] ?? null;
     },
     enabled: !!clientProfile?.id
@@ -70,17 +67,29 @@ export default function ClientCheckIn() {
 
   const submitMutation = useMutation({
     mutationFn: async (data) => {
-      if (pendingCheckin) {
-        return await base44.entities.CheckIn.update(pendingCheckin.id, {
+      if (pendingCheckin?.id) {
+        const { data: updated } = await invokeSupabaseFunction('checkin-update', {
+          id: pendingCheckin.id,
           ...data,
           status: 'submitted',
           submitted_at: new Date().toISOString()
         });
+        return updated;
       }
       return null;
     },
-    onSuccess: () => {
+    onSuccess: (_data, payload) => {
       queryClient.invalidateQueries(['pending-checkin']);
+      if (clientProfile?.id) {
+        const coachId = clientProfile.trainer_id ?? clientProfile.coach_id;
+        trackCheckinSubmitted(clientProfile.id, coachId, { checkin_id: pendingCheckin?.id }).catch(() => {});
+        if (coachId) {
+          notifyCoachCheckinSubmitted(coachId, clientProfile.id, pendingCheckin?.id).catch(() => {});
+        }
+        if (payload?.photo_urls?.length) {
+          trackProgressPhotoUploaded(clientProfile.id, coachId, { checkin_id: pendingCheckin?.id, photo_count: payload.photo_urls.length }).catch(() => {});
+        }
+      }
       toast.success('Check-in submitted!');
       navigate(createPageUrl('Home'));
     }

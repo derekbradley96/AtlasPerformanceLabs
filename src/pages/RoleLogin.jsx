@@ -91,9 +91,9 @@ export default function RoleLogin() {
   const handleRole = async (roleKey) => {
     await lightHaptic();
     selectRole(roleKey);
-    if (roleKey === 'trainer') navigate('/trainer');
+    if (roleKey === 'coach') navigate('/home');
     if (roleKey === 'client') navigate('/client');
-    if (roleKey === 'solo') navigate('/solo');
+    if (roleKey === 'personal') navigate('/solo');
   };
 
   const handleLogout = async () => {

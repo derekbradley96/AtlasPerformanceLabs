@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, User, Ban } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -8,35 +8,42 @@ import { Badge } from '@/components/ui/badge';
 import { CardSkeleton } from '@/components/ui/LoadingState';
 import { toast } from 'sonner';
 
+function mapAdminRow(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    full_name: row.display_name ?? row.email,
+    user_type: row.role ?? '',
+    created_date: row.created_at,
+  };
+}
+
 export default function AdminUsersSection({ adminEmail }) {
   const isAdmin = adminEmail?.toLowerCase() === 'derekbradley96@gmail.com';
-
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
-  const { data: users = [], isLoading } = useQuery({
-    queryKey: ['admin-users'],
-    queryFn: () => base44.entities.User.list('-created_date'),
+  const { data: rawUsers = [], isLoading } = useQuery({
+    queryKey: ['admin-users', search],
+    queryFn: async () => {
+      if (!hasSupabase) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase.rpc('get_admin_users', { p_search: search || null });
+      if (error || data?.error === 'unauthorized') return [];
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      return rows.map(mapAdminRow);
+    },
     enabled: isAdmin,
   });
 
-  const logAction = async (action, targetId, oldValue, newValue) => {
-    await base44.entities.AdminAuditLog.create({
-      admin_email: adminEmail,
-      action_type: action,
-      target_type: 'User',
-      target_id: targetId,
-      old_value: JSON.stringify(oldValue),
-      new_value: JSON.stringify(newValue),
-      timestamp: new Date().toISOString()
-    });
-  };
+  const users = rawUsers;
 
   const _updateUserMutation = useMutation({
     mutationFn: async ({ userId, data, oldData }) => {
-      await base44.asServiceRole.entities.User.update(userId, data);
-      await logAction('user_updated', userId, oldData, data);
+      // TODO: add admin user-update RPC if needed
+      await Promise.resolve({ userId, data, oldData });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
@@ -47,7 +54,7 @@ export default function AdminUsersSection({ adminEmail }) {
   const filteredUsers = users.filter(u => {
     const matchesSearch = u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
       u.email?.toLowerCase().includes(search.toLowerCase());
-    const matchesFilter = filter === 'all' || u.user_type === filter;
+    const matchesFilter = filter === 'all' || u.user_type === filter || (filter === 'coach' && u.user_type === 'trainer') || (filter === 'personal' && u.user_type === 'solo');
     return matchesSearch && matchesFilter;
   });
 
@@ -75,9 +82,9 @@ export default function AdminUsersSection({ adminEmail }) {
           className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm"
         >
           <option value="all">All Users</option>
-          <option value="trainer">Trainers</option>
+          <option value="coach">Coaches</option>
           <option value="client">Clients</option>
-          <option value="general">Solo</option>
+          <option value="personal">Personal</option>
         </select>
       </div>
 
@@ -94,8 +101,9 @@ export default function AdminUsersSection({ adminEmail }) {
                     <p className="font-medium text-white">{user.full_name}</p>
                     {user.user_type && (
                       <Badge className={
-                        user.user_type === 'trainer' ? 'bg-blue-500/20 text-blue-400' :
+                        (user.user_type === 'coach' || user.user_type === 'trainer') ? 'bg-blue-500/20 text-blue-400' :
                         user.user_type === 'client' ? 'bg-purple-500/20 text-purple-400' :
+(user.user_type === 'personal' || user.user_type === 'solo') ? 'bg-slate-500/20 text-slate-400' :
                         'bg-slate-500/20 text-slate-400'
                       }>
                         {user.user_type}

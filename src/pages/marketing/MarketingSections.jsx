@@ -10,37 +10,42 @@ export function Hero({ title, subtitle, primaryCtaLabel, primaryCtaTo, secondary
     <section
       className="text-center px-4 py-16 sm:py-24"
       style={{
-        background: `linear-gradient(180deg, ${colors.surface} 0%, ${colors.bg} 100%)`,
+        background: `radial-gradient(circle at top left, rgba(59,130,246,0.38), transparent 55%), linear-gradient(180deg, ${colors.surface} 0%, ${colors.bg} 100%)`,
         borderBottom: `1px solid ${colors.border}`,
       }}
     >
-      <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold max-w-3xl mx-auto mb-4" style={{ color: colors.text }}>
-        {title}
-      </h1>
-      {subtitle && (
-        <p className="text-lg sm:text-xl max-w-2xl mx-auto mb-8" style={{ color: colors.muted }}>
-          {subtitle}
+      <div className="max-w-5xl mx-auto">
+        <p className="text-[11px] font-semibold tracking-[0.18em] uppercase mb-4" style={{ color: colors.muted }}>
+          Built for performance coaching
         </p>
-      )}
-      <div className="flex flex-wrap items-center justify-center gap-3">
-        {primaryCtaLabel && primaryCtaTo && (
-          <Link
-            to={primaryCtaTo}
-            className="inline-flex items-center justify-center px-6 py-3 rounded-xl text-base font-semibold transition-opacity hover:opacity-90"
-            style={{ background: colors.primary, color: '#fff' }}
-          >
-            {primaryCtaLabel}
-          </Link>
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4 leading-tight" style={{ color: colors.text }}>
+          {title}
+        </h1>
+        {subtitle && (
+          <p className="text-base sm:text-lg md:text-xl mb-8" style={{ color: colors.muted }}>
+            {subtitle}
+          </p>
         )}
-        {secondaryCtaLabel && secondaryCtaTo && (
-          <Link
-            to={secondaryCtaTo}
-            className="inline-flex items-center justify-center px-6 py-3 rounded-xl text-base font-semibold border transition-opacity hover:opacity-90"
-            style={{ borderColor: colors.border, color: colors.text }}
-          >
-            {secondaryCtaLabel}
-          </Link>
-        )}
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          {primaryCtaLabel && primaryCtaTo && (
+            <Link
+              to={primaryCtaTo}
+              className="inline-flex items-center justify-center px-7 py-3.5 rounded-2xl text-base font-semibold transition-opacity hover:opacity-90"
+              style={{ background: colors.primary, color: '#fff' }}
+            >
+              {primaryCtaLabel}
+            </Link>
+          )}
+          {secondaryCtaLabel && secondaryCtaTo && (
+            <Link
+              to={secondaryCtaTo}
+              className="inline-flex items-center justify-center px-6 py-3 rounded-2xl text-base font-semibold border transition-opacity hover:bg-white/5"
+              style={{ borderColor: colors.border, color: colors.text }}
+            >
+              {secondaryCtaLabel}
+            </Link>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -50,7 +55,7 @@ export function Features({ title, items }) {
   return (
     <section className="px-4 py-16 max-w-4xl mx-auto">
       <h2 className="text-2xl font-bold text-center mb-10" style={{ color: colors.text }}>{title}</h2>
-      <ul className="grid gap-6 sm:grid-cols-2">
+      <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {items.map(({ heading, body }, i) => (
           <li
             key={i}
@@ -74,8 +79,10 @@ export function SocialProof({ title, quote, attribution }) {
     >
       <div className="max-w-2xl mx-auto text-center">
         <h2 className="text-xl font-bold mb-6" style={{ color: colors.text }}>{title}</h2>
-        <blockquote className="text-lg italic mb-4" style={{ color: colors.text }}>
-          "{quote}"
+        <blockquote className="text-lg md:text-xl font-medium mb-4 leading-relaxed" style={{ color: colors.text }}>
+          <span className="text-3xl align-middle mr-1" style={{ color: colors.primary }}>“</span>
+          {quote}
+          <span className="text-3xl align-middle ml-1" style={{ color: colors.primary }}>”</span>
         </blockquote>
         {attribution && <p className="text-sm" style={{ color: colors.muted }}>— {attribution}</p>}
       </div>

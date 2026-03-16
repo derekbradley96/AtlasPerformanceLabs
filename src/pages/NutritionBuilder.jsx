@@ -39,7 +39,7 @@ export default function NutritionBuilder() {
   const { data: profile } = useQuery({
     queryKey: ['trainer-profile', user?.id],
     queryFn: async () => null,
-    enabled: !!user?.id && user?.user_type === 'trainer'
+    enabled: !!user?.id && (user?.user_type === 'coach' || user?.user_type === 'trainer')
   });
 
   const { data: client } = useQuery({
@@ -136,7 +136,7 @@ export default function NutritionBuilder() {
   };
 
   if (!user) return <PageLoader />;
-  if (user.user_type !== 'trainer') return <NotAuthorized />;
+  if (user.user_type !== 'coach' && user.user_type !== 'trainer') return <NotAuthorized />;
   if (clientId && !client) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">

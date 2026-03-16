@@ -30,7 +30,7 @@ export default function Leads() {
       const list = Array.isArray(data) ? data : [];
       return list[0] ?? null;
     },
-    enabled: !!displayUser?.id && (displayUser?.user_type === 'trainer' || displayUser?.role === 'trainer') && !isDemoMode
+    enabled: !!displayUser?.id && (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer' || displayUser?.role === 'coach' || displayUser?.role === 'trainer') && !isDemoMode
   });
 
   const [demoLeadsRefresh, setDemoLeadsRefresh] = useState(0);
@@ -86,7 +86,7 @@ export default function Leads() {
     }
   });
 
-  if (displayUser && displayUser.user_type !== 'trainer' && displayUser?.role !== 'trainer') {
+  if (displayUser && displayUser.user_type !== 'coach' && displayUser.user_type !== 'trainer' && displayUser?.role !== 'coach' && displayUser?.role !== 'trainer') {
     return <NotAuthorized />;
   }
 

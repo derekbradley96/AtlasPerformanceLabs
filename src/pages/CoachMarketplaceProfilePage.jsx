@@ -1,427 +1,344 @@
 /**
- * Coach: create and manage marketplace listing (display name, headline, bio, specialties,
- * divisions, coaching focus, price, listed toggle, profile images).
- * Uses marketplace_coach_profiles, marketplace_coach_media, storage bucket marketplace_coach_media.
+ * Public marketplace coach profile: converts visitors with listing data + public result stories.
+ * Route: /marketplace/coach/:slug. Data: coach_marketplace_profiles, profiles, client_result_stories, result_story_metrics.
  */
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
-import { Button } from '@/components/ui/button';
-import { colors, spacing, shell, radii } from '@/ui/tokens';
+import Button from '@/ui/Button';
+import { colors, spacing } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
-import { ImagePlus, Trash2 } from 'lucide-react';
+import { invokeSupabaseFunction } from '@/lib/supabaseStripeApi';
+import { isPersonal } from '@/lib/roles';
+import { trackPersonalViewedCoachProfile, trackPersonalSubmittedEnquiry } from '@/services/analyticsService';
+import EmptyState from '@/components/ui/EmptyState';
+import { CoachMarketplaceProfileSkeleton } from '@/components/ui/LoadingState';
+import { User, Trophy, MessageCircle, Calendar, X, Image as ImageIcon } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 
-const STORAGE_BUCKET = 'marketplace_coach_media';
-const COACHING_FOCUS_OPTIONS = [
-  { value: 'transformation', label: 'Transformation' },
-  { value: 'competition', label: 'Competition' },
-  { value: 'integrated', label: 'Integrated' },
-];
+const COACH_TYPE_LABELS = {
+  transformation: 'Transformation',
+  competition: 'Competition',
+  integrated: 'Transformation & Competition',
+};
 
-function arrayFromText(text) {
-  if (!text || typeof text !== 'string') return [];
-  return text
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+const STORY_TYPE_LABELS = { transformation: 'Transformation', prep: 'Show outcome' };
 
-function textFromArray(arr) {
-  return Array.isArray(arr) ? arr.join(', ') : '';
+function useMarketplaceCoachProfile(slug) {
+  const supabase = hasSupabase ? getSupabase() : null;
+  return useQuery({
+    queryKey: ['marketplace-coach-profile', slug],
+    queryFn: async () => {
+      if (!supabase || !slug) return null;
+      const { data: mp, error: mpErr } = await supabase
+        .from('coach_marketplace_profiles')
+        .select('id, coach_id, display_name, slug, headline, bio, location, pricing_summary, accepts_transformation, accepts_competition, accepts_personal_transitions')
+        .eq('slug', slug)
+        .eq('is_public', true)
+        .maybeSingle();
+      if (mpErr || !mp) return null;
+      const coachId = mp.coach_id;
+      const [profileRes, storiesRes] = await Promise.all([
+        supabase.from('profiles').select('id, coach_focus, referral_code').eq('id', coachId).maybeSingle(),
+        supabase.from('client_result_stories').select('id, story_type, title, summary, before_image_path, after_image_path, created_at').eq('coach_id', coachId).eq('is_public', true).order('created_at', { ascending: false }),
+      ]);
+      const profile = profileRes?.data ?? null;
+      const stories = Array.isArray(storiesRes?.data) ? storiesRes.data : [];
+      const storyIds = stories.map((s) => s.id);
+      let metrics = [];
+      if (storyIds.length > 0) {
+        const { data: m } = await supabase.from('result_story_metrics').select('story_id, metric_key, metric_label, metric_value, sort_order').in('story_id', storyIds).order('sort_order', { ascending: true });
+        metrics = Array.isArray(m) ? m : [];
+      }
+      const storiesWithMetrics = stories.map((s) => ({
+        ...s,
+        metrics: metrics.filter((m) => m.story_id === s.id).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+      }));
+      return { listing: mp, profile, stories: storiesWithMetrics };
+    },
+    enabled: !!supabase && !!slug,
+  });
 }
 
 export default function CoachMarketplaceProfilePage() {
+  const { slug } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const coachId = user?.id ?? null;
-  const supabase = hasSupabase ? getSupabase() : null;
+  const { user, effectiveRole } = useAuth();
+  const { data, isLoading, error } = useMarketplaceCoachProfile(slug);
+  const trackedProfileView = useRef(false);
+  const [enquireOpen, setEnquireOpen] = useState(false);
+  const [enquiryName, setEnquiryName] = useState('');
+  const [enquiryEmail, setEnquiryEmail] = useState('');
+  const [enquiryGoal, setEnquiryGoal] = useState('');
+  const [enquiryType, setEnquiryType] = useState('general');
+  const [enquiryMessage, setEnquiryMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [profile, setProfile] = useState(null);
-  const [media, setMedia] = useState([]);
-  const [mediaUrls, setMediaUrls] = useState({});
-
-  const [displayName, setDisplayName] = useState('');
-  const [headline, setHeadline] = useState('');
-  const [bio, setBio] = useState('');
-  const [specialtiesText, setSpecialtiesText] = useState('');
-  const [divisionsText, setDivisionsText] = useState('');
-  const [coachingFocus, setCoachingFocus] = useState([]);
-  const [monthlyPriceFrom, setMonthlyPriceFrom] = useState('');
-  const [isListed, setIsListed] = useState(false);
-  const [uploading, setUploading] = useState(false);
-
-  const loadProfile = useCallback(async () => {
-    if (!supabase || !coachId) return null;
-    const { data, error } = await supabase
-      .from('marketplace_coach_profiles')
-      .select('*')
-      .eq('coach_id', coachId)
-      .maybeSingle();
-    if (error) return null;
-    return data;
-  }, [supabase, coachId]);
-
-  const loadMedia = useCallback(
-    async (profileId) => {
-      if (!supabase || !profileId) return [];
-      const { data, error } = await supabase
-        .from('marketplace_coach_media')
-        .select('*')
-        .eq('marketplace_profile_id', profileId)
-        .order('sort_order', { ascending: true });
-      if (error) return [];
-      return Array.isArray(data) ? data : [];
-    },
-    [supabase]
-  );
+  const listing = data?.listing ?? null;
+  const profile = data?.profile ?? null;
+  const stories = useMemo(() => data?.stories ?? [], [data?.stories]);
+  const referralCode = profile?.referral_code ?? listing?.slug ?? slug;
+  const coachFocus = profile?.coach_focus ?? 'integrated';
+  const coachName = listing?.display_name ?? 'Coach';
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!coachId || !supabase) {
-        setLoading(false);
-        return;
-      }
-      const p = await loadProfile();
-      if (cancelled) return;
-      setProfile(p);
-      if (p) {
-        setDisplayName(p.display_name ?? '');
-        setHeadline(p.headline ?? '');
-        setBio(p.bio ?? '');
-        setSpecialtiesText(textFromArray(p.specialties));
-        setDivisionsText(textFromArray(p.divisions));
-        setCoachingFocus(Array.isArray(p.coaching_focus) ? [...p.coaching_focus] : []);
-        setMonthlyPriceFrom(p.monthly_price_from != null ? String(p.monthly_price_from) : '');
-        setIsListed(!!p.is_listed);
-        const m = await loadMedia(p.id);
-        if (!cancelled) setMedia(m);
-      } else {
-        setDisplayName(user?.user_metadata?.full_name || user?.email?.split('@')[0] || '');
-      }
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [coachId, supabase, user, loadProfile, loadMedia]);
+    if (!listing?.coach_id || !user?.id || !isPersonal(effectiveRole) || trackedProfileView.current) return;
+    trackedProfileView.current = true;
+    trackPersonalViewedCoachProfile({ coach_id: listing.coach_id, slug: listing.slug ?? slug, source: 'marketplace' }).catch(() => {});
+  }, [listing?.coach_id, listing?.slug, slug, user?.id, effectiveRole]);
 
-  useEffect(() => {
-    if (media.length === 0) return;
-    const bucket = supabase?.storage?.from(STORAGE_BUCKET);
-    if (!bucket) return;
-    let cancelled = false;
-    (async () => {
-      const byId = {};
-      for (const m of media.filter((x) => x.media_path)) {
-        try {
-          const { data } = await bucket.createSignedUrl(m.media_path, 3600);
-          if (!cancelled && data?.signedUrl) byId[m.id] = data.signedUrl;
-        } catch (_) {}
-      }
-      if (!cancelled) setMediaUrls((prev) => ({ ...prev, ...byId }));
-    })();
-    return () => { cancelled = true; };
-  }, [media, supabase]);
+  const acceptedTypes = useMemo(() => {
+    const t = [];
+    if (listing?.accepts_transformation) t.push('Transformation');
+    if (listing?.accepts_competition) t.push('Competition / Prep');
+    if (listing?.accepts_personal_transitions) t.push('Personal transitions');
+    return t;
+  }, [listing]);
 
-  const toggleFocus = (value) => {
-    setCoachingFocus((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
-    );
-  };
-
-  const handleSave = async (e) => {
-    e?.preventDefault();
-    if (!coachId || !supabase || saving) return;
-    if (!displayName.trim()) {
-      toast.error('Display name is required');
+  const handleEnquireSubmit = async (e) => {
+    e.preventDefault();
+    if (!referralCode || !enquiryName.trim() || !enquiryEmail.trim()) {
+      toast.error('Name and email are required');
       return;
     }
-    setSaving(true);
+    setSubmitting(true);
     try {
-      const payload = {
-        coach_id: coachId,
-        display_name: displayName.trim(),
-        headline: headline.trim() || null,
-        bio: bio.trim() || null,
-        specialties: arrayFromText(specialtiesText),
-        divisions: arrayFromText(divisionsText),
-        coaching_focus: coachingFocus,
-        monthly_price_from: monthlyPriceFrom.trim() ? parseFloat(monthlyPriceFrom) : null,
-        is_listed: isListed,
-      };
-      if (profile?.id) {
-        const { coach_id: _, ...updatePayload } = payload;
-        const { error } = await supabase
-          .from('marketplace_coach_profiles')
-          .update(updatePayload)
-          .eq('id', profile.id);
-        if (error) throw error;
-        setProfile((p) => (p ? { ...p, ...payload } : p));
-        toast.success('Profile updated');
-      } else {
-        const { data, error } = await supabase
-          .from('marketplace_coach_profiles')
-          .insert(payload)
-          .select()
-          .single();
-        if (error) throw error;
-        setProfile(data);
-        toast.success('Profile created');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Could not save profile');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleUploadImage = async (e) => {
-    const file = e?.target?.files?.[0];
-    if (!file || !profile?.id || !supabase || uploading) return;
-    setUploading(true);
-    try {
-      const ext = (file.name || '').split('.').pop() || 'jpg';
-      const path = `${coachId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-      const { error: uploadError } = await supabase.storage
-        .from(STORAGE_BUCKET)
-        .upload(path, file, { contentType: file.type || 'image/jpeg', upsert: false });
-      if (uploadError) throw uploadError;
-      const nextOrder = media.length > 0 ? Math.max(...media.map((m) => m.sort_order), 0) + 1 : 0;
-      const { data: row, error: insertError } = await supabase
-        .from('marketplace_coach_media')
-        .insert({
-          marketplace_profile_id: profile.id,
-          media_type: 'image',
-          media_path: path,
-          sort_order: nextOrder,
-        })
-        .select()
-        .single();
-      if (insertError) throw insertError;
-      setMedia((prev) => [...prev, row].sort((a, b) => a.sort_order - b.sort_order));
-      toast.success('Image added');
-    } catch (err) {
-      console.error(err);
-      toast.error('Upload failed');
-    } finally {
-      setUploading(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleRemoveMedia = async (mediaId) => {
-    if (!supabase || !mediaId) return;
-    const row = media.find((m) => m.id === mediaId);
-    if (!row) return;
-    try {
-      await supabase.storage.from(STORAGE_BUCKET).remove([row.media_path]);
-      await supabase.from('marketplace_coach_media').delete().eq('id', mediaId);
-      setMedia((prev) => prev.filter((m) => m.id !== mediaId));
-      setMediaUrls((prev) => {
-        const next = { ...prev };
-        delete next[mediaId];
-        return next;
+      const { data: res, error: err } = await invokeSupabaseFunction('submit-public-enquiry', {
+        slug: referralCode,
+        enquiry_name: enquiryName.trim(),
+        enquiry_email: enquiryEmail.trim(),
+        enquiry_goal: enquiryGoal.trim() || undefined,
+        enquiry_type: enquiryType || undefined,
+        message: enquiryMessage.trim() || undefined,
       });
-      toast.success('Image removed');
-    } catch (err) {
-      toast.error('Could not remove image');
+      if (err) {
+        toast.error(err || 'Could not send enquiry');
+        return;
+      }
+      if (user?.id && isPersonal(effectiveRole) && listing?.coach_id) {
+        trackPersonalSubmittedEnquiry({ coach_id: listing.coach_id, enquiry_type: enquiryType }).catch(() => {});
+      }
+      toast.success('Enquiry sent. The coach will get in touch.');
+      setEnquireOpen(false);
+      setEnquiryName('');
+      setEnquiryEmail('');
+      setEnquiryGoal('');
+      setEnquiryType('general');
+      setEnquiryMessage('');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  if (loading) {
+  if (!slug) {
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Marketplace profile" onBack={() => navigate(-1)} />
-        <div className="p-4 flex items-center justify-center" style={{ minHeight: 200 }}>
-          <p style={{ color: colors.muted }}>Loading…</p>
+      <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ background: colors.bg, paddingTop: 'env(safe-area-inset-top)' }}>
+        <p className="text-sm" style={{ color: colors.muted }}>Invalid link.</p>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen" style={{ background: colors.bg }}>
+        <TopBar title="Coach" onBack={() => navigate(-1)} />
+        <CoachMarketplaceProfileSkeleton />
+      </div>
+    );
+  }
+
+  if (error || !listing) {
+    return (
+      <div className="min-h-screen" style={{ background: colors.bg }}>
+        <TopBar title="Coach" onBack={() => navigate(-1)} />
+        <div className="p-6 text-center">
+          <User size={48} style={{ color: colors.muted }} className="mx-auto mb-4" />
+          <h1 className="text-xl font-semibold mb-2" style={{ color: colors.text }}>Profile not found</h1>
+          <p className="text-sm mb-4" style={{ color: colors.muted }}>This coach profile doesn&apos;t exist or isn&apos;t public.</p>
+          <Button variant="secondary" onClick={() => navigate(-1)}>Go back</Button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 96 }}>
-      <TopBar title="Marketplace profile" onBack={() => navigate(-1)} />
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 120 }}>
+      <TopBar title={coachName} onBack={() => navigate(-1)} />
+
       <div style={{ padding: spacing[16], maxWidth: 560, margin: '0 auto' }}>
-        <p className="text-sm mb-6" style={{ color: colors.muted }}>
-          Control how you appear in coach discovery. Turn “Listed” on when you’re ready to be found.
-        </p>
-
-        <form onSubmit={handleSave}>
-          <Card style={{ marginBottom: spacing[16], padding: spacing[16], border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Display name</label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your name"
-              required
-              className="w-full rounded-xl border bg-black/20 text-white placeholder:text-gray-500"
-              style={{ padding: 12, borderColor: colors.border, marginBottom: spacing[16] }}
-            />
-
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Headline</label>
-            <input
-              type="text"
-              value={headline}
-              onChange={(e) => setHeadline(e.target.value)}
-              placeholder="e.g. NPC competitor & transformation coach"
-              className="w-full rounded-xl border bg-black/20 text-white placeholder:text-gray-500"
-              style={{ padding: 12, borderColor: colors.border, marginBottom: spacing[16] }}
-            />
-
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Bio</label>
-            <textarea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              placeholder="Tell clients what you offer and your experience…"
-              rows={4}
-              className="w-full rounded-xl border bg-black/20 text-white placeholder:text-gray-500"
-              style={{ padding: 12, borderColor: colors.border, marginBottom: spacing[16] }}
-            />
-
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Specialties (comma-separated)</label>
-            <input
-              type="text"
-              value={specialtiesText}
-              onChange={(e) => setSpecialtiesText(e.target.value)}
-              placeholder="e.g. Fat loss, Muscle building, Contest prep"
-              className="w-full rounded-xl border bg-black/20 text-white placeholder:text-gray-500"
-              style={{ padding: 12, borderColor: colors.border, marginBottom: spacing[16] }}
-            />
-
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Divisions coached (comma-separated)</label>
-            <input
-              type="text"
-              value={divisionsText}
-              onChange={(e) => setDivisionsText(e.target.value)}
-              placeholder="e.g. Men's Physique, Bikini, Figure"
-              className="w-full rounded-xl border bg-black/20 text-white placeholder:text-gray-500"
-              style={{ padding: 12, borderColor: colors.border, marginBottom: spacing[16] }}
-            />
-
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Coaching focus</label>
-            <div className="flex flex-wrap gap-2 mb-4">
-              {COACHING_FOCUS_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => toggleFocus(opt.value)}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: radii.pill,
-                    fontSize: 13,
-                    fontWeight: 500,
-                    border: `1px solid ${coachingFocus.includes(opt.value) ? colors.primary : colors.border}`,
-                    background: coachingFocus.includes(opt.value) ? colors.primarySubtle : 'transparent',
-                    color: colors.text,
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
+        {/* Hero */}
+        <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+          <div className="rounded-2xl overflow-hidden mb-4" style={{ background: colors.card, border: `1px solid ${colors.border}` }}>
+            <div className="h-24 flex items-end justify-center pb-2" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.2), rgba(11,18,32,0.9))' }} />
+            <div className="flex flex-col items-center px-4 pb-4 -mt-12">
+              <div className="w-20 h-20 rounded-xl border-4 flex items-center justify-center flex-shrink-0" style={{ borderColor: colors.card, background: colors.surface2 }}>
+                <User size={36} style={{ color: colors.muted }} />
+              </div>
+              <h1 className="text-xl font-semibold mt-3" style={{ color: colors.text }}>{coachName}</h1>
+              {listing.headline && (
+                <p className="text-sm text-center mt-1" style={{ color: colors.muted }}>{listing.headline}</p>
+              )}
+              <div className="flex flex-wrap gap-2 justify-center mt-2">
+                <span className="rounded-full px-3 py-1 text-xs font-medium" style={{ background: colors.primarySubtle, color: colors.accent }}>
+                  {COACH_TYPE_LABELS[coachFocus] || coachFocus || 'Coach'}
+                </span>
+              </div>
             </div>
+          </div>
+        </motion.section>
 
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Monthly price from (USD)</label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={monthlyPriceFrom}
-              onChange={(e) => setMonthlyPriceFrom(e.target.value)}
-              placeholder="Optional"
-              className="w-full rounded-xl border bg-black/20 text-white placeholder:text-gray-500"
-              style={{ padding: 12, borderColor: colors.border, marginBottom: spacing[16], maxWidth: 140 }}
+        {/* Bio */}
+        {listing.bio && (
+          <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="mb-6">
+            <Card style={{ padding: spacing[16], border: `1px solid ${colors.border}` }}>
+              <h2 className="text-sm font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>About</h2>
+              <p className="text-sm whitespace-pre-wrap" style={{ color: colors.text }}>{listing.bio}</p>
+            </Card>
+          </motion.section>
+        )}
+
+        {/* Accepted client types */}
+        {acceptedTypes.length > 0 && (
+          <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="mb-6">
+            <Card style={{ padding: spacing[16], border: `1px solid ${colors.border}` }}>
+              <h2 className="text-sm font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Accepts</h2>
+              <div className="flex flex-wrap gap-2">
+                {acceptedTypes.map((t) => (
+                  <span key={t} className="text-xs px-2.5 py-1 rounded-full" style={{ background: colors.surface2, color: colors.text }}>
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          </motion.section>
+        )}
+
+        {/* Pricing summary */}
+        {listing.pricing_summary?.trim() && (
+          <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mb-6">
+            <Card style={{ padding: spacing[16], border: `1px solid ${colors.border}` }}>
+              <h2 className="text-sm font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Pricing</h2>
+              <p className="text-sm whitespace-pre-wrap" style={{ color: colors.text }}>{listing.pricing_summary.trim()}</p>
+            </Card>
+          </motion.section>
+        )}
+
+        {/* Public stories */}
+        <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className="mb-6">
+          <h2 className="text-sm font-semibold uppercase tracking-wide mb-3 flex items-center gap-2" style={{ color: colors.muted }}>
+            <Trophy size={16} style={{ color: colors.accent }} />
+            Results
+          </h2>
+          {stories.length === 0 ? (
+            <EmptyState
+              icon={Trophy}
+              title="No public results yet"
+              description="This coach hasn’t shared any result stories. Get in touch to start your journey."
             />
-
-            <div className="flex items-center justify-between" style={{ marginBottom: spacing[8] }}>
-              <span className="text-sm font-medium" style={{ color: colors.text }}>Listed on marketplace</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={isListed}
-                onClick={() => setIsListed((v) => !v)}
-                style={{
-                  width: 44,
-                  height: 24,
-                  borderRadius: 12,
-                  background: isListed ? colors.primary : colors.surface2,
-                  border: 'none',
-                  position: 'relative',
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: isListed ? 22 : 2,
-                    width: 20,
-                    height: 20,
-                    borderRadius: '50%',
-                    background: '#fff',
-                    transition: 'left 0.2s',
-                  }}
-                />
-              </button>
-            </div>
-            <p className="text-xs" style={{ color: colors.muted }}>When on, your profile can be discovered by personal users.</p>
-          </Card>
-
-          {profile?.id && (
-            <Card style={{ marginBottom: spacing[16], padding: spacing[16], border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: colors.muted }}>Profile images</p>
-              <div className="flex flex-wrap gap-3 mb-3">
-                {media.map((m) => (
-                  <div key={m.id} className="relative group">
-                    <div
-                      className="rounded-xl overflow-hidden flex-shrink-0"
-                      style={{ width: 100, height: 100, background: colors.surface2 }}
-                    >
-                      {mediaUrls[m.id] ? (
-                        <img src={mediaUrls[m.id]} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center" style={{ color: colors.muted }}>…</div>
+          ) : (
+            <div className="space-y-4">
+              {stories.map((story) => (
+                <Card key={story.id} style={{ padding: spacing[16], border: `1px solid ${colors.border}` }}>
+                  <span className="text-xs font-medium rounded-full px-2.5 py-0.5" style={{ background: colors.primarySubtle, color: colors.accent }}>
+                    {STORY_TYPE_LABELS[story.story_type] || story.story_type}
+                  </span>
+                  <h3 className="text-base font-semibold mt-2 mb-1" style={{ color: colors.text }}>{story.title}</h3>
+                  {story.summary && <p className="text-sm mb-2 whitespace-pre-wrap" style={{ color: colors.muted }}>{story.summary}</p>}
+                  {story.metrics?.length > 0 && (
+                    <div className="flex flex-wrap gap-3 text-xs" style={{ color: colors.muted }}>
+                      {story.metrics.map((m) => (
+                        <span key={m.metric_key}><span style={{ color: colors.textSecondary }}>{m.metric_label}:</span> {m.metric_value}</span>
+                      ))}
+                    </div>
+                  )}
+                  {((story.before_image_path || story.after_image_path)) && (
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      {story.before_image_path && (
+                        <div className="rounded-lg aspect-[3/4] flex items-center justify-center" style={{ background: colors.surface2 }}>
+                          <ImageIcon size={24} style={{ color: colors.muted }} />
+                        </div>
+                      )}
+                      {story.after_image_path && (
+                        <div className="rounded-lg aspect-[3/4] flex items-center justify-center" style={{ background: colors.surface2 }}>
+                          <ImageIcon size={24} style={{ color: colors.muted }} />
+                        </div>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveMedia(m.id)}
-                      className="absolute top-1 right-1 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                      style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}
-                      aria-label="Remove image"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-                <label
-                  className="rounded-xl border-2 border-dashed flex items-center justify-center cursor-pointer flex-shrink-0"
-                  style={{ width: 100, height: 100, borderColor: colors.border, color: colors.muted }}
-                >
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={handleUploadImage}
-                    disabled={uploading}
-                    className="sr-only"
-                  />
-                  {uploading ? <span className="text-xs">…</span> : <ImagePlus size={24} />}
-                </label>
-              </div>
-              <p className="text-xs" style={{ color: colors.muted }}>Add images for your marketplace card. Save your profile first if you don’t see the upload area.</p>
-            </Card>
+                  )}
+                </Card>
+              ))}
+            </div>
           )}
+        </motion.section>
 
-          <Button type="submit" variant="primary" disabled={saving} onClick={handleSave} className="w-full">
-            {saving ? 'Saving…' : profile ? 'Update profile' : 'Create profile'}
+        {/* CTAs */}
+        <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="flex flex-col gap-3">
+          <Button className="w-full justify-center" onClick={() => setEnquireOpen(true)}>
+            <MessageCircle size={18} className="mr-2" />
+            Enquire
           </Button>
-        </form>
+          <Button variant="secondary" className="w-full justify-center" disabled>
+            <Calendar size={18} className="mr-2" />
+            Book consultation (coming soon)
+          </Button>
+        </motion.section>
       </div>
+
+      {/* Enquire modal */}
+      {enquireOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+          onClick={() => !submitting && setEnquireOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto"
+            style={{ background: colors.card, border: `1px solid ${colors.border}` }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 flex items-center justify-between p-4 border-b" style={{ borderColor: colors.border, background: colors.card }}>
+              <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Send an enquiry</h2>
+              <button type="button" onClick={() => !submitting && setEnquireOpen(false)} className="p-2 rounded-lg" style={{ color: colors.muted }} aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleEnquireSubmit} className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: colors.textSecondary }}>Name *</label>
+                <input type="text" value={enquiryName} onChange={(e) => setEnquiryName(e.target.value)} placeholder="Your name" required className="w-full rounded-lg border px-3 py-2 text-sm" style={{ background: colors.surface2, borderColor: colors.border, color: colors.text }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: colors.textSecondary }}>Email *</label>
+                <input type="email" value={enquiryEmail} onChange={(e) => setEnquiryEmail(e.target.value)} placeholder="your@email.com" required className="w-full rounded-lg border px-3 py-2 text-sm" style={{ background: colors.surface2, borderColor: colors.border, color: colors.text }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: colors.textSecondary }}>Goal</label>
+                <input type="text" value={enquiryGoal} onChange={(e) => setEnquiryGoal(e.target.value)} placeholder="e.g. Fat loss, competition prep" className="w-full rounded-lg border px-3 py-2 text-sm" style={{ background: colors.surface2, borderColor: colors.border, color: colors.text }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: colors.textSecondary }}>Interest</label>
+                <select value={enquiryType} onChange={(e) => setEnquiryType(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" style={{ background: colors.surface2, borderColor: colors.border, color: colors.text }}>
+                  <option value="general">General</option>
+                  <option value="transformation">Transformation</option>
+                  <option value="competition">Competition / Prep</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: colors.textSecondary }}>Message</label>
+                <textarea value={enquiryMessage} onChange={(e) => setEnquiryMessage(e.target.value)} placeholder="Tell the coach a bit about yourself…" rows={3} className="w-full rounded-lg border px-3 py-2 text-sm resize-none" style={{ background: colors.surface2, borderColor: colors.border, color: colors.text }} />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button type="button" variant="secondary" className="flex-1" onClick={() => setEnquireOpen(false)} disabled={submitting}>Cancel</Button>
+                <Button type="submit" className="flex-1" disabled={submitting}>{submitting ? 'Sending…' : 'Send enquiry'}</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

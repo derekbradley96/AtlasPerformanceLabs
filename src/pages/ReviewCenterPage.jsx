@@ -8,6 +8,7 @@ import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 import { getCoachClients, getLatestCheckinsForCoach, getWeekStartISO } from '@/lib/checkins';
+import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { ChevronRight } from 'lucide-react';
 
 const STATUS_NEW = 'new';
@@ -37,6 +38,8 @@ export default function ReviewCenterPage() {
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState([]);
   const [latestMap, setLatestMap] = useState({});
+  const [insightClientIds, setInsightClientIds] = useState([]);
+  const [showInsightsOnly, setShowInsightsOnly] = useState(false);
 
   const currentWeekStart = useMemo(() => getWeekStartISO(), []);
 
@@ -56,20 +59,46 @@ export default function ReviewCenterPage() {
       const map = {};
       for (const r of rows) map[r.client_id] = r;
       setLatestMap(map);
+
+       // Optional: fetch clients with high-severity coaching insights requiring attention
+       if (hasSupabase && ids.length > 0) {
+         const supabase = getSupabase();
+         if (supabase) {
+           try {
+             const { data, error } = await supabase
+               .from('coaching_insights')
+               .select('client_id')
+               .in('client_id', ids)
+               .eq('severity', 'high')
+               .eq('is_resolved', false);
+             if (!cancelled && !error && Array.isArray(data)) {
+               const clientIds = [...new Set(data.map((d) => d.client_id).filter(Boolean))];
+               setInsightClientIds(clientIds);
+             }
+           } catch {
+             // ignore insight fetch errors in this view
+           }
+         }
+       }
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
 
   const rows = useMemo(() => {
-    return clients
+    let base = clients
       .map((client) => {
         const latest = latestMap[client.id] || null;
         const status = getStatus(client, latest, currentWeekStart);
         return { client, latest, status };
       })
       .sort((a, b) => sortOrder(a.status) - sortOrder(b.status));
-  }, [clients, latestMap, currentWeekStart]);
+    if (showInsightsOnly && insightClientIds.length > 0) {
+      const set = new Set(insightClientIds);
+      base = base.filter((row) => set.has(row.client.id));
+    }
+    return base;
+  }, [clients, latestMap, currentWeekStart, showInsightsOnly, insightClientIds]);
 
   const statusLabel = (status) => {
     if (status === STATUS_NEW) return 'New check-in';
@@ -98,9 +127,23 @@ export default function ReviewCenterPage() {
     <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Review Center" onBack={() => navigate(-1)} />
       <div className="p-4 pb-8">
-        <p className="text-sm mb-4" style={{ color: colors.muted }}>
-          Week of {currentWeekStart}
-        </p>
+        <div className="flex items-center justify-between mb-4 gap-3">
+          <p className="text-sm m-0" style={{ color: colors.muted }}>
+            Week of {currentWeekStart}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowInsightsOnly((v) => !v)}
+            className="text-xs font-medium px-3 py-1 rounded-full border"
+            style={{
+              borderColor: showInsightsOnly ? colors.primary : colors.border,
+              background: showInsightsOnly ? colors.primarySubtle : 'transparent',
+              color: showInsightsOnly ? colors.primary : colors.muted,
+            }}
+          >
+            {showInsightsOnly ? 'Show all check-ins' : 'Insights requiring attention'}
+          </button>
+        </div>
         {rows.length === 0 ? (
           <Card style={{ padding: spacing[24], textAlign: 'center' }}>
             <p style={{ color: colors.muted }}>No clients yet.</p>

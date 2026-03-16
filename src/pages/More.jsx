@@ -26,28 +26,34 @@ import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
 import Card from '@/ui/Card';
 import Row from '@/ui/Row';
-import { colors, spacing } from '@/ui/tokens';
-import { pageContainer, standardCard } from '@/ui/pageLayout';
+import { colors, spacing, shell } from '@/ui/tokens';
+import { pageContainer, standardCard, sectionGap } from '@/ui/pageLayout';
 import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';
 import RequestConsultationModal from '@/components/consultation/RequestConsultationModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
-/** Local error boundary so a runtime error cannot cause repeated remount flashing. */
+/** Local error boundary: captures and shows the real error so we can fix it. */
 class MoreErrorBoundary extends React.Component {
-  state = { hasError: false };
+  state = { hasError: false, error: null, componentStack: null };
 
-  static getDerivedStateFromError() {
-    return { hasError: true };
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
   }
 
   componentDidCatch(error, info) {
     if (typeof console !== 'undefined' && console.error) {
-      console.error('More screen error', error, info);
+      console.error('[More screen]', error?.message ?? error, info?.componentStack);
     }
+    this.setState((prev) => (prev.componentStack != null ? null : { componentStack: info?.componentStack ?? null }));
   }
 
   render() {
     if (this.state.hasError) {
+      const err = this.state.error;
+      const message = (err?.message && String(err.message).trim()) || (err && String(err)) || 'Unknown error';
+      const stack = this.state.componentStack || err?.stack;
+      const showStack = import.meta.env.DEV && stack;
+
       return (
         <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={{ padding: spacing[24] }}>
           <div
@@ -66,10 +72,29 @@ class MoreErrorBoundary extends React.Component {
               <RefreshCw size={32} style={{ color: colors.muted }} />
             </div>
             <h2 className="text-lg font-semibold mb-2" style={{ color: colors.text }}>Something went wrong</h2>
-            <p className="text-sm mb-6" style={{ color: colors.muted }}>The More screen couldn’t load. Tap Reload to try again.</p>
+            <p className="text-sm mb-2 font-medium" style={{ color: colors.text }}>
+              {message}
+            </p>
+            {showStack && (
+              <pre
+                className="text-left text-xs overflow-auto mt-3 mb-4 p-3 rounded-lg"
+                style={{
+                  color: colors.muted,
+                  background: colors.surface1,
+                  border: `1px solid ${colors.border}`,
+                  maxHeight: 120,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {typeof stack === 'string' ? stack.slice(0, 800) : String(stack).slice(0, 800)}
+                {(typeof stack === 'string' ? stack.length : String(stack).length) > 800 ? '…' : ''}
+              </pre>
+            )}
+            <p className="text-sm mb-6" style={{ color: colors.muted }}>Tap Reload to try again.</p>
             <button
               type="button"
-              onClick={() => this.setState({ hasError: false })}
+              onClick={() => this.setState({ hasError: false, error: null, componentStack: null })}
               className="px-6 py-3 rounded-xl font-medium transition-opacity active:opacity-90"
               style={{ background: colors.accent, color: '#fff' }}
             >
@@ -93,11 +118,14 @@ const TRAINER_ROWS = [
   { label: 'Gym overview', icon: Building2, path: '/gym' },
   { label: 'Supplement stacks', icon: Pill, path: '/supplements/stacks' },
   { label: 'Competition Prep', icon: Award, path: '/comp-prep' },
+  { label: 'Marketplace listing', icon: Store, path: '/marketplace-setup' },
   { label: 'Marketplace profile', icon: Store, path: '/marketplace-profile' },
   { label: 'Inquiry inbox', icon: Inbox, path: '/inquiry-inbox' },
   { label: 'Account', icon: UserCircle, path: '/account' },
   { label: 'Plan & Billing', icon: CreditCard, path: '/plan' },
   { label: 'Referrals', icon: Gift, path: '/referrals' },
+  { label: 'Enquiries', icon: Inbox, path: '/enquiries' },
+  { label: 'Result stories', icon: Trophy, path: '/results-stories/new' },
   { label: 'Organisation', icon: Building, path: '/organisation' },
   { label: 'Team', icon: UsersRound, path: '/team' },
   { label: 'Notification Center', icon: Bell, path: '/notifications' },
@@ -271,7 +299,8 @@ function MoreContent() {
   const { canAccessTeam, isAssistant } = useTrainerPermissions();
   const clientForUser = userId ? getClientByUserId(userId) : null;
   const planId = getCurrentPlanIdFromStorage();
-  const currentPlan = PLANS.find((p) => p.id === planId) || PLANS[1];
+  const fallbackPlan = PLANS.find((p) => p.id === 'pro') || PLANS[0] || { id: 'pro', name: 'Pro', price: 0, commission: null };
+  const currentPlan = PLANS.find((p) => p.id === planId) || fallbackPlan;
   const checkInsForUser = clientForUser ? getClientCheckIns(clientForUser.id) : [];
   const achievements = userId ? getAchievementsList(userId, { byUser: true }) : [];
   const shownIds = getShownAchievementIds();
@@ -311,6 +340,11 @@ function MoreContent() {
   const showContent = !!displayUser;
 
   const handleRoleSwitcher = (viewRole) => {
+    if (viewRole === 'admin') {
+      impactLight();
+      navigate('/admin', { replace: true });
+      return;
+    }
     if (viewRole !== 'coach' && viewRole !== 'client' && viewRole !== 'personal') return;
     setRoleOverride(viewRole);
     impactLight();
@@ -360,16 +394,16 @@ function MoreContent() {
             {trainerProfile?.profileImage ? (
               <img src={trainerProfile.profileImage} alt="" className="w-full h-full object-cover" />
             ) : (
-              (displayUser.full_name || displayUser.name || '?').slice(0, 2).toUpperCase()
+              (displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || '?').slice(0, 2).toUpperCase()
             )}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-[17px] font-semibold truncate" style={{ color: colors.text }}>
-              {displayUser.full_name || displayUser.name || 'User'}
+              {displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || 'User'}
             </p>
             <p className="text-sm truncate" style={{ color: colors.muted }}>{roleLabel}</p>
-            {displayUser.email && (
-              <p className="text-xs truncate mt-0.5" style={{ color: colors.muted }}>{displayUser.email}</p>
+            {(displayUser?.email ?? displayUser?.user_metadata?.email) && (
+              <p className="text-xs truncate mt-0.5" style={{ color: colors.muted }}>{displayUser?.email ?? displayUser?.user_metadata?.email}</p>
             )}
           </div>
           <span
@@ -389,19 +423,19 @@ function MoreContent() {
           <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Developer tools (testing)</p>
           <p className="text-xs mb-2" style={{ color: colors.muted }}>View as</p>
           <div className="flex flex-wrap gap-2 mb-3">
-            {['coach', 'client', 'personal'].map((r) => (
+            {['coach', 'client', 'personal', ...(isPlatformAdmin ? ['admin'] : [])].map((r) => (
               <button
                 key={r}
                 type="button"
                 onClick={() => handleRoleSwitcher(r)}
                 className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
                 style={{
-                  background: (r === 'coach' ? effectiveRole === 'trainer' : effectiveRole === r) ? colors.primary : colors.surface1,
-                  color: (r === 'coach' ? effectiveRole === 'trainer' : effectiveRole === r) ? '#fff' : colors.text,
-                  border: 'none',
+                  background: (r === 'coach' ? (effectiveRole === 'coach' || effectiveRole === 'trainer') : r === 'client' || r === 'personal' ? effectiveRole === r : false) ? colors.primary : colors.surface1,
+                  color: (r === 'coach' ? (effectiveRole === 'coach' || effectiveRole === 'trainer') : r === 'client' || r === 'personal' ? effectiveRole === r : false) ? '#fff' : colors.text,
+                  border: r === 'admin' ? `1px solid ${colors.border}` : 'none',
                 }}
               >
-                {r === 'coach' ? 'Coach' : r === 'client' ? 'Client' : 'Personal'}
+                {r === 'coach' ? 'Coach' : r === 'client' ? 'Client' : r === 'personal' ? 'Personal' : 'Admin'}
               </button>
             ))}
           </div>
@@ -440,6 +474,31 @@ function MoreContent() {
               Use my actual role ({authRole})
             </button>
           )}
+        </Card>
+      )}
+
+      {isTrainer && !isAssistant && (
+        <Card style={{ marginBottom: spacing[16], padding: spacing[20], border: `1px solid ${colors.border}` }}>
+          <div className="flex items-start gap-3">
+            <span style={{ width: 44, height: 44, borderRadius: 12, background: colors.primarySubtle, color: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Building2 size={22} strokeWidth={2} />
+            </span>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-[17px] font-semibold mb-1" style={{ color: colors.text }}>Create Team</h3>
+              <p className="text-sm mb-3" style={{ color: colors.muted }}>
+                Organisation mode is for multi-coach teams, prep companies, and coaching brands. You become the owner and can invite more coaches later.
+              </p>
+              <button
+                type="button"
+                onClick={() => { impactLight(); navigate('/organisation/setup'); }}
+                className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-[15px] font-medium transition-opacity active:opacity-90"
+                style={{ background: colors.primarySubtle, color: colors.primary, border: 'none' }}
+              >
+                <Building2 size={18} />
+                Create Team
+              </button>
+            </div>
+          </div>
         </Card>
       )}
 
@@ -511,7 +570,7 @@ function MoreContent() {
             left={<Activity size={20} style={{ color: colors.muted }} />}
             title="Athlete dashboard"
             showChevron={true}
-            onPress={() => { impactLight(); navigate('/athlete'); }}
+            onPress={() => { impactLight(); navigate('/client-dashboard'); }}
             style={{ marginBottom: spacing[8] }}
           />
           <Row
@@ -688,8 +747,8 @@ function MoreContent() {
         <RequestConsultationModal
           onClose={() => setConsultationModalOpen(false)}
           userId={displayUser?.id}
-          userName={displayUser?.full_name || displayUser?.name}
-          userEmail={displayUser?.email}
+          userName={displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name}
+          userEmail={displayUser?.email ?? displayUser?.user_metadata?.email}
         />
       )}
         </>

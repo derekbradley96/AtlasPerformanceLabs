@@ -14,10 +14,12 @@ import {
   getMyClientId,
   getCheckinForWeek,
   getFocusTypeForCurrentUser,
+  getClientCoachId,
   submitCheckin,
   uploadCheckinPhoto,
   updateCheckinPhotos,
 } from '@/lib/checkins';
+import { notifyCoachCheckinSubmitted } from '@/services/notificationTriggers';
 import { trackFriction, trackRecoverableError } from '@/services/frictionTracker';
 import { ChevronDown, ChevronRight, ImagePlus } from 'lucide-react';
 
@@ -149,6 +151,8 @@ export default function CheckInPage() {
         if (path) paths.push(path);
       }
       if (paths.length > 0) await updateCheckinPhotos(row.id, paths);
+      const coachId = await getClientCoachId(clientId);
+      if (coachId) notifyCoachCheckinSubmitted(coachId, clientId, row.id).catch(() => {});
       toast.success('Check-in submitted');
       setExisting(row);
       setPhotoFiles([]);

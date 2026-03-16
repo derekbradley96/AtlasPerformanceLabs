@@ -1,11 +1,12 @@
 /**
  * Map pathname (lowercase, no query) to display title for TopBar.
- * Paths match createPageUrl(pageKey) → '/' + pageKey.replace(/ /g, '-').toLowerCase()
+ * Production auth flow is unified through /auth. Legacy role-select pages are DEV/demo only.
  */
 import { isCoach, DEFAULT_ROLE, normalizeRole } from '@/lib/roles';
 
 const ROUTE_TITLES = {
   '/': 'Atlas',
+  '/auth': 'Sign in',
   '/for-coaches': 'For Coaches',
   '/for-athletes': 'For Athletes',
   '/pricing': 'Pricing',
@@ -15,9 +16,9 @@ const ROUTE_TITLES = {
   '/trainer-dashboard': 'Home',
   '/client-dashboard': 'Home',
   '/solo-dashboard': 'Home',
-  '/trainer-login': 'Trainer sign in',
+  '/trainer-login': 'Coach sign in',
   '/solo-login': 'Personal sign in',
-  '/client-code': 'Invite code',
+  '/client-code': 'Client invite code',
   '/admin-dev-panel': 'Admin (DEV)',
   '/admin': 'Admin',
   '/beta-feedback-inbox': 'Beta feedback',
@@ -67,6 +68,7 @@ const ROUTE_TITLES = {
   '/trainingintelligence': 'Intelligence',
   '/analytics': 'Analytics',
   '/marketplace-profile': 'Marketplace profile',
+  '/marketplace-setup': 'Marketplace listing',
   '/discover': 'Find a coach',
   '/coach-marketplace': 'Coach marketplace',
   '/inquiry-inbox': 'Inquiry inbox',
@@ -137,7 +139,7 @@ const DASHBOARD_ROUTES = ['/home', '/trainer', '/trainer-dashboard', '/client-da
  * Coach: Home, Clients, Messages, More. (coach_focus does not change nav structure.)
  * Client: Home, Today, Messages, Progress, More.
  * Personal: Home, Today, Progress, Nutrition, More (no Messages as primary tab).
- * @param {string} [role] - Normalized role: 'trainer'|'client'|'solo' (or guard: coach|client|personal).
+ * @param {string} [role] - Normalized role: 'coach'|'client'|'personal' (legacy trainer|solo still map via normalizeRole).
  */
 export function getTabRoutesForRole(role) {
   const r = normalizeRole(role) ?? DEFAULT_ROLE;
@@ -150,11 +152,12 @@ export function getTabRoutesForRole(role) {
     ];
   }
   if (r === 'client') {
+    // Client: Home, Today, Progress, Messages, More
     return [
       { path: '/client-dashboard', label: 'Home', iconKey: 'Home' },
       { path: '/today', label: 'Today', iconKey: 'Calendar' },
-      { path: '/messages', label: 'Messages', iconKey: 'MessageSquare' },
       { path: '/progress', label: 'Progress', iconKey: 'TrendingUp' },
+      { path: '/messages', label: 'Messages', iconKey: 'MessageSquare' },
       { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
     ];
   }

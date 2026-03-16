@@ -81,7 +81,7 @@ function clientNameFromSession(row) {
 }
 
 async function fetchSessions() {
-  if (!hasSupabase()) return [];
+  if (!hasSupabase) return [];
   const supabase = getSupabase();
   if (!supabase) return [];
   const { data: { user } } = await supabase.auth.getUser();
@@ -208,7 +208,7 @@ export default function CoachCalendarPage() {
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['coach_sessions'],
     queryFn: fetchSessions,
-    enabled: hasSupabase(),
+    enabled: hasSupabase,
   });
 
   const markCompleteMutation = useMutation({
@@ -311,7 +311,7 @@ export default function CoachCalendarPage() {
     return days;
   }, [weekCursor, sessionsForWeek]);
 
-  if (!hasSupabase()) {
+  if (!hasSupabase) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }}>
         <p style={{ color: colors.muted }}>Sign in to view your calendar.</p>

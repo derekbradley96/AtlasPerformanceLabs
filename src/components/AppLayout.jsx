@@ -24,7 +24,7 @@ export default function AppLayout({ children, currentPageName }) {
     enabled: !!user?.id && showShell
   });
 
-  const userRole = user?.user_type ?? user?.role ?? 'general';
+  const userRole = user?.user_type ?? user?.role ?? 'personal';
   const loading = isLoadingAuth;
 
   if (showShell && loading) {

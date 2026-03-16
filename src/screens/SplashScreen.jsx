@@ -2,19 +2,20 @@
  * Native-style in-app splash: Atlas Pillar logo, top third, subtle radial glow.
  * No text. Optional pulsing ring after 2s if auth is still loading.
  * After 10s without auth ready, show recoverable error UI (Retry / Sign out) so app never infinite-spins.
+ * Production auth flow is unified through /auth. Legacy role-select pages are DEV/demo only.
  */
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
-import { SplashScreen as CapSplash } from '@capacitor/splash-screen';
 import BootErrorScreen from '@/components/BootErrorScreen';
 import AtlasLogo from '@/components/Brand/AtlasLogo';
 import { colors } from '@/ui/tokens';
 
 /** Minimum time splash is visible before allowing navigation */
-const MIN_SPLASH_MS = 750;
+const MIN_SPLASH_MS = 400;
 
 /** After this many ms without auth ready, show subtle pulsing ring below logo */
 const LOADING_INDICATOR_DELAY_MS = 2000;
@@ -36,8 +37,16 @@ export default function SplashScreen() {
 
   useEffect(() => {
     const t = requestAnimationFrame(() => setMounted(true));
-    CapSplash.hide().catch(() => {});
     return () => cancelAnimationFrame(t);
+  }, []);
+
+  // Hide native splash after in-app splash has had time to render (avoids black flash).
+  useEffect(() => {
+    if (!Capacitor?.isNativePlatform?.()) return;
+    const id = setTimeout(() => {
+      import('@capacitor/splash-screen').then(({ SplashScreen: CapSplash }) => CapSplash.hide().catch(() => {}));
+    }, 100);
+    return () => clearTimeout(id);
   }, []);
 
   useEffect(() => {
@@ -59,13 +68,21 @@ export default function SplashScreen() {
 
   useEffect(() => {
     if (!authReady || !splashMinElapsed) return;
+    if (import.meta.env.DEV) {
+      console.log('[SPLASH] authReady');
+      console.log('[SPLASH] hasSupabase', hasSupabase);
+      console.log('[SPLASH] authenticated', isSupabaseAuthed);
+    }
     if (!hasSupabase) {
-      navigate('/role-select', { replace: true });
+      if (import.meta.env.DEV) console.log('[SPLASH] route -> /auth');
+      navigate('/auth', { replace: true });
       return;
     }
     if (isSupabaseAuthed) {
+      if (import.meta.env.DEV) console.log('[SPLASH] route -> /home');
       navigate('/home', { replace: true });
     } else {
+      if (import.meta.env.DEV) console.log('[SPLASH] route -> /auth');
       navigate('/auth', { replace: true });
     }
   }, [authReady, splashMinElapsed, hasSupabase, isSupabaseAuthed, navigate]);

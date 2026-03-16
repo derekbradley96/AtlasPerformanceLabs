@@ -88,7 +88,7 @@ export default function HelpSupport() {
     }
   ];
 
-  const faqs = displayUser?.user_type === 'trainer' ? trainerFaqs : clientFaqs;
+  const faqs = (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer') ? trainerFaqs : clientFaqs;
 
   if (!isDemoMode && loading) return <PageLoader />;
   if (!displayUser) return <PageLoader />;

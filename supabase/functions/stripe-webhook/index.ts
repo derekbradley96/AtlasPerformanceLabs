@@ -1,14 +1,15 @@
-// Stripe webhook: verify signature, handle checkout.session.completed, invoice.paid/failed, account.updated
-// Atlas commission: Basic 10%, Pro 3%, Elite 0% from coach_subscription_tiers; fee calculated on invoice.paid.
+// Stripe webhook: verify signature, replay-safe, idempotent. Raw body only.
+// Atlas commission from coach_subscription_tiers; fee from invoice.amount_paid (never from client).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { corsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
+import { isWebhookReplaySafe, safeLogWebhook } from "../_shared/stripe.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
 
-/** Atlas commission by tier (default when no row in coach_subscription_tiers is basic 10%). */
+/** Atlas commission by tier (default when no row in coach_subscription_tiers is basic 10%). Server-side only. */
 const TIER_COMMISSION = { basic: 0.1, pro: 0.03, elite: 0 } as const;
 
 function calculatePlatformFee(amountPaidCents: number, commissionRate: number): { platformFeeCents: number; coachAmountCents: number } {
@@ -30,16 +31,32 @@ Deno.serve(async (req) => {
   const sig = req.headers.get("stripe-signature");
   if (!sig || !webhookSecret) return jsonResp({ error: "Missing signature or webhook secret" }, 400);
 
+  if (!isWebhookReplaySafe(sig)) {
+    safeLogWebhook("reject_replay", { objectId: "timestamp_outside_tolerance" });
+    return jsonResp({ error: "Replay or expired" }, 400);
+  }
+
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(raw, sig, webhookSecret);
-  } catch (e) {
-    console.error("Webhook signature verification failed", e);
+  } catch {
+    safeLogWebhook("signature_invalid");
     return jsonResp({ error: "Invalid signature" }, 400);
   }
 
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const now = new Date().toISOString();
+
+  const { error: insertErr } = await supabase.from("stripe_webhook_events").insert({
+    event_id: event.id,
+    event_type: event.type,
+    processed_at: now,
+  });
+  if (insertErr) {
+    if (insertErr.code === "23505") return jsonResp({ received: true }, 200);
+    safeLogWebhook("idempotency_insert_failed", { eventId: event.id });
+    return jsonResp({ error: "Webhook processing failed" }, 500);
+  }
 
   try {
     switch (event.type) {
@@ -54,7 +71,6 @@ Deno.serve(async (req) => {
 
         if (planTier && !leadId) {
           const subId = session.subscription as string;
-          const periodEnd = subId ? null : null;
           let currentPeriodEnd: string | null = null;
           if (subId) {
             try {
@@ -65,11 +81,11 @@ Deno.serve(async (req) => {
           await supabase.from(TABLE.coaches).update({
             stripe_customer_id: (session.customer as string) ?? null,
             subscription_status: "active",
-            plan_tier: planTier.toLowerCase(),
+            plan_tier: (planTier as string).toLowerCase(),
             current_period_end: currentPeriodEnd,
             updated_at: now,
           }).eq("id", coachId);
-          if (typeof console.log === "function") console.log("Webhook: plan subscription started", { coachId, planTier });
+          safeLogWebhook("checkout.session.completed", { objectId: session.id });
           break;
         }
 
@@ -78,9 +94,9 @@ Deno.serve(async (req) => {
         if (!lead) break;
         await supabase.from(TABLE.leads).update({ status: "paid", updated_at: now }).eq("id", leadId);
         let clientId: string | null = null;
-        const { data: existing } = await supabase.from(TABLE.clients).select("id").eq("coach_id", coachId).eq("email", lead.email ?? "").single();
-        if (existing) {
-          clientId = existing.id;
+        const { data: existingClient } = await supabase.from(TABLE.clients).select("id").eq("coach_id", coachId).eq("email", lead.email ?? "").single();
+        if (existingClient) {
+          clientId = existingClient.id;
         } else {
           const { data: newClient } = await supabase.from(TABLE.clients).insert({
             coach_id: coachId,
@@ -115,7 +131,7 @@ Deno.serve(async (req) => {
           created_at: now,
           updated_at: now,
         }, { onConflict: "coach_id,dedupe_key" });
-        if (typeof console.log === "function") console.log("Webhook: lead paid, client created", { leadId, clientId });
+        safeLogWebhook("checkout.session.completed", { objectId: session.id });
         break;
       }
       case "invoice.paid": {
@@ -155,6 +171,7 @@ Deno.serve(async (req) => {
         if (pay?.client_id) {
           await supabase.from(TABLE.review_items).update({ status: "done", updated_at: now }).eq("coach_id", pay.coach_id).eq("client_id", pay.client_id).eq("type", "payment_overdue");
         }
+        safeLogWebhook("invoice.paid", { objectId: invoice.id });
         break;
       }
       case "invoice.payment_failed": {
@@ -181,6 +198,7 @@ Deno.serve(async (req) => {
             updated_at: now,
           }, { onConflict: "coach_id,dedupe_key" });
         }
+        safeLogWebhook("invoice.payment_failed", { objectId: invoice.id });
         break;
       }
       case "account.updated": {
@@ -193,6 +211,7 @@ Deno.serve(async (req) => {
             updated_at: now,
           }).eq("id", coach.id);
         }
+        safeLogWebhook("account.updated", { objectId: account.id });
         break;
       }
       case "customer.subscription.updated":
@@ -205,7 +224,7 @@ Deno.serve(async (req) => {
         if (planTier && coachIdSub) {
           await supabase.from(TABLE.coaches).update({
             subscription_status: status,
-            plan_tier: planTier.toLowerCase(),
+            plan_tier: (planTier as string).toLowerCase(),
             current_period_end: periodEnd,
             updated_at: now,
           }).eq("id", coachIdSub);
@@ -215,14 +234,15 @@ Deno.serve(async (req) => {
           current_period_end: periodEnd,
           updated_at: now,
         }).eq("stripe_subscription_id", sub.id);
+        safeLogWebhook(event.type, { objectId: sub.id });
         break;
       }
       default:
-        if (typeof console.log === "function") console.log("Webhook unhandled", event.type);
+        safeLogWebhook(event.type, { eventId: event.id });
     }
   } catch (e) {
-    console.error("Webhook handler error", event.type, e);
-    return jsonResp({ error: String(e) }, 500);
+    safeLogWebhook("handler_error", { eventId: event.id });
+    return jsonResp({ error: "Webhook processing failed" }, 500);
   }
 
   return jsonResp({ received: true }, 200);

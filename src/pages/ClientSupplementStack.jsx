@@ -22,7 +22,7 @@ function todayISODate() {
 }
 
 async function fetchClientStack() {
-  if (!hasSupabase()) return { stack: [], todayLogs: [] };
+  if (!hasSupabase) return { stack: [], todayLogs: [] };
   const supabase = getSupabase();
   if (!supabase) return { stack: [], todayLogs: [] };
 
@@ -56,7 +56,7 @@ export default function ClientSupplementStack() {
   const { data, isLoading } = useQuery({
     queryKey: ['client_supplement_stack', today],
     queryFn: fetchClientStack,
-    enabled: hasSupabase(),
+    enabled: hasSupabase,
   });
 
   const stack = data?.stack ?? [];
@@ -99,7 +99,7 @@ export default function ClientSupplementStack() {
     },
   });
 
-  if (!hasSupabase()) {
+  if (!hasSupabase) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }}>
         <p style={{ color: colors.muted }}>Sign in to view your supplement plan.</p>

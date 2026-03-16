@@ -1,3 +1,4 @@
+/** Production auth flow is unified through /auth. Legacy role-select pages are DEV/demo only. */
 import React, { Suspense, useEffect, useRef } from 'react';
 import { Toaster } from "@/components/ui/toaster"
 import { toast } from 'sonner';
@@ -18,15 +19,18 @@ import RoleSelect from './pages/RoleSelect';
 import TrainerLogin from './pages/TrainerLogin';
 import SoloLogin from './pages/SoloLogin';
 import ClientCode from './pages/ClientCode';
+import ClientOnboarding from './pages/ClientOnboarding';
 import AdminDevPanel from './pages/AdminDevPanel';
 import BetaFeedbackInboxPage from './pages/BetaFeedbackInboxPage';
 import BetaHealthDashboard from './pages/BetaHealthDashboard';
 import AdminLayout from './pages/admin/AdminLayout';
-import AdminDashboardPage from './pages/admin/AdminDashboardPage';
+import AdminDashboardPage from './pages/AdminDashboardPage';
 import AdminUsersPage from './pages/admin/AdminUsersPage';
+import AdminUserLookupPage from './pages/AdminUserLookupPage';
 import AdminCoachesPage from './pages/admin/AdminCoachesPage';
 import AdminFeedbackPage from './pages/admin/AdminFeedbackPage';
 import AdminMetricsPage from './pages/admin/AdminMetricsPage';
+import GrowthDashboardPage from './pages/GrowthDashboardPage';
 import AppShell from './components/shell/AppShell';
 import { FeedbackProvider } from '@/contexts/FeedbackContext';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -41,6 +45,7 @@ import ImportClientsPage from './pages/ImportClientsPage';
 import ImportProgramsPage from './pages/ImportProgramsPage';
 import ImportBodyweightPage from './pages/ImportBodyweightPage';
 import SoloDashboardPage from './pages/SoloDashboardPage';
+import PersonalInsightsPage from './pages/PersonalInsightsPage';
 import ClientDetail from './pages/ClientDetail';
 import CheckinReview from './pages/CheckinReview';
 import Intervention from './pages/Intervention';
@@ -54,6 +59,7 @@ import EditProfile from './pages/EditProfile';
 import InviteClient from './pages/InviteClient';
 import CapacityDashboard from './pages/CapacityDashboard';
 import NotificationSettings from './pages/NotificationSettings';
+import NotificationSettingsPage from './pages/NotificationSettingsPage';
 import NotificationsPage from './pages/NotificationsPage';
 import Branding from './pages/Branding';
 import Consultations from './pages/Consultations';
@@ -84,21 +90,35 @@ import PoseCheckSubmitPage from './pages/PoseCheckSubmitPage';
 import PoseCheckReviewPage from './pages/PoseCheckReviewPage';
 import PoseCheckReviewDetailPage from './pages/PoseCheckReviewDetailPage';
 import PeakWeekCommandCenter from './pages/PeakWeekCommandCenter';
+import CoachPeakWeekDashboard from './pages/CoachPeakWeekDashboard';
 import PoseTimelinePage from './pages/PoseTimelinePage';
 import PeakWeekBuilderPage from './pages/PeakWeekBuilderPage';
+import PeakWeekEditorPage from './pages/PeakWeekEditorPage';
+import ClientHabitsPage from './pages/ClientHabitsPage';
+import ClientBillingPage from './pages/ClientBillingPage';
+import ClientHabitsDailyPage from './pages/ClientHabitsDailyPage';
 import PeakWeekClientPage from './pages/PeakWeekClientPage';
+import ClientPeakWeekPage from './pages/ClientPeakWeekPage';
+import PeakWeekCheckinSubmitPage from './pages/PeakWeekCheckinSubmitPage';
+import PeakWeekCheckinReviewPage from './pages/PeakWeekCheckinReviewPage';
 import PrepComparisonPage from './pages/PrepComparisonPage';
 import MoneyDashboardPage from './pages/MoneyDashboardPage';
-import ReferralDashboard from './pages/ReferralDashboard';
+import CoachReferralDashboardPage from './pages/CoachReferralDashboardPage';
+import CoachEnquiriesPage from './pages/CoachEnquiriesPage';
 import CoachCalendarPage from './pages/CoachCalendarPage';
 import CoachCommandCenter from './pages/CoachCommandCenter';
 import GymDashboard from './pages/GymDashboard';
-import OrganisationDashboard from './pages/OrganisationDashboard';
+import OrganisationDashboardPage from './pages/OrganisationDashboardPage';
+import OrganisationAnalyticsPage from './pages/OrganisationAnalyticsPage';
+import OrganisationSetupPage from './pages/OrganisationSetupPage';
 import TeamManagementPage from './pages/TeamManagementPage';
 import CoachHomePage from './pages/CoachHomePage';
 import CoachAnalyticsPage from './pages/CoachAnalyticsPage';
 import CoachRevenueDashboard from './pages/CoachRevenueDashboard';
+import RevenueAnalyticsPage from './pages/RevenueAnalyticsPage';
 import CoachMarketplaceProfilePage from './pages/CoachMarketplaceProfilePage';
+import CoachMarketplaceEditPage from './pages/CoachMarketplaceEditPage';
+import CoachMarketplaceSetupPage from './pages/CoachMarketplaceSetupPage';
 import CoachDiscoveryPage from './pages/CoachDiscoveryPage';
 import CoachMarketplacePage from './pages/CoachMarketplacePage';
 import CoachInquiryInboxPage from './pages/CoachInquiryInboxPage';
@@ -112,7 +132,9 @@ import IntakeTemplateBuilder from './pages/intake/IntakeTemplateBuilder';
 import OnboardingByToken from './pages/intake/OnboardingByToken';
 import ClientIntake from './pages/intake/ClientIntake';
 import TrainerPlan from './pages/plan/TrainerPlan';
-import CoachPublicProfileScreen from './pages/coach/CoachPublicProfileScreen';
+import PublicCoachProfilePage from './pages/PublicCoachProfilePage';
+import CoachResultsStoryBuilderPage from './pages/CoachResultsStoryBuilderPage';
+import PublicResultStoryPage from './pages/PublicResultStoryPage';
 import Team from './pages/team/Team';
 import PublicLink from './pages/PublicLink';
 import LeadIntake from './pages/LeadIntake';
@@ -129,9 +151,12 @@ import { useTrainerPermissions } from '@/components/hooks/useTrainerPermissions'
 import RequireCompPrepAccess from '@/components/RequireCompPrepAccess';
 import SetupWizard from './pages/setup/SetupWizard';
 import CoachOnboardingWizard from './pages/CoachOnboardingWizard';
+import CoachOnboardingFlow from './pages/CoachOnboardingFlow';
 import CoachTypeOnboarding from './pages/CoachTypeOnboarding';
 import Appearance from './pages/Appearance';
 import HelpSupport from './pages/HelpSupport';
+import ReportBugPage from './pages/ReportBugPage';
+import FeedbackPage from './pages/FeedbackPage';
 import NavigationAudit from './pages/NavigationAudit';
 import Profile from './pages/Profile';
 import Workout from './pages/Workout';
@@ -191,7 +216,8 @@ const LazyRouteFallback = () => (
 );
 
 /** Use HashRouter on native (Capacitor) so deep routes survive reload; BrowserRouter on web. */
-const Router = Capacitor?.isNativePlatform?.() ? HashRouter : BrowserRouter;
+const isNative = Capacitor?.isNativePlatform?.() ?? false;
+const Router = isNative ? HashRouter : BrowserRouter;
 
 /** Wraps ErrorBoundary with onReset (navigate to /clients) and getSessionUserId so Retry never hard-reloads. */
 function ErrorBoundaryWithRouter({ children }) {
@@ -257,45 +283,6 @@ function ProfileLoadErrorBanner() {
 /** Root: MarketingGate shows splash until auth ready, then redirects logged-in users to /home (app) or marketing outlet. */
 
 
-/** Entry after splash: show RoleSelect unless hydrated + authenticated (or demo/admin) with a role, then redirect to dashboard. */
-const EntryRoute = () => {
-  const { isHydratingAppState, isLoadingAuth, role, isAuthenticated, isAdminBypass, effectiveRole, user, bootError, profile, authReady } = useAuth();
-
-  // Only block on boot error when user has no session (e.g. timeout). If session exists but profile failed (RLS), let them in.
-  if (bootError && !isHydratingAppState && !isAuthenticated) {
-    return <BootErrorScreen />;
-  }
-  if (isHydratingAppState) {
-    return <BootLoadingWithTimeout />;
-  }
-
-  if (isAdminBypass) {
-    return <Navigate to={roleHomePath(effectiveRole)} replace />;
-  }
-
-  const hasRole = role === 'trainer' || role === 'client' || role === 'solo';
-  if (hasRole && isLoadingAuth) {
-    return <BootLoadingWithTimeout />;
-  }
-
-  if (isAuthenticated && hasRole && authReady) {
-    if (isCoach(role)) {
-      const trainerId = user?.id ?? null;
-      if (trainerId) migrateLegacyOnboarding(trainerId);
-      const coachFocusSet = hasSupabase
-        ? (profile != null && VALID_COACH_FOCUS.includes((profile?.coach_focus ?? '').toLowerCase()))
-        : (trainerId && trainerId !== 'local-trainer' && hasCoachTypeSet(trainerId));
-      if (trainerId && trainerId !== 'local-trainer' && !coachFocusSet) return <Navigate to="/coach-type" replace />;
-      if (trainerId && trainerId !== 'local-trainer' && !isCoachOnboardingComplete(trainerId)) return <Navigate to="/coach-onboarding" replace />;
-      return <Navigate to="/home" replace />;
-    }
-    if (role === 'client') return <Navigate to="/messages" replace />;
-    if (role === 'solo') return <Navigate to={roleHomePath('solo')} replace />;
-  }
-
-  return <RoleSelect />;
-};
-
 /** Layout guard: while hydrating show loading; if Supabase configured but no session redirect to /auth; if session but no role yet show loading (profile in background); if no role after timeout redirect to /auth; else render Outlet. */
 function RequireAuthLayout() {
   const { isHydratingAppState, isAuthenticated, isAdminBypass, role, supabaseUser, hasSupabase } = useAuth();
@@ -309,18 +296,18 @@ function RequireAuthLayout() {
   if (hasSupabase && !supabaseUser) return <Navigate to="/auth" replace />;
   if (hasSupabase && supabaseUser && !role && profileWaitTimedOut) return <Navigate to="/auth" replace />;
   if (hasSupabase && supabaseUser && !role) return <BootLoadingWithTimeout />;
-  const hasRole = role === 'trainer' || role === 'client' || role === 'solo';
+  const hasRole = role === 'coach' || role === 'client' || role === 'personal' || role === 'trainer' || role === 'solo';
   const allowed = (isAuthenticated || isAdminBypass) && hasRole;
-  if (!allowed) return <Navigate to="/" replace />;
+  if (!allowed) return <Navigate to="/auth" replace />;
   return <Outlet />;
 }
 
-/** Protects routes: require any role + auth (or demo/admin). Redirect to "/" when no role. */
+/** Protects routes: require any role + auth (or demo/admin). Redirect to /auth when no role. */
 const RequireAuth = ({ children }) => {
   const { isAuthenticated, isAdminBypass, role } = useAuth();
-  const hasRole = role === 'trainer' || role === 'client' || role === 'solo';
+  const hasRole = role === 'coach' || role === 'client' || role === 'personal' || role === 'trainer' || role === 'solo';
   const allowed = (isAuthenticated || isAdminBypass) && hasRole;
-  if (!allowed) return <Navigate to="/" replace />;
+  if (!allowed) return <Navigate to="/auth" replace />;
   return children;
 };
 
@@ -381,21 +368,27 @@ function AdminGate() {
 
 const AppRoutes = () => (
   <Routes>
-      <Route path="/" element={<MarketingGate />}>
-        <Route element={<MarketingLayout />}>
-          <Route index element={<MarketingHomePage />} />
-          <Route path="for-coaches" element={<ForCoachesPage />} />
-          <Route path="for-athletes" element={<ForAthletesPage />} />
-          <Route path="pricing" element={<PricingPage />} />
-          <Route path="marketplace" element={<MarketplacePage />} />
-          <Route path="login" element={<MarketingLoginPage />} />
+      {isNative ? (
+        // On native, show the in-app SplashScreen which then routes to /auth or /home.
+        <Route path="/" element={<SplashScreen />} />
+      ) : (
+        <Route path="/" element={<MarketingGate />}>
+          <Route element={<MarketingLayout />}>
+            <Route index element={<MarketingHomePage />} />
+            <Route path="for-coaches" element={<ForCoachesPage />} />
+            <Route path="for-athletes" element={<ForAthletesPage />} />
+            <Route path="pricing" element={<PricingPage />} />
+            <Route path="marketplace" element={<MarketplacePage />} />
+            <Route path="login" element={<MarketingLoginPage />} />
+          </Route>
         </Route>
-      </Route>
+      )}
       <Route path="/auth" element={<AuthScreen />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route path="/role-select" element={<EntryRoute />} />
-      <Route path="/trainer-login" element={<TrainerLogin />} />
-      <Route path="/solo-login" element={<SoloLogin />} />
+      <Route path="/role-select" element={import.meta.env.DEV ? <RoleSelect /> : <Navigate to="/auth" replace />} />
+      {/* Legacy login entrypoints – always redirect to canonical /auth */}
+      <Route path="/trainer-login" element={<Navigate to="/auth?mode=login&account=coach" replace />} />
+      <Route path="/solo-login" element={<Navigate to="/auth?mode=login&account=personal" replace />} />
       <Route path="/client-code" element={<ClientCode />} />
       <Route path="/join/:slug" element={<JoinPage />} />
       <Route path="/onboard/:trainerSlug" element={<OnboardPage />} />
@@ -408,14 +401,18 @@ const AppRoutes = () => (
         <Route element={<AdminLayout />}>
           <Route index element={<AdminDashboardPage />} />
           <Route path="users" element={<AdminUsersPage />} />
+          <Route path="lookup" element={<AdminUserLookupPage />} />
           <Route path="coaches" element={<AdminCoachesPage />} />
           <Route path="feedback" element={<AdminFeedbackPage />} />
           <Route path="metrics" element={<AdminMetricsPage />} />
+          <Route path="growth" element={<GrowthDashboardPage />} />
         </Route>
       </Route>
       <Route path="/navigation-audit" element={import.meta.env.DEV ? <NavigationAudit /> : <Navigate to="/" replace />} />
       <Route path="/onboarding/:token" element={<OnboardingByToken />} />
-      <Route path="/coach/:username" element={<CoachPublicProfileScreen />} />
+      <Route path="/coach/:slug" element={<PublicCoachProfilePage />} />
+      <Route path="/results/:storySlug" element={<PublicResultStoryPage />} />
+      <Route path="/marketplace/coach/:slug" element={<RequireAuth><CoachMarketplaceProfilePage /></RequireAuth>} />
       <Route path="/lead-checkout" element={<LeadCheckout />} />
       <Route path="/lead-checkout/success" element={<LeadCheckoutSuccess />} />
       <Route path="/lead-checkout/cancel" element={<LeadCheckoutCancel />} />
@@ -427,21 +424,28 @@ const AppRoutes = () => (
       <Route path="/solo" element={<Navigate to="/home" replace />} />
       <Route element={<RequireAuthLayout />}>
         <Route path="coach-type" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Coach type is for trainers only."><CoachTypeOnboarding /></RequireRole>} />
+        <Route path="clientonboarding" element={<ClientOnboarding />} />
         <Route element={<FeedbackProvider><AppShell /></FeedbackProvider>}>
           <Route path="coach-onboarding" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Onboarding is for trainers only."><CoachOnboardingWizard /></RequireRole>} />
+          <Route path="coach-onboarding-flow" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Onboarding is for trainers only."><CoachOnboardingFlow /></RequireRole>} />
           <Route path="setup" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Setup is for trainers only."><SetupWizard /></RequireRole>} />
           <Route path="trainer-setup" element={<Navigate to="/setup" replace />} />
-          <Route path="home" element={<HomePageByRole />} />
-          <Route path="trainer/home" element={<HomePageByRole />} />
-          <Route path="personal/home" element={<HomePageByRole />} />
-          <Route path="client/home" element={<HomePageByRole />} />
+          <Route path="home" element={<ErrorBoundary><HomePageByRole /></ErrorBoundary>} />
+          <Route path="trainer/home" element={<ErrorBoundary><HomePageByRole /></ErrorBoundary>} />
+          <Route path="personal/home" element={<ErrorBoundary><HomePageByRole /></ErrorBoundary>} />
+          <Route path="client/home" element={<ErrorBoundary><HomePageByRole /></ErrorBoundary>} />
           <Route path="inbox" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for trainers only."><Inbox /></RequireRole>} />
           <Route path="money" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Money dashboard is for trainers only."><MoneyDashboardPage /></RequireRole>} />
-          <Route path="referrals" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Referrals are for coaches only."><ReferralDashboard /></RequireRole>} />
+          <Route path="referrals" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Referrals are for coaches only."><CoachReferralDashboardPage /></RequireRole>} />
+          <Route path="enquiries" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Enquiries are for coaches only."><CoachEnquiriesPage /></RequireRole>} />
+          <Route path="results-stories/new" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Result stories are for coaches only."><CoachResultsStoryBuilderPage /></RequireRole>} />
+          <Route path="results-stories/:id" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Result stories are for coaches only."><CoachResultsStoryBuilderPage /></RequireRole>} />
           <Route path="calendar" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Session calendar is for coaches only."><CoachCalendarPage /></RequireRole>} />
           <Route path="gym" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Gym overview is for coaches only."><GymDashboard /></RequireRole>} />
           <Route path="supplements/stacks" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Supplement stacks are for coaches only."><SupplementStackBuilder /></RequireRole>} />
-          <Route path="organisation" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Organisation dashboard is for coaches only."><OrganisationDashboard /></RequireRole>} />
+          <Route path="organisation" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Organisation dashboard is for coaches only."><OrganisationDashboardPage /></RequireRole>} />
+          <Route path="organisation/analytics" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Organisation analytics are for owners and admins."><OrganisationAnalyticsPage /></RequireRole>} />
+          <Route path="organisation/setup" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Only coaches can create an organisation."><OrganisationSetupPage /></RequireRole>} />
           <Route path="organisation/team" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Team management is for coaches only."><TeamManagementPage /></RequireRole>} />
           <Route path="closeout" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for trainers only."><Closeout /></RequireRole>} />
           <Route path="briefing" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Briefing is for trainers only."><Briefing /></RequireRole>} />
@@ -461,34 +465,46 @@ const AppRoutes = () => (
           <Route path="review-center/checkins/:checkinId" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Review Center is for trainers only."><CheckInReviewPage /></RequireRole>} />
           <Route path="review-center/pose-checks" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Pose check review is for trainers only."><PoseCheckReviewPage /></RequireRole>} />
           <Route path="review-center/pose-checks/:poseCheckId" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Pose check review is for trainers only."><PoseCheckReviewDetailPage /></RequireRole>} />
+          <Route path="review-center/peak-week-checkins" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Peak week check-in review is for coaches only."><PeakWeekCheckinReviewPage /></RequireRole>} />
+          <Route path="review-center/peak-week-checkins/:checkinId" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Peak week check-in review is for coaches only."><PeakWeekCheckinReviewPage /></RequireRole>} />
           <Route path="peak-week-command-center" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Peak Week Command Center is for coaches only."><PeakWeekCommandCenter /></RequireRole>} />
+          <Route path="peak-week-dashboard" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Peak Week Dashboard is for coaches only."><ErrorBoundary><CoachPeakWeekDashboard /></ErrorBoundary></RequireRole>} />
           <Route path="peak-week-builder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Peak Week Builder is for coaches only."><PeakWeekBuilderPage /></RequireRole>} />
           <Route path="clients/:id/peak-week" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Peak Week is for coaches only."><PeakWeekBuilderPage /></RequireRole>} />
+          <Route path="clients/:id/peak-week-editor" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Peak Week Editor is for coaches only."><PeakWeekEditorPage /></RequireRole>} />
+          <Route path="clients/:id/habits" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Habit management is for coaches only."><ClientHabitsPage /></RequireRole>} />
+          <Route path="clients/:id/billing" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Client billing is for coaches only."><ClientBillingPage /></RequireRole>} />
           <Route path="prep-comparison" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Prep Comparison is for coaches only."><PrepComparisonPage /></RequireRole>} />
           <Route path="analytics" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Analytics is for trainers only."><CoachAnalyticsPage /></RequireRole>} />
           <Route path="revenue" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Revenue dashboard is for trainers only."><CoachRevenueDashboard /></RequireRole>} />
-          <Route path="marketplace-profile" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Marketplace profile is for trainers only."><CoachMarketplaceProfilePage /></RequireRole>} />
+          <Route path="revenue-analytics" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Revenue analytics is for trainers only."><RevenueAnalyticsPage /></RequireRole>} />
+          <Route path="marketplace-profile" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Marketplace profile is for trainers only."><CoachMarketplaceEditPage /></RequireRole>} />
+          <Route path="marketplace-setup" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Marketplace listing is for coaches only."><CoachMarketplaceSetupPage /></RequireRole>} />
           <Route path="inquiry-inbox" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Inquiry inbox is for trainers only."><CoachInquiryInboxPage /></RequireRole>} />
           <Route path="review-global" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Global Review is for trainers only."><GlobalReview /></RequireRole>} />
           <Route path="global-review" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Global Review is for trainers only."><GlobalReviewRedirect /></RequireRole>} />
           <Route path="review/:reviewType/:id" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Review detail is for trainers only."><ReviewDetail /></RequireRole>} />
-          <Route path="messages" element={<RequireRole allow={[Roles.COACH, Roles.CLIENT]} accessDeniedMessage="Messaging is for coaches and clients. Find a coach to get started." accessDeniedSecondaryAction={{ label: 'Find a Coach', path: '/discover' }}><Messages /></RequireRole>} />
-          <Route path="messages/:clientId" element={<RequireRole allow={[Roles.COACH, Roles.CLIENT]} accessDeniedMessage="Messaging is for coaches and clients. Find a coach to get started." accessDeniedSecondaryAction={{ label: 'Find a Coach', path: '/discover' }}><ChatThread /></RequireRole>} />
+          <Route path="messages" element={<RequireRole allow={[Roles.COACH, Roles.CLIENT]} accessDeniedMessage="Messaging is for coaches and clients. Find a coach to get started." accessDeniedSecondaryAction={{ label: 'Find a Coach', path: '/discover' }}><ErrorBoundary><Messages /></ErrorBoundary></RequireRole>} />
+          <Route path="messages/:clientId" element={<RequireRole allow={[Roles.COACH, Roles.CLIENT]} accessDeniedMessage="Messaging is for coaches and clients. Find a coach to get started." accessDeniedSecondaryAction={{ label: 'Find a Coach', path: '/discover' }}><ErrorBoundary><ChatThread /></ErrorBoundary></RequireRole>} />
           <Route path="more" element={<RequireAuth><More /></RequireAuth>} />
           <Route path="beta-feedback-inbox" element={<RequireAuth><BetaFeedbackInboxGate /></RequireAuth>} />
           <Route path="beta-health-dashboard" element={<RequireAuth><BetaHealthDashboardGate /></RequireAuth>} />
           <Route path="appearance" element={<RequireAuth><Appearance /></RequireAuth>} />
           <Route path="helpsupport" element={<RequireAuth><HelpSupport /></RequireAuth>} />
+          <Route path="report-bug" element={<RequireAuth><ReportBugPage /></RequireAuth>} />
+          <Route path="feedback" element={<RequireAuth><FeedbackPage /></RequireAuth>} />
           <Route path="notificationsettings" element={<Navigate to="/settings/notifications" replace />} />
           <Route path="notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
           <Route path="profile" element={<RequireAuth><Profile /></RequireAuth>} />
           <Route path="workout" element={<RequireAuth><Workout /></RequireAuth>} />
           <Route path="progress" element={<RequireAuth><ProgressPage /></RequireAuth>} />
           <Route path="today" element={<RequireAuth><TodayPage /></RequireAuth>} />
-          <Route path="peak-week" element={<RequireAuth><PeakWeekClientPage /></RequireAuth>} />
+          <Route path="peak-week" element={<RequireAuth><ErrorBoundary><ClientPeakWeekPage /></ErrorBoundary></RequireAuth>} />
+          <Route path="peak-week-checkin" element={<RequireAuth><PeakWeekCheckinSubmitPage /></RequireAuth>} />
+          <Route path="habits-daily" element={<RequireAuth><ClientHabitsDailyPage /></RequireAuth>} />
           <Route path="findtrainer" element={<RequireAuth><FindTrainer /></RequireAuth>} />
           <Route path="discover" element={<RequireAuth><CoachDiscoveryPage /></RequireAuth>} />
-          <Route path="coach-marketplace" element={<RequireAuth><CoachMarketplacePage /></RequireAuth>} />
+          <Route path="coach-marketplace" element={<RequireAuth><ErrorBoundary><CoachMarketplacePage /></ErrorBoundary></RequireAuth>} />
           <Route path="myprogram" element={<RequireAuth><MyProgram /></RequireAuth>} />
           <Route path="clientcheckin" element={<RequireAuth><ClientCheckIn /></RequireAuth>} />
           <Route path="check-in" element={<RequireAuth><CheckInPage /></RequireAuth>} />
@@ -515,7 +531,7 @@ const AppRoutes = () => (
           <Route path="trainingintelligence" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Training Intelligence is for trainers only."><TrainingIntelligence /></RequireRole>} />
           <Route path="progressphotos" element={<RequireAuth><ProgressPhotos /></RequireAuth>} />
           <Route path="clientdetail" element={<RequireAuth><RedirectClientDetail /></RequireAuth>} />
-          <Route path="settings/notifications" element={<RequireAuth><NotificationSettings /></RequireAuth>} />
+          <Route path="settings/notifications" element={<RequireAuth><NotificationSettingsPage /></RequireAuth>} />
           <Route path="settings/equipment" element={<RequireAuth><ClientEquipment /></RequireAuth>} />
           <Route path="settings/branding" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Branding is for trainers only."><RequireCoachOwner accessDeniedMessage="Branding is only available to the account owner."><Branding /></RequireCoachOwner></RequireRole>} />
           <Route path="settings/account" element={<RequireAuth><Account /></RequireAuth>} />
@@ -557,11 +573,14 @@ const AppRoutes = () => (
           <Route path="competition-prep/pose-library" element={<Navigate to="/comp-prep/pose-library" replace />} />
           <Route path="competition-prep/photo-guide" element={<Navigate to="/comp-prep/photo-guide" replace />} />
           <Route path="competition-prep/media" element={<Navigate to="/comp-prep/media" replace />} />
+          {/* Canonical dashboards per role */}
           <Route path="client-dashboard" element={<RequireRole allow={[Roles.CLIENT]}><ClientDashboardPage /></RequireRole>} />
           <Route path="client/sessions" element={<RequireAuth><ClientSessionsPage /></RequireAuth>} />
           <Route path="client/supplements" element={<RequireAuth><ClientSupplementStack /></RequireAuth>} />
-          <Route path="athlete" element={<RequireAuth><AthleteDashboard /></RequireAuth>} />
+          {/* Legacy athlete route kept as alias for personal dashboard; use SoloDashboardPage for UI. */}
+          <Route path="athlete" element={<RequireRole allow={[Roles.PERSONAL]}><SoloDashboardPage /></RequireRole>} />
           <Route path="solo-dashboard" element={<RequireRole allow={[Roles.PERSONAL]}><SoloDashboardPage /></RequireRole>} />
+          <Route path="personal/insights" element={<RequireRole allow={[Roles.PERSONAL]}><PersonalInsightsPage /></RequireRole>} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />

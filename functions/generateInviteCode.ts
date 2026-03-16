@@ -1,66 +1,69 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
+/**
+ * Get or ensure coach has a referral code. Uses Supabase profiles.referral_code.
+ * No Base44 dependency.
+ */
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Generate short human-readable code (e.g., FITX-4K9Z)
-function generateCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I, O, 0, 1
-  let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code.slice(0, 4) + '-' + code.slice(4);
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
+
+function randomCode() {
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let s = '';
+  for (let i = 0; i < 4; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+  return 'atlas-' + s;
 }
 
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-
-    if (!user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return Response.json({ error: 'Server not configured' }, { status: 500, headers: corsHeaders });
     }
 
-    const trainers = await base44.asServiceRole.entities.TrainerProfile.filter({
-      user_id: user.id
-    });
-
-    if (!trainers[0]) {
-      return Response.json({ error: 'Trainer profile not found' }, { status: 404 });
+    const authHeader = req.headers.get('Authorization');
+    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey ?? '', { global: { headers: { Authorization: authHeader ?? '' } } });
+    const { data: { user }, error: userError } = await supabaseAuth.auth.getUser(authHeader?.replace('Bearer ', '') ?? '');
+    if (userError || !user) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders });
     }
 
-    // If code exists, return it
-    if (trainers[0].invite_code) {
-      return Response.json({ code: trainers[0].invite_code });
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, referral_code')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      return Response.json({ error: 'Profile not found' }, { status: 404, headers: corsHeaders });
     }
 
-    // Generate unique code
-    let code;
-    let isUnique = false;
-    let attempts = 0;
-
-    while (!isUnique && attempts < 10) {
-      code = generateCode();
-      const existing = await base44.asServiceRole.entities.TrainerProfile.filter({
-        invite_code: code
-      });
-      isUnique = existing.length === 0;
-      attempts++;
+    const existing = (profile as { referral_code?: string }).referral_code?.trim();
+    if (existing) {
+      return Response.json({ code: existing }, { headers: corsHeaders });
     }
 
-    if (!isUnique) {
-      return Response.json(
-        { error: 'Failed to generate unique code' },
-        { status: 500 }
-      );
+    let code: string | null = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const c = randomCode();
+      const { data: conflict } = await supabase.from('profiles').select('id').eq('referral_code', c).maybeSingle();
+      if (!conflict) {
+        const { error: updateErr } = await supabase.from('profiles').update({ referral_code: c }).eq('id', user.id);
+        if (!updateErr) {
+          code = c;
+          break;
+        }
+      }
     }
-
-    // Update trainer profile
-    await base44.asServiceRole.entities.TrainerProfile.update(trainers[0].id, {
-      invite_code: code
-    });
-
-    return Response.json({ code });
-  } catch (error) {
-    console.error('Error generating invite code:', error);
-    return Response.json({ error: error.message }, { status: 500 });
+    if (!code) {
+      return Response.json({ error: 'Failed to generate unique code' }, { status: 500, headers: corsHeaders });
+    }
+    return Response.json({ code }, { headers: corsHeaders });
+  } catch (err) {
+    console.error('generateInviteCode:', err);
+    return Response.json({ error: (err as Error).message }, { status: 500, headers: corsHeaders });
   }
 });

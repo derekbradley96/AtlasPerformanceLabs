@@ -10,6 +10,8 @@ import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import EmptyState from '@/components/ui/EmptyState';
+import { CoachDiscoverySkeleton } from '@/components/ui/LoadingState';
+import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { colors, spacing, shell, radii } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
@@ -23,6 +25,7 @@ function formatPrice(n) {
 }
 
 function CoachCard({ profile, imageUrl, onApply }) {
+  if (!profile) return null;
   const focusLabel = (profile.coaching_focus && profile.coaching_focus[0])
     ? String(profile.coaching_focus[0]).replace(/\b\w/g, (c) => c.toUpperCase())
     : null;
@@ -53,7 +56,7 @@ function CoachCard({ profile, imageUrl, onApply }) {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold" style={{ color: colors.text }}>{profile.display_name}</p>
+          <p className="font-semibold" style={{ color: colors.text }}>{profile.display_name ?? 'Coach'}</p>
           {focusLabel && (
             <p className="text-sm mt-0.5" style={{ color: colors.primary }}>{focusLabel}</p>
           )}
@@ -89,7 +92,7 @@ export default function CoachMarketplacePage() {
   const [inquiryMessage, setInquiryMessage] = useState('');
   const [sendingInquiry, setSendingInquiry] = useState(false);
 
-  const { data: profiles = [], isLoading } = useQuery({
+  const { data: profiles = [], isLoading, isError: profilesError, refetch: refetchProfiles } = useQuery({
     queryKey: ['marketplace-listed-profiles'],
     queryFn: async () => {
       if (!supabase) return [];
@@ -98,7 +101,7 @@ export default function CoachMarketplacePage() {
         .select('*')
         .eq('is_listed', true)
         .order('updated_at', { ascending: false });
-      if (error) return [];
+      if (error) throw error;
       return Array.isArray(data) ? data : [];
     },
     enabled: !!supabase,
@@ -188,6 +191,21 @@ export default function CoachMarketplacePage() {
     );
   }
 
+  if (profilesError) {
+    return (
+      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 100 }}>
+        <TopBar title="Coach marketplace" onBack={() => navigate(-1)} />
+        <div style={{ padding: spacing[16], maxWidth: 800, margin: '0 auto' }}>
+          <LoadErrorFallback
+            title="Couldn't load coaches"
+            description="Check your connection and try again."
+            onRetry={() => refetchProfiles()}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 100 }}>
       <TopBar title="Coach marketplace" onBack={() => navigate(-1)} />
@@ -197,10 +215,8 @@ export default function CoachMarketplacePage() {
         </p>
 
         {isLoading ? (
-          <div className="flex items-center justify-center" style={{ minHeight: 200 }}>
-            <p style={{ color: colors.muted }}>Loading…</p>
-          </div>
-        ) : profiles.length === 0 ? (
+          <CoachDiscoverySkeleton />
+        ) : (Array.isArray(profiles) ? profiles : []).length === 0 ? (
           <EmptyState
             icon={Users}
             title="No coaches listed yet"
@@ -213,11 +229,11 @@ export default function CoachMarketplacePage() {
               gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
             }}
           >
-            {profiles.map((profile) => (
+            {(Array.isArray(profiles) ? profiles : []).map((profile, idx) => (
               <CoachCard
-                key={profile.id}
+                key={profile?.id ?? profile?.coach_id ?? `profile-${idx}`}
                 profile={profile}
-                imageUrl={imageUrls[profile.id]}
+                imageUrl={profile ? imageUrls[profile.id] : null}
                 onApply={setSelectedProfile}
               />
             ))}
@@ -239,7 +255,7 @@ export default function CoachMarketplacePage() {
           >
             <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: colors.border }}>
               <h2 className="text-lg font-semibold" style={{ color: colors.text }}>
-                Apply to {selectedProfile.display_name}
+                Apply to {selectedProfile?.display_name ?? 'Coach'}
               </h2>
               <button
                 type="button"

@@ -72,7 +72,7 @@ export function createShownThisSessionSet() {
  * @param {Set<string>} shownThisSession - add to this when showing
  */
 export function shouldShowMilestone(role, record, dismissedMap, shownThisSession) {
-  if (role === 'trainer') return false;
+  if (role === 'coach' || role === 'trainer') return false;
   if (!record) return false;
   const milestoneKey = makeMilestoneKey({
     clientId: record.clientId,

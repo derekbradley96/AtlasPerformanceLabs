@@ -1,44 +1,61 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
+/**
+ * Validate coach invite code. Uses Supabase profiles.referral_code.
+ * No Base44 dependency.
+ */
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' };
 
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const base44 = createClientFromRequest(req);
-    const body = await req.json();
-    const { code } = body;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return Response.json({ error: 'Server not configured' }, { status: 500, headers: corsHeaders });
+    }
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    if (!code || typeof code !== 'string') {
-      return Response.json({ error: 'Invalid code' }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const code = typeof body?.code === 'string' ? body.code.trim() : '';
+    if (!code) {
+      return Response.json({ valid: false, error: 'Invalid code' }, { status: 400, headers: corsHeaders });
     }
 
-    const trainers = await base44.asServiceRole.entities.TrainerProfile.filter({
-      invite_code: code.toUpperCase()
-    });
+    const normalized = code.trim().toLowerCase();
+    const { data: rows, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, role, stripe_account_id')
+      .ilike('referral_code', normalized);
 
-    if (!trainers[0]) {
-      return Response.json({ valid: false });
+    if (error) {
+      console.error('validateInviteCode error:', error);
+      return Response.json({ valid: false, error: 'Lookup failed' }, { status: 500, headers: corsHeaders });
     }
 
-    const trainer = trainers[0];
+    const profile = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    if (!profile) {
+      return Response.json({ valid: false }, { headers: corsHeaders });
+    }
 
-    // Check if trainer has Stripe Connect setup
-    if (!trainer.stripe_connected) {
-      return Response.json({
-        valid: false,
-        error: 'Trainer has not completed payment setup yet'
-      });
+    const isCoach = (profile as { role?: string }).role === 'coach' || (profile as { role?: string }).role === 'trainer';
+    if (!isCoach) {
+      return Response.json({ valid: false, error: 'Code is not for a coach' }, { headers: corsHeaders });
     }
 
     return Response.json({
       valid: true,
+      trainer_id: (profile as { id: string }).id,
+      coach_id: (profile as { id: string }).id,
       trainer: {
-        id: trainer.id,
-        name: trainer.display_name,
-        niche: trainer.niche,
-        monthlyRate: trainer.monthly_rate || 10000 // £100 default
+        id: (profile as { id: string }).id,
+        name: (profile as { display_name?: string }).display_name ?? 'Coach',
+        niche: '',
+        monthlyRate: 10000
       }
-    });
-  } catch (error) {
-    console.error('Error validating invite code:', error);
-    return Response.json({ error: error.message }, { status: 500 });
+    }, { headers: corsHeaders });
+  } catch (err) {
+    console.error('validateInviteCode:', err);
+    return Response.json({ error: (err as Error).message }, { status: 500, headers: corsHeaders });
   }
 });

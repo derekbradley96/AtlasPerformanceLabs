@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
+import { trackPersonalConvertedToClient } from '@/services/analyticsService';
 import { Users, CheckCircle2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -11,56 +13,49 @@ import { toast } from 'sonner';
 export default function EnterInviteCode() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const trainerId = searchParams.get('trainerId');
-  
-  const [user, setUser] = useState(null);
   const [code, setCode] = useState('');
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
 
   const joinMutation = useMutation({
     mutationFn: async (inviteCode) => {
-      // Validate code
-      const result = await base44.functions.invoke('validateInviteCode', { code: inviteCode });
-      if (!result.data.valid) {
-        throw new Error(result.data.message || 'Invalid invite code');
+      if (!user?.id) throw new Error('Please sign in first');
+      const result = await invokeSupabaseFunction('validateInviteCode', { code: inviteCode });
+      if (result.error || !result.data?.valid) {
+        throw new Error(result.data?.message || result.error || 'Invalid invite code');
       }
-
-      const trainerProfileId = result.data.trainer_id;
-
-      // Get or create client profile
-      let clientProfiles = await base44.entities.ClientProfile.filter({ user_id: user.id });
-      let clientProfile = clientProfiles[0];
-
+      const coachProfileId = result.data.trainer_id ?? result.data.coach_id;
+      const { data: profileList } = await invokeSupabaseFunction('client-profile-list', { user_id: user.id });
+      const list = Array.isArray(profileList) ? profileList : [];
+      let clientProfile = list[0];
       if (!clientProfile) {
-        clientProfile = await base44.entities.ClientProfile.create({
+        const { data: created } = await invokeSupabaseFunction('client-profile-create', {
           user_id: user.id,
-          trainer_id: trainerProfileId,
+          coach_id: coachProfileId,
+          trainer_id: coachProfileId,
           subscription_status: 'pending'
         });
+        clientProfile = created ?? null;
       } else {
-        await base44.entities.ClientProfile.update(clientProfile.id, {
-          trainer_id: trainerProfileId
+        await invokeSupabaseFunction('client-profile-update', {
+          id: clientProfile.id,
+          coach_id: coachProfileId,
+          trainer_id: coachProfileId
         });
       }
-
-      // Update user role to client if needed
       if (user.user_type !== 'client') {
-        await base44.auth.updateMe({ user_type: 'client' });
+        await invokeSupabaseFunction('user-update-role', { user_type: 'client' });
       }
-
-      return clientProfile;
+      const wasPersonal = (user.user_type === 'personal' || user.user_type === 'solo');
+      return { clientProfile, coach_id: coachProfileId, was_personal: wasPersonal };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      if (result?.was_personal && result?.coach_id) {
+        trackPersonalConvertedToClient({ coach_id: result.coach_id }).catch(() => {});
+      }
       queryClient.invalidateQueries(['client-profile']);
-      toast.success('Successfully joined trainer!');
+      toast.success('Successfully joined coach!');
       navigate(createPageUrl('MyProgram'));
     },
     onError: (error) => {
@@ -112,7 +107,7 @@ export default function EnterInviteCode() {
               {joinMutation.isPending ? (
                 <>Joining...</>
               ) : (
-                <><CheckCircle2 className="w-4 h-4 mr-2" /> Join Trainer</>
+                <><CheckCircle2 className="w-4 h-4 mr-2" /> Join Coach</>
               )}
             </Button>
           </form>
@@ -122,7 +117,7 @@ export default function EnterInviteCode() {
               onClick={() => navigate(createPageUrl('FindTrainer'))}
               className="text-sm text-blue-400 hover:text-blue-300"
             >
-              Don't have a code? Find a trainer
+              Don't have a code? Find a coach
             </button>
           </div>
         </div>

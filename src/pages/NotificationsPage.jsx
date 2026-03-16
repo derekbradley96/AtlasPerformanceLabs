@@ -1,73 +1,90 @@
 /**
- * Notification Center UI: recent notifications from public.notifications (Supabase).
- * - List ordered by created_at (newest first)
- * - Tap row → mark as read + navigate when type has a route
- * - Mark read only → check button (no navigation)
- * - Mark all read + All / Unread filter
+ * Notification Centre: unread and read notifications with deep links.
+ * Uses public.notifications (profile_id, type, title, message, data, is_read).
+ * Tap row → mark as read + navigate to linked screen when data has route.
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Bell,
-  Dumbbell,
   Calendar,
   CheckSquare,
-  Camera,
   CreditCard,
-  Settings,
-  Flag,
-  AlertCircle,
+  MessageCircle,
+  FileText,
+  Trophy,
   Check,
   RefreshCw,
-  Pill,
+  Settings,
+  ChevronRight,
 } from 'lucide-react';
-import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
+import { getNotifications, markNotificationRead, markAllNotificationsRead } from '@/lib/notifications';
+import { hasSupabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
-import { impactLight } from '@/lib/haptics';
+import { hapticLight } from '@/lib/haptics';
 import { colors, spacing } from '@/ui/tokens';
 import { toast } from 'sonner';
+import EmptyState from '@/components/ui/EmptyState';
 
 const PAGE_SIZE = 50;
 
-/** Route when user taps a notification (by type). Unknown types: mark read only. */
-const TYPE_TO_ROUTE = {
-  workout_due: '/today',
-  workout_evening_reminder: '/today',
-  checkin_due: '/check-in',
-  habit_missing: '/today',
-  prep_pose_check_due: '/pose-check',
-  billing_due: '/settings/account',
-  checkin_submitted: '/review-center/checkins',
-  pose_check_submitted: '/review-center/pose-checks',
-  client_flag_created: '/review-center/queue',
-  billing_failed: '/money',
-  supplement_morning_reminder: '/client/supplements',
-  supplement_evening_reminder: '/client/supplements',
-  supplement_missed_reminder: '/client/supplements',
-};
+/**
+ * Resolve deep-link route from notification type and data.
+ * Returns path string or null if no link.
+ */
+function getRouteForNotification(notification) {
+  if (!notification?.type) return null;
+  const data = notification.data && typeof notification.data === 'object' ? notification.data : {};
+  const clientId = data.client_id ?? data.clientId;
+  const checkinId = data.checkin_id ?? data.checkinId;
+  const threadId = data.thread_id ?? data.threadId;
+  const peakWeekId = data.peak_week_id ?? data.peakWeekId;
+
+  switch (notification.type) {
+    case 'checkin_review':
+      if (clientId && checkinId) return `/clients/${clientId}/checkins/${checkinId}`;
+      if (clientId) return `/clients/${clientId}/review-center`;
+      return '/review-center/queue';
+    case 'message_received':
+      if (clientId) return `/messages/${clientId}`;
+      if (threadId) return '/messages';
+      return '/messages';
+    case 'checkin_due':
+      return '/check-in';
+    case 'habit_due':
+    case 'habit_streak':
+      return '/habits-daily';
+    case 'peak_week_update':
+      if (clientId) return `/clients/${clientId}/peak-week`;
+      if (peakWeekId) return '/peak-week';
+      return '/peak-week';
+    case 'program_update':
+      if (clientId) return `/clients/${clientId}`;
+      return null;
+    case 'payment_due':
+      if (clientId) return `/clients/${clientId}/billing`;
+      return '/revenue';
+    default:
+      return null;
+  }
+}
 
 function getIconForType(type) {
   const map = {
-    workout_due: Dumbbell,
-    workout_evening_reminder: Dumbbell,
     checkin_due: Calendar,
-    habit_missing: CheckSquare,
-    prep_pose_check_due: Camera,
-    billing_due: CreditCard,
-    checkin_submitted: Calendar,
-    pose_check_submitted: Camera,
-    client_flag_created: Flag,
-    billing_failed: AlertCircle,
-    supplement_morning_reminder: Pill,
-    supplement_evening_reminder: Pill,
-    supplement_missed_reminder: Pill,
+    checkin_review: FileText,
+    message_received: MessageCircle,
+    habit_due: CheckSquare,
+    habit_streak: CheckSquare,
+    peak_week_update: Trophy,
+    program_update: FileText,
+    payment_due: CreditCard,
   };
   return map[type] || Bell;
 }
@@ -76,70 +93,50 @@ export default function NotificationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('all'); // 'all' | 'unread'
 
-  const { data: notifications = [], isLoading, refetch, isFetching } = useQuery({
+  const {
+    data: notifications = [],
+    isLoading,
+    refetch,
+    isFetching,
+  } = useQuery({
     queryKey: ['notifications', user?.id],
-    queryFn: async () => {
-      const supabase = getSupabase();
-      if (!supabase || !user?.id) return [];
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('id, type, title, message, is_read, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(PAGE_SIZE);
-      if (error) throw error;
-      return data ?? [];
-    },
-    enabled: !!user?.id && hasSupabase(),
+    queryFn: () => getNotifications(user?.id, { limit: PAGE_SIZE }),
+    enabled: !!user?.id && hasSupabase,
   });
 
   const markAsReadMutation = useMutation({
-    mutationFn: async (id) => {
-      const supabase = getSupabase();
-      if (!supabase) return;
-      await supabase.from('notifications').update({ is_read: true }).eq('id', id);
-    },
+    mutationFn: markNotificationRead,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count', user?.id] });
     },
   });
 
   const markAllAsReadMutation = useMutation({
-    mutationFn: async () => {
-      const supabase = getSupabase();
-      if (!supabase || !user?.id) return;
-      await supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('user_id', user.id)
-        .eq('is_read', false);
-    },
+    mutationFn: () => markAllNotificationsRead(user?.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count', user?.id] });
       toast.success('All marked read');
     },
   });
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
-  const filteredNotifications =
+  const filteredList =
     filter === 'unread' ? notifications.filter((n) => !n.is_read) : notifications;
 
-  const markReadOnly = (e, notification) => {
+  const handleMarkReadOnly = (e, notification) => {
     e.stopPropagation();
-    impactLight();
-    if (!notification.is_read) {
-      markAsReadMutation.mutate(notification.id);
-    }
+    hapticLight();
+    if (!notification.is_read) markAsReadMutation.mutate(notification.id);
   };
 
   const handleRowClick = (notification) => {
-    impactLight();
-    if (!notification.is_read) {
-      markAsReadMutation.mutate(notification.id);
-    }
-    const route = notification.type && TYPE_TO_ROUTE[notification.type];
+    hapticLight();
+    if (!notification.is_read) markAsReadMutation.mutate(notification.id);
+    const route = getRouteForNotification(notification);
     if (route) {
       navigate(route);
     } else if (!notification.is_read) {
@@ -147,9 +144,12 @@ export default function NotificationsPage() {
     }
   };
 
-  if (!hasSupabase() || !user) {
+  if (!hasSupabase || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg, color: colors.text }}>
+      <div
+        className="min-h-screen flex items-center justify-center p-6"
+        style={{ background: colors.bg, color: colors.text }}
+      >
         <p style={{ color: colors.muted }}>Sign in to see notifications.</p>
       </div>
     );
@@ -173,18 +173,36 @@ export default function NotificationsPage() {
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => { impactLight(); refetch(); }}
+              onClick={() => {
+                hapticLight();
+                refetch();
+              }}
               className="flex items-center justify-center rounded-lg active:opacity-80"
-              style={{ minWidth: 44, minHeight: 44, color: colors.muted, background: 'transparent', border: 'none' }}
+              style={{
+                minWidth: 44,
+                minHeight: 44,
+                color: colors.muted,
+                background: 'transparent',
+                border: 'none',
+              }}
               aria-label="Refresh"
             >
               <RefreshCw className={`w-5 h-5 ${isFetching ? 'animate-spin' : ''}`} />
             </button>
             <button
               type="button"
-              onClick={() => { impactLight(); navigate('/settings/notifications'); }}
+              onClick={() => {
+                hapticLight();
+                navigate('/settings/notifications');
+              }}
               className="flex items-center justify-center rounded-lg active:opacity-80"
-              style={{ minWidth: 44, minHeight: 44, color: colors.muted, background: 'transparent', border: 'none' }}
+              style={{
+                minWidth: 44,
+                minHeight: 44,
+                color: colors.muted,
+                background: 'transparent',
+                border: 'none',
+              }}
               aria-label="Notification settings"
             >
               <Settings className="w-5 h-5" />
@@ -193,7 +211,7 @@ export default function NotificationsPage() {
         }
       />
 
-      {/* Subheader: unread + filters */}
+      {/* Subheader: unread count + filters */}
       <div
         className="sticky z-10 border-b px-4 py-3"
         style={{ background: colors.surface1, borderColor: colors.border }}
@@ -206,19 +224,24 @@ export default function NotificationsPage() {
         <div className="flex gap-2 flex-wrap items-center">
           <Button
             type="button"
-            onClick={() => setFilter('all')}
             variant={filter === 'all' ? 'default' : 'outline'}
             size="sm"
-            className={filter === 'all' ? '' : ''}
+            onClick={() => {
+              hapticLight();
+              setFilter('all');
+            }}
             style={filter === 'all' ? { background: colors.primary, color: '#fff' } : {}}
           >
             All
           </Button>
           <Button
             type="button"
-            onClick={() => setFilter('unread')}
             variant={filter === 'unread' ? 'default' : 'outline'}
             size="sm"
+            onClick={() => {
+              hapticLight();
+              setFilter('unread');
+            }}
             style={filter === 'unread' ? { background: colors.primary, color: '#fff' } : {}}
           >
             Unread {unreadCount > 0 && `(${unreadCount})`}
@@ -226,11 +249,14 @@ export default function NotificationsPage() {
           {unreadCount > 0 && (
             <Button
               type="button"
-              onClick={() => markAllAsReadMutation.mutate()}
               variant="ghost"
               size="sm"
               className="ml-auto"
-              style={{ color: colors.accent }}
+              onClick={() => {
+                hapticLight();
+                markAllAsReadMutation.mutate();
+              }}
+              style={{ color: colors.primary }}
             >
               Mark all read
             </Button>
@@ -240,108 +266,106 @@ export default function NotificationsPage() {
 
       {/* List */}
       <div className="p-4 space-y-3">
-        {filteredNotifications.length === 0 ? (
-          <Card style={{ padding: spacing[32], textAlign: 'center' }}>
-            <Bell className="w-12 h-12 mx-auto mb-3" style={{ color: colors.muted }} />
-            <p style={{ color: colors.muted }}>
-              {filter === 'unread' ? 'No unread notifications' : 'No notifications yet'}
-            </p>
-          </Card>
+        {filteredList.length === 0 ? (
+          <EmptyState
+            icon={Bell}
+            title={filter === 'unread' ? 'No unread notifications' : 'No notifications yet'}
+            description={
+              filter === 'unread'
+                ? 'When you get new notifications they’ll show up here.'
+                : 'Check-ins, messages, and other updates will appear here.'
+            }
+          />
         ) : (
-          filteredNotifications.map((notification, i) => {
+          filteredList.map((notification) => {
             const Icon = getIconForType(notification.type);
-            const route = notification.type && TYPE_TO_ROUTE[notification.type];
+            const route = getRouteForNotification(notification);
             const unread = !notification.is_read;
             return (
-              <motion.div
+              <Card
                 key={notification.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(i * 0.02, 0.3) }}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleRowClick(notification)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleRowClick(notification);
+                  }
+                }}
+                style={{
+                  padding: spacing[16],
+                  borderColor: unread ? colors.primary : colors.border,
+                  borderWidth: 1,
+                  background: unread ? 'rgba(59, 130, 246, 0.08)' : colors.card,
+                  cursor: 'pointer',
+                }}
               >
-                <Card
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => handleRowClick(notification)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      handleRowClick(notification);
-                    }
-                  }}
-                  style={{
-                    padding: spacing[16],
-                    borderColor: unread ? colors.primary : colors.border,
-                    borderWidth: 1,
-                    background: unread ? 'rgba(59, 130, 246, 0.08)' : colors.card,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                      style={{
-                        background: unread ? 'rgba(59, 130, 246, 0.2)' : colors.surface2,
-                      }}
-                    >
-                      <Icon
-                        className="w-5 h-5"
-                        style={{ color: unread ? colors.accent : colors.muted }}
-                      />
+                <div className="flex items-start gap-3">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{
+                      background: unread ? 'rgba(59, 130, 246, 0.2)' : colors.surface2,
+                    }}
+                  >
+                    <Icon
+                      className="w-5 h-5"
+                      style={{ color: unread ? colors.primary : colors.muted }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h3
+                        className="font-semibold text-sm"
+                        style={{ color: unread ? colors.text : colors.muted }}
+                      >
+                        {notification.title}
+                      </h3>
+                      {unread && (
+                        <span
+                          className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
+                          style={{ background: colors.primary }}
+                          aria-hidden
+                        />
+                      )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <h3
-                          className="font-semibold text-sm"
-                          style={{ color: unread ? colors.text : colors.muted }}
-                        >
-                          {notification.title}
-                        </h3>
+                    <p className="text-sm mb-2" style={{ color: colors.muted }}>
+                      {notification.message}
+                    </p>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs" style={{ color: colors.muted }}>
+                        {formatDistanceToNow(new Date(notification.created_at), {
+                          addSuffix: true,
+                        })}
+                      </span>
+                      <div className="flex items-center gap-2">
                         {unread && (
-                          <span
-                            className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
-                            style={{ background: colors.primary }}
-                            aria-hidden
-                          />
+                          <button
+                            type="button"
+                            onClick={(e) => handleMarkReadOnly(e, notification)}
+                            className="text-xs font-medium flex items-center gap-1 rounded-lg px-2 py-1 active:opacity-80"
+                            style={{
+                              color: colors.primary,
+                              background: 'rgba(59, 130, 246, 0.12)',
+                              border: 'none',
+                            }}
+                            aria-label="Mark as read"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            Mark read
+                          </button>
                         )}
-                      </div>
-                      <p className="text-sm mb-2" style={{ color: colors.muted }}>
-                        {notification.message}
-                      </p>
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-xs" style={{ color: colors.muted }}>
-                          {formatDistanceToNow(new Date(notification.created_at), {
-                            addSuffix: true,
-                          })}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          {unread && (
-                            <button
-                              type="button"
-                              onClick={(e) => markReadOnly(e, notification)}
-                              className="text-xs font-medium flex items-center gap-1 rounded-lg px-2 py-1 active:opacity-80"
-                              style={{
-                                color: colors.accent,
-                                background: 'rgba(59, 130, 246, 0.12)',
-                                border: 'none',
-                              }}
-                              aria-label="Mark as read"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              Mark read
-                            </button>
-                          )}
-                          {route && (
-                            <span className="text-xs" style={{ color: colors.accent }}>
-                              Tap to open
-                            </span>
-                          )}
-                        </div>
+                        {route && (
+                          <span className="text-xs flex items-center gap-0.5" style={{ color: colors.primary }}>
+                            Open
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
-                </Card>
-              </motion.div>
+                </div>
+              </Card>
             );
           })
         )}

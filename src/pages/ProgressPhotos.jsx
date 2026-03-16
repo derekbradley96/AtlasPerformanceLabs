@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Camera, Upload, ArrowLeftRight, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
+import { trackProgressPhotoUploaded } from '@/services/engagementTracker';
 
 export default function ProgressPhotos() {
   const navigate = useNavigate();
@@ -67,7 +68,7 @@ export default function ProgressPhotos() {
         weight_kg: uploadForm.weight_kg ? parseFloat(uploadForm.weight_kg) : null
       });
     },
-    onSuccess: () => {
+    onSuccess: (_data, _variables) => {
       queryClient.invalidateQueries(['progress-photos']);
       toast.success('Photo uploaded!');
       setUploadDialogOpen(false);
@@ -78,6 +79,9 @@ export default function ProgressPhotos() {
         weight_kg: ''
       });
       setUploadingFile(null);
+      if (clientProfile?.id) {
+        trackProgressPhotoUploaded(clientProfile.id, clientProfile.trainer_id ?? clientProfile.coach_id, { tag: uploadForm.tag }).catch(() => {});
+      }
     }
   });
 

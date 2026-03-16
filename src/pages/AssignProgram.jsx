@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
@@ -15,26 +16,19 @@ export default function AssignProgram() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const programId = searchParams.get('id');
+  const { user } = useAuth();
 
-  const [user, setUser] = useState(null);
   const [selectedClients, setSelectedClients] = useState([]);
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [weeklySchedule, setWeeklySchedule] = useState([1, 3, 5]); // Mon, Wed, Fri
   const [clientNotes, setClientNotes] = useState('');
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
-
   const { data: profile } = useQuery({
     queryKey: ['trainer-profile', user?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.TrainerProfile.filter({ user_id: user.id });
-      return profiles[0];
+      const { data } = await invokeSupabaseFunction('trainer-profile-list', { user_id: user?.id });
+      const list = Array.isArray(data) ? data : (data ? [data] : []);
+      return list[0] ?? null;
     },
     enabled: !!user?.id
   });
@@ -42,91 +36,32 @@ export default function AssignProgram() {
   const { data: program } = useQuery({
     queryKey: ['program', programId],
     queryFn: async () => {
-      const programs = await base44.entities.Program.filter({ id: programId });
-      return programs[0];
+      const { data } = await invokeSupabaseFunction('program-get', { id: programId });
+      return data ?? null;
     },
     enabled: !!programId
   });
 
   const { data: clients = [] } = useQuery({
     queryKey: ['clients', profile?.id],
-    queryFn: () => base44.entities.ClientProfile.filter({ trainer_id: profile.id }),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('client-list-by-trainer', { trainer_id: profile?.id });
+      return Array.isArray(data) ? data : [];
+    },
     enabled: !!profile?.id
-  });
-
-  const { data: allUsers = [] } = useQuery({
-    queryKey: ['all-users'],
-    queryFn: () => base44.entities.User.list(),
-    enabled: clients.length > 0
   });
 
   const assignMutation = useMutation({
     mutationFn: async () => {
-      // For each selected client, duplicate program and assign
-      for (const clientId of selectedClients) {
-        // Duplicate program
-        const newProgram = await base44.entities.Program.create({
-          ...program,
-          id: undefined,
-          created_date: undefined,
-          updated_date: undefined,
-          is_template: false,
-          template_id: programId
-        });
-
-        // Duplicate weeks/days/exercises
-        const weeks = await base44.entities.ProgramWeek.filter({ program_id: programId });
-        for (const week of weeks) {
-          const newWeek = await base44.entities.ProgramWeek.create({
-            program_id: newProgram.id,
-            week_number: week.week_number,
-            notes: week.notes
-          });
-
-          const days = await base44.entities.ProgramDay.filter({ program_week_id: week.id });
-          for (const day of days) {
-            const newDay = await base44.entities.ProgramDay.create({
-              program_week_id: newWeek.id,
-              day_number: day.day_number,
-              name: day.name,
-              notes: day.notes
-            });
-
-            const exercises = await base44.entities.ProgramExercise.filter({ program_day_id: day.id });
-            for (const exercise of exercises) {
-              await base44.entities.ProgramExercise.create({
-                program_day_id: newDay.id,
-                exercise_id: exercise.exercise_id,
-                exercise_name: exercise.exercise_name,
-                order: exercise.order,
-                sets: exercise.sets,
-                reps: exercise.reps,
-                load: exercise.load,
-                rest_seconds: exercise.rest_seconds,
-                rpe_target: exercise.rpe_target,
-                notes: exercise.notes,
-                progression_type: exercise.progression_type,
-                progression_trigger: exercise.progression_trigger
-              });
-            }
-          }
-        }
-
-        // Create assignment
-        await base44.entities.ClientProgramAssignment.create({
-          client_id: clientId,
-          program_id: newProgram.id,
-          start_date: startDate,
-          weekly_schedule: weeklySchedule,
-          notes: clientNotes,
-          status: 'active'
-        });
-
-        // Update client current program
-        await base44.entities.ClientProfile.update(clientId, {
-          current_program_id: newProgram.id
-        });
-      }
+      const { error } = await invokeSupabaseFunction('program-assign', {
+        program_id: programId,
+        client_ids: selectedClients,
+        start_date: startDate,
+        weekly_schedule: weeklySchedule,
+        notes: clientNotes,
+        trainer_id: profile?.id
+      });
+      if (error) throw new Error(error);
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['clients']);
@@ -224,9 +159,7 @@ export default function AssignProgram() {
         <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
           <h3 className="font-semibold text-white mb-4">Select Clients</h3>
           <div className="space-y-2">
-            {clients.map(client => {
-              const clientUser = allUsers.find(u => u.id === client.user_id);
-              return (
+            {clients.map(client => (
                 <button
                   key={client.id}
                   onClick={() => toggleClient(client.id)}
@@ -246,11 +179,10 @@ export default function AssignProgram() {
                         <CheckCircle2 className="w-4 h-4 text-white" />
                       )}
                     </div>
-                    <span className="text-white">{clientUser?.full_name || 'Client'}</span>
+                    <span className="text-white">{client?.name || client?.full_name || 'Client'}</span>
                   </div>
                 </button>
-              );
-            })}
+              ))}
             {clients.length === 0 && (
               <p className="text-sm text-slate-500 text-center py-4">No clients yet</p>
             )}

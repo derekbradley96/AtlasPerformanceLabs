@@ -119,7 +119,7 @@ export default function EditCheckInTemplate() {
     });
   };
 
-  if (user && user.user_type !== 'trainer') {
+  if (user && user.user_type !== 'coach' && user.user_type !== 'trainer') {
     return <NotAuthorized />;
   }
 

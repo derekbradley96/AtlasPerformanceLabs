@@ -1,6 +1,6 @@
 /**
- * Single source of truth for auth roles. Canonical: 'trainer', 'client', 'solo' (optional: 'admin').
- * Guard system uses Roles (coach, client, personal, admin) for route protection and hasRole().
+ * Single source of truth for auth roles. Canonical: 'coach', 'client', 'personal' (optional: 'admin').
+ * No athlete or trainer—only coach, client, personal. Guard system uses Roles for route protection and hasRole().
  */
 
 const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV;
@@ -13,22 +13,22 @@ export const Roles = Object.freeze({
   ADMIN: 'admin',
 });
 
-/** Canonical roles: stored in DB and sent as user_type in signUp. */
-export const CANONICAL_ROLES = Object.freeze(['trainer', 'client', 'solo']);
+/** Canonical roles: stored in DB and sent as user_type in signUp. Only coach, client, personal. */
+export const CANONICAL_ROLES = Object.freeze(['coach', 'client', 'personal']);
 
 /** Legacy profile.role values we may read from DB; map to canonical, never write. */
-const LEGACY_READ = Object.freeze(['coach', 'personal', 'athlete']);
+const LEGACY_READ = Object.freeze(['trainer', 'solo', 'athlete']);
 
-/** Default when role is unknown (safe: solo, not trainer). */
-export const DEFAULT_ROLE = 'solo';
+/** Default when role is unknown (safe: personal). */
+export const DEFAULT_ROLE = 'personal';
 
 /** Map internal/raw role to guard role (coach | client | personal | admin). Used by hasRole and route guards. */
 export function toGuardRole(role) {
   if (role === Roles.ADMIN) return Roles.ADMIN;
   const r = normalizeRole(role);
-  if (r === 'trainer') return Roles.COACH;
+  if (r === 'coach') return Roles.COACH;
   if (r === 'client') return Roles.CLIENT;
-  if (r === 'solo') return Roles.PERSONAL;
+  if (r === 'personal') return Roles.PERSONAL;
   return Roles.PERSONAL;
 }
 
@@ -45,28 +45,28 @@ export function hasRole(userRole, allowedRoles) {
 }
 
 /**
- * Get canonical role from profile. Reads public.profiles.role; returns trainer | client | solo.
+ * Get canonical role from profile. Reads public.profiles.role; returns coach | client | personal.
  * @param { { role?: string | null } | null | undefined } profile - Profile object from Supabase or auth context
- * @returns { 'trainer' | 'client' | 'solo' }
+ * @returns { 'coach' | 'client' | 'personal' }
  */
 export function getUserRole(profile) {
   return normalizeRole(profile);
 }
 
 /**
- * Normalise role for routing/UI. Reads legacy (coach→trainer, personal/athlete→solo) and returns only canonical.
+ * Normalise role for routing/UI. Reads legacy (trainer→coach, solo/athlete→personal) and returns only canonical.
  * @param { { role?: string | null } | string | null } input - Profile object or role string
- * @returns { 'trainer' | 'client' | 'solo' }
+ * @returns { 'coach' | 'client' | 'personal' }
  */
 export function normalizeRole(input) {
   const raw = typeof input === 'string' ? input : input?.role;
   if (!raw || typeof raw !== 'string') return DEFAULT_ROLE;
   const r = raw.toString().trim().toLowerCase();
-  if (r === 'trainer' || r === 'coach') return 'trainer';
+  if (r === 'coach' || r === 'trainer') return 'coach';
   if (r === 'client') return 'client';
-  if (r === 'solo' || r === 'personal' || r === 'athlete') return 'solo';
+  if (r === 'personal' || r === 'solo' || r === 'athlete') return 'personal';
   if (isDev) {
-    console.warn('[roles] Unknown role arrived:', raw, '→ defaulting to solo');
+    console.warn('[roles] Unknown role arrived:', raw, '→ defaulting to personal');
   }
   return DEFAULT_ROLE;
 }
@@ -84,9 +84,9 @@ export function isRole(role, allowed) {
  */
 export function roleHomePath(role) {
   const r = normalizeRole(role);
-  if (r === 'trainer') return '/home';
+  if (r === 'coach') return '/home';
   if (r === 'client') return '/messages';
-  return '/home'; // solo
+  return '/home'; // personal
 }
 
 export function personalHomePath() {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { createPageUrl } from '@/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -13,10 +14,10 @@ import { toast } from 'sonner';
 export default function TrainerOnboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [user, setUser] = useState(null);
   const [formData, setFormData] = useState({
     display_name: '',
     niche: '',
@@ -25,31 +26,27 @@ export default function TrainerOnboarding() {
   });
 
   useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-      setFormData(prev => ({ ...prev, display_name: u.full_name || '' }));
-    };
-    
-    // Check if Stripe Connect setup succeeded
+    if (user?.full_name) {
+      setFormData(prev => ({ ...prev, display_name: user.full_name || '' }));
+    }
     if (searchParams.get('success') === 'true') {
       setStep(3);
       toast.success('Stripe account connected!');
     }
-    
-    loadUser();
-  }, [searchParams]);
+  }, [user?.full_name, searchParams]);
 
   const handleCreateProfile = async () => {
     if (!formData.display_name.trim()) {
       toast.error('Please enter your display name');
       return;
     }
-    
+    if (!user?.id) {
+      toast.error('Please sign in first');
+      return;
+    }
     setLoading(true);
-    
     try {
-      await base44.entities.TrainerProfile.create({
+      await invokeSupabaseFunction('trainer-profile-create', {
         user_id: user.id,
         display_name: formData.display_name,
         niche: formData.niche,
@@ -57,7 +54,6 @@ export default function TrainerOnboarding() {
         monthly_rate: formData.monthly_rate * 100,
         stripe_connected: false
       });
-      
       setStep(2);
     } catch (err) {
       toast.error('Failed to create profile');
@@ -78,8 +74,14 @@ export default function TrainerOnboarding() {
   const handleStripeSetup = async () => {
     setLoading(true);
     try {
-      const { data } = await base44.functions.invoke('createStripeConnectSession');
-      window.location.href = data.url;
+      const { stripeConnectLink } = await import('@/lib/supabaseStripeApi');
+      const { url, error } = await stripeConnectLink(user?.id);
+      if (error || !url) {
+        toast.error(error || 'Failed to start Stripe setup');
+        setLoading(false);
+        return;
+      }
+      window.location.href = url;
     } catch (err) {
       toast.error('Failed to start Stripe setup');
       console.error(err);

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
@@ -16,30 +16,23 @@ import { formatDistanceToNow } from 'date-fns';
 export default function Notifications() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user: authUser, isDemoMode } = useAuth();
-  const [user, setUser] = useState(null);
+  const { user: displayUser, isDemoMode } = useAuth();
   const [filter, setFilter] = useState('all');
-  const displayUser = isDemoMode ? authUser : user;
-
-  useEffect(() => {
-    if (isDemoMode) return;
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, [isDemoMode]);
 
   const { data: notificationsData = [], isLoading } = useQuery({
     queryKey: ['notifications', displayUser?.id],
-    queryFn: () => base44.entities.Notification.filter({ user_id: displayUser.id }, '-created_date', 50),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('notification-list', { user_id: displayUser?.id });
+      return Array.isArray(data) ? data : [];
+    },
     enabled: !!displayUser?.id && !isDemoMode
   });
   const notifications = isDemoMode ? [] : notificationsData;
 
   const markAsReadMutation = useMutation({
-    mutationFn: (notificationId) => 
-      base44.entities.Notification.update(notificationId, { read: true }),
+    mutationFn: async (notificationId) => {
+      await invokeSupabaseFunction('notification-update', { id: notificationId, read: true });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     }
@@ -48,9 +41,7 @@ export default function Notifications() {
   const markAllAsReadMutation = useMutation({
     mutationFn: async () => {
       const unreadNotifs = notifications.filter(n => !n.read);
-      await Promise.all(
-        unreadNotifs.map(n => base44.entities.Notification.update(n.id, { read: true }))
-      );
+      await Promise.all(unreadNotifs.map(n => invokeSupabaseFunction('notification-update', { id: n.id, read: true })));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });

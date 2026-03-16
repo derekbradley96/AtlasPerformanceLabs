@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useAppRefresh } from '@/lib/useAppRefresh';
 import { Capacitor } from '@capacitor/core';
@@ -12,6 +12,7 @@ import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
+import { resolveOrgCoachScope } from '@/lib/organisationScope';
 import { safeDate } from '@/lib/format';
 import Card from '@/ui/Card';
 import Row from '@/ui/Row';
@@ -24,6 +25,8 @@ import { captureUiError } from '@/services/errorLogger';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel } from '@/ui/pageLayout';
 import { toast } from 'sonner';
+import { toCSV, downloadCSV } from '@/lib/csvExport';
+import { Download } from 'lucide-react';
 
 const STATUS_COLORS = { on_track: '#22C55E', needs_review: '#EAB308', attention: '#EF4444' };
 const STATUS_LABELS = { on_track: 'On track', needs_review: 'Needs review', attention: 'Attention' };
@@ -70,7 +73,7 @@ export default function Clients() {
   const outletContext = useOutletContext() || {};
   const { registerRefresh, setHeaderRight } = outletContext;
   const data = useData();
-  const { supabaseUser } = useAuth();
+  const { supabaseUser, authReady } = useAuth();
   const isAuthed = !!supabaseUser;
   const trainerId = supabaseUser?.id ?? 'local-trainer';
   const filterFromUrl = searchParams.get('filter');
@@ -94,10 +97,13 @@ export default function Clients() {
   const [checkIns, setCheckIns] = useState([]);
   const [threads, setThreads] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
-   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [clientsLoadError, setClientsLoadError] = useState(false);
+  const [clientsLoadErrorMessage, setClientsLoadErrorMessage] = useState(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [openRowId, setOpenRowId] = useState(null);
   const [openSide, setOpenSide] = useState(null);
   const showRiskFilters = hasSupabase && isAuthed && trainerId && trainerId !== 'local-trainer';
+  const loadRetriedRef = useRef(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [addClientForm, setAddClientForm] = useState({
     full_name: '',
@@ -145,13 +151,32 @@ export default function Clients() {
   }, [setHeaderRight]);
 
   useEffect(() => {
+    const listClients = data?.listClients;
+    const listCheckIns = data?.listCheckInsForTrainer;
+    const listThreads = data?.listThreads;
+    if (typeof listClients !== 'function' || typeof listCheckIns !== 'function' || typeof listThreads !== 'function') {
+      setDataLoading(true);
+      setClientsLoadError(false);
+      return;
+    }
+    if (hasSupabase && !authReady) {
+      setDataLoading(true);
+      setClientsLoadError(false);
+      return;
+    }
+
+    loadRetriedRef.current = false;
     let cancelled = false;
+    let retryTimeoutId = null;
     setDataLoading(true);
-    const load = async () => {
+    setClientsLoadError(false);
+    setClientsLoadErrorMessage(null);
+
+    const runLoad = async () => {
       const [clientsResult, checkInsResult, threadsResult] = await Promise.allSettled([
-        data.listClients(),
-        data.listCheckInsForTrainer(),
-        data.listThreads(),
+        listClients(),
+        listCheckIns(),
+        listThreads(),
       ]);
       if (cancelled) return;
       const list = clientsResult.status === 'fulfilled' && Array.isArray(clientsResult.value)
@@ -166,8 +191,27 @@ export default function Clients() {
       if (clientsResult.status === 'fulfilled') {
         setClients(list);
         setClientsLoadError(false);
+        setClientsLoadErrorMessage(null);
       } else {
-        captureUiError('Clients', clientsResult.reason ?? new Error('listClients failed'));
+        const err = clientsResult.reason ?? new Error('listClients failed');
+        const raw = (err?.message && String(err.message).trim()) || (err && String(err)) || 'Unknown error';
+        const isTransient = /is not a function|undefined is not a function|not ready/i.test(raw);
+        const didRetry = loadRetriedRef.current;
+        if (isTransient && !didRetry) {
+          loadRetriedRef.current = true;
+          if (import.meta.env.DEV) console.warn('[Clients] first load failed, retrying in 500ms', raw);
+          retryTimeoutId = setTimeout(() => {
+            runLoad().finally(() => {
+              if (!cancelled) setDataLoading(false);
+            });
+          }, 500);
+          setDataLoading(true);
+          return;
+        }
+        const msg = isTransient ? 'Data not ready. Pull down to refresh.' : raw;
+        captureUiError('Clients', err);
+        if (import.meta.env.DEV) console.error('[Clients] listClients failed', err);
+        setClientsLoadErrorMessage(msg);
         toast.error('Could not load client list');
         setClientsLoadError(true);
       }
@@ -177,10 +221,14 @@ export default function Clients() {
         try {
           const supabase = getSupabase();
           if (supabase && !cancelled) {
+            const scope = await resolveOrgCoachScope();
+            const coachIds = scope && scope.mode === 'org_wide' && Array.isArray(scope.coachIds) && scope.coachIds.length > 0
+              ? scope.coachIds
+              : [trainerId];
             const { data: riskRows, error } = await supabase
               .from('v_client_retention_risk')
-              .select('client_id, risk_band, risk_score')
-              .eq('coach_id', trainerId);
+              .select('client_id, risk_band, risk_score, coach_id')
+              .in('coach_id', coachIds);
             if (!error && Array.isArray(riskRows) && !cancelled) {
               const map = {};
               riskRows.forEach((r) => {
@@ -195,13 +243,16 @@ export default function Clients() {
         console.log('[Clients] trainerId=', trainerId, 'isAuthed=', isAuthed, 'clientsCount=', clientsResult.status === 'fulfilled' ? list.length : '(failed)', 'checkInsCount=', ch.length, 'threadsCount=', th.length);
       }
     };
-    load().finally(() => {
+
+    runLoad().finally(() => {
       if (!cancelled) setDataLoading(false);
     });
+
     return () => {
       cancelled = true;
+      if (retryTimeoutId) clearTimeout(retryTimeoutId);
     };
-  }, [data, refreshKey, trainerId, isAuthed]);
+  }, [authReady, data, refreshKey, trainerId, isAuthed]);
 
   const clientIdsWithPendingCheckIns = useMemo(
     () => [...new Set((checkIns ?? []).filter((c) => c?.status === 'pending').map((c) => c?.client_id).filter(Boolean))],
@@ -350,12 +401,27 @@ export default function Clients() {
         federation: '',
         gym_equipment: [],
       });
-      setRefreshKey((k) => k + 1);
       if (client?.id) {
+        setClients((prev) => {
+          const next = Array.isArray(prev) ? [...prev] : [];
+          if (!next.some((c) => c?.id === client.id)) {
+            next.unshift({
+              ...client,
+              full_name: client.full_name ?? client.name ?? name,
+              name: client.name ?? client.full_name ?? name,
+              created_date: client.created_at ?? client.created_date,
+            });
+          }
+          return next;
+        });
+        setRefreshKey((k) => k + 1);
         const { trackClientCreated } = await import('@/services/analyticsService');
         trackClientCreated({ client_id: client.id });
         navigate(`/clients/${client.id}`);
-      } else toast.error('Failed to create client');
+      } else {
+        setRefreshKey((k) => k + 1);
+        toast.error('Failed to create client');
+      }
     } catch (e) {
       const msg = e?.message ?? 'Failed to create client';
       toast.error(msg);
@@ -386,6 +452,28 @@ export default function Clients() {
     setOpenSide(null);
   }, []);
 
+  const handleExportClients = useCallback(() => {
+    const rows = allClients.map((c) => ({
+      id: c.id,
+      name: c.full_name ?? c.name ?? '',
+      phase: c.phase ?? '',
+      created_at: c.created_at ?? c.created_date ?? '',
+    }));
+    const columns = [
+      { key: 'id', label: 'ID' },
+      { key: 'name', label: 'Name' },
+      { key: 'phase', label: 'Phase' },
+      { key: 'created_at', label: 'Created at' },
+    ];
+    const csv = toCSV(rows, columns);
+    if (!csv) {
+      toast.error('No data to export');
+      return;
+    }
+    downloadCSV(`clients-export-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+    toast.success('Clients exported');
+  }, [allClients]);
+
   return (
     <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={pageContainer}>
       {/* Search */}
@@ -411,6 +499,18 @@ export default function Clients() {
             }}
           />
         </div>
+      </div>
+
+      {/* Export */}
+      <div className="flex justify-end" style={{ marginBottom: spacing[8] }}>
+        <button
+          type="button"
+          onClick={handleExportClients}
+          className="flex items-center gap-2 rounded-lg text-sm font-medium py-2 px-3"
+          style={{ color: colors.primary, background: colors.primarySubtle }}
+        >
+          <Download size={16} /> Export clients (CSV)
+        </button>
       </div>
 
       {/* Filter chips: All, Active, Prep, At Risk, Check-In Due */}
@@ -487,19 +587,20 @@ export default function Clients() {
       {!initialLoad && !dataLoading && clientsLoadError ? (
         <LoadErrorFallback
           title="Couldn't load clients"
-          description="Check your connection and try again."
+          description={clientsLoadErrorMessage || 'Check your connection and try again.'}
           onRetry={() => {
             setClientsLoadError(false);
+            setClientsLoadErrorMessage(null);
             setRefreshKey((k) => k + 1);
           }}
         />
       ) : !initialLoad && !dataLoading && showEmptyState ? (
         <EmptyState
           title="Your roster is empty"
-          description="Add your first client to start building your roster, assigning programs, and tracking check-ins."
+          description="Share your invite code so clients can sign up and connect to your roster."
           icon={UserPlus}
-          actionLabel="Add client"
-          onAction={() => setAddClientOpen(true)}
+          actionLabel="Open invite code"
+          onAction={() => navigate('/inviteclient')}
         />
       ) : !initialLoad && !dataLoading && isEmpty ? (
         <EmptyState

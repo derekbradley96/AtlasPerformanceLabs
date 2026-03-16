@@ -47,7 +47,7 @@ function MarketingLoading() {
 
 export default function MarketingGate() {
   const { authReady, isAuthenticated, role } = useAuth();
-  const hasRole = role === 'trainer' || role === 'client' || role === 'solo';
+  const hasRole = role === 'coach' || role === 'client' || role === 'personal' || role === 'trainer' || role === 'solo';
 
   if (!authReady) return <MarketingLoading />;
   if (isAuthenticated && hasRole) return <Navigate to="/home" replace />;

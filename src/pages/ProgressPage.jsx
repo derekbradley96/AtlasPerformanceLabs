@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/lib/AuthContext';
-import { isCoach } from '@/lib/roles';
+import { isCoach, isPersonal } from '@/lib/roles';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
@@ -98,6 +98,7 @@ export default function ProgressPage() {
   const { user, effectiveRole, coachFocus } = useAuth();
   const supabase = hasSupabase ? getSupabase() : null;
   const isCoachView = isCoach(effectiveRole) && clientIdParam != null;
+  const isPersonalView = !isCoachView && isPersonal(effectiveRole);
   const showPrepSection = isCoachView && showPrepByFocus(coachFocus);
 
   const timeframe = useMemo(() => parseTimeframeFromSearchParams(searchParams), [searchParams]);
@@ -358,6 +359,14 @@ export default function ProgressPage() {
                   ))}
                 </ul>
               )}
+              {progressInsight.level === 'warning' && isPersonalView && (
+                <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginTop: spacing[12], paddingTop: spacing[12], borderTop: `1px solid ${colors.border}` }}>
+                  Want support?{' '}
+                  <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
+                    Find a coach
+                  </button>
+                </p>
+              )}
             </Card>
           </section>
         )}
@@ -542,6 +551,18 @@ export default function ProgressPage() {
                 ))}
               </ul>
             </Card>
+          </section>
+        )}
+
+        {/* Optional Find a Coach for personal users (secondary, not spammy) */}
+        {isPersonalView && hasData && (
+          <section style={{ marginBottom: spacing[24], textAlign: 'center' }}>
+            <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>
+              Looking for a coach?{' '}
+              <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
+                Find a coach
+              </button>
+            </p>
           </section>
         )}
       </div>

@@ -25,7 +25,7 @@ export default function ProPlanUpgrade() {
   const { data: earnings, isLoading } = useQuery({
     queryKey: ['trainer-earnings', user?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('getTrainerEarnings', {});
+      const { data } = await invokeSupabaseFunction('getTrainerEarnings', { user_id: user?.id });
       return data ?? {};
     },
     enabled: !!user?.id
@@ -33,7 +33,7 @@ export default function ProPlanUpgrade() {
 
   const upgradeMutation = useMutation({
     mutationFn: async () => {
-      const { data } = await invokeSupabaseFunction('upgradeToProPlan', {});
+      const { data } = await invokeSupabaseFunction('upgradeToProPlan', { user_id: user?.id });
       return data;
     },
     onSuccess: (data) => {
@@ -44,7 +44,7 @@ export default function ProPlanUpgrade() {
 
   const cancelMutation = useMutation({
     mutationFn: async () => {
-      await invokeSupabaseFunction('cancelProPlan', {});
+      await invokeSupabaseFunction('cancelProPlan', { user_id: user?.id });
     },
     onSuccess: () => {
       toast.success('Pro plan will be cancelled at the end of the billing period');

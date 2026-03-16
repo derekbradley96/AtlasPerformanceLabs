@@ -133,7 +133,7 @@ export default function Inbox() {
   else if (typeFilter) list = list.filter((item) => item.type === typeFilter);
   const isEmpty = list.length === 0;
 
-  const showCloseoutBanner = role === 'trainer' && !wasCloseoutDoneToday() && new Date().getHours() >= 19;
+  const showCloseoutBanner = role === 'coach' && !wasCloseoutDoneToday() && new Date().getHours() >= 19;
 
 
   const handlePrimary = useCallback(

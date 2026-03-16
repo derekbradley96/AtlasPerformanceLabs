@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
+import { Button } from '@/components/ui/button';
 import { colors, spacing } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import {
@@ -20,7 +21,7 @@ import {
 const COACH_ROLES = ['owner', 'admin', 'coach'];
 
 async function fetchOrganisationDashboard() {
-  if (!hasSupabase()) return null;
+  if (!hasSupabase) return null;
   const supabase = getSupabase();
   if (!supabase) return null;
   const { data: { user } } = await supabase.auth.getUser();
@@ -166,10 +167,10 @@ export default function OrganisationDashboard() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['organisation_dashboard'],
     queryFn: fetchOrganisationDashboard,
-    enabled: hasSupabase(),
+    enabled: hasSupabase,
   });
 
-  if (!hasSupabase()) {
+  if (!hasSupabase) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }}>
         <p style={{ color: colors.muted }}>Sign in to view organisation dashboard.</p>
@@ -211,6 +212,13 @@ export default function OrganisationDashboard() {
             <p className="text-sm mt-2" style={{ color: colors.muted }}>
               Join or create an organisation to see the team dashboard.
             </p>
+            <Button
+              variant="default"
+              className="mt-4"
+              onClick={() => navigate('/organisation/setup')}
+            >
+              Create organisation
+            </Button>
           </Card>
         )}
 

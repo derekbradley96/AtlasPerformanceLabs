@@ -5,6 +5,7 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Pin, PinOff, Trash2, MessageSquare, Search, Plus, ChevronRight } from 'lucide-react';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
+import { hasSupabase } from '@/lib/supabaseClient';
 import { normalizeRole } from '@/lib/roles';
 import { formatRelativeDate } from '@/lib/format';
 import { getPinnedIds, togglePinned, removeFromPinned } from '@/lib/pinsStore';
@@ -14,6 +15,7 @@ import SwipeRow from '@/components/messages/SwipeRow';
 import Card from '@/ui/Card';
 import EmptyState from '@/components/ui/EmptyState';
 import { MessagesListSkeleton } from '@/components/ui/LoadingState';
+import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { sectionLabel } from '@/ui/pageLayout';
@@ -41,7 +43,7 @@ export default function Messages() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
   const role = normalizeRole(user ?? null);
   const isClientView = role === 'client';
   const filterUnread = searchParams.get('filter') === 'unread';
@@ -62,16 +64,30 @@ export default function Messages() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [clientIdToDelete, setClientIdToDelete] = useState(null);
   const [dataLoading, setDataLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const loadData = useCallback(() => {
-    data.listClients().then((c) => setClientsState(Array.isArray(c) ? c : []));
-    data.listThreads().then((th) => setThreadsState(Array.isArray(th) ? th : []));
+    if (typeof data?.listClients === 'function') data.listClients().then((c) => setClientsState(Array.isArray(c) ? c : []));
+    if (typeof data?.listThreads === 'function') data.listThreads().then((th) => setThreadsState(Array.isArray(th) ? th : []));
   }, [data]);
 
   useEffect(() => {
+    if (hasSupabase && !authReady) {
+      setDataLoading(true);
+      setLoadError(false);
+      return;
+    }
+    const listClients = data?.listClients;
+    const listThreads = data?.listThreads;
+    if (typeof listClients !== 'function' || typeof listThreads !== 'function') {
+      setDataLoading(true);
+      setLoadError(false);
+      return;
+    }
     let cancelled = false;
     setDataLoading(true);
-    Promise.all([data.listClients(), data.listThreads()])
+    setLoadError(false);
+    Promise.all([listClients(), listThreads()])
       .then(([c, th]) => {
         if (!cancelled) {
           setClientsState(Array.isArray(c) ? c : []);
@@ -82,6 +98,7 @@ export default function Messages() {
         if (!cancelled) {
           setClientsState([]);
           setThreadsState([]);
+          setLoadError(true);
           toast.error('Failed to load conversations');
           if (import.meta.env?.DEV) console.error('[Messages] load error', err);
         }
@@ -95,7 +112,7 @@ export default function Messages() {
       cancelled = true;
       window.removeEventListener('atlas-sandbox-updated', onUpdate);
     };
-  }, [data, loadData, refreshKey]);
+  }, [authReady, data, loadData, refreshKey]);
 
   useEffect(() => {
     if (isListPage) loadData();
@@ -255,6 +272,11 @@ export default function Messages() {
     return list.filter((c) => (c?.full_name || c?.name || '').toLowerCase().includes(q));
   }, [clients, clientSearch]);
 
+  const handleRetryLoad = useCallback(() => {
+    setLoadError(false);
+    loadData();
+  }, [loadData]);
+
   return (
     <div
       className="app-screen min-w-0 max-w-full overflow-x-hidden flex-1 min-h-0 flex flex-col"
@@ -263,6 +285,14 @@ export default function Messages() {
       {dataLoading ? (
         <div className="flex-1 min-h-0 overflow-auto">
           <MessagesListSkeleton count={6} />
+        </div>
+      ) : loadError ? (
+        <div className="flex-1 min-h-0 flex items-center justify-center" style={{ padding: spacing[16] }}>
+          <LoadErrorFallback
+            title="Couldn't load conversations"
+            description="Check your connection and try again."
+            onRetry={handleRetryLoad}
+          />
         </div>
       ) : threadList.length === 0 ? (
         <div className="flex-1 min-h-0 flex flex-col justify-center" style={{ paddingLeft: spacing[16], paddingRight: spacing[16] }}>

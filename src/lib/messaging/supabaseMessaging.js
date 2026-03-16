@@ -151,6 +151,25 @@ export async function sendMessage({ supabase, threadId, text, senderRole = 'coac
     trackMessageSent({ thread_id: threadId, sender: senderRole });
   } catch (_) {}
 
+  try {
+    const { notifyMessageReceived } = await import('@/services/notificationTriggers');
+    const { triggerMessagePush } = await import('@/services/pushAlertService');
+    const { data: thread } = await supabase.from('message_threads').select('coach_id, client_id').eq('id', threadId).maybeSingle();
+    if (thread) {
+      const preview = (text ?? '').trim().slice(0, 80) || 'New message';
+      if (senderRole === 'coach' && thread.client_id) {
+        const { data: client } = await supabase.from('clients').select('user_id').eq('id', thread.client_id).maybeSingle();
+        if (client?.user_id) {
+          notifyMessageReceived(client.user_id, threadId, preview, 'coach');
+          triggerMessagePush(client.user_id, 'coach', preview).catch(() => {});
+        }
+      } else if (senderRole === 'client' && thread.coach_id) {
+        notifyMessageReceived(thread.coach_id, threadId, preview, 'client');
+        triggerMessagePush(thread.coach_id, 'client', preview).catch(() => {});
+      }
+    }
+  } catch (_) {}
+
   return {
     id: msg.id,
     created_date: msg.created_at ?? now,
@@ -198,6 +217,25 @@ export async function sendVoiceMessage({ supabase, threadId, blob, mimeType, dur
     .from('message_threads')
     .update({ updated_at: now })
     .eq('id', threadId);
+
+  try {
+    const { notifyMessageReceived } = await import('@/services/notificationTriggers');
+    const { triggerMessagePush } = await import('@/services/pushAlertService');
+    const { data: thread } = await supabase.from('message_threads').select('coach_id, client_id').eq('id', threadId).maybeSingle();
+    if (thread) {
+      const preview = 'Voice message';
+      if (senderRole === 'coach' && thread.client_id) {
+        const { data: client } = await supabase.from('clients').select('user_id').eq('id', thread.client_id).maybeSingle();
+        if (client?.user_id) {
+          notifyMessageReceived(client.user_id, threadId, preview, 'coach');
+          triggerMessagePush(client.user_id, 'coach', preview, { thread_id: threadId, client_id: thread.client_id }).catch(() => {});
+        }
+      } else if (senderRole === 'client' && thread.coach_id) {
+        notifyMessageReceived(thread.coach_id, threadId, preview, 'client');
+        triggerMessagePush(thread.coach_id, 'client', preview, { thread_id: threadId }).catch(() => {});
+      }
+    }
+  } catch (_) {}
 
   return {
     id: msg.id,

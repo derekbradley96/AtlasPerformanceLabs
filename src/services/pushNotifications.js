@@ -1,18 +1,13 @@
 /**
- * Push notifications service using Capacitor.
- * Registers device tokens (and stores in Supabase), sends local notifications, handles push events.
- * Use on native (iOS/Android); no-op or safe fallback on web.
+ * Capacitor push notifications: init, register token, handle received/action.
+ * Saves device tokens to public.device_push_tokens (Supabase). Use on iOS/Android; no-op on web.
  */
 
 import { Capacitor } from '@capacitor/core';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { registerPushToken, sendNotification, handleIncomingNotification } from './notificationService.js';
 
 const isNative = () => typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform?.() === true;
 
-/**
- * Get current platform for token storage ('ios' | 'android' | 'web').
- */
 function getPlatform() {
   if (typeof Capacitor === 'undefined') return 'web';
   const p = Capacitor.getPlatform?.() ?? '';
@@ -22,66 +17,144 @@ function getPlatform() {
 }
 
 /**
- * Register for push notifications and store the device token in Supabase (device_push_tokens).
- * Call after login so the backend can send remote push to this device.
+ * Initialize push notifications: request permission, register for remote push, save token to DB.
+ * Call after login. Optionally pass callbacks for received/action; or use handlePushReceived/handlePushAction later.
  *
- * @returns {Promise<string|null>} Device token (FCM/APNs) or null on web/denied/error
- */
-export async function registerDeviceToken() {
-  const token = await registerPushToken();
-  if (!token) return null;
-
-  if (!hasSupabase()) return token;
-  const supabase = getSupabase();
-  if (!supabase) return token;
-
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.id) return token;
-
-    const platform = getPlatform();
-    if (platform === 'web') return token;
-
-    await supabase.from('device_push_tokens').upsert(
-      {
-        user_id: user.id,
-        device_token: token,
-        platform,
-      },
-      {
-        onConflict: 'user_id,device_token,platform',
-      }
-    );
-  } catch (e) {
-    console.warn('[pushNotifications] registerDeviceToken save', e);
-  }
-
-  return token;
-}
-
-/**
- * Send a push notification. On device this schedules a local notification (immediate).
- * Remote push must be sent from your backend using the token from registerDeviceToken().
- *
- * @param {string} title - Notification title
- * @param {string} [body] - Notification body
- * @param {Record<string, unknown>} [data] - Optional payload (e.g. type, deep link)
+ * @param {{ onReceived?: (notification: { title?: string; body?: string; data?: unknown }) => void; onActionPerformed?: (action: { actionId: string; notification: { title?: string; body?: string; data?: unknown } }) => void }} [options]
  * @returns {Promise<void>}
  */
-export async function sendPushNotification(title, body, data = {}) {
-  await sendNotification(title, body, data);
+export async function initializePushNotifications(options = {}) {
+  if (!isNative()) return;
+  const { PushNotifications } = await import(/* @vite-ignore */ '@capacitor/push-notifications');
+  try {
+    let permStatus = await PushNotifications.checkPermissions();
+    if (permStatus.receive === 'prompt' || permStatus.receive === 'prompt-with-rationale') {
+      permStatus = await PushNotifications.requestPermissions();
+    }
+    if (permStatus.receive !== 'granted') return;
+
+    await registerPushToken();
+
+    if (typeof options.onReceived === 'function') {
+      handlePushReceived(options.onReceived);
+    }
+    if (typeof options.onActionPerformed === 'function') {
+      handlePushAction(options.onActionPerformed);
+    }
+  } catch (e) {
+    if (import.meta.env?.DEV) console.warn('[pushNotifications] initializePushNotifications', e);
+  }
 }
 
 /**
- * Subscribe to push notification events (received in foreground, and when user taps).
- * Call the returned cleanup to remove listeners.
+ * Register for push and save the device token to the database (device_push_tokens).
+ * Resolves with the token string or null on web/denied/error.
  *
- * @param {{
- *   onReceived?: (notification: { title?: string; body?: string; data?: unknown }) => void;
- *   onActionPerformed?: (action: { actionId: string; notification: { title?: string; body?: string; data?: unknown } }) => void;
- * }} callbacks
- * @returns {Promise<() => void>} Cleanup function to remove listeners
+ * @returns {Promise<string|null>}
  */
-export async function handlePushEvent(callbacks = {}) {
-  return handleIncomingNotification(callbacks);
+export async function registerPushToken() {
+  if (!isNative()) return null;
+  const { PushNotifications } = await import(/* @vite-ignore */ '@capacitor/push-notifications');
+  try {
+    let permStatus = await PushNotifications.checkPermissions();
+    if (permStatus.receive === 'prompt' || permStatus.receive === 'prompt-with-rationale') {
+      permStatus = await PushNotifications.requestPermissions();
+    }
+    if (permStatus.receive !== 'granted') return null;
+
+    let removeReg;
+    let removeErr;
+    const token = await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        removeReg?.();
+        removeErr?.();
+      };
+      const onReg = (ev) => {
+        cleanup();
+        resolve(ev?.value ?? null);
+      };
+      const onErr = (ev) => {
+        cleanup();
+        reject(new Error(ev?.error ?? 'Registration failed'));
+      };
+      Promise.all([
+        PushNotifications.addListener('registration', onReg),
+        PushNotifications.addListener('registrationError', onErr),
+      ]).then(([regH, errH]) => {
+        removeReg = () => regH?.remove?.();
+        removeErr = () => errH?.remove?.();
+        return PushNotifications.register();
+      }).catch((e) => {
+        removeReg?.();
+        removeErr?.();
+        reject(e);
+      });
+    });
+
+    if (token && hasSupabase) {
+      const supabase = getSupabase();
+      if (supabase) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id) {
+            const platform = getPlatform();
+            if (platform !== 'web') {
+              await supabase.from('device_push_tokens').upsert(
+                { user_id: user.id, device_token: token, platform },
+                { onConflict: 'user_id,device_token,platform' }
+              );
+            }
+          }
+        } catch (e) {
+          if (import.meta.env?.DEV) console.warn('[pushNotifications] registerPushToken save', e);
+        }
+      }
+    }
+
+    return token;
+  } catch (e) {
+    if (import.meta.env?.DEV) console.warn('[pushNotifications] registerPushToken', e);
+    return null;
+  }
+}
+
+/**
+ * Subscribe to push notification received (e.g. in foreground). Call the returned function to remove the listener.
+ *
+ * @param {(notification: { title?: string; body?: string; data?: unknown }) => void} callback
+ * @returns {Promise<() => void>} Cleanup function
+ */
+export async function handlePushReceived(callback) {
+  if (!isNative() || typeof callback !== 'function') return () => {};
+  const { PushNotifications } = await import(/* @vite-ignore */ '@capacitor/push-notifications');
+  const h = await PushNotifications.addListener('pushNotificationReceived', (event) => {
+    callback({
+      title: event?.title,
+      body: event?.body,
+      data: event?.data,
+    });
+  });
+  return () => h?.remove?.();
+}
+
+/**
+ * Subscribe to push notification action (user tapped notification). Call the returned function to remove the listener.
+ *
+ * @param {(action: { actionId: string; notification: { title?: string; body?: string; data?: unknown } }) => void} callback
+ * @returns {Promise<() => void>} Cleanup function
+ */
+export async function handlePushAction(callback) {
+  if (!isNative() || typeof callback !== 'function') return () => {};
+  const { PushNotifications } = await import(/* @vite-ignore */ '@capacitor/push-notifications');
+  const h = await PushNotifications.addListener('pushNotificationActionPerformed', (event) => {
+    callback({
+      actionId: event?.actionId ?? '',
+      notification: {
+        title: event?.notification?.title,
+        body: event?.notification?.body,
+        data: event?.notification?.data,
+      },
+    });
+  });
+  return () => h?.remove?.();
 }

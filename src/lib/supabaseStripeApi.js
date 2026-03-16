@@ -1,7 +1,10 @@
 /**
  * Supabase Edge Functions API for Stripe (Connect, Services, Checkout).
  * Reads VITE_SUPABASE_URL from import.meta.env; errors cleanly when missing.
+ * Sends JWT in Authorization header when Supabase Auth session exists.
  */
+
+import { getSupabase } from '@/lib/supabaseClient';
 
 const SUPABASE_URL_ERROR = 'Supabase URL not configured. Set VITE_SUPABASE_URL in .env.local.';
 
@@ -27,7 +30,7 @@ if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
 }
 
 /**
- * Call an Edge Function via POST with JSON body.
+ * Call an Edge Function via POST with JSON body. Sends JWT when Supabase session exists.
  * @param {string} name - Function name (e.g. 'stripe-connect-link')
  * @param {Record<string, unknown>} body
  * @returns {Promise<{ data?: unknown; error?: string }>}
@@ -35,10 +38,18 @@ if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
 export async function invokeSupabaseFunction(name, body = {}) {
   const base = getFunctionsUrl();
   if (!base) return { error: SUPABASE_URL_ERROR, data: null };
+  const headers = { 'Content-Type': 'application/json' };
+  try {
+    const supabase = getSupabase?.() ?? null;
+    if (supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+    }
+  } catch (_) {}
   try {
     const res = await fetch(`${base}/${name}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));

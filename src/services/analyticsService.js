@@ -16,6 +16,11 @@ export const ANALYTICS_EVENTS = {
   CHECKIN_REVIEWED: 'checkin_reviewed',
   MESSAGE_SENT: 'message_sent',
   WORKOUT_LOGGED: 'workout_logged',
+  // Personal-to-coach conversion (marketplace)
+  PERSONAL_OPENED_FIND_A_COACH: 'personal_opened_find_a_coach',
+  PERSONAL_VIEWED_COACH_PROFILE: 'personal_viewed_coach_profile',
+  PERSONAL_SUBMITTED_ENQUIRY: 'personal_submitted_enquiry',
+  PERSONAL_CONVERTED_TO_CLIENT: 'personal_converted_to_client',
   // Friction / beta tracking
   ONBOARDING_ABANDONED: 'onboarding_abandoned',
   IMPORT_FAILED: 'import_failed',
@@ -120,4 +125,35 @@ export function trackMessageSent(properties = {}) {
  */
 export function trackWorkoutLogged(properties = {}) {
   return track(ANALYTICS_EVENTS.WORKOUT_LOGGED, properties);
+}
+
+/**
+ * Personal opened Find a Coach (discovery). Call when a personal user lands on discovery.
+ */
+export function trackPersonalOpenedFindACoach(properties = {}) {
+  return track(ANALYTICS_EVENTS.PERSONAL_OPENED_FIND_A_COACH, properties);
+}
+
+/**
+ * Personal viewed a coach profile. Call when profile page loads for a personal user.
+ * @param {Record<string, unknown>} [properties] - e.g. { coach_id, slug, source: 'marketplace'|'public' }
+ */
+export function trackPersonalViewedCoachProfile(properties = {}) {
+  return track(ANALYTICS_EVENTS.PERSONAL_VIEWED_COACH_PROFILE, properties);
+}
+
+/**
+ * Personal submitted an enquiry. Call after successful enquiry submit.
+ * @param {Record<string, unknown>} [properties] - e.g. { coach_id, enquiry_type }
+ */
+export function trackPersonalSubmittedEnquiry(properties = {}) {
+  return track(ANALYTICS_EVENTS.PERSONAL_SUBMITTED_ENQUIRY, properties);
+}
+
+/**
+ * Personal converted to client (joined a coach via invite code).
+ * @param {Record<string, unknown>} [properties] - e.g. { coach_id }
+ */
+export function trackPersonalConvertedToClient(properties = {}) {
+  return track(ANALYTICS_EVENTS.PERSONAL_CONVERTED_TO_CLIENT, properties);
 }

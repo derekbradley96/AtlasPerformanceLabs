@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { PageLoader, CardSkeleton } from '@/components/ui/LoadingState';
+import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import Card from '@/ui/Card';
 import { colors, shell, spacing, radii } from '@/ui/tokens';
 import CoachingUpgradeCard from '@/components/coaching/CoachingUpgradeCard';
@@ -26,7 +27,7 @@ export default function GeneralDashboard({ user }) {
   const navigate = useNavigate();
   const { trigger, reason } = useCoachingUpgradeTriggers(user?.id, user?.user_type);
 
-  const { data: recentWorkouts = [], isLoading } = useQuery({
+  const { data: recentWorkouts = [], isLoading, isError: workoutsError, refetch: refetchWorkouts } = useQuery({
     queryKey: ['recent-workouts', user?.id],
     queryFn: async () => {
       const { data } = await invokeSupabaseFunction('workout-list', { user_id: user?.id, status: 'completed' });
@@ -68,6 +69,17 @@ export default function GeneralDashboard({ user }) {
   }
 
   if (!user) return <PageLoader />;
+  if (workoutsError) {
+    return (
+      <div style={{ padding: shell.pagePaddingH, paddingTop: spacing[16], paddingBottom: spacing[24] }}>
+        <LoadErrorFallback
+          title="Couldn't load your dashboard"
+          description="Check your connection and try again."
+          onRetry={() => refetchWorkouts()}
+        />
+      </div>
+    );
+  }
   if (isLoading) {
     return (
       <div style={{ padding: shell.pagePaddingH, paddingTop: spacing[16], paddingBottom: spacing[24] }}>
@@ -78,12 +90,13 @@ export default function GeneralDashboard({ user }) {
 
   const weekStart = new Date();
   weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-  const thisWeekWorkouts = recentWorkouts.filter(
-    (w) => new Date(w.completed_at || w.created_date) >= weekStart
+  const workouts = Array.isArray(recentWorkouts) ? recentWorkouts : [];
+  const thisWeekWorkouts = workouts.filter(
+    (w) => w && new Date(w.completed_at || w.created_date) >= weekStart
   );
   const weeklyGoal = 4;
-  const currentStreak = calculateStreak(recentWorkouts);
-  const weekVolume = thisWeekWorkouts.reduce((sum, w) => sum + (w.total_volume || 0), 0);
+  const currentStreak = calculateStreak(workouts);
+  const weekVolume = thisWeekWorkouts.reduce((sum, w) => sum + (Number(w?.total_volume) || 0), 0);
 
   const pagePadding = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
   const sectionGap = shell.sectionSpacing;

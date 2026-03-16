@@ -10,10 +10,11 @@ Use this in the **Supabase SQL Editor** (Dashboard → SQL Editor). Do **not** r
 
 2. **Env vars in the app** (create or edit `.env.local` in the repo root, do **not** commit real keys):
    ```bash
-   VITE_SUPABASE_URL=sb_publishable_sS7cQL3p-FE3CKEhin8Feg_IV5m4ZIX
-   VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1anRlb2pkanhvcXJqZHBhbGpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1ODAxNjksImV4cCI6MjA4NzE1NjE2OX0._YSJ4JAiuv1YAaNxVKstxxXs_4btx-1BpuHVacMUa8o
+   # Copy from .env.example and fill in from Supabase Dashboard → Project Settings → API
+   VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
+   VITE_SUPABASE_ANON_KEY=<your-anon-public-key>
    ```
-   Restart the dev server after changing env (`npm run dev`).
+   Restart the dev server after changing env (`npm run dev`). **Never commit real keys.**
 
 3. **Run the SQL below** in the Supabase Dashboard → SQL Editor (create table, enable RLS, add policy).
 

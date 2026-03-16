@@ -35,7 +35,7 @@ export default function BecomeATrainer() {
 
   const createProfileMutation = useMutation({
     mutationFn: async (data) => {
-      const { data: codeResult } = await invokeSupabaseFunction('generateInviteCode', {});
+      const { data: codeResult } = await invokeSupabaseFunction('generateInviteCode', { user_id: user?.id });
       const code = codeResult?.code ?? `FITX-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       const { data: profile } = await invokeSupabaseFunction('trainer-profile-create', {
         user_id: user?.id,
@@ -50,7 +50,7 @@ export default function BecomeATrainer() {
         invite_code: code,
         stripe_connected: false
       });
-      await invokeSupabaseFunction('user-update-role', { user_type: 'trainer' });
+      await invokeSupabaseFunction('user-update-role', { user_type: 'coach' });
       return profile ?? { invite_code: code };
     },
     onSuccess: () => {

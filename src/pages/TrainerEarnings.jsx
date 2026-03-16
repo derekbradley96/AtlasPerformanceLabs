@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery } from '@tanstack/react-query';
 import { DollarSign, TrendingUp, Users, Calendar, AlertCircle, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,40 +9,33 @@ import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
 
 export default function TrainerEarnings() {
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-      if (u) {
-        const profiles = await base44.entities.TrainerProfile.filter({ user_id: u.id });
-        setProfile(profiles[0] || null);
-      }
-    };
-    loadUser();
-  }, []);
+  const { user, profile: authProfile } = useAuth();
+  const { data: coachData } = useQuery({
+    queryKey: ['get-coach', user?.id],
+    queryFn: async () => {
+      const { getCoach } = await import('@/lib/supabaseStripeApi');
+      const res = await getCoach(user?.id);
+      return res.coach ? { ...res.coach, connected: res.connected } : null;
+    },
+    enabled: !!user?.id
+  });
+  const profile = authProfile ?? coachData;
+  const stripeConnected = !!(coachData?.stripe_account_id ?? coachData?.connected);
 
   const { data: earningsData, isLoading, error, refetch } = useQuery({
-    queryKey: ['trainer-earnings', profile?.id],
+    queryKey: ['trainer-earnings', user?.id],
     queryFn: async () => {
-      try {
-        const response = await base44.functions.invoke('getTrainerEarnings', {});
-        return response.data;
-      } catch (err) {
-        console.error('Earnings fetch error:', err);
-        return null;
-      }
+      const { data } = await invokeSupabaseFunction('getTrainerEarnings', { user_id: user?.id });
+      return data;
     },
-    enabled: !!profile?.stripe_connected,
+    enabled: !!user?.id && !!stripeConnected,
     retry: 1
   });
 
   if (!user) return <PageLoader />;
 
   // State 1: Stripe not connected
-  if (!profile?.stripe_connected) {
+  if (!stripeConnected) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24">
         <div className="text-center max-w-md">

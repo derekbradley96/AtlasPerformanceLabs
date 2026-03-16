@@ -73,7 +73,7 @@ export default function CompPrepHome() {
     }
   }, [outletContext?.registerRefresh]);
 
-  const isTrainer = role === 'trainer';
+  const isCoach = role === 'coach' || role === 'trainer';
   const isClient = role === 'client';
 
   return (
@@ -92,18 +92,18 @@ export default function CompPrepHome() {
         Competition Prep
       </h1>
       <p className="text-sm mb-4" style={{ color: colors.muted }}>
-        {isTrainer && 'Manage competing clients, posing library, and reviews.'}
+        {isCoach && 'Manage competing clients, posing library, and reviews.'}
         {isClient && 'Your prep plan, poses, and media submissions.'}
-        {role === 'solo' && 'Pose guides and local progress logging.'}
+        {(role === 'personal' || role === 'solo') && 'Pose guides and local progress logging.'}
       </p>
 
-      {isTrainer && nextShow != null && (
+      {isCoach && nextShow != null && (
         <p className="text-[13px] font-medium mb-3" style={{ color: colors.accent }}>
           {getNextShowLabel(nextShow.daysRemaining)}
         </p>
       )}
 
-      {isTrainer && (
+      {isCoach && (
         <>
           <div className="mb-4">
             <input

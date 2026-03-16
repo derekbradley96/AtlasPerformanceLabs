@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { Search, Star, CheckCircle2, ArrowRight, Users } from 'lucide-react';
@@ -11,63 +12,39 @@ import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
 
 export default function FindTrainer() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
-
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
 
   const { data: trainers = [], isLoading } = useQuery({
     queryKey: ['trainer-marketplace'],
     queryFn: async () => {
-      const profiles = await base44.entities.TrainerProfile.filter({
-        accepting_clients: true
-      });
-      
-      // Fair ranking: boost new trainers, rotate visibility
+      const { data } = await invokeSupabaseFunction('trainer-marketplace-list', { accepting_clients: true });
+      const profiles = Array.isArray(data) ? data : [];
       const now = new Date();
       const rankedTrainers = profiles.map(trainer => {
-        const daysActive = Math.floor((now - new Date(trainer.created_date)) / (1000 * 60 * 60 * 24));
+        const created = trainer.created_date || trainer.created_at;
+        const daysActive = created ? Math.floor((now - new Date(created)) / (1000 * 60 * 60 * 24)) : 0;
         const isNewTrainer = daysActive <= 30;
-        
-        // Ranking score
         let score = 0;
-        if (isNewTrainer) score += 50; // New trainer boost
-        if (trainer.stripe_connected) score += 20; // Can accept payments
-        if (trainer.bio) score += 10; // Profile completeness
+        if (isNewTrainer) score += 50;
+        if (trainer.stripe_connected) score += 20;
+        if (trainer.bio) score += 10;
         if (trainer.specialties?.length > 0) score += 10;
-        score += Math.random() * 15; // Slight randomization
-        
+        score += Math.random() * 15;
         return { ...trainer, score };
       });
-      
-      // Sort by score
       return rankedTrainers.sort((a, b) => b.score - a.score);
     }
   });
 
-  const { data: users = [] } = useQuery({
-    queryKey: ['trainer-users'],
-    queryFn: () => base44.entities.User.list(),
-    enabled: trainers.length > 0
-  });
-
   if (!user) return <PageLoader />;
 
-  const filteredTrainers = trainers.filter(trainer => {
-    const trainerUser = users.find(u => u.id === trainer.user_id);
-    const searchTerm = search.toLowerCase();
-    return (
-      trainer.display_name?.toLowerCase().includes(searchTerm) ||
-      trainer.headline?.toLowerCase().includes(searchTerm) ||
-      trainer.specialties?.some(s => s.toLowerCase().includes(searchTerm))
-    );
-  });
+  const searchTerm = search.toLowerCase();
+  const filteredTrainers = trainers.filter(trainer =>
+    trainer.display_name?.toLowerCase().includes(searchTerm) ||
+    trainer.headline?.toLowerCase().includes(searchTerm) ||
+    (Array.isArray(trainer.specialties) && trainer.specialties.some(s => String(s).toLowerCase().includes(searchTerm)))
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24">
@@ -107,9 +84,7 @@ export default function FindTrainer() {
           />
         ) : (
           <div className="grid gap-4">
-            {filteredTrainers.map((trainer) => {
-              const trainerUser = users.find(u => u.id === trainer.user_id);
-              return (
+            {filteredTrainers.map((trainer) => (
                 <button
                   key={trainer.id}
                   onClick={() => navigate(createPageUrl('TrainerPublicProfile') + `?id=${trainer.id}`)}
@@ -166,8 +141,7 @@ export default function FindTrainer() {
                     </div>
                   </div>
                 </button>
-              );
-            })}
+              ))}
           </div>
         )}
       </div>

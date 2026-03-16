@@ -14,7 +14,7 @@ export default function TrainerDashboardPage() {
   const { setHeaderRight, registerRefresh } = outletContext;
   const { user: authUser, isAdminBypass } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
-  const user = authUser || (isAdminBypass ? { id: 'admin', full_name: 'Admin', user_type: 'trainer' } : null);
+  const user = authUser || (isAdminBypass ? { id: 'admin', full_name: 'Admin', user_type: 'coach' } : null);
   const silentMode = getTrainerSilentMode();
 
   useEffect(() => {

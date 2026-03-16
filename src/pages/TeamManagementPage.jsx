@@ -20,6 +20,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { TeamManagementSkeleton } from '@/components/ui/LoadingState';
+import EmptyState from '@/components/ui/EmptyState';
 
 const ROLES = [
   { value: 'admin', label: 'Admin' },
@@ -52,7 +54,7 @@ async function getCurrentUserOrg(supabase) {
 
   const { data: organisation } = await supabase
     .from('organisations')
-    .select('id, name, owner_id')
+    .select('id, name, owner_profile_id')
     .eq('id', orgId)
     .maybeSingle();
 
@@ -64,19 +66,19 @@ async function getCurrentUserOrg(supabase) {
     .maybeSingle();
 
   const canManage =
-    organisation?.owner_id === user.id ||
+    organisation?.owner_profile_id === user.id ||
     (myMember?.role && ['owner', 'admin'].includes(myMember.role));
 
   return {
     orgId,
-    organisation: organisation ?? { id: orgId, name: 'Organisation', owner_id: null },
+    organisation: organisation ?? { id: orgId, name: 'Organisation', owner_profile_id: null },
     canManage: !!canManage,
     userProfileId: user.id,
   };
 }
 
 async function fetchTeamData() {
-  if (!hasSupabase()) return null;
+  if (!hasSupabase) return null;
   const supabase = getSupabase();
   if (!supabase) return null;
 
@@ -86,7 +88,7 @@ async function fetchTeamData() {
   const [membersRes, invitesRes] = await Promise.all([
     supabase
       .from('organisation_members')
-      .select('id, profile_id, role')
+      .select('id, profile_id, role, is_active, created_at')
       .eq('organisation_id', orgId)
       .order('created_at', { ascending: true }),
     canManage
@@ -117,7 +119,7 @@ async function fetchTeamData() {
   const membersWithNames = members.map((m) => ({
     ...m,
     name: profileMap.get(m.profile_id)?.name ?? 'Coach',
-    isOwner: organisation.owner_id === m.profile_id,
+    isOwner: organisation.owner_profile_id === m.profile_id,
   }));
 
   return {
@@ -140,7 +142,7 @@ export default function TeamManagementPage() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['team_management'],
     queryFn: fetchTeamData,
-    enabled: hasSupabase(),
+    enabled: hasSupabase,
   });
 
   const updateRoleMutation = useMutation({
@@ -160,18 +162,21 @@ export default function TeamManagementPage() {
     onError: (e) => toast.error(e.message || 'Failed to update role'),
   });
 
-  const removeMemberMutation = useMutation({
-    mutationFn: async (memberId) => {
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ memberId, nextActive }) => {
       const supabase = getSupabase();
       if (!supabase) throw new Error('No Supabase');
-      const { error } = await supabase.from('organisation_members').delete().eq('id', memberId);
+      const { error } = await supabase
+        .from('organisation_members')
+        .update({ is_active: nextActive })
+        .eq('id', memberId);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['team_management'] });
-      toast.success('Member removed');
+      toast.success(variables?.nextActive ? 'Member reactivated' : 'Member deactivated');
     },
-    onError: (e) => toast.error(e.message || 'Failed to remove'),
+    onError: (e) => toast.error(e.message || 'Failed to update member'),
   });
 
   const createInviteMutation = useMutation({
@@ -231,7 +236,7 @@ export default function TeamManagementPage() {
     window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
-  if (!hasSupabase()) {
+  if (!hasSupabase) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }}>
         <p style={{ color: colors.muted }}>Sign in to manage team.</p>
@@ -250,20 +255,17 @@ export default function TeamManagementPage() {
       />
 
       <div className="p-4 space-y-6">
-        {isLoading && <p style={{ color: colors.muted }}>Loading…</p>}
+        {isLoading && <TeamManagementSkeleton />}
         {isError && <p style={{ color: colors.muted }}>Could not load team.</p>}
 
         {noOrg && !isLoading && !isError && (
-          <Card style={{ padding: spacing[24], textAlign: 'center' }}>
-            <Users className="w-10 h-10 mx-auto mb-3" style={{ color: colors.muted }} />
-            <p style={{ color: colors.text }}>You’re not in an organisation.</p>
-            <p className="text-sm mt-2" style={{ color: colors.muted }}>
-              Join or create an organisation to manage team members.
-            </p>
-            <Button variant="outline" className="mt-4" onClick={() => navigate('/organisation')}>
-              Back to Organisation
-            </Button>
-          </Card>
+          <EmptyState
+            title="No organisation"
+            description="Join or create an organisation to manage team members, roles, and invites."
+            icon={Users}
+            actionLabel="Back to Organisation"
+            onAction={() => navigate('/organisation')}
+          />
         )}
 
         {data?.organisation && !canManage && (
@@ -364,60 +366,76 @@ export default function TeamManagementPage() {
               <h2 className="text-sm font-semibold mb-3" style={{ color: colors.text }}>
                 Team members
               </h2>
-              {(data?.members?.length === 0 ? (
-                <Card style={{ padding: spacing[20], textAlign: 'center' }}>
-                  <p className="text-sm" style={{ color: colors.muted }}>
-                    No members yet. Invite coaches above.
-                  </p>
-                </Card>
+              {(!data?.members?.length ? (
+                <EmptyState
+                  title="No team members yet"
+                  description="As owner or admin, invite coaches and admins above to build your team. Assign roles and manage access from here."
+                  icon={UserPlus}
+                />
               ) : (
                 <ul className="space-y-2">
-                  {data.members.map((member) => (
-                    <li
-                      key={member.id}
-                      className="flex items-center justify-between gap-2 rounded-lg px-3 py-3 border"
-                      style={{ borderColor: colors.border, background: colors.card }}
-                    >
-                      <div>
-                        <p className="font-medium text-sm" style={{ color: colors.text }}>
-                          {member.name}
-                          {member.isOwner && (
-                            <span className="ml-2 text-xs" style={{ color: colors.muted }}>
-                              (Owner)
-                            </span>
+                  {data.members.map((member) => {
+                    const joinedLabel = member.created_at
+                      ? new Date(member.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                      : '—';
+                    const activeLabel = member.is_active ? 'Active' : 'Inactive';
+                    const activeColor = member.is_active ? colors.success : colors.muted;
+                    return (
+                      <li
+                        key={member.id}
+                        className="flex items-center justify-between gap-2 rounded-lg px-3 py-3 border"
+                        style={{ borderColor: colors.border, background: colors.card }}
+                      >
+                        <div>
+                          <p className="font-medium text-sm" style={{ color: colors.text }}>
+                            {member.name}
+                            {member.isOwner && (
+                              <span className="ml-2 text-xs" style={{ color: colors.muted }}>
+                                (Owner)
+                              </span>
+                            )}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
+                            <span style={{ color: colors.muted }}>Role: {member.role}</span>
+                            <span style={{ color: activeColor }}>• {activeLabel}</span>
+                            <span style={{ color: colors.muted }}>• Joined {joinedLabel}</span>
+                          </div>
+                          {!member.isOwner && (
+                            <select
+                              value={member.role}
+                              onChange={(e) => updateRoleMutation.mutate({ memberId: member.id, role: e.target.value })}
+                              className="mt-2 rounded border bg-transparent px-2 py-1 text-xs"
+                              style={{ borderColor: colors.border, color: colors.text }}
+                              disabled={updateRoleMutation.isPending}
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="coach">Coach</option>
+                              <option value="assistant">Assistant</option>
+                            </select>
                           )}
-                        </p>
+                        </div>
                         {!member.isOwner && (
-                          <select
-                            value={member.role}
-                            onChange={(e) => updateRoleMutation.mutate({ memberId: member.id, role: e.target.value })}
-                            className="mt-1 rounded border bg-transparent px-2 py-1 text-xs"
-                            style={{ borderColor: colors.border, color: colors.text }}
-                            disabled={updateRoleMutation.isPending}
-                          >
-                            <option value="admin">Admin</option>
-                            <option value="coach">Coach</option>
-                            <option value="assistant">Assistant</option>
-                          </select>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => {
+                                const nextActive = !member.is_active;
+                                const label = nextActive ? 'reactivate' : 'deactivate';
+                                if (window.confirm(`Are you sure you want to ${label} ${member.name}?`)) {
+                                  toggleActiveMutation.mutate({ memberId: member.id, nextActive });
+                                }
+                              }}
+                              disabled={toggleActiveMutation.isPending}
+                            >
+                              {member.is_active ? 'Deactivate' : 'Reactivate'}
+                            </Button>
+                          </div>
                         )}
-                      </div>
-                      {!member.isOwner && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => {
-                            if (window.confirm(`Remove ${member.name} from the team?`)) {
-                              removeMemberMutation.mutate(member.id);
-                            }
-                          }}
-                          disabled={removeMemberMutation.isPending}
-                        >
-                          <Trash2 size={16} />
-                        </Button>
-                      )}
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               ))}
             </div>

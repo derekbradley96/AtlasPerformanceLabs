@@ -19,7 +19,9 @@ import { savePoseCheckReview } from '@/lib/poseChecks';
 import { generateCheckinSummary } from '@/lib/atlasInsights';
 import { useAuth } from '@/lib/AuthContext';
 import ReviewActionTray, { PAYMENT_REMINDER_MSG } from '@/components/review/ReviewActionTray';
-import { FileCheck, MessageCircle, Flag, Check, ImageIcon, CalendarClock, DollarSign, User } from 'lucide-react';
+import { resolveOrgCoachScope } from '@/lib/organisationScope';
+import { getReengagementTemplate, sendReengagementNudge } from '@/lib/reengagementTemplates';
+import { FileCheck, MessageCircle, Flag, Check, ImageIcon, CalendarClock, DollarSign, User, Send } from 'lucide-react';
 
 /** coach_focus from profile; default 'transformation' if missing. */
 function getCoachFocus(profile, coachFocusFromAuth) {
@@ -38,7 +40,12 @@ const ITEM_TYPE_LABELS = {
   retention_risk: 'Retention risk',
   billing_overdue: 'Billing overdue',
   flag: 'Active flags',
-  momentum_dropping: 'Client momentum dropping',
+  momentum_dropping: 'Momentum dropping',
+  momentum_low: 'Low momentum',
+  habit_adherence_low: 'Low habit adherence',
+  streak_broken: 'Streak broken',
+  no_checkin: 'No check-in',
+  no_workout: 'No workout',
 };
 
 /** Filter tabs: value for URL, label, hide for transformation. */
@@ -50,6 +57,11 @@ const FILTER_OPTIONS = [
   { value: 'billing_overdue', label: 'Billing' },
   { value: 'flag', label: 'Flags' },
   { value: 'momentum_dropping', label: 'Momentum' },
+  { value: 'habit_adherence_low', label: 'Habit adherence' },
+  { value: 'streak_broken', label: 'Streak broken' },
+  { value: 'momentum_low', label: 'Low momentum' },
+  { value: 'no_checkin', label: 'No check-in' },
+  { value: 'no_workout', label: 'No workout' },
 ];
 
 const SORT_OPTIONS = [
@@ -64,16 +76,25 @@ function formatCreatedAt(ts) {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
 }
 
-/** Fetch unified queue for current coach. */
-async function fetchReviewQueue(coachId) {
-  if (!hasSupabase || !coachId) return [];
+/** Fetch unified queue for one or more coaches. */
+async function fetchReviewQueue(coachFilter) {
+  const ids = Array.isArray(coachFilter)
+    ? coachFilter.filter(Boolean)
+    : coachFilter
+      ? [coachFilter]
+      : [];
+  if (!hasSupabase || ids.length === 0) return [];
   const supabase = getSupabase();
   if (!supabase) return [];
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('v_coach_review_queue')
-      .select('coach_id, client_id, client_name, item_type, priority, reasons, created_at, payload, resolved_at')
-      .eq('coach_id', coachId)
+      .select(
+        'coach_id, client_id, client_name, item_type, priority, reasons, created_at, payload, resolved_at',
+      );
+    query =
+      ids.length === 1 ? query.eq('coach_id', ids[0]) : query.in('coach_id', ids);
+    const { data, error } = await query
       .order('priority', { ascending: false })
       .order('created_at', { ascending: false });
     if (error) return [];
@@ -83,9 +104,14 @@ async function fetchReviewQueue(coachId) {
   }
 }
 
-/** Dismiss a queue item (retention_risk, billing_overdue, flag, momentum_dropping) by inserting into review_queue_dismissals. */
+const DISMISSABLE_ITEM_TYPES = [
+  'retention_risk', 'billing_overdue', 'flag', 'momentum_dropping',
+  'habit_adherence_low', 'momentum_low', 'streak_broken', 'no_checkin', 'no_workout',
+];
+
+/** Dismiss a queue item by inserting into review_queue_dismissals. */
 async function dismissQueueItem(coachId, clientId, itemType) {
-  if (!hasSupabase || !coachId || !clientId || !['retention_risk', 'billing_overdue', 'flag', 'momentum_dropping'].includes(itemType)) return false;
+  if (!hasSupabase || !coachId || !clientId || !DISMISSABLE_ITEM_TYPES.includes(itemType)) return false;
   const supabase = getSupabase();
   if (!supabase) return false;
   try {
@@ -120,14 +146,14 @@ export default function ReviewCenterQueuePage() {
         setLoading(false);
         return;
       }
-      const supabase = getSupabase();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (cancelled || !user?.id) {
+      const scope = await resolveOrgCoachScope();
+      if (cancelled || !scope || (!scope.coachId && (!scope.coachIds || scope.coachIds.length === 0))) {
         setLoading(false);
         return;
       }
-      setCoachId(user.id);
-      let list = await fetchReviewQueue(user.id);
+      setCoachId(scope.coachId);
+      const coachFilter = scope.mode === 'org_wide' ? scope.coachIds : scope.coachId;
+      let list = await fetchReviewQueue(coachFilter);
       if (isTransformation) {
         list = (list || []).filter((item) => !TRANSFORMATION_EXCLUDED_ITEM_TYPES.includes(item.item_type));
       }
@@ -148,7 +174,7 @@ export default function ReviewCenterQueuePage() {
         ok = await markCheckinReviewed(item.payload.checkin_id);
       } else if (item.item_type === 'pose_check' && item.payload?.pose_check_id) {
         ok = await savePoseCheckReview(item.payload.pose_check_id, {});
-      } else if (['retention_risk', 'billing_overdue', 'flag', 'momentum_dropping'].includes(item.item_type) && coachId) {
+      } else if (DISMISSABLE_ITEM_TYPES.includes(item.item_type) && coachId) {
         ok = await dismissQueueItem(coachId, item.client_id, item.item_type);
       }
       if (ok) {
@@ -294,8 +320,10 @@ export default function ReviewCenterQueuePage() {
         ];
       case 'retention_risk':
         return [
-          { label: 'Message Client', onClick: navMessages, primary: true, icon: <MessageCircle size={16} /> },
-          { label: 'Schedule Follow-Up', onClick: scheduleFollowUp, icon: <CalendarClock size={16} /> },
+          { label: 'Open Client', onClick: navClient, primary: true, icon: <User size={16} /> },
+          { label: 'Message Client', onClick: navMessages, icon: <MessageCircle size={16} /> },
+          { label: 'Send Nudge', onClick: () => { const template = getReengagementTemplate([item.item_type, ...(item.reasons || [])]); sendReengagementNudge({ clientId, template, navigate, toast }); }, icon: <Send size={16} /> },
+          { label: 'Review', onClick: navClient, icon: <FileCheck size={16} /> },
           { label: 'Mark Resolved', onClick: () => handleResolve(item), disabled: resolving, icon: <Check size={16} /> },
         ];
       case 'billing_overdue':
@@ -311,9 +339,16 @@ export default function ReviewCenterQueuePage() {
           { label: 'Resolve Flag', onClick: () => handleResolve(item), disabled: resolving, icon: <Check size={16} /> },
         ];
       case 'momentum_dropping':
+      case 'momentum_low':
+      case 'habit_adherence_low':
+      case 'streak_broken':
+      case 'no_checkin':
+      case 'no_workout':
         return [
-          { label: 'View Client', onClick: navClient, primary: true, icon: <User size={16} /> },
+          { label: 'Open Client', onClick: navClient, primary: true, icon: <User size={16} /> },
           { label: 'Message Client', onClick: navMessages, icon: <MessageCircle size={16} /> },
+          { label: 'Send Nudge', onClick: () => { const template = getReengagementTemplate([item.item_type, ...(item.reasons || [])]); sendReengagementNudge({ clientId, template, navigate, toast }); }, icon: <Send size={16} /> },
+          { label: 'Review', onClick: navClient, icon: <FileCheck size={16} /> },
           { label: 'Mark Resolved', onClick: () => handleResolve(item), disabled: resolving, icon: <Check size={16} /> },
         ];
       default:
@@ -339,10 +374,25 @@ export default function ReviewCenterQueuePage() {
     );
   }
 
+  const showPeakWeekCheckins = !isTransformation;
+
   return (
     <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Review Center" onBack={() => navigate(-1)} />
       <div style={{ ...pageContainer, paddingBottom: spacing[8] }}>
+        {showPeakWeekCheckins && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => navigate('/review-center/peak-week-checkins')}
+              className="inline-flex items-center gap-2 text-sm font-medium rounded-lg py-2 px-3 border"
+              style={{ borderColor: colors.border, background: colors.surface1, color: colors.primary }}
+            >
+              <CalendarClock size={16} />
+              Peak Week Check-Ins
+            </button>
+          </div>
+        )}
         <div className="flex flex-wrap gap-1.5 mb-3">
           {visibleFilters.map((opt) => {
             const active = (filterType || null) === opt.value;
@@ -427,9 +477,19 @@ export default function ReviewCenterQueuePage() {
                           Atlas: {atlasInsight}
                         </p>
                       )}
-                      {item.item_type === 'momentum_dropping' && item.payload?.total_score != null && (
+                      {(item.item_type === 'momentum_dropping' || item.item_type === 'momentum_low') && item.payload?.total_score != null && (
                         <p className="text-xs mt-1" style={{ color: colors.muted }}>
                           Momentum score: {Math.round(Number(item.payload.total_score))}/100
+                        </p>
+                      )}
+                      {item.item_type === 'no_checkin' && item.payload?.days_since_last_checkin != null && (
+                        <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                          {item.payload.days_since_last_checkin === 0 ? 'No check-in yet' : `${item.payload.days_since_last_checkin} days since last check-in`}
+                        </p>
+                      )}
+                      {item.item_type === 'no_workout' && item.payload?.days_since_last_workout != null && (
+                        <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                          {item.payload.days_since_last_workout === 0 ? 'No workout yet' : `${item.payload.days_since_last_workout} days since last workout`}
                         </p>
                       )}
                       <p className="text-xs mt-1" style={{ color: colors.muted }}>

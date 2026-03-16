@@ -33,7 +33,7 @@ export default function IntakeForms() {
       const profiles = await base44.entities.TrainerProfile.filter({ user_id: displayUser.id });
       return profiles[0] || null;
     },
-    enabled: !!displayUser?.id && displayUser?.user_type === 'trainer' && !isDemoMode
+    enabled: !!displayUser?.id && (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer') && !isDemoMode
   });
 
   const { data: templatesData = [], isLoading } = useQuery({
@@ -115,7 +115,7 @@ export default function IntakeForms() {
   };
 
   if (!displayUser) return <PageLoader />;
-  if (displayUser.user_type !== 'trainer') return <NotAuthorized />;
+  if (displayUser.user_type !== 'coach' && displayUser.user_type !== 'trainer') return <NotAuthorized />;
   if (!isDemoMode && isLoading) return <PageLoader />;
 
   const getCompletionCount = (templateId) => {

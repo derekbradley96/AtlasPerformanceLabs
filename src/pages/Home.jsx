@@ -1,6 +1,5 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
 import TrainerDashboard from '@/components/dashboards/TrainerDashboard';
 import ClientDashboard from '@/components/dashboards/ClientDashboard';
@@ -24,10 +23,11 @@ export default function Home() {
 
   const userType = displayUser?.user_type ?? displayUser?.role;
   if (!userType) {
-    navigate(createPageUrl('RoleSelection'));
+    // No role yet – send into canonical auth flow instead of legacy RoleSelection.
+    navigate('/auth', { replace: true });
     return <PageLoader />;
   }
-  if (userType === 'trainer') {
+  if (userType === 'coach' || userType === 'trainer') {
     return <TrainerDashboard user={displayUser} />;
   }
   if (userType === 'client') {

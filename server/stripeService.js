@@ -118,8 +118,8 @@ export async function handleWebhook(rawBody, signature, handlers = {}) {
   let event;
   try {
     event = stripe.webhooks.constructEvent(body, signature, secret);
-  } catch (err) {
-    return { error: err.message || 'Webhook signature verification failed' };
+  } catch {
+    return { error: 'Webhook signature verification failed' };
   }
 
   const custom = handlers[event.type];

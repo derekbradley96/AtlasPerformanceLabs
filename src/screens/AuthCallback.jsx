@@ -23,9 +23,9 @@ function parseHashParams(hash) {
 
 function getDashboardPath(role) {
   const r = (role ?? '').toString().toLowerCase();
-  if (r === 'trainer' || r === 'coach') return '/home';
-  if (r === 'client') return '/messages';
-  if (r === 'solo' || r === 'personal') return '/home';
+  if (r === 'coach' || r === 'trainer') return '/home';
+  if (r === 'client') return '/client-dashboard';
+  if (r === 'personal' || r === 'solo') return '/solo-dashboard';
   return '/home';
 }
 

@@ -17,6 +17,10 @@ const TRIGGER_COPY: Record<string, { title: string; message: string }> = {
     title: "Check-in due",
     message: "Your check-in is due today.",
   },
+  habit_due: {
+    title: "Habit reminder",
+    message: "Don't forget today's habits.",
+  },
   habit_missing: {
     title: "Habit check-in",
     message: "Don't forget to log your habits for today.",
@@ -56,6 +60,13 @@ function getTodayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Add days to a YYYY-MM-DD date string, return YYYY-MM-DD. */
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -74,7 +85,14 @@ Deno.serve(async (req) => {
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const nextDayISO = nextDay.toISOString().slice(0, 10);
 
-    type Pair = { user_id: string; trigger_type: string };
+    type Pair = {
+      user_id: string;
+      trigger_type: string;
+      title?: string;
+      message?: string;
+      data?: Record<string, unknown>;
+      dedupe_key?: string;
+    };
     const toSend: Pair[] = [];
 
     // Load all clients with user_id once for lookups
@@ -113,21 +131,27 @@ Deno.serve(async (req) => {
       if (c.user_id) toSend.push({ user_id: c.user_id, trigger_type: "billing_due" });
     }
 
-    // 4) habit_missing: clients with at least one habit and at least one habit with no log for today
-    const { data: habits } = await supabase.from("client_habits").select("id, client_id");
+    // 4) habit_due: clients with at least one active habit and at least one habit not logged for today
+    const { data: habits } = await supabase
+      .from("client_habits")
+      .select("id, client_id")
+      .eq("is_active", true);
     const clientHabits = new Map<string, string[]>();
     for (const h of habits ?? []) {
       const list = clientHabits.get(h.client_id) ?? [];
       list.push(h.id);
       clientHabits.set(h.client_id, list);
     }
-    const { data: logsToday } = await supabase.from("habit_logs").select("habit_id").eq("log_date", today);
+    const { data: logsToday } = await supabase
+      .from("client_habit_logs")
+      .select("habit_id")
+      .eq("log_date", today);
     const loggedHabitIds = new Set((logsToday ?? []).map((r) => r.habit_id));
     for (const [clientId, habitIds] of clientHabits) {
       const missing = habitIds.some((id) => !loggedHabitIds.has(id));
       if (missing) {
         const c = clientById.get(clientId);
-        if (c?.user_id) toSend.push({ user_id: c.user_id, trigger_type: "habit_missing" });
+        if (c?.user_id) toSend.push({ user_id: c.user_id, trigger_type: "habit_due" });
       }
     }
 
@@ -231,28 +255,101 @@ Deno.serve(async (req) => {
       if (isMissedWindow && anyDue.length > 0) toSend.push({ user_id: c.user_id, trigger_type: "supplement_missed_reminder" });
     }
 
-    // Already-sent today: (user_id, type) set
+    // 6) Peak week alerts (type peak_week_update; use custom message + dedupe_key)
+    const { data: activePeakWeeks } = await supabase
+      .from("peak_weeks")
+      .select("id, client_id, show_date")
+      .eq("is_active", true);
+    for (const pw of activePeakWeeks ?? []) {
+      const c = clientById.get(pw.client_id);
+      if (!c?.user_id) continue;
+      const showDate = pw.show_date as string;
+
+      // 6a) Day -N instructions available: when today is the target_date for that day
+      for (let dayNum = -7; dayNum <= 0; dayNum++) {
+        const targetDate = addDays(showDate, dayNum);
+        if (targetDate !== today) continue;
+        toSend.push({
+          user_id: c.user_id,
+          trigger_type: "peak_week_update",
+          title: "Peak week",
+          message: `Day ${dayNum} instructions available.`,
+          data: { peak_week_id: pw.id, day_number: dayNum },
+          dedupe_key: `peak_week_update:day:${dayNum}:${pw.id}`,
+        });
+      }
+
+      // 6b) Peak week check-in required: today is within peak week and this day has checkin_required and no check-in today
+      const dayOffset = Math.round((new Date(today + "T12:00:00Z").getTime() - new Date(showDate + "T12:00:00Z").getTime()) / (24 * 60 * 60 * 1000));
+      if (dayOffset >= -7 && dayOffset <= 0) {
+        const { data: dayRow } = await supabase
+          .from("peak_week_days")
+          .select("id, checkin_required")
+          .eq("peak_week_id", pw.id)
+          .eq("day_number", dayOffset)
+          .maybeSingle();
+        if (dayRow?.checkin_required) {
+          const { data: checkinToday } = await supabase
+            .from("peak_week_checkins")
+            .select("id")
+            .eq("peak_week_id", pw.id)
+            .eq("client_id", pw.client_id)
+            .gte("created_at", today + "T00:00:00Z")
+            .lt("created_at", nextDayISO + "T00:00:00Z")
+            .limit(1);
+          if (!(checkinToday && checkinToday.length > 0)) {
+            toSend.push({
+              user_id: c.user_id,
+              trigger_type: "peak_week_update",
+              title: "Peak week",
+              message: "Peak week check-in required.",
+              data: { peak_week_id: pw.id },
+              dedupe_key: `peak_week_update:checkin:${pw.id}`,
+            });
+          }
+        }
+      }
+    }
+
+    // Already-sent today: (profile_id, type) or (profile_id, dedupe_key) set (notifications table uses profile_id)
     const { data: existing } = await supabase
       .from("notifications")
-      .select("user_id, type")
+      .select("profile_id, type, data")
       .gte("created_at", today + "T00:00:00Z");
-    const sentToday = new Set((existing ?? []).map((r) => `${r.user_id}:${r.type}`));
+    const sentToday = new Set<string>();
+    for (const r of existing ?? []) {
+      const data = r.data as { dedupe_key?: string } | null;
+      const hasDedupeKey = data && typeof data.dedupe_key === "string";
+      if (r.type === "peak_week_update" && hasDedupeKey) {
+        sentToday.add(`${r.profile_id}:${data!.dedupe_key}`);
+      } else {
+        sentToday.add(`${r.profile_id}:${r.type}`);
+      }
+    }
 
     let inserted = 0;
     const byTrigger: Record<string, number> = {};
-    for (const { user_id, trigger_type } of toSend) {
-      if (sentToday.has(`${user_id}:${trigger_type}`)) continue;
+    for (const item of toSend) {
+      const { user_id, trigger_type, title: customTitle, message: customMessage, data: customData, dedupe_key } = item;
+      const profileId = user_id;
+      const key = dedupe_key ? `${profileId}:${dedupe_key}` : `${profileId}:${trigger_type}`;
+      if (sentToday.has(key)) continue;
       const copy = TRIGGER_COPY[trigger_type] ?? { title: "Reminder", message: "You have an action due." };
+      const title = customTitle ?? copy.title;
+      const message = customMessage ?? copy.message;
+      const data = customData ?? {};
+      if (dedupe_key) (data as Record<string, unknown>).dedupe_key = dedupe_key;
       const { error } = await supabase.from("notifications").insert({
-        user_id,
+        profile_id: profileId,
         type: trigger_type,
-        title: copy.title,
-        message: copy.message,
+        title,
+        message,
+        data,
         is_read: false,
       });
       if (!error) {
         inserted += 1;
-        sentToday.add(`${user_id}:${trigger_type}`);
+        sentToday.add(key);
         byTrigger[trigger_type] = (byTrigger[trigger_type] ?? 0) + 1;
       }
     }
@@ -268,7 +365,7 @@ Deno.serve(async (req) => {
     );
   } catch (e) {
     console.error("send-reminders", e);
-    return new Response(JSON.stringify({ error: String(e) }), {
+    return new Response(JSON.stringify({ error: "Request failed" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { 
@@ -18,83 +19,68 @@ export default function ReviewCheckIn() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const [user, setUser] = useState(null);
+  const { user } = useAuth();
   const [feedback, setFeedback] = useState('');
   const [sending, setSending] = useState(false);
 
   const params = new URLSearchParams(location.search);
   const checkInId = params.get('id');
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
-
   const { data: checkin } = useQuery({
     queryKey: ['checkin-detail', checkInId],
     queryFn: async () => {
       if (!checkInId) return null;
-      return await base44.entities.CheckIn.filter({ id: checkInId });
+      const { data } = await invokeSupabaseFunction('checkin-get', { id: checkInId });
+      return data ?? null;
     },
-    select: (data) => data[0] || null,
     enabled: !!checkInId
   });
 
   const { data: client } = useQuery({
     queryKey: ['client-profile', checkin?.client_id],
-    queryFn: () => base44.entities.ClientProfile.filter({ id: checkin.client_id }),
-    enabled: !!checkin?.client_id,
-    select: (data) => data[0]
-  });
-
-  const { data: clientUser } = useQuery({
-    queryKey: ['user', client?.user_id],
-    queryFn: () => base44.entities.User.filter({ id: client.user_id }),
-    enabled: !!client?.user_id,
-    select: (data) => data[0]
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('client-profile-get', { id: checkin?.client_id });
+      return data ?? null;
+    },
+    enabled: !!checkin?.client_id
   });
 
   const { data: recentWorkouts = [] } = useQuery({
     queryKey: ['recent-workouts-for-client', client?.user_id],
-    queryFn: () => base44.entities.Workout.filter(
-      { user_id: client.user_id, status: 'completed' },
-      '-completed_at',
-      10
-    ),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('workout-list', { user_id: client?.user_id, status: 'completed' });
+      return Array.isArray(data) ? data.slice(0, 10) : [];
+    },
     enabled: !!client?.user_id
   });
 
   const { data: performanceSnapshot } = useQuery({
     queryKey: ['performance-snapshot', client?.id],
-    queryFn: () => base44.entities.ClientPerformanceSnapshot.filter(
-      { client_id: client.id },
-      '-week_start_date',
-      1
-    ),
-    enabled: !!client?.id,
-    select: (data) => data[0]
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('client-performance-snapshot-list', { client_id: client?.id });
+      const list = Array.isArray(data) ? data : (data ? [data] : []);
+      return list[0] ?? null;
+    },
+    enabled: !!client?.id
   });
 
   const { data: exerciseTrends = [] } = useQuery({
     queryKey: ['exercise-trends', client?.user_id],
-    queryFn: () => base44.entities.ExercisePerformanceTrend.filter(
-      { user_id: client.user_id },
-      '-week_start_date',
-      20
-    ),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('exercise-trends-list', { user_id: client?.user_id });
+      return Array.isArray(data) ? data : [];
+    },
     enabled: !!client?.user_id
   });
 
   const submitFeedbackMutation = useMutation({
     mutationFn: async () => {
-      if (!checkin) return;
-      return await base44.entities.CheckIn.update(checkin.id, {
-        status: 'reviewed',
-        trainer_feedback: feedback,
-        trainer_feedback_at: new Date().toISOString()
+      if (!checkin?.id) return;
+      await invokeSupabaseFunction('checkin-update', {
+        id: checkin.id,
+        reviewed_at: new Date().toISOString(),
+        reviewed_by: user?.id,
+        condition_notes: feedback || undefined
       });
     },
     onSuccess: () => {
@@ -105,7 +91,7 @@ export default function ReviewCheckIn() {
     }
   });
 
-  if (!user || !checkin || !client || !clientUser) return <PageLoader />;
+  if (!user || !checkin || !client) return <PageLoader />;
 
   const thisWeekWorkouts = recentWorkouts.filter(w => {
     const date = new Date(w.completed_at);
@@ -142,9 +128,9 @@ export default function ReviewCheckIn() {
         </button>
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">{clientUser.full_name}</h1>
+            <h1 className="text-2xl font-bold text-white mb-1">{client?.full_name || client?.name || 'Client'}</h1>
             <p className="text-sm text-slate-400">
-              Check-in submitted {new Date(checkin.submitted_at).toLocaleDateString('en-GB', { 
+              Check-in submitted {new Date(checkin.submitted_at ?? checkin.created_at ?? checkin.week_start ?? '').toLocaleDateString('en-GB', { 
                 day: 'numeric', 
                 month: 'long',
                 hour: '2-digit',

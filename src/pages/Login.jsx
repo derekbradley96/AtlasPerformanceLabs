@@ -24,7 +24,7 @@ export default function Login() {
 
   const handleDemoMode = (e) => {
     e?.preventDefault?.();
-    enterDemo('trainer');
+    enterDemo('coach');
     navigate(createPageUrl('Home'));
   };
 

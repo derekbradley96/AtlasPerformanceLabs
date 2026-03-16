@@ -28,7 +28,7 @@ export default function CompMediaList() {
   const focusRef = useRef(null);
 
   const effectiveClientId = useMemo(() => {
-    if (role === 'trainer' && urlClientId) return urlClientId;
+    if ((role === 'coach' || role === 'trainer') && urlClientId) return urlClientId;
     if (role === 'client' && user?.id) {
       const c = getClientByUserId(user.id);
       return c?.id ?? null;
@@ -93,7 +93,7 @@ export default function CompMediaList() {
     return (
       <div className="app-screen p-4" style={{ background: colors.bg, color: colors.muted }}>
         <p className="text-sm">
-          {role === 'trainer' ? 'Add a client to the URL (e.g. ?clientId=...) or open from Comp Prep.' : 'Sign in as a client or solo to view your media log.'}
+          {(role === 'coach' || role === 'trainer') ? 'Add a client to the URL (e.g. ?clientId=...) or open from Comp Prep.' : 'Sign in as a client or solo to view your media log.'}
         </p>
       </div>
     );

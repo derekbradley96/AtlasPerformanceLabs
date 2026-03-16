@@ -37,12 +37,13 @@ export default function ClientDashboardPage() {
         if (!clientProfile) {
           const { data: created } = await invokeSupabaseFunction('client-profile-create', {
             user_id: user.id,
+            coach_id: trainerProfileId,
             trainer_id: trainerProfileId,
             subscription_status: 'pending',
           });
           clientProfile = created ?? {};
         } else {
-          await invokeSupabaseFunction('client-profile-update', { id: clientProfile.id, trainer_id: trainerProfileId });
+          await invokeSupabaseFunction('client-profile-update', { id: clientProfile.id, coach_id: trainerProfileId, trainer_id: trainerProfileId });
         }
         if (user.user_type !== 'client' && user.role !== 'client') {
           await invokeSupabaseFunction('user-update-role', { user_type: 'client' });

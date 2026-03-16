@@ -1,6 +1,7 @@
 import React, { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle } from 'lucide-react';
+import NotificationBell from '@/components/ui/NotificationBell';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { getRouteTitle } from '@/lib/routeMeta';
@@ -353,8 +354,9 @@ export default function AppShell() {
           >
             {title}
           </h1>
-          <div className="flex items-center justify-end" style={{ minWidth: 88, minHeight: 44 }}>
-            {headerRight != null ? headerRight : <span className="w-10" aria-hidden />}
+          <div className="flex items-center justify-end gap-1" style={{ minWidth: 88, minHeight: 44 }}>
+            <NotificationBell />
+            {headerRight != null ? headerRight : null}
           </div>
         </div>
       </header>

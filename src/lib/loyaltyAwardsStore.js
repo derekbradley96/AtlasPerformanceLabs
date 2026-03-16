@@ -1,5 +1,5 @@
 /**
- * Loyalty award events (1, 3, 6, 12 months with trainer). Stored so we show modal once and list in Achievements.
+ * Loyalty award events (1, 3, 6, 12 months with coach). Stored so we show modal once and list in Achievements.
  */
 const KEY = 'atlas_loyalty_awards';
 
@@ -24,7 +24,7 @@ function nextId() {
 
 const MONTHS_MILESTONES = [1, 2, 3, 6, 12]; // 30, 60, 90, 180, 365 days
 
-/** Get months with trainer from client.created_date or trainer_client created_at. Returns 0 for invalid dates. */
+/** Get months with coach from client.created_date or coach-client link created_at. Returns 0 for invalid dates. */
 export function getMonthsWithTrainer(createdAt) {
   if (!createdAt) return 0;
   const start = new Date(createdAt);

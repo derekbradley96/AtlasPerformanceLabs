@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { isPersonal } from '@/lib/roles';
 import { getClientByUserId } from '@/data/selectors';
 import { getAchievementsList } from '@/lib/milestonesStore';
 import Card from '@/ui/Card';
@@ -14,11 +15,12 @@ function formatDate(iso) {
 
 export default function Achievements() {
   const navigate = useNavigate();
-  const { user: authUser, role, isDemoMode } = useAuth();
+  const { user: authUser, effectiveRole, role, isDemoMode } = useAuth();
   const userId = authUser?.id;
   const clientForUser = userId ? getClientByUserId(userId) : null;
   const byUser = true;
   const achievements = userId ? getAchievementsList(userId, { byUser }) : [];
+  const showFindCoach = isPersonal(effectiveRole ?? role);
 
   return (
     <div
@@ -34,6 +36,14 @@ export default function Achievements() {
           <p className="text-sm mt-2" style={{ color: colors.muted }}>
             Complete check-ins and hit goals to unlock achievements.
           </p>
+          {showFindCoach && (
+            <p className="text-sm mt-4" style={{ color: colors.muted }}>
+              Want a program built for you?{' '}
+              <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
+                Find a coach
+              </button>
+            </p>
+          )}
         </Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[12] }}>
@@ -56,6 +66,14 @@ export default function Achievements() {
               </div>
             </Card>
           ))}
+          {showFindCoach && (
+            <p className="text-sm text-center mt-4" style={{ color: colors.muted }}>
+              Want to level up with a coach?{' '}
+              <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
+                Find a coach
+              </button>
+            </p>
+          )}
         </div>
       )}
     </div>

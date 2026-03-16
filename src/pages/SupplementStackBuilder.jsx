@@ -16,7 +16,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { Search, Users, Pill, CheckCircle2 } from 'lucide-react';
 
 async function fetchCoachClients() {
-  if (!hasSupabase()) return [];
+  if (!hasSupabase) return [];
   const supabase = getSupabase();
   if (!supabase) return [];
   const { data: { user } } = await supabase.auth.getUser();
@@ -34,7 +34,7 @@ async function fetchCoachClients() {
 }
 
 async function fetchSupplements() {
-  if (!hasSupabase()) return [];
+  if (!hasSupabase) return [];
   const supabase = getSupabase();
   if (!supabase) return [];
   const { data, error } = await supabase
@@ -46,7 +46,7 @@ async function fetchSupplements() {
 }
 
 async function fetchClientStack(clientId) {
-  if (!clientId || !hasSupabase()) return [];
+  if (!clientId || !hasSupabase) return [];
   const supabase = getSupabase();
   if (!supabase) return [];
   const { data, error } = await supabase
@@ -76,19 +76,19 @@ export default function SupplementStackBuilder() {
   const { data: clients = [], isLoading: loadingClients } = useQuery({
     queryKey: ['coach_clients_for_supplements'],
     queryFn: fetchCoachClients,
-    enabled: hasSupabase() && isCoachRole,
+    enabled: hasSupabase && isCoachRole,
   });
 
   const { data: supplements = [], isLoading: loadingSupps } = useQuery({
     queryKey: ['supplements_all'],
     queryFn: fetchSupplements,
-    enabled: hasSupabase() && isCoachRole,
+    enabled: hasSupabase && isCoachRole,
   });
 
   const { data: clientStack = [], isLoading: loadingStack } = useQuery({
     queryKey: ['client_supplements_stack', clientId],
     queryFn: () => fetchClientStack(clientId),
-    enabled: hasSupabase() && isCoachRole && !!clientId,
+    enabled: hasSupabase && isCoachRole && !!clientId,
   });
 
   const assignMutation = useMutation({

@@ -22,6 +22,7 @@
     "assets": "node scripts/generate-capacitor-resources.mjs && npx capacitor-assets generate --assetPath resources --iconBackgroundColor '#0F172A' --iconBackgroundColorDark '#0F172A' --splashBackgroundColor '#0F172A' --splashBackgroundColorDark '#0F172A'",
     "cap:init": "npx cap init \"Atlas Performance Labs\" \"com.atlasperformancelabs.app\" --web-dir=dist",
     "cap:sync": "npm run build && npx cap sync",
+    "cap:sync:all": "npm run build && npx cap sync",
     "android": "npm run cap:sync && npx cap open android",
     "ios": "node scripts/ensure-ios.mjs",
     "open:ios": "open ios/App/App.xcodeproj",
@@ -36,7 +37,11 @@
     "cap:ios:live": "vite build --watch & npx cap sync ios",
     "cap:android:live": "vite build --watch & npx cap sync android",
     "reset-project": "rm -rf node_modules dist .vite && npm install",
-    "expo": "echo \"This project uses Vite + Capacitor, not Expo. Use: npm run dev (web) or npm run ios (iOS simulator).\""
+    "expo": "echo \"This project uses Vite + Capacitor, not Expo. Use: npm run dev (web) or npm run ios (iOS simulator).\"",
+    "security:audit": "npm audit --omit=dev",
+    "security:audit:fix": "npm audit fix --omit=dev",
+    "security:osv": "npx osv-scanner@latest --lockfile=package-lock.json",
+    "security:full": "npm run security:audit && npm run security:osv"
   },
   "dependencies": {
     "@capacitor/app": "^6.0.3",
@@ -84,6 +89,8 @@
     "@stripe/stripe-js": "^5.2.0",
     "@supabase/supabase-js": "^2.97.0",
     "@tanstack/react-query": "^5.84.1",
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -148,6 +155,6 @@
   },
   "overrides": {
     "minimatch": "^9.0.7",
-    "tar": "^6.1.11"
+    "tar": "^7.0.0"
   }
 }

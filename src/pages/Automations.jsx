@@ -23,11 +23,11 @@ export default function Automations() {
       const profiles = await base44.entities.TrainerProfile.filter({ user_id: user.id });
       return profiles[0] || null;
     },
-    enabled: !!user?.id && user?.user_type === 'trainer'
+    enabled: !!user?.id && (user?.user_type === 'coach' || user?.user_type === 'trainer')
   });
 
   if (!user) return <PageLoader />;
-  if (user.user_type !== 'trainer') return <NotAuthorized />;
+  if (user.user_type !== 'coach' && user.user_type !== 'trainer') return <NotAuthorized />;
 
   const automations = [
     {

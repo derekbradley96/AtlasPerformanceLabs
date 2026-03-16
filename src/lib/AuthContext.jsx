@@ -1,3 +1,4 @@
+/** Production auth flow is unified through /auth. Legacy role-select pages are DEV/demo only. setFakeSession is a DEV-only fallback. */
 import React, { createContext, useState, useContext, useEffect, useRef } from 'react';
 import { getCoachType, normalizeCoachType } from '@/lib/data/coachProfileRepo';
 import { coachTypeToCoachFocus, coachFocusToCoachType } from '@/lib/data/coachTypeHelpers';
@@ -24,24 +25,25 @@ const ADMIN_COACH_FOCUS_KEY = 'atlas_admin_coach_focus_override';
 /** Only this email can use the in-app role switcher and admin panel. Exported for route gate / Profile. */
 export const ADMIN_EMAIL = 'derekbradley96@gmail.com';
 
-/** Canonical: trainer, client, solo. Persisted and sent as user_type in signUp. */
+/** Canonical: coach, client, personal. Persisted and sent as user_type in signUp. */
 const VALID_ROLES = [...CANONICAL_ROLES];
 const VALID_ROLES_PERSISTED = [...CANONICAL_ROLES];
 /** Values we may read from DB (canonical + legacy); map legacy to canonical, never write legacy. */
-const PROFILE_ROLES_READ = ['trainer', 'client', 'solo', 'coach', 'personal', 'athlete'];
+// Roles we may still read from legacy rows; normalizeRole maps to canonical (coach/client/personal).
+const PROFILE_ROLES_READ = ['coach', 'client', 'personal', 'trainer', 'solo', 'athlete'];
 const ADMIN_ROLE = 'admin';
 
 function isValidProfileRole(profileRole) {
   return profileRole && PROFILE_ROLES_READ.includes(profileRole.toString().trim().toLowerCase());
 }
 
-/** Local trainer when no Supabase/fake session. Sandbox only; never used when real auth exists. */
-const LOCAL_TRAINER_USER = {
-  id: 'local-trainer',
+/** Local coach when no Supabase/fake session. Sandbox only; never used when real auth exists. */
+const LOCAL_COACH_USER = {
+  id: 'local-coach',
   full_name: 'Derek (Local)',
   name: 'Derek (Local)',
-  user_type: 'trainer',
-  role: 'trainer',
+  user_type: 'coach',
+  role: 'coach',
   email: 'local@atlas',
 };
 
@@ -59,9 +61,9 @@ function getStoredRole() {
   if (typeof window === 'undefined' || !window.localStorage) return null;
   const r = window.localStorage.getItem(ROLE_STORAGE_KEY);
   if (r && VALID_ROLES_PERSISTED.includes(r)) return r;
-  if (r === 'coach') return 'trainer';
-  if (r === 'personal') return 'solo';
-  if (window.localStorage.getItem(SOLO_STORAGE_KEY) === 'true') return 'solo';
+  if (r === 'trainer') return 'coach';
+  if (r === 'solo') return 'personal';
+  if (window.localStorage.getItem(SOLO_STORAGE_KEY) === 'true') return 'personal';
   return null;
 }
 
@@ -74,7 +76,7 @@ function persistRole(role) {
   }
   if (!VALID_ROLES_PERSISTED.includes(role)) return;
   window.localStorage.setItem(ROLE_STORAGE_KEY, role);
-  if (role === 'solo') {
+  if (role === 'personal') {
     window.localStorage.setItem(SOLO_STORAGE_KEY, 'true');
   } else {
     window.localStorage.removeItem(SOLO_STORAGE_KEY);
@@ -160,7 +162,7 @@ async function clearAuthStoragePreferences() {
 function buildFakeUser(role, email) {
   const normalised = normalizeRole(role);
   const name = (email && email !== '') ? email.split('@')[0] : normalised;
-  const stableId = normalised === 'trainer' ? 'local-trainer' : normalised === 'client' ? 'fake-client' : 'fake-personal';
+  const stableId = normalised === 'coach' ? 'local-coach' : normalised === 'client' ? 'fake-client' : 'fake-personal';
   return {
     id: stableId,
     full_name: name,
@@ -215,7 +217,7 @@ export async function fetchProfile(userId) {
   if (!supabase || !userId) return null;
   if (import.meta.env.DEV) console.log('[ATLAS] Fetching profile for', userId);
   try {
-    const { data, error } = await supabase.from('profiles').select('id, role, display_name, coach_type, coach_focus, is_beta_user, beta_group, is_admin').eq('id', userId).maybeSingle();
+    const { data, error } = await supabase.from('profiles').select('id, role, display_name, coach_type, coach_focus, is_beta_user, beta_group, is_admin, onboarding_complete').eq('id', userId).maybeSingle();
     if (error) {
       if (import.meta.env.DEV) console.log('[AUTH] profile error', error?.message);
       return null;
@@ -232,7 +234,7 @@ export const AuthProvider = ({ children }) => {
   const fakeSession = typeof window !== 'undefined' ? getStoredFakeSession() : null;
   const [user, setUser] = useState(() => {
     if (fakeSession) return buildFakeUser(fakeSession.role, fakeSession.email);
-    return LOCAL_TRAINER_USER;
+    return LOCAL_COACH_USER;
   });
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
@@ -261,7 +263,7 @@ export const AuthProvider = ({ children }) => {
   const hydrationStartedRef = useRef(false);
 
   useEffect(() => {
-    const id = user?.id ?? 'local-trainer';
+    const id = user?.id ?? 'local-coach';
     setCurrentTrainerId(id);
   }, [user?.id]);
 
@@ -280,7 +282,7 @@ export const AuthProvider = ({ children }) => {
         setIsAuthenticated(true);
       } else {
         setRoleState(storedRole);
-        setUser(LOCAL_TRAINER_USER);
+        setUser(LOCAL_COACH_USER);
       }
       setIsHydratingAppState(false);
       return;
@@ -288,7 +290,7 @@ export const AuthProvider = ({ children }) => {
     if (!supabase) {
       setIsHydratingSupabase(false);
       setRoleState(null);
-      setUser(LOCAL_TRAINER_USER);
+      setUser(LOCAL_COACH_USER);
       setIsHydratingAppState(false);
       return;
     }
@@ -309,10 +311,10 @@ export const AuthProvider = ({ children }) => {
     let mounted = true;
     (async () => {
       try {
-        if (import.meta.env.DEV) console.log('[ATLAS] boot start');
+        if (import.meta.env.DEV) console.log('[AUTH] boot start');
         const { data } = await supabase.auth.getSession();
         const session = data?.session;
-        if (import.meta.env.DEV) console.log('[AUTH] session user id', session?.user?.id ?? 'no session');
+        if (import.meta.env.DEV) console.log('[AUTH] session', session ? 'found' : 'not found', session?.user?.id ?? '');
         if (!mounted) return;
         setIsHydratingSupabase(false);
         if (!session?.user) {
@@ -321,8 +323,11 @@ export const AuthProvider = ({ children }) => {
           setProfile(null);
           setProfileLoadError(null);
           setRoleState(null);
-          setUser(LOCAL_TRAINER_USER);
+          setUser(LOCAL_COACH_USER);
           setIsAuthenticated(false);
+          hydrationDoneRef.current = true;
+          setIsHydratingAppState(false);
+          clearTimeout(safetyTimer);
           if (import.meta.env.DEV) console.log('[ATLAS] boot ready (no session)');
           return;
         }
@@ -348,16 +353,16 @@ export const AuthProvider = ({ children }) => {
           }
         } else if (profileRow && profileRow.id && (profileRow.role == null || profileRow.role === '')) {
           try {
-            await supabase.from('profiles').update({ role: 'solo' }).eq('id', session.user.id);
+            await supabase.from('profiles').update({ role: 'personal' }).eq('id', session.user.id);
           } catch (_) {}
-          const patched = { ...profileRow, role: 'solo' };
+          const patched = { ...profileRow, role: 'personal' };
           setProfile(patched);
-          setRoleState('solo');
+          setRoleState('personal');
           const u = buildUserFromProfile(session.user, patched);
           if (u) setUser(u);
           setIsAuthenticated(true);
           setBootError(null);
-          if (import.meta.env.DEV) console.log('[ATLAS] profile role missing, defaulted to solo');
+          if (import.meta.env.DEV) console.log('[ATLAS] profile role missing, defaulted to personal');
         } else {
           setProfile(null);
           setRoleState(DEFAULT_ROLE);
@@ -381,7 +386,7 @@ export const AuthProvider = ({ children }) => {
           setProfile(null);
           setProfileLoadError(null);
           setRoleState(null);
-          setUser(LOCAL_TRAINER_USER);
+          setUser(LOCAL_COACH_USER);
           setIsAuthenticated(false);
         }
       } finally {
@@ -417,11 +422,11 @@ export const AuthProvider = ({ children }) => {
           }
         } else if (profileRow && profileRow.id && (profileRow.role == null || profileRow.role === '')) {
           try {
-            await supabase.from('profiles').update({ role: 'solo' }).eq('id', session.user.id);
+            await supabase.from('profiles').update({ role: 'personal' }).eq('id', session.user.id);
           } catch (_) {}
-          const patched = { ...profileRow, role: 'solo' };
+          const patched = { ...profileRow, role: 'personal' };
           setProfile(patched);
-          setRoleState('solo');
+          setRoleState('personal');
           const u = buildUserFromProfile(session.user, patched);
           if (u) setUser(u);
           setIsAuthenticated(true);
@@ -439,7 +444,7 @@ export const AuthProvider = ({ children }) => {
       } else {
         setProfile(null);
         setRoleState(null);
-        setUser(LOCAL_TRAINER_USER);
+        setUser(LOCAL_COACH_USER);
         setIsAuthenticated(false);
       }
     });
@@ -453,18 +458,18 @@ export const AuthProvider = ({ children }) => {
 
   /** Single source of truth: coach_focus. Derive coachType from it for legacy consumers (health, nutrition, etc). */
   useEffect(() => {
-    if (normalizeRole(role) !== 'trainer') {
+    if (normalizeRole(role) !== 'coach') {
       setCoachTypeState(null);
       return;
     }
-    const trainerId = user?.id;
-    if (!trainerId) return;
+    const coachId = user?.id;
+    if (!coachId) return;
     let resolvedFocus = (profile?.coach_focus ?? '').toString().trim() || null;
     if (!resolvedFocus && profile?.coach_type) {
       resolvedFocus = coachTypeToCoachFocus(normalizeCoachType(profile.coach_type) || profile.coach_type);
     }
     if (!resolvedFocus) {
-      const legacyType = getCoachType(trainerId);
+      const legacyType = getCoachType(coachId);
       resolvedFocus = coachTypeToCoachFocus(legacyType) || 'transformation';
     }
     setCoachTypeState(coachFocusToCoachType(resolvedFocus));
@@ -500,14 +505,10 @@ export const AuthProvider = ({ children }) => {
     if (focusStored) setCoachFocusOverrideState(focusStored);
   }, [user?.email, role]);
 
-  /** Switch view to coach/client/personal (admin account only). Maps coach->trainer, personal->solo for persistence. */
+  /** Switch view to coach/client/personal (admin account only). Persists canonical role. */
   const setRoleOverride = (nextRole) => {
     if (user?.email !== ADMIN_EMAIL) return;
-    const toPersist =
-      nextRole === 'coach' ? 'trainer'
-        : nextRole === 'personal' ? 'solo'
-          : nextRole === 'client' ? 'client'
-            : null;
+    const toPersist = nextRole === 'coach' || nextRole === 'client' || nextRole === 'personal' ? nextRole : null;
     setAdminImpersonateRole(toPersist);
     persistAdminImpersonate(toPersist);
   };
@@ -547,16 +548,17 @@ export const AuthProvider = ({ children }) => {
           if (import.meta.env.DEV) console.log('[AUTH] profile error', profileErr?.message);
           setProfileLoadError('PROFILE_MISSING');
         }
-        const u = profileRow && VALID_ROLES.includes(profileRow.role)
+        const canonicalRole = profileRow ? normalizeRole(profileRow.role) : null;
+        const u = profileRow && canonicalRole && VALID_ROLES.includes(canonicalRole)
           ? normalizeProfile(data.user, profileRow)
           : normalizeProfile(data.user, null);
         if (u) {
           setUser(u);
           setIsAuthenticated(true);
         }
-        if (profileRow && VALID_ROLES.includes(profileRow.role)) {
+        if (profileRow && canonicalRole && VALID_ROLES.includes(canonicalRole)) {
           setProfile(profileRow);
-          setRoleState(profileRow.role);
+          setRoleState(canonicalRole);
         } else {
           setProfile(null);
           setRoleState(null);
@@ -598,7 +600,8 @@ export const AuthProvider = ({ children }) => {
       ...(roleForMetadata === 'coach' && coach_focus != null ? { coach_focus } : {}),
     };
     if (import.meta.env.DEV) {
-      console.warn('[SIGNUP DEBUG]', { role: roleForMetadata, coach_focus, display_name, email });
+      console.log('[SIGNUP] start', { email, role: roleForMetadata, coach_focus: coach_focus ?? null, display_name });
+      console.log('[SIGNUP] metadata sent (no password)', dataForTrigger);
     }
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -611,9 +614,10 @@ export const AuthProvider = ({ children }) => {
       });
       if (error) {
         if (import.meta.env.DEV) {
-          console.warn('[SIGNUP FAILED]', {
-            errorMessage: error?.message,
-            errorStatus: error?.status,
+          console.warn('[SIGNUP] Supabase auth error', {
+            message: error?.message,
+            status: error?.status,
+            name: error?.name,
             roleSent: roleForMetadata,
           });
         }
@@ -636,7 +640,7 @@ export const AuthProvider = ({ children }) => {
             new Promise((_, rej) => setTimeout(() => rej(new Error('Profile fetch timeout')), PROFILE_FETCH_TIMEOUT_MS)),
           ]);
         } catch (profileErr) {
-          if (import.meta.env.DEV) console.log('[AUTH] profile error', profileErr?.message);
+          if (import.meta.env.DEV) console.warn('[SIGNUP] profile fetch failed (trigger may have failed)', profileErr?.message, profileErr);
           setProfileLoadError('PROFILE_MISSING');
         }
         if (roleForMetadata === 'coach' && coach_focus != null) {
@@ -664,6 +668,10 @@ export const AuthProvider = ({ children }) => {
               console.warn('[SIGNUP] referral record', rpcData?.error);
             }
           }
+        }
+        if (import.meta.env.DEV) {
+          if (profileRow) console.log('[SIGNUP] profile fetch success', { role: profileRow.role, id: profileRow.id });
+          else console.warn('[SIGNUP] profile missing after signup — trigger may have failed; run migration 20260317120000_fix_profile_creation_on_signup');
         }
         if (profileRow && (options.role === 'personal' || roleForMetadata === 'personal') && (profileRow.role === 'coach' || profileRow.role === 'trainer')) {
           if (import.meta.env.DEV) console.warn('[SIGNUP] Expected role=personal but profile has', profileRow.role);
@@ -704,10 +712,10 @@ export const AuthProvider = ({ children }) => {
     setSupabaseSession(null);
     setProfile(null);
     clearFakeSession();
-    setUser(LOCAL_TRAINER_USER);
+    setUser(LOCAL_COACH_USER);
     setRoleState(null);
     setIsAuthenticated(false);
-    setCurrentTrainerId('local-trainer');
+    setCurrentTrainerId('local-coach');
     if (typeof window !== 'undefined') window.location.href = '/';
   };
 
@@ -736,17 +744,18 @@ export const AuthProvider = ({ children }) => {
     setProfile(null);
     setRoleState(null);
     setAdminImpersonateRole(null);
-    setUser(LOCAL_TRAINER_USER);
+    setUser(LOCAL_COACH_USER);
     setIsAuthenticated(false);
     setIsDemoMode(false);
-    setCurrentTrainerId('local-trainer');
+    setCurrentTrainerId('local-coach');
     if (shouldRedirect && typeof window !== 'undefined') {
       window.location.href = '/';
     }
   };
 
   const setFakeSession = (roleValue, email) => {
-    const r = VALID_ROLES_PERSISTED.includes(normalizeRole(roleValue)) ? normalizeRole(roleValue) : 'solo';
+    if (import.meta.env.DEV) console.warn('[AUTH] setFakeSession used (DEV-only fallback)', roleValue);
+    const r = VALID_ROLES_PERSISTED.includes(normalizeRole(roleValue)) ? normalizeRole(roleValue) : 'personal';
     const u = buildFakeUser(r, email);
     setUser(u);
     setIsAuthenticated(true);
@@ -760,7 +769,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const navigateToLogin = () => {
-    if (typeof window !== 'undefined') window.location.href = '/';
+    if (typeof window !== 'undefined') window.location.href = '/auth';
   };
 
   const setRole = (nextRole) => {
@@ -779,9 +788,9 @@ export const AuthProvider = ({ children }) => {
     persistRole(value);
   };
 
-  const enterAdmin = (roleToImpersonate = 'trainer') => {
+  const enterAdmin = (roleToImpersonate = 'coach') => {
     if (!isDev) return;
-    const r = VALID_ROLES_PERSISTED.includes(roleToImpersonate) ? roleToImpersonate : 'trainer';
+    const r = VALID_ROLES_PERSISTED.includes(roleToImpersonate) ? roleToImpersonate : 'coach';
     setRoleState(ADMIN_ROLE);
     setAdminImpersonateRole(r);
     persistRole(null);
@@ -794,10 +803,10 @@ export const AuthProvider = ({ children }) => {
     setProfile(null);
     setRoleState(null);
     setAdminImpersonateRole(null);
-    setUser(LOCAL_TRAINER_USER);
+    setUser(LOCAL_COACH_USER);
     setIsAuthenticated(false);
     setIsDemoMode(false);
-    setCurrentTrainerId('local-trainer');
+    setCurrentTrainerId('local-coach');
     if (typeof window !== 'undefined') window.location.href = '/';
   };
 
@@ -810,7 +819,7 @@ export const AuthProvider = ({ children }) => {
   const updateProfile = async (patch) => {
     if (!hasSupabase || !supabase || !supabaseUser?.id) return { error: new Error('Not signed in') };
     const safePatch = { ...patch };
-    if (safePatch.coach_focus !== undefined && profile && normalizeRole(profile.role) !== 'trainer') {
+    if (safePatch.coach_focus !== undefined && profile && normalizeRole(profile.role) !== 'coach') {
       safePatch.coach_focus = null;
     }
     const { error } = await supabase.from('profiles').update(safePatch).eq('id', supabaseUser.id);
@@ -824,13 +833,13 @@ export const AuthProvider = ({ children }) => {
     return { error: null };
   };
 
-  /** Resolved role for UI/routing: when admin-by-email and no override, use real role; when dev-panel admin, use impersonation or trainer. */
+  /** Resolved role for UI/routing: when admin-by-email and no override, use real role; when dev-panel admin, use impersonation or coach. */
   const effectiveRole = !isAdminBypass
     ? role
     : role === ADMIN_ROLE
-      ? (adminImpersonateRole || 'trainer')
+      ? (adminImpersonateRole || 'coach')
       : (adminImpersonateRole ?? role);
-  const isViewingAsCoach = effectiveRole === 'trainer';
+  const isViewingAsCoach = normalizeRole(effectiveRole) === 'coach';
 
   /** True only after session hydration (getSession) completes; prevents splash from routing before auth is known. */
   const authReady = !isHydratingAppState;
@@ -893,7 +902,7 @@ export const AuthProvider = ({ children }) => {
       canUseRoleSwitcher,
       setCoachFocusOverride,
       coachFocusOverride: isViewingAsCoach ? coachFocusOverride : null,
-      isSolo: normalizeRole(role) === 'solo',
+      isSolo: normalizeRole(role) === 'personal' || normalizeRole(role) === 'solo',
       isHydratingAppState,
       authReady,
       hasSupabase,

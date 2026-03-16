@@ -4,7 +4,7 @@
  * Personal: self-directed or empty state with CTA.
  * Session persistence: workout_sessions + workout_session_sets (Supabase or sessionStorage).
  */
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -31,6 +31,7 @@ import { createPageUrl } from '@/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { trackFriction, trackRecoverableError } from '@/services/frictionTracker';
+import { trackWorkoutLogged, trackAppOpened } from '@/services/engagementTracker';
 
 const pagePadding = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
 const sectionGap = shell.sectionSpacing;
@@ -56,6 +57,8 @@ function ClientTodayContent() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
+  const appOpenedTracked = useRef(false);
+
   const { data: profile } = useQuery({
     queryKey: ['client-profile', user?.id],
     queryFn: async () => {
@@ -65,6 +68,12 @@ function ClientTodayContent() {
     },
     enabled: !!user?.id,
   });
+
+  useEffect(() => {
+    if (!profile?.id || appOpenedTracked.current) return;
+    appOpenedTracked.current = true;
+    trackAppOpened(profile.id, profile.trainer_id ?? profile.coach_id).catch(() => {});
+  }, [profile?.id, profile?.trainer_id, profile?.coach_id]);
 
   const { data: assignedWorkout, isLoading: assignedWorkoutLoading } = useQuery({
     queryKey: ['assigned-workout-today', profile?.id, 'client'],
@@ -124,7 +133,7 @@ function ClientTodayContent() {
       });
       if (!plan) return null;
       const { data: days } = await supabase
-        .from('peak_week_days')
+        .from('peak_week_plan_days')
         .select('*')
         .eq('plan_id', plan.id)
         .eq('day_date', todayStr)
@@ -155,9 +164,12 @@ function ClientTodayContent() {
 
   const finishSessionMutation = useMutation({
     mutationFn: (sessionId) => completeSession(sessionId),
-    onSuccess: () => {
+    onSuccess: (_data, sessionId) => {
       queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress', profile?.id] });
       queryClient.invalidateQueries({ queryKey: ['workout-session-sets'] });
+      if (profile?.id) {
+        trackWorkoutLogged(profile.id, profile.trainer_id ?? profile.coach_id, { session_id: sessionId }).catch(() => {});
+      }
     },
   });
 

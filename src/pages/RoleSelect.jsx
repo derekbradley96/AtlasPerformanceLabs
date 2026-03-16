@@ -1,9 +1,12 @@
+/**
+ * DEV/demo only: role picker that routes to real auth or client code.
+ * Production auth flow is unified through /auth. Legacy role-select pages are DEV/demo only.
+ */
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { ChevronRight, User, Users, Dumbbell, Shield } from 'lucide-react';
-import { useAuth } from '@/lib/AuthContext';
 import AtlasLogo from '@/components/Brand/AtlasLogo';
 
 import { colors as atlasColors } from '@/ui/tokens';
@@ -67,7 +70,6 @@ function RoleRow({ icon, title, onPress, isLast }) {
 
 export default function RoleSelect() {
   const navigate = useNavigate();
-  const { selectRole } = useAuth();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -77,10 +79,9 @@ export default function RoleSelect() {
 
   const handleRole = async (roleKey) => {
     await lightHaptic();
-    selectRole(roleKey);
-    if (roleKey === 'trainer') navigate('/trainer-login');
-    if (roleKey === 'client') navigate('/client-code');
-    if (roleKey === 'solo') navigate('/solo-login');
+    if (roleKey === 'coach') navigate('/auth?mode=login&account=coach', { replace: true });
+    else if (roleKey === 'personal') navigate('/auth?mode=login&account=personal', { replace: true });
+    else if (roleKey === 'client') navigate('/client-code', { replace: true });
   };
 
   const handleAdminOpen = async () => {
@@ -127,9 +128,9 @@ export default function RoleSelect() {
           }}
         >
           <RoleRow
-            title="Trainer"
+            title="Coach"
             icon={<Dumbbell size={20} color={ACCENT} />}
-            onPress={() => handleRole('trainer')}
+            onPress={() => handleRole('coach')}
             isLast={false}
           />
           <RoleRow
@@ -141,7 +142,7 @@ export default function RoleSelect() {
           <RoleRow
             title="Personal"
             icon={<User size={20} color={ACCENT} />}
-            onPress={() => handleRole('solo')}
+            onPress={() => handleRole('personal')}
             isLast
           />
         </div>

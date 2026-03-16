@@ -16,7 +16,7 @@ const TOGGLES = [
 
 export default function NotificationSettings() {
   const { role } = useAuth();
-  const isTrainer = role === 'trainer';
+  const isCoach = role === 'coach' || role === 'trainer';
   const [settings, setSettings] = useState(() => getNotificationSettings());
   const [autoOpenReview, setAutoOpenReview] = useState(() => getTrainerAutoOpenReview());
   const [silentMode, setSilentMode] = useState(() => getTrainerSilentMode());
@@ -108,7 +108,7 @@ export default function NotificationSettings() {
         ))}
       </Card>
 
-      {isTrainer && (
+      {isCoach && (
         <>
           <Card style={{ padding: 0, marginBottom: spacing[16] }}>
             <div

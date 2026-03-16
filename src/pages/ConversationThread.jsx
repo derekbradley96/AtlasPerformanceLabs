@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { useAuth } from '@/lib/AuthContext';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Send, Image as ImageIcon, Pin, Flag, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import QuickReplies from '@/components/messaging/QuickReplies';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { createPageUrl } from '@/utils';
 import { toast } from 'sonner';
+import { trackMessageSent } from '@/services/engagementTracker';
 
 export default function ConversationThread() {
   const navigate = useNavigate();
@@ -17,89 +19,75 @@ export default function ConversationThread() {
   const conversationId = searchParams.get('id');
   const prefillText = searchParams.get('prefill');
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   
-  const [user, setUser] = useState(null);
   const [messageText, setMessageText] = useState(prefillText || '');
   const [uploading, setUploading] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
-  }, []);
-
   const { data: conversation } = useQuery({
     queryKey: ['conversation', conversationId],
-    queryFn: () => base44.entities.Conversation.filter({ id: conversationId }).then(c => c[0]),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('conversation-get', { id: conversationId });
+      return data ?? null;
+    },
     enabled: !!conversationId
   });
 
   const { data: messages = [] } = useQuery({
     queryKey: ['messages', conversationId],
-    queryFn: () => base44.entities.Message.filter({ conversation_id: conversationId }, 'created_date'),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('message-list', { conversation_id: conversationId });
+      return Array.isArray(data) ? data : [];
+    },
     enabled: !!conversationId
   });
 
   const { data: trainerProfile } = useQuery({
     queryKey: ['trainer-profile-msg', conversation?.trainer_id],
-    queryFn: () => base44.entities.TrainerProfile.filter({ id: conversation.trainer_id }).then(p => p[0]),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('trainer-profile-get', { id: conversation?.trainer_id });
+      return data ?? null;
+    },
     enabled: !!conversation?.trainer_id
   });
 
   const { data: clientProfile } = useQuery({
     queryKey: ['client-profile-msg', conversation?.client_id],
-    queryFn: () => base44.entities.ClientProfile.filter({ id: conversation.client_id }).then(p => p[0]),
+    queryFn: async () => {
+      const { data } = await invokeSupabaseFunction('client-profile-get', { id: conversation?.client_id });
+      return data ?? null;
+    },
     enabled: !!conversation?.client_id
   });
 
-  const { data: trainerUser } = useQuery({
-    queryKey: ['trainer-user-msg', trainerProfile?.user_id],
-    queryFn: () => base44.entities.User.filter({ id: trainerProfile.user_id }).then(u => u[0]),
-    enabled: !!trainerProfile?.user_id
-  });
-
-  const { data: clientUser } = useQuery({
-    queryKey: ['client-user-msg', clientProfile?.user_id],
-    queryFn: () => base44.entities.User.filter({ id: clientProfile.user_id }).then(u => u[0]),
-    enabled: !!clientProfile?.user_id
-  });
-
-  // Check if client is at risk or has payment issues
   const { data: latestCheckin } = useQuery({
     queryKey: ['latest-checkin', conversation?.client_id],
     queryFn: async () => {
-      const checkins = await base44.entities.CheckIn.filter(
-        { client_id: conversation.client_id },
-        '-created_date',
-        1
-      );
-      const list = Array.isArray(checkins) ? checkins : [];
+      const { data } = await invokeSupabaseFunction('checkin-list', { client_id: conversation?.client_id });
+      const list = Array.isArray(data) ? data : [];
       return list[0] ?? null;
     },
-    enabled: !!conversation?.client_id && user?.user_type === 'trainer'
+    enabled: !!conversation?.client_id && (user?.user_type === 'coach' || user?.user_type === 'trainer')
   });
 
-  const isTrainer = user?.user_type === 'trainer';
+  const isTrainer = (user?.user_type === 'coach' || user?.user_type === 'trainer');
   const senderType = isTrainer ? 'trainer' : 'client';
-  const otherPartyName = isTrainer ? clientUser?.full_name : trainerUser?.full_name;
+  const otherPartyName = isTrainer ? (clientProfile?.name || clientProfile?.full_name) : (trainerProfile?.display_name || trainerProfile?.name);
 
   // Mark messages as read when conversation opens
   useEffect(() => {
     if (!user || !conversationId || !messages.length) return;
-    
     const unreadMessages = messages.filter(m => !m.read_at && m.sender_id !== user.id);
     if (unreadMessages.length > 0) {
       unreadMessages.forEach(msg => {
-        base44.entities.Message.update(msg.id, { read_at: new Date().toISOString() });
+        invokeSupabaseFunction('message-update', { id: msg.id, read_at: new Date().toISOString() });
       });
       queryClient.invalidateQueries(['messages', conversationId]);
       queryClient.invalidateQueries(['unread-count']);
     }
-  }, [conversationId, messages, user]);
+  }, [conversationId, messages, user, queryClient]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -108,11 +96,15 @@ export default function ConversationThread() {
 
   const sendMessageMutation = useMutation({
     mutationFn: async (data) => {
-      await base44.entities.Message.create(data);
-      await base44.entities.Conversation.update(conversationId, {
+      await invokeSupabaseFunction('message-create', data);
+      await invokeSupabaseFunction('conversation-update', {
+        id: conversationId,
         last_message_at: new Date().toISOString(),
-        last_message_preview: data.text.substring(0, 50)
+        last_message_preview: (data.text || '').substring(0, 50)
       });
+      if (conversation?.client_id && data.sender_type === 'client') {
+        trackMessageSent(conversation.client_id, conversation.trainer_id ?? conversation.coach_id, { thread_id: conversationId }).catch(() => {});
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['messages', conversationId]);

@@ -1,13 +1,15 @@
 /**
  * Client Detail – Client Health card: lifecycle stage, risk band/score, reasons from v_client_retention_risk.
- * Quick actions: Message Client, Adjust Program, Add Flag.
+ * Quick actions: Message Client, Send Nudge, Adjust Program, Add Flag.
  */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
-import { MessageSquare, ClipboardList, Flag } from 'lucide-react';
+import { MessageSquare, ClipboardList, Flag, Send } from 'lucide-react';
+import { getReengagementTemplate, sendReengagementNudge } from '@/lib/reengagementTemplates';
+import { toast } from 'sonner';
 
 const REASON_LABELS = {
   days_since_last_checkin_high: 'Check-in overdue',
@@ -46,12 +48,17 @@ export default function ClientHealthCard({
   reasons = [],
   loading,
   onMessage,
+  onSendNudge,
   onAdjustProgram,
   onAddFlag,
 }) {
   const navigate = useNavigate();
   const displayReasons = Array.isArray(reasons) ? reasons.map(formatReason) : [];
   const handleAddFlag = onAddFlag ?? (() => clientId && navigate(`/clients/${clientId}/intervention`));
+  const handleSendNudge = onSendNudge ?? (() => {
+    const template = getReengagementTemplate(reasons);
+    sendReengagementNudge({ clientId, template, navigate, toast });
+  });
 
   if (loading) {
     return (
@@ -109,6 +116,11 @@ export default function ClientHealthCard({
         {typeof onMessage === 'function' && (
           <Button variant="secondary" size="sm" onClick={onMessage} className="flex items-center gap-1.5">
             <MessageSquare size={16} /> Message Client
+          </Button>
+        )}
+        {clientId && (displayReasons.length > 0 || riskBand === 'at_risk' || riskBand === 'churn_risk') && (
+          <Button variant="secondary" size="sm" onClick={handleSendNudge} className="flex items-center gap-1.5">
+            <Send size={16} /> Send Nudge
           </Button>
         )}
         {typeof onAdjustProgram === 'function' && (

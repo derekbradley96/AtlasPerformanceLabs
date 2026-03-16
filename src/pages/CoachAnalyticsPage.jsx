@@ -16,7 +16,9 @@ import { ProgressSummarySkeleton, TrendSectionSkeleton } from '@/components/ui/L
 import { hapticLight } from '@/lib/haptics';
 import { colors, spacing, radii, shadows } from '@/ui/tokens';
 import TimeframeFilter, { getCutoffDateForRange, DEFAULT_TIMEFRAME, TIMEFRAME_OPTIONS } from '@/components/ui/TimeframeFilter';
-import { ChevronRight, TrendingUp, AlertTriangle, ClipboardCheck, Award, BarChart3 } from 'lucide-react';
+import { resolveOrgCoachScope } from '@/lib/organisationScope';
+import { toCSV, downloadCSV } from '@/lib/csvExport';
+import { ChevronRight, TrendingUp, AlertTriangle, ClipboardCheck, Award, BarChart3, Download, Loader2 } from 'lucide-react';
 
 const TOP_LIST_SIZE = 5;
 const MAX_TREND_WEEKS = 52;
@@ -37,9 +39,24 @@ function showPoseAndPeakByFocus(coachFocus) {
   return coachFocus === 'competition' || coachFocus === 'integrated';
 }
 
+/** Current week start (Monday) as YYYY-MM-DD for v_client_momentum. */
+function getCurrentWeekStartISO() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diff);
+  return monday.toISOString().slice(0, 10);
+}
+
 /** Fetch all analytics data in parallel. */
-async function fetchAnalyticsData(coachId, showPrep) {
-  if (!hasSupabase || !coachId) {
+async function fetchAnalyticsData(coachFilter, showPrep) {
+  const coachIds = Array.isArray(coachFilter)
+    ? coachFilter.filter(Boolean)
+    : coachFilter
+      ? [coachFilter]
+      : [];
+  if (!hasSupabase || coachIds.length === 0) {
     return {
       money: null,
       metrics: [],
@@ -48,40 +65,46 @@ async function fetchAnalyticsData(coachId, showPrep) {
       attention: [],
       checkinsByWeek: [],
       clientIds: [],
+      momentum: [],
+      habitAdherence: [],
     };
   }
   const supabase = getSupabase();
-  if (!supabase) return { money: null, metrics: [], retention: [], retentionSignals: [], attention: [], checkinsByWeek: [], clientIds: [] };
+  if (!supabase) return { money: null, metrics: [], retention: [], retentionSignals: [], attention: [], checkinsByWeek: [], clientIds: [], momentum: [], habitAdherence: [] };
 
   const maxWeeksAgo = new Date();
   maxWeeksAgo.setDate(maxWeeksAgo.getDate() - MAX_TREND_WEEKS * 7);
   const since = maxWeeksAgo.toISOString();
+  const weekStart = getCurrentWeekStartISO();
 
-  const [moneyRes, metricsRes, retentionRes, signalsRes, attentionRes, checkinsRes] = await Promise.all([
-    supabase.from('v_coach_money_dashboard').select('*').eq('coach_id', coachId).maybeSingle(),
+  const primaryCoachId = coachIds[0];
+
+  const [moneyRes, metricsRes, retentionRes, signalsRes, attentionRes, checkinsRes, clientsRes] = await Promise.all([
+    supabase.from('v_coach_money_dashboard').select('*').eq('coach_id', primaryCoachId).maybeSingle(),
     supabase
       .from('v_client_progress_metrics')
       .select('client_id, client_name, avg_compliance_last_4w, checkins_last_4w, active_flags_count, has_active_prep, show_date')
-      .eq('coach_id', coachId),
+      .in('coach_id', coachIds),
     supabase
       .from('v_client_retention_risk')
       .select('client_id, client_name, risk_score, risk_band, reasons')
-      .eq('coach_id', coachId)
+      .in('coach_id', coachIds)
       .order('risk_score', { ascending: false }),
     supabase
       .from('v_client_retention_signals')
-      .select('client_id, coach_id, workouts_last_7d, workouts_last_14d')
-      .eq('coach_id', coachId),
+      .select('client_id, coach_id, retention_score, low_habit_adherence, habit_streak_broken')
+      .in('coach_id', coachIds),
     supabase
       .from('v_coach_attention_queue')
-      .select('client_id, client_name, attention_score, reasons')
-      .eq('coach_id', coachId)
-      .order('attention_score', { ascending: false })
+      .select('client_id, client_name, attention_priority, attention_score, reasons, attention_reason')
+      .in('coach_id', coachIds)
+      .order('attention_priority', { ascending: false })
       .limit(TOP_LIST_SIZE * 2),
     supabase
       .from('checkins')
       .select('client_id, week_start')
       .gte('submitted_at', since),
+    supabase.from('clients').select('id').in('assigned_coach_id', coachIds),
   ]);
 
   const money = moneyRes.data || null;
@@ -90,18 +113,40 @@ async function fetchAnalyticsData(coachId, showPrep) {
   const retentionSignals = signalsRes.data || [];
   const attention = attentionRes.data || [];
   const checkins = checkinsRes.data || [];
+  const coachClientIds = (clientsRes.data || []).map((c) => c.id).filter(Boolean);
 
   const clientIds = [...new Set(metrics.map((m) => m.client_id).filter(Boolean))];
   let nameMap = {};
-  if (clientIds.length > 0) {
+  const idsForNames = clientIds.length > 0 ? clientIds : coachClientIds;
+  if (idsForNames.length > 0) {
     const { data: clientRows } = await supabase
       .from('clients')
       .select('id, full_name, name')
-      .in('id', clientIds);
+      .in('id', idsForNames);
     (clientRows || []).forEach((c) => {
       nameMap[c.id] = c.full_name || c.name || 'Client';
     });
   }
+
+  let momentum = [];
+  let habitAdherence = [];
+  if (coachClientIds.length > 0) {
+    const [momentumRes, habitRes] = await Promise.all([
+      supabase
+        .from('v_client_momentum')
+        .select('client_id, total_score')
+        .in('client_id', coachClientIds)
+        .eq('week_start', weekStart),
+      supabase
+        .from('v_client_habit_adherence')
+        .select('client_id, category, adherence_last_7d, current_streak_days, is_active, last_logged_date')
+        .in('client_id', coachClientIds)
+        .eq('is_active', true),
+    ]);
+    momentum = momentumRes.data || [];
+    habitAdherence = habitRes.data || [];
+  }
+
   const byWeek = {};
   checkins.forEach((c) => {
     const w = c.week_start;
@@ -121,7 +166,9 @@ async function fetchAnalyticsData(coachId, showPrep) {
     retentionSignals,
     attention,
     checkinsByWeek,
-    clientIds,
+    clientIds: clientIds.length > 0 ? clientIds : coachClientIds,
+    momentum,
+    habitAdherence,
     showPrep,
   };
 }
@@ -166,7 +213,7 @@ function deriveRiskSummary(retention) {
   return { churn_risk, at_risk, watch, healthy };
 }
 
-/** Retention overview: risk band counts + avg compliance, check-in frequency, workout engagement from metrics + signals. */
+/** Retention overview: risk band counts + avg compliance, check-in frequency. */
 function deriveRetentionOverview(metrics, retention, retentionSignals) {
   const riskSummary = deriveRiskSummary(retention || []);
   const withCompliance = (metrics || []).filter((m) => m.avg_compliance_last_4w != null);
@@ -179,16 +226,54 @@ function deriveRetentionOverview(metrics, retention, retentionSignals) {
     withCheckins.length > 0
       ? withCheckins.reduce((s, m) => s + Number(m.checkins_last_4w), 0) / withCheckins.length
       : null;
-  const withWorkouts = (retentionSignals || []).filter((s) => s.workouts_last_7d != null);
-  const avgWorkouts7d =
-    withWorkouts.length > 0
-      ? withWorkouts.reduce((sum, s) => sum + Number(s.workouts_last_7d), 0) / withWorkouts.length
-      : null;
   return {
     ...riskSummary,
     avgCompliance,
     avgCheckins4w,
-    avgWorkouts7d,
+  };
+}
+
+const LOW_MOMENTUM_THRESHOLD = 50;
+const MOMENTUM_SCORE_DECIMALS = 0;
+
+/** Retention analytics: momentum, habit adherence, broken streaks, top categories. */
+function deriveRetentionAnalytics(momentum, habitAdherence, retentionSignals, nameMap) {
+  const withScore = (momentum || []).filter((m) => m.total_score != null);
+  const avgMomentumScore =
+    withScore.length > 0
+      ? withScore.reduce((s, m) => s + Number(m.total_score), 0) / withScore.length
+      : null;
+  const lowMomentumClients = (momentum || [])
+    .filter((m) => m.total_score != null && Number(m.total_score) < LOW_MOMENTUM_THRESHOLD)
+    .map((m) => ({ client_id: m.client_id, client_name: nameMap[m.client_id] || 'Client', total_score: Number(m.total_score) }));
+
+  const adherenceValues = (habitAdherence || []).map((a) => Number(a.adherence_last_7d)).filter((n) => !Number.isNaN(n) && n != null);
+  const avgHabitAdherence =
+    adherenceValues.length > 0 ? adherenceValues.reduce((s, n) => s + n, 0) / adherenceValues.length : null;
+
+  const brokenStreakCount = (retentionSignals || []).filter((s) => s.habit_streak_broken === true).length;
+
+  const byCategory = {};
+  (habitAdherence || []).forEach((a) => {
+    const cat = a.category || 'custom';
+    if (!byCategory[cat]) byCategory[cat] = { sum: 0, count: 0 };
+    const v = Number(a.adherence_last_7d);
+    if (!Number.isNaN(v)) {
+      byCategory[cat].sum += v;
+      byCategory[cat].count += 1;
+    }
+  });
+  const topAdherenceCategories = Object.entries(byCategory)
+    .map(([category, { sum, count }]) => ({ category, avg: count > 0 ? sum / count : 0, count }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 6);
+
+  return {
+    avgMomentumScore,
+    lowMomentumClients,
+    avgHabitAdherence,
+    brokenStreakCount,
+    topAdherenceCategories,
   };
 }
 
@@ -210,12 +295,16 @@ export default function CoachAnalyticsPage() {
     attention: [],
     checkinsByWeek: [],
     clientIds: [],
+    momentum: [],
+    habitAdherence: [],
   });
 
   const coachId = user?.id ?? null;
   const isCoachRole = isCoach(effectiveRole);
   const coachFocus = getCoachFocus(profile, coachFocusFromAuth);
   const showPrep = showPoseAndPeakByFocus(coachFocus);
+  const [exportingCheckins, setExportingCheckins] = useState(false);
+  const [exportingPrograms, setExportingPrograms] = useState(false);
 
   useEffect(() => {
     if (!isCoachRole || !coachId) {
@@ -223,11 +312,19 @@ export default function CoachAnalyticsPage() {
       return;
     }
     let cancelled = false;
-    fetchAnalyticsData(coachId, showPrep).then((result) => {
+    (async () => {
+      const scope = await resolveOrgCoachScope();
+      const coachFilter =
+        scope && scope.mode === 'org_wide' && Array.isArray(scope.coachIds) && scope.coachIds.length > 0
+          ? scope.coachIds
+          : coachId;
+      const result = await fetchAnalyticsData(coachFilter, showPrep);
       if (!cancelled) setData(result);
       setLoading(false);
-    });
-    return () => { cancelled = true; };
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isCoachRole, coachId, showPrep]);
 
   if (!isCoachRole) {
@@ -285,10 +382,19 @@ export default function CoachAnalyticsPage() {
     return data.checkinsByWeek.filter((w) => w.week_start >= cutoffWeek);
   }, [data.checkinsByWeek, timeframe]);
 
+  const nameMap = useMemo(() => {
+    const m = {};
+    (data.metrics || []).forEach((x) => { m[x.client_id] = x.client_name; });
+    (data.retention || []).forEach((x) => { m[x.client_id] = x.client_name || m[x.client_id]; });
+    (data.attention || []).forEach((x) => { m[x.client_id] = x.client_name || m[x.client_id]; });
+    return m;
+  }, [data.metrics, data.retention, data.attention]);
+
   const roster = deriveRosterSummary(data.money, data.metrics, data.retention);
   const complianceDist = deriveComplianceDistribution(data.metrics);
   const riskSummary = deriveRiskSummary(data.retention);
   const retentionOverview = deriveRetentionOverview(data.metrics, data.retention, data.retentionSignals);
+  const retentionAnalytics = deriveRetentionAnalytics(data.momentum, data.habitAdherence, data.retentionSignals, nameMap);
   const activeCount = data.clientIds.length || roster.activeClients || 0;
   const checkinCompletionTrend = checkinCompletionTrendFiltered.map((w) => ({
     ...w,
@@ -306,6 +412,61 @@ export default function CoachAnalyticsPage() {
     borderRadius: radii.card,
     boxShadow: shadows.glow,
     padding: spacing[16],
+  };
+
+  const handleExportCheckins = async () => {
+    if (!hasSupabase || !coachId || data.clientIds.length === 0) return;
+    setExportingCheckins(true);
+    try {
+      const supabase = getSupabase();
+      const { data: rows, error } = await supabase
+        .from('checkins')
+        .select('id, client_id, week_start, submitted_at, reviewed_at, weight_avg, adherence_pct, notes')
+        .in('client_id', data.clientIds)
+        .order('submitted_at', { ascending: false });
+      if (error) throw error;
+      const csv = toCSV(rows || [], [
+        { key: 'id', label: 'ID' },
+        { key: 'client_id', label: 'Client ID' },
+        { key: 'week_start', label: 'Week start' },
+        { key: 'submitted_at', label: 'Submitted at' },
+        { key: 'reviewed_at', label: 'Reviewed at' },
+        { key: 'weight_avg', label: 'Weight avg' },
+        { key: 'adherence_pct', label: 'Adherence %' },
+        { key: 'notes', label: 'Notes' },
+      ]);
+      downloadCSV(`checkins-export-${new Date().toISOString().slice(0, 10)}.csv`, csv || '');
+    } catch (e) {
+      console.error('[CoachAnalytics] export checkins', e);
+    } finally {
+      setExportingCheckins(false);
+    }
+  };
+
+  const handleExportPrograms = async () => {
+    if (!hasSupabase || !coachId || data.clientIds.length === 0) return;
+    setExportingPrograms(true);
+    try {
+      const supabase = getSupabase();
+      const { data: rows, error } = await supabase
+        .from('program_blocks')
+        .select('id, client_id, title, total_weeks, created_at')
+        .in('client_id', data.clientIds)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const csv = toCSV(rows || [], [
+        { key: 'id', label: 'ID' },
+        { key: 'client_id', label: 'Client ID' },
+        { key: 'title', label: 'Title' },
+        { key: 'total_weeks', label: 'Total weeks' },
+        { key: 'created_at', label: 'Created at' },
+      ]);
+      downloadCSV(`programs-export-${new Date().toISOString().slice(0, 10)}.csv`, csv || '');
+    } catch (e) {
+      console.error('[CoachAnalytics] export programs', e);
+    } finally {
+      setExportingPrograms(false);
+    }
   };
 
   const hasRoster = data.metrics.length > 0 || (roster.activeClients ?? 0) > 0;
@@ -334,6 +495,30 @@ export default function CoachAnalyticsPage() {
         <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>
           Roster health and trends at a glance.
         </p>
+
+        {/* Export */}
+        <div className="flex flex-wrap gap-2" style={{ marginBottom: spacing[16] }}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportCheckins}
+            disabled={exportingCheckins || data.clientIds.length === 0}
+            className="flex items-center gap-2"
+          >
+            {exportingCheckins ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            Export check-ins (CSV)
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportPrograms}
+            disabled={exportingPrograms || data.clientIds.length === 0}
+            className="flex items-center gap-2"
+          >
+            {exportingPrograms ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            Export programs (CSV)
+          </Button>
+        </div>
 
         {/* Timeframe filter */}
         <div style={{ marginBottom: spacing[16] }}>
@@ -394,7 +579,7 @@ export default function CoachAnalyticsPage() {
               <p className="text-lg font-semibold" style={{ color: retentionOverview.churn_risk > 0 ? colors.danger : colors.text }}>{retentionOverview.churn_risk}</p>
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
             <div>
               <p className="text-xs font-medium" style={{ color: colors.muted }}>Avg compliance</p>
               <p className="text-base font-semibold" style={{ color: colors.text }}>
@@ -407,12 +592,93 @@ export default function CoachAnalyticsPage() {
                 {retentionOverview.avgCheckins4w != null ? retentionOverview.avgCheckins4w.toFixed(1) : '—'}
               </p>
             </div>
+          </div>
+        </Card>
+
+        {/* Retention analytics: momentum, habits, streaks, categories, risk distribution */}
+        <div className="mb-2">
+          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: colors.muted }}>Retention analytics</span>
+        </div>
+        <Card style={{ ...cardStyle, marginBottom: spacing[12] }}>
+          <h2 className="atlas-card-title flex items-center gap-2 mb-3">
+            <TrendingUp size={18} style={{ color: colors.primary }} />
+            Momentum & habits
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <div>
-              <p className="text-xs font-medium" style={{ color: colors.muted }}>Workout engagement (7d)</p>
-              <p className="text-base font-semibold" style={{ color: colors.text }}>
-                {retentionOverview.avgWorkouts7d != null ? retentionOverview.avgWorkouts7d.toFixed(1) : '—'}
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Avg momentum score</p>
+              <p className="text-lg font-semibold" style={{ color: colors.text }}>
+                {retentionAnalytics.avgMomentumScore != null ? retentionAnalytics.avgMomentumScore.toFixed(MOMENTUM_SCORE_DECIMALS) : '—'}
               </p>
             </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Avg habit adherence</p>
+              <p className="text-lg font-semibold" style={{ color: colors.text }}>
+                {retentionAnalytics.avgHabitAdherence != null ? `${retentionAnalytics.avgHabitAdherence.toFixed(1)}%` : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Broken streaks</p>
+              <p className="text-lg font-semibold" style={{ color: retentionAnalytics.brokenStreakCount > 0 ? colors.warning : colors.text }}>
+                {retentionAnalytics.brokenStreakCount}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Low momentum clients</p>
+              <p className="text-lg font-semibold" style={{ color: retentionAnalytics.lowMomentumClients.length > 0 ? colors.warning : colors.text }}>
+                {retentionAnalytics.lowMomentumClients.length}
+              </p>
+            </div>
+          </div>
+          {retentionAnalytics.topAdherenceCategories.length > 0 && (
+            <div className="pt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
+              <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Top adherence categories (7d)</p>
+              <div className="flex flex-wrap gap-2">
+                {retentionAnalytics.topAdherenceCategories.map(({ category, avg }) => (
+                  <CountPill
+                    key={category}
+                    label={category}
+                    value={`${avg.toFixed(0)}%`}
+                    tone="neutral"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {retentionAnalytics.lowMomentumClients.length > 0 && (
+            <div className="pt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
+              <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Low momentum clients (this week)</p>
+              <ul className="space-y-0">
+                {retentionAnalytics.lowMomentumClients.slice(0, TOP_LIST_SIZE).map((c) => (
+                  <li key={c.client_id}>
+                    <button
+                      type="button"
+                      onClick={() => { hapticLight(); navigate(`/clients/${c.client_id}`); }}
+                      className="w-full flex items-center justify-between gap-2 py-2 text-left rounded-lg active:opacity-80 text-sm"
+                      style={{ borderBottom: `1px solid ${colors.border}`, background: 'transparent' }}
+                    >
+                      <span className="font-medium truncate" style={{ color: colors.text }}>{c.client_name}</span>
+                      <span className="text-xs shrink-0" style={{ color: colors.muted }}>{c.total_score.toFixed(0)}</span>
+                      <ChevronRight size={14} style={{ color: colors.muted }} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+
+        {/* Retention risk distribution */}
+        <Card style={{ ...cardStyle, marginBottom: spacing[16] }}>
+          <h2 className="atlas-card-title flex items-center gap-2 mb-3">
+            <AlertTriangle size={18} style={{ color: colors.primary }} />
+            Retention risk distribution
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            <CountPill label="Healthy" value={riskSummary.healthy} tone="neutral" />
+            <CountPill label="Watch" value={riskSummary.watch} tone="neutral" />
+            <CountPill label="At risk" value={riskSummary.at_risk} tone={riskSummary.at_risk > 0 ? 'warning' : 'neutral'} />
+            <CountPill label="Churn risk" value={riskSummary.churn_risk} tone={riskSummary.churn_risk > 0 ? 'danger' : 'neutral'} />
           </div>
         </Card>
 
@@ -523,7 +789,7 @@ export default function CoachAnalyticsPage() {
                     style={{ borderBottom: `1px solid ${colors.border}`, background: 'transparent' }}
                   >
                     <span className="font-medium truncate" style={{ color: colors.text }}>{a.client_name || 'Client'}</span>
-                    <span className="text-xs shrink-0" style={{ color: colors.muted }}>Score {a.attention_score ?? '—'}</span>
+                    <span className="text-xs shrink-0" style={{ color: colors.muted }}>Score {a.attention_priority ?? a.attention_score ?? '—'}</span>
                     <ChevronRight size={16} style={{ color: colors.muted }} />
                   </button>
                 </li>

@@ -10,7 +10,7 @@ import {
   getMessagesByClientId,
   getClientById,
 } from '@/data/selectors';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useData, getEffectiveTrainerId } from '@/data/useData';
 import { getAssignment, getProgramById, getAssignmentMeta, assignProgramToClient, getNewerVersions, getLatestVersionForProgram } from '@/lib/programsStore';
 import { addProgramChangeLog } from '@/lib/programChangeLogStore';
@@ -44,7 +44,8 @@ import { getRetentionItem } from '@/lib/retention/retentionRepo';
 import { shouldShowLoyaltyModal, recordLoyaltyAward, getMonthsWithTrainer } from '@/lib/loyaltyAwardsStore';
 import { getProgramChangeLog } from '@/lib/programChangeLogStore';
 import { getClientProgram } from '@/lib/clientProgramStore';
-import { getClientTimeline } from '@/lib/timeline/buildTimeline';
+import { getClientTimeline as getLegacyTimeline } from '@/lib/timeline/buildTimeline';
+import { getClientTimeline as getPerformanceTimeline } from '@/lib/performanceGraph';
 import { appendActionLog } from '@/lib/timeline/actionLogRepo';
 import {
   getSubmissionsByClient,
@@ -69,7 +70,7 @@ import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useClientMasterDashboard } from '@/lib/dashboard/useClientMasterDashboard';
 import { generateProgressInsight, generateRiskInsight } from '@/lib/atlasInsights';
 import { getWeekStartISO } from '@/lib/checkins';
-import { calculateMomentumScore, MOMENTUM_STATUS } from '@/lib/momentumEngine';
+import { calculateMomentumScore, getMomentumStatus, MOMENTUM_STATUS } from '@/lib/momentumEngine';
 import {
   setClientPhase as setClientPhaseSupabase,
   createProgramBlockWithWeeksDays,
@@ -90,6 +91,9 @@ import PoseCheckTimeline from '@/components/prep/PoseCheckTimeline';
 import PrepInsightsBlock from '@/components/prep/PrepInsightsBlock';
 import PrepHistoryCard from '@/components/prep/PrepHistoryCard';
 import HabitProgressCard from '@/components/habits/HabitProgressCard';
+import HabitSnapshotCard from '@/components/habits/HabitSnapshotCard';
+import MilestonesCard from '@/components/milestones/MilestonesCard';
+import ClientAssignmentCard from '@/components/clients/ClientAssignmentCard';
 import ClientOverviewPanel from '@/components/clients/ClientOverviewPanel';
 import ClientHealthCard from '@/components/clients/ClientHealthCard';
 import ClientCheckinsPanel from '@/components/clients/ClientCheckinsPanel';
@@ -119,6 +123,7 @@ const SEGMENTS = [
   { key: 'overview', label: 'Overview' },
   { key: 'checkins', label: 'Check-ins' },
   { key: 'program', label: 'Program' },
+  { key: 'performance', label: 'Performance Timeline' },
 ];
 
 const TIMELINE_FILTERS = [
@@ -209,8 +214,14 @@ export default function ClientDetail() {
     if (!clientId) return;
     setTimelineLoading(true);
     try {
-      const list = await getClientTimeline(clientId, new Date());
-      setTimelineEvents(Array.isArray(list) ? list : []);
+      // Prefer structured performance timeline when available, fall back to legacy buildTimeline helper.
+      const { data, error } = await getPerformanceTimeline(clientId);
+      if (!error && Array.isArray(data) && data.length) {
+        setTimelineEvents(data);
+      } else {
+        const list = await getLegacyTimeline(clientId, new Date());
+        setTimelineEvents(Array.isArray(list) ? list : []);
+      }
     } catch (err) {
       console.error('[ClientDetail] loadTimeline', err);
       setTimelineEvents([]);
@@ -580,6 +591,46 @@ export default function ClientDetail() {
     return { progress, risk };
   }, [progressMetrics, retentionRiskRow]);
 
+  // Engine-generated coaching insights (public.coaching_insights)
+  const queryClient = useQueryClient();
+  const { data: coachingInsights = [] } = useQuery({
+    queryKey: ['coaching_insights', clientId],
+    queryFn: async () => {
+      if (!hasSupabase || !clientId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase
+        .from('coaching_insights')
+        .select('*')
+        .eq('client_id', clientId)
+        .order('is_resolved', { ascending: true })
+        .order('created_at', { ascending: false });
+      if (error) return [];
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: Boolean(hasSupabase && clientId),
+  });
+
+  const markInsightResolvedMutation = useMutation({
+    mutationFn: async (insightId) => {
+      if (!hasSupabase || !insightId) return;
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('coaching_insights')
+        .update({ is_resolved: true })
+        .eq('id', insightId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['coaching_insights', clientId] });
+    },
+    onError: (err) => {
+      console.error('[ClientDetail] markInsightResolved', err);
+      toast.error(err?.message ?? 'Failed to update insight');
+    },
+  });
+
   // Client Momentum (v_client_momentum): current score, trend vs last week, streak, weakest category
   const { data: momentumRows = [], isLoading: momentumLoading } = useQuery({
     queryKey: ['v_client_momentum', clientId],
@@ -638,7 +689,8 @@ export default function ClientDetail() {
         }
       }
     }
-    return { score, status, trend, streakWeeks, weakest };
+    const momentumStatus = score != null ? getMomentumStatus(score) : null;
+    return { score, status, momentumStatus, trend, streakWeeks, weakest };
   }, [momentumRows]);
 
   const [setPhaseSheetOpen, setSetPhaseSheetOpen] = useState(false);
@@ -876,7 +928,7 @@ export default function ClientDetail() {
   }, [clientId]);
 
   useEffect(() => {
-    if (!clientId || role === 'trainer') return;
+    if (!clientId || (role === 'coach' || role === 'trainer')) return;
     const newlyUnlocked = safe(() => evaluateClientMilestones(clientId), null);
     if (newlyUnlocked && !shownAchievementIds.includes(newlyUnlocked.id)) setAchievementModalRecord(newlyUnlocked);
   }, [clientId, checkInsListRaw.length, role]);
@@ -1323,7 +1375,31 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
               </Button>
             )}
           </Card>
-          {clientId && <HabitProgressCard clientId={clientId} />}
+          {clientId && hasSupabase && (
+            <ClientAssignmentCard clientId={clientId} />
+          )}
+          {clientId && (
+            <div style={{ marginBottom: spacing[16] }}>
+              <HabitSnapshotCard clientId={clientId} />
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: colors.muted }}>Habit progress</p>
+                <div className="flex gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => { lightHaptic(); navigate(`/clients/${clientId}/billing`); }}>
+                    Billing
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => { lightHaptic(); navigate(`/clients/${clientId}/habits`); }}>
+                    Manage habits
+                  </Button>
+                </div>
+              </div>
+              <HabitProgressCard clientId={clientId} />
+            </div>
+          )}
+          {clientId && (
+            <div style={{ marginBottom: spacing[16] }}>
+              <MilestonesCard clientId={clientId} title="Milestones" showEmptyState={true} variant="coach" />
+            </div>
+          )}
         </div>
       )}
 
@@ -1518,37 +1594,67 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
               <div style={{ marginBottom: sectionGap }}>
                 <Card style={{ ...standardCard, padding: spacing[20] }}>
                   {momentumLoading ? (
-                    <SkeletonCard lines={3} />
-                  ) : (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                      <div>
-                        <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Score</p>
-                        <p style={{ color: colors.text, fontWeight: 600 }}>
-                          {momentumSummary.score != null ? `${momentumSummary.score}` : '—'}
-                          {momentumSummary.score != null && <span className="text-xs font-normal" style={{ color: colors.muted, marginLeft: 4 }}>/ 100</span>}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Trend</p>
-                        <p style={{ color: colors.text, display: 'flex', alignItems: 'center', gap: 4 }}>
-                          {momentumSummary.trend === 'up' && <TrendingUp size={16} style={{ color: colors.success }} aria-hidden />}
-                          {momentumSummary.trend === 'down' && <TrendingDown size={16} style={{ color: colors.danger }} aria-hidden />}
-                          {momentumSummary.trend === 'stable' && <Minus size={16} style={{ color: colors.muted }} aria-hidden />}
-                          <span style={{ color: colors.text }}>
-                            {momentumSummary.trend === 'up' ? 'Up' : momentumSummary.trend === 'down' ? 'Down' : 'Stable'}
+                    <SkeletonCard lines={4} />
+                  ) : (momentumSummary.score != null || momentumSummary.momentumStatus) ? (
+                    <>
+                      {momentumSummary.momentumStatus && (
+                        <div style={{ marginBottom: spacing[12] }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.04em',
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              background: momentumSummary.momentumStatus === MOMENTUM_STATUS.ON_TRACK ? colors.successSubtle : momentumSummary.momentumStatus === MOMENTUM_STATUS.WATCH ? colors.warningSubtle : 'rgba(239,68,68,0.2)',
+                              color: momentumSummary.momentumStatus === MOMENTUM_STATUS.ON_TRACK ? colors.success : momentumSummary.momentumStatus === MOMENTUM_STATUS.WATCH ? colors.warning : colors.danger,
+                            }}
+                          >
+                            {momentumSummary.momentumStatus === MOMENTUM_STATUS.ON_TRACK ? 'On track' : momentumSummary.momentumStatus === MOMENTUM_STATUS.WATCH ? 'Watch' : 'Off track'}
                           </span>
-                        </p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                        <div>
+                          <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Score</p>
+                          <p style={{ color: colors.text, fontWeight: 600 }}>
+                            {momentumSummary.score != null ? `${momentumSummary.score}` : '—'}
+                            {momentumSummary.score != null && <span className="text-xs font-normal" style={{ color: colors.muted, marginLeft: 4 }}>/ 100</span>}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Trend</p>
+                          <p style={{ color: colors.text, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {momentumSummary.trend === 'up' && <TrendingUp size={16} style={{ color: colors.success }} aria-hidden />}
+                            {momentumSummary.trend === 'down' && <TrendingDown size={16} style={{ color: colors.danger }} aria-hidden />}
+                            {momentumSummary.trend === 'stable' && <Minus size={16} style={{ color: colors.muted }} aria-hidden />}
+                            <span style={{ color: colors.text }}>
+                              {momentumSummary.trend === 'up' ? 'Up' : momentumSummary.trend === 'down' ? 'Down' : 'Stable'}
+                            </span>
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Streak</p>
+                          <p style={{ color: colors.text }}>
+                            {momentumSummary.streakWeeks > 0 ? `${momentumSummary.streakWeeks} week${momentumSummary.streakWeeks === 1 ? '' : 's'}` : '—'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Weakest category</p>
+                          <p style={{
+                            color: (momentumSummary.score != null && momentumSummary.score < 70 && momentumSummary.weakest) ? colors.warning : colors.text,
+                            fontWeight: (momentumSummary.score != null && momentumSummary.score < 70 && momentumSummary.weakest) ? 600 : 400,
+                          }}>
+                            {momentumSummary.weakest ?? '—'}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Streak</p>
-                        <p style={{ color: colors.text }}>
-                          {momentumSummary.streakWeeks > 0 ? `${momentumSummary.streakWeeks} week${momentumSummary.streakWeeks === 1 ? '' : 's'}` : '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Weakest category</p>
-                        <p style={{ color: colors.text }}>{momentumSummary.weakest ?? '—'}</p>
-                      </div>
+                    </>
+                  ) : (
+                    <div style={{ padding: spacing[16], textAlign: 'center' }}>
+                      <p style={{ fontSize: 14, fontWeight: 600, color: colors.text, margin: 0, marginBottom: 4 }}>No momentum data yet</p>
+                      <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>This client&apos;s momentum score will appear here once they have workouts and check-ins for this week.</p>
                     </div>
                   )}
                 </Card>
@@ -1585,6 +1691,81 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
                     <p className="text-sm m-0" style={{ color: colors.text, lineHeight: 1.4 }}>{atlasCoachingInsights.risk.summary}</p>
                   </Card>
                 )}
+              </div>
+            </section>
+          )}
+
+          {/* Coaching Insights */}
+          {Array.isArray(coachingInsights) && coachingInsights.length > 0 && (
+            <section style={{ marginBottom: sectionGap }}>
+              <p style={{ ...sectionLabel }}>Coaching Insights</p>
+              <div className="flex flex-col gap-2">
+                {coachingInsights.map((insight) => {
+                  const severity = (insight.severity || '').toLowerCase();
+                  const color =
+                    severity === 'high' ? colors.danger
+                      : severity === 'medium' ? colors.warning
+                        : colors.success;
+                  const suggestedAction =
+                    insight.metadata?.suggested_action
+                    || insight.metadata?.action
+                    || 'Review this insight and decide on the next best step for this client.';
+
+                  return (
+                    <Card
+                      key={insight.id}
+                      style={{
+                        ...standardCard,
+                        padding: spacing[12],
+                        opacity: insight.is_resolved ? 0.6 : 1,
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-sm font-semibold m-0" style={{ color: colors.text }}>
+                              {insight.title}
+                            </p>
+                            <span
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide"
+                              style={{
+                                background: `${color}22`,
+                                color,
+                                border: `1px solid ${color}55`,
+                              }}
+                            >
+                              {severity || 'info'}
+                            </span>
+                          </div>
+                          {insight.description && (
+                            <p className="text-xs mb-1" style={{ color: colors.muted }}>
+                              {insight.description}
+                            </p>
+                          )}
+                          <p className="text-[11px] mt-1" style={{ color: colors.muted }}>
+                            <span style={{ fontWeight: 500 }}>Suggested action:</span>{' '}
+                            {suggestedAction}
+                          </p>
+                        </div>
+                        {!insight.is_resolved && (
+                          <button
+                            type="button"
+                            onClick={() => markInsightResolvedMutation.mutate(insight.id)}
+                            className="text-[11px] font-medium px-2 py-1 rounded-full"
+                            style={{
+                              background: colors.surface2,
+                              color: colors.text,
+                              border: `1px solid ${colors.border}`,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            Mark resolved
+                          </button>
+                        )}
+                      </div>
+                    </Card>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -1700,6 +1881,82 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
           }}
           lightHaptic={lightHaptic}
         />
+      )}
+
+      {segment === 'performance' && (
+        <section style={{ marginTop: spacing[16], marginBottom: sectionGap }}>
+          <p style={{ ...sectionLabel }}>Performance timeline</p>
+          {timelineLoading && (
+            <div className="space-y-2">
+              <SkeletonCard />
+              <SkeletonCard />
+            </div>
+          )}
+          {!timelineLoading && (!timelineEvents || timelineEvents.length === 0) && (
+            <EmptyState
+              title="No performance events yet"
+              description="As this client engages with programs, check-ins, and habits, their performance timeline will appear here."
+            />
+          )}
+          {!timelineLoading && timelineEvents && timelineEvents.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {timelineEvents.map((evt) => {
+                const key = evt.id || `${evt.event_type || evt.badge || 'event'}-${evt.created_at || evt.date}-${evt.title || ''}`;
+                const createdAt = evt.created_at || evt.date || evt.occurred_at;
+                const label = timelineDateLabel(createdAt, new Date());
+                const badge = evt.badge || evt.event_type || 'System';
+                const Icon = timelineIconForBadge(badge);
+                const title = evt.title || evt.summary || evt.event_type || 'Update';
+                const description = evt.description || evt.details || evt.event_data?.note || '';
+                return (
+                  <Card
+                    key={key}
+                    style={{
+                      ...standardCard,
+                      padding: spacing[12],
+                      display: 'flex',
+                      gap: spacing[12],
+                      alignItems: 'flex-start',
+                    }}
+                  >
+                    <div
+                      className="flex h-9 w-9 items-center justify-center rounded-full"
+                      style={{ backgroundColor: colors.surfaceElevated, color: colors.primary }}
+                    >
+                      <Icon size={18} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="text-sm font-medium truncate" style={{ color: colors.text }}>
+                          {title}
+                        </p>
+                        <span className="text-xs" style={{ color: colors.muted }}>
+                          {label}
+                        </span>
+                      </div>
+                      {description && (
+                        <p className="text-xs" style={{ color: colors.muted }}>
+                          {description}
+                        </p>
+                      )}
+                      {badge && (
+                        <span
+                          className="inline-flex mt-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          style={{
+                            backgroundColor: colors.surfaceElevated,
+                            color: colors.muted,
+                          }}
+                        >
+                          {badge}
+                        </span>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </section>
       )}
 
       {/* Legacy tab blocks removed: nutrition is inside Program panel; intake via /clients/:id/intake; timeline in sheet below */}

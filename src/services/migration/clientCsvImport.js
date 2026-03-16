@@ -135,7 +135,7 @@ export async function createClientRecords({ rows, supabase }) {
   const errors = [];
   if (!rows || rows.length === 0) return { created, errors };
 
-  const client = supabase ?? (hasSupabase() ? getSupabase() : null);
+  const client = supabase ?? (hasSupabase ? getSupabase() : null);
   if (!client) throw new Error('Supabase client is required to create clients');
 
   const {

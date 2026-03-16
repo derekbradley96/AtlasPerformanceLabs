@@ -1,11 +1,16 @@
+/**
+ * Client invite/code entry. Validates code, stores code + coach id, then sends to signup.
+ * After signup, user is redirected to client onboarding (details → package → pay or skip).
+ */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { useAuth } from '@/lib/AuthContext';
 import { ChevronLeft, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 
 import { colors } from '@/ui/tokens';
 const BG = colors.bg;
@@ -57,28 +62,45 @@ async function lightHaptic() {
 
 export default function ClientCode() {
   const navigate = useNavigate();
-  const { setFakeSession } = useAuth();
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleBack = async () => {
     await lightHaptic();
-    navigate('/', { replace: true });
+    navigate('/auth', { replace: true });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     await lightHaptic();
-    setLoading(true);
     const codeTrim = (code.trim() || '').toUpperCase();
+    if (!codeTrim) {
+      toast.error('Please enter your coach code');
+      return;
+    }
+    setLoading(true);
+    setError('');
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(CLIENT_CODE_KEY, codeTrim || '');
+      const result = await invokeSupabaseFunction('validateInviteCode', { code: codeTrim });
+      if (result.error || !result.data?.valid) {
+        setLoading(false);
+        setError(result.data?.error || result.error || 'Invalid coach code');
+        toast.error(result.data?.error || result.error || 'Invalid coach code');
+        return;
       }
-    } catch (_) {}
-    setFakeSession('client', codeTrim || 'client@atlas.local');
-    setLoading(false);
-    navigate('/messages', { replace: true });
+      const trainerId = result.data.trainer_id ?? result.data.coach_id ?? '';
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(CLIENT_CODE_KEY, codeTrim);
+      }
+      setPendingInvite(codeTrim, trainerId);
+      toast.success('Code accepted. Sign up to continue.');
+      navigate('/auth?mode=signup&account=client', { replace: true });
+    } catch (err) {
+      setLoading(false);
+      setError('Could not validate code');
+      toast.error('Could not validate code');
+    }
   };
 
   return (
@@ -124,7 +146,10 @@ export default function ClientCode() {
         <form onSubmit={handleSubmit} style={{ marginTop: 28 }}>
           <Input
             value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              setError('');
+            }}
             placeholder="Coach code"
             maxLength={20}
             autoComplete="off"
@@ -137,10 +162,15 @@ export default function ClientCode() {
               color: TEXT,
               textAlign: 'center',
               letterSpacing: 2,
-              marginBottom: 24,
+              marginBottom: 8,
             }}
             className="border-slate-700 font-mono"
           />
+          {error ? (
+            <p style={{ marginBottom: 16, fontSize: 13, color: colors.error || '#ef4444', textAlign: 'center' }}>
+              {error}
+            </p>
+          ) : null}
           <Button
             type="submit"
             disabled={loading}

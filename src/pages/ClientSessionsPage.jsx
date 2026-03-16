@@ -12,7 +12,7 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { Calendar, Clock, MapPin, User } from 'lucide-react';
 
 async function fetchClientSessions() {
-  if (!hasSupabase()) return { sessions: [], coachNames: {} };
+  if (!hasSupabase) return { sessions: [], coachNames: {} };
   const supabase = getSupabase();
   if (!supabase) return { sessions: [], coachNames: {} };
 
@@ -114,7 +114,7 @@ export default function ClientSessionsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['client_sessions'],
     queryFn: fetchClientSessions,
-    enabled: hasSupabase(),
+    enabled: hasSupabase,
   });
 
   const sessions = data?.sessions ?? [];
@@ -135,7 +135,7 @@ export default function ClientSessionsPage() {
     return { upcoming: up, past: pa };
   }, [sessions]);
 
-  if (!hasSupabase()) {
+  if (!hasSupabase) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }}>
         <p style={{ color: colors.muted }}>Sign in to see your sessions.</p>
