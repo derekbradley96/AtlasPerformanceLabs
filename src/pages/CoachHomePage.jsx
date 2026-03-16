@@ -18,7 +18,7 @@ import { DashboardSkeleton, EmptyState } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { captureUiError } from '@/services/errorLogger';
 import { hapticLight } from '@/lib/haptics';
-import { colors, spacing, radii, shadows, shell } from '@/ui/tokens';
+import { colors, spacing, shadows } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
 
 function formatCurrency(val) {

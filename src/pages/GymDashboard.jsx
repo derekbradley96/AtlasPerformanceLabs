@@ -1,7 +1,7 @@
 /**
  * Gym-level overview for hybrid coaches: today's sessions, client mix (active/online/hybrid), metrics.
  */
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';

@@ -17,7 +17,6 @@ import {
   Mail,
   Copy,
   Check,
-  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { TeamManagementSkeleton } from '@/components/ui/LoadingState';

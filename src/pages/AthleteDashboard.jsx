@@ -21,7 +21,7 @@ import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import HabitAdherenceCard from '@/components/habits/HabitAdherenceCard';
-import { colors, spacing, shell } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 import { PageLoader, MomentumCardSkeleton } from '@/components/ui/LoadingState';
 import { getAthleteProgressInsights } from '@/lib/athleteProgressInsights';
 import { calculateMomentumScore, MOMENTUM_STATUS } from '@/lib/momentumEngine';

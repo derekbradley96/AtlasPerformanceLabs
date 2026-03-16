@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard } from '@/ui/pageLayout';
-import { Bug, Lightbulb, HelpCircle, MessageCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { CheckCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const CATEGORY_LABELS = { bug: 'Bug', feature_request: 'Feature request', confusion: 'Confusion', general: 'General' };

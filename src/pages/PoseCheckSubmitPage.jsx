@@ -2,7 +2,7 @@
  * Client/personal pose check submission. One per week (Monday week_start).
  * Reuses getMyClientId + getWeekStartISO from checkins pattern.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import TopBar from '@/components/ui/TopBar';

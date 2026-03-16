@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery } from '@tanstack/react-query';

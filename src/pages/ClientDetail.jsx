@@ -69,7 +69,6 @@ import {
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useClientMasterDashboard } from '@/lib/dashboard/useClientMasterDashboard';
 import { generateProgressInsight, generateRiskInsight } from '@/lib/atlasInsights';
-import { getWeekStartISO } from '@/lib/checkins';
 import { calculateMomentumScore, getMomentumStatus, MOMENTUM_STATUS } from '@/lib/momentumEngine';
 import {
   setClientPhase as setClientPhaseSupabase,
@@ -99,7 +98,7 @@ import ClientHealthCard from '@/components/clients/ClientHealthCard';
 import ClientCheckinsPanel from '@/components/clients/ClientCheckinsPanel';
 import ClientProgramPanel from '@/components/clients/ClientProgramPanel';
 import ClientAnalyticsSnapshot from '@/components/clients/ClientAnalyticsSnapshot';
-import { colors, spacing, radii, shell } from '@/ui/tokens';
+import { colors, spacing, radii } from '@/ui/tokens';
 import { standardCard, pageContainer, sectionLabel, sectionGap } from '@/ui/pageLayout';
 
 const DEFAULT_HEALTH_RESULT = {

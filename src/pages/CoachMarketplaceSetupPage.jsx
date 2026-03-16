@@ -2,13 +2,13 @@
  * Coach marketplace setup: create/update coach_marketplace_profiles listing.
  * Display name, headline, bio, pricing summary, visibility, accepts transformation/competition/personal-transitions.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
-import { colors, spacing, shell, radii } from '@/ui/tokens';
+import { colors, spacing, shell } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import EmptyState from '@/components/ui/EmptyState';

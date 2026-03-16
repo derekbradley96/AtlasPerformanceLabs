@@ -14,7 +14,6 @@ import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { resolveOrgCoachScope } from '@/lib/organisationScope';
 import { safeDate } from '@/lib/format';
-import Card from '@/ui/Card';
 import Row from '@/ui/Row';
 import Button from '@/ui/Button';
 import SwipeRow from '@/components/messages/SwipeRow';

@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import EmptyState from '@/components/ui/EmptyState';
 import { CoachDiscoverySkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
-import { colors, spacing, shell, radii } from '@/ui/tokens';
+import { colors, spacing, shell } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { Users, X } from 'lucide-react';

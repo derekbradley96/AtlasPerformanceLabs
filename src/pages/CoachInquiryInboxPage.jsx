@@ -10,7 +10,7 @@ import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import EmptyState from '@/components/ui/EmptyState';
-import { colors, spacing, shell, radii } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { Inbox, UserPlus, MessageCircle, CheckCircle2, XCircle } from 'lucide-react';

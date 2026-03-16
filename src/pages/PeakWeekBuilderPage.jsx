@@ -2,7 +2,7 @@
  * Peak Week Builder – competition/integrated coaches only.
  * Select prep client, generate week (show_date - 6 through show_date), edit carbs/water/sodium/cardio/training/notes per day, save.
  */
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';

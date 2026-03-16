@@ -11,7 +11,7 @@ import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { MessageCircle, Mail, Loader2, User } from 'lucide-react';
+import { MessageCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STATUS_OPTIONS = [

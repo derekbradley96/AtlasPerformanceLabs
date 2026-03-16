@@ -11,9 +11,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search as SearchIcon, User, Dumbbell, MessageSquare, FileText, X } from 'lucide-react';
 import { useData } from '@/data/useData';
-import { EXERCISES, searchExercises } from '@/data/exercises/exerciseLibrary';
+import { searchExercises } from '@/data/exercises/exerciseLibrary';
 import Card from '@/ui/Card';
-import { colors, spacing, shell } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 
 const DOMAINS = [
   { key: 'all', label: 'All' },

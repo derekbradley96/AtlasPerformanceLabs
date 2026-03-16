@@ -2,12 +2,12 @@
  * Organisation Analytics – owner/admin view of team-wide performance.
  * Aggregates across all active coaches in the organisation.
  */
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
-import { colors, spacing, radii, shadows } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel } from '@/ui/pageLayout';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { resolveOrgCoachScope } from '@/lib/organisationScope';

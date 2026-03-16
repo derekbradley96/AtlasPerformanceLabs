@@ -10,7 +10,7 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import { colors, spacing, radii, shadows } from '@/ui/tokens';
-import { Calendar, ImageIcon, MessageSquare, ClipboardList, ChevronRight, FileCheck, Pencil } from 'lucide-react';
+import { Calendar, ImageIcon, MessageSquare, ClipboardList, FileCheck, Pencil } from 'lucide-react';
 import { hapticLight } from '@/lib/haptics';
 
 function getCoachFocus(profile, coachFocusFromAuth) {

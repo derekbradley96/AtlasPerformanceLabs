@@ -3,7 +3,7 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { colors, spacing } from '@/ui/tokens';
+import { colors } from '@/ui/tokens';
 import { pageContainer, standardCard } from '@/ui/pageLayout';
 import { BarChart3, Loader2, Activity } from 'lucide-react';
 

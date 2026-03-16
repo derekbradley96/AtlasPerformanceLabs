@@ -8,7 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
-import { colors, spacing, radii } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { Pill, CheckCircle2, Circle } from 'lucide-react';

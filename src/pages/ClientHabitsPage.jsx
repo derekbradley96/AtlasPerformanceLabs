@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { colors, spacing, shell } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
 import { Plus, Trash2, X, ClipboardList } from 'lucide-react';
 import EmptyState from '@/components/ui/EmptyState';

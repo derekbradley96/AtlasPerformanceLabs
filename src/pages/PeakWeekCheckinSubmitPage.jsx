@@ -2,7 +2,7 @@
  * Client: submit a peak week check-in (weight, photos, pump/flat-full ratings, notes).
  * Saves to peak_week_checkins. Competition clients with active peak week only.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { colors, spacing, shell } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel } from '@/ui/pageLayout';
 import EmptyState from '@/components/ui/EmptyState';
 import { Calendar, Upload, X } from 'lucide-react';

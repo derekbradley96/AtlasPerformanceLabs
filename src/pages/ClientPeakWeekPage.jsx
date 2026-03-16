@@ -10,7 +10,7 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { colors, spacing, shell } from '@/ui/tokens';
-import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
+import { pageContainer, sectionLabel, sectionGap } from '@/ui/pageLayout';
 import EmptyState from '@/components/ui/EmptyState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { CardSkeleton } from '@/components/ui/LoadingState';

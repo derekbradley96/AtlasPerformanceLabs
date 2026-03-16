@@ -3,7 +3,7 @@
  * Clean pill tabs; later weeks show as muted when not yet created.
  */
 import React from 'react';
-import { colors, spacing, shell, radii } from '@/ui/tokens';
+import { colors, spacing, shell } from '@/ui/tokens';
 import { sectionLabel } from '@/ui/pageLayout';
 
 export default function WeekTabs({

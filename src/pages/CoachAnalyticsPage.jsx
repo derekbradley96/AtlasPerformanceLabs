@@ -327,6 +327,21 @@ export default function CoachAnalyticsPage() {
     };
   }, [isCoachRole, coachId, showPrep]);
 
+  const timeframe = useMemo(() => parseTimeframeFromSearchParams(searchParams), [searchParams]);
+  const checkinCompletionTrendFiltered = useMemo(() => {
+    const cutoff = getCutoffDateForRange(timeframe);
+    if (!cutoff) return data.checkinsByWeek;
+    const cutoffWeek = cutoff.toISOString().slice(0, 10);
+    return data.checkinsByWeek.filter((w) => w.week_start >= cutoffWeek);
+  }, [data.checkinsByWeek, timeframe]);
+  const nameMap = useMemo(() => {
+    const m = {};
+    (data.metrics || []).forEach((x) => { m[x.client_id] = x.client_name; });
+    (data.retention || []).forEach((x) => { m[x.client_id] = x.client_name || m[x.client_id]; });
+    (data.attention || []).forEach((x) => { m[x.client_id] = x.client_name || m[x.client_id]; });
+    return m;
+  }, [data.metrics, data.retention, data.attention]);
+
   if (!isCoachRole) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg, color: colors.text }}>
@@ -365,7 +380,6 @@ export default function CoachAnalyticsPage() {
     );
   }
 
-  const timeframe = useMemo(() => parseTimeframeFromSearchParams(searchParams), [searchParams]);
   const setTimeframe = (key) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -374,21 +388,6 @@ export default function CoachAnalyticsPage() {
       return next;
     });
   };
-
-  const checkinCompletionTrendFiltered = useMemo(() => {
-    const cutoff = getCutoffDateForRange(timeframe);
-    if (!cutoff) return data.checkinsByWeek;
-    const cutoffWeek = cutoff.toISOString().slice(0, 10);
-    return data.checkinsByWeek.filter((w) => w.week_start >= cutoffWeek);
-  }, [data.checkinsByWeek, timeframe]);
-
-  const nameMap = useMemo(() => {
-    const m = {};
-    (data.metrics || []).forEach((x) => { m[x.client_id] = x.client_name; });
-    (data.retention || []).forEach((x) => { m[x.client_id] = x.client_name || m[x.client_id]; });
-    (data.attention || []).forEach((x) => { m[x.client_id] = x.client_name || m[x.client_id]; });
-    return m;
-  }, [data.metrics, data.retention, data.attention]);
 
   const roster = deriveRosterSummary(data.money, data.metrics, data.retention);
   const complianceDist = deriveComplianceDistribution(data.metrics);

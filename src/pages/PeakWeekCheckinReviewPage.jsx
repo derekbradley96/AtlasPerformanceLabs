@@ -2,7 +2,7 @@
  * Coach: review peak week check-ins (list + detail). View photos, weight, ratings, add coach notes,
  * and optionally save stage readiness scores to stage_readiness_scores.
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { colors, spacing, shell } from '@/ui/tokens';
+import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
 import { MessageSquare, ClipboardList, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';

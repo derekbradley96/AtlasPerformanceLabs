@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { colors, spacing, shell } from '@/ui/tokens';
-import { pageContainer, standardCard, sectionLabel } from '@/ui/pageLayout';
+import { pageContainer, standardCard } from '@/ui/pageLayout';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { hapticLight } from '@/lib/haptics';

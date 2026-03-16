@@ -4,7 +4,7 @@ import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import {
-  Dumbbell, TrendingUp, Target, Calendar, Play, ChevronRight,
+  Dumbbell, TrendingUp, Target, Play, ChevronRight,
   CheckCircle2, Flame, UtensilsCrossed, UserPlus,
 } from 'lucide-react';
 import { motion } from 'framer-motion';

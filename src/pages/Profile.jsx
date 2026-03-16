@@ -6,7 +6,7 @@ import SkeletonCard from '@/components/ui/SkeletonCard';
 import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { Button } from '@/components/ui/button';
-import { Edit2, LogOut, Mail, Zap, Shield } from 'lucide-react';
+import { Edit2, LogOut, Mail, Shield } from 'lucide-react';
 import { getUserRole } from '@/lib/roles';
 import { toast } from 'sonner';
 

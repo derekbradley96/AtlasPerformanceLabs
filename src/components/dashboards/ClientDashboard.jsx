@@ -12,7 +12,7 @@ import { trackAppOpened } from '@/services/engagementTracker';
 import { motion } from 'framer-motion';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { getAthleteProgressInsights } from '@/lib/athleteProgressInsights';
-import { calculateMomentumScore, getMomentumStatus, MOMENTUM_STATUS } from '@/lib/momentumEngine';
+import { calculateMomentumScore, MOMENTUM_STATUS } from '@/lib/momentumEngine';
 import PaymentIssueBanner from '@/components/PaymentIssueBanner';
 import PrepHeader from '@/components/PrepHeader';
 import OnboardingChecklist from '@/components/OnboardingChecklist';
