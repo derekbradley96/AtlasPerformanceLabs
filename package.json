@@ -39,6 +39,7 @@
     "reset-project": "rm -rf node_modules dist .vite && npm install",
     "expo": "echo \"This project uses Vite + Capacitor, not Expo. Use: npm run dev (web) or npm run ios (iOS simulator).\"",
     "audit": "npm audit --audit-level=high",
+    "audit:fix": "npm audit fix; npm audit --audit-level=high",
     "security:audit": "npm audit --omit=dev --audit-level=high",
     "security:audit:fix": "npm audit fix --omit=dev",
     "security:osv": "npx osv-scanner@latest --lockfile=package-lock.json",
