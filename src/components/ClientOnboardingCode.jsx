@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ArrowRight, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
@@ -21,7 +21,7 @@ export default function ClientOnboardingCode({ onValidCode }) {
 
     try {
       const { data, error } = await invokeSupabaseFunction('validateInviteCode', {
-        code: code.toUpperCase().trim()
+        code: normalizeInviteCode(code)
       });
 
       if (error || !data?.valid) {

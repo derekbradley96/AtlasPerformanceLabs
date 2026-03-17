@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 import ClientDashboard from '@/components/dashboards/ClientDashboard';
 import { getPendingInvite, clearPendingInvite } from './ClientCode';
 import { toast } from 'sonner';
@@ -24,7 +24,7 @@ export default function ClientDashboardPage() {
     setApplyingInvite(true);
     (async () => {
       try {
-        const { data } = await invokeSupabaseFunction('validateInviteCode', { code: pending.code });
+        const { data } = await invokeSupabaseFunction('validateInviteCode', { code: normalizeInviteCode(pending.code) });
         if (!data?.valid) {
           clearPendingInvite();
           setApplyingInvite(false);

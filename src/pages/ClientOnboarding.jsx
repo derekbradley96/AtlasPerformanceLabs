@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getPendingInvite, clearPendingInvite } from './ClientCode';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Loader2, Check, AlertCircle, User } from 'lucide-react';
@@ -44,7 +44,7 @@ export default function ClientOnboarding() {
       setHasPending(true);
       setInviteCode(pending.code);
       setLoading(true);
-      invokeSupabaseFunction('validateInviteCode', { code: (pending.code || '').trim() })
+      invokeSupabaseFunction('validateInviteCode', { code: normalizeInviteCode(pending.code) })
         .then(({ data }) => {
           if (data?.valid && data?.trainer) {
             setTrainer(data.trainer);
@@ -85,7 +85,7 @@ export default function ClientOnboarding() {
     setError('');
     try {
       const { data } = await invokeSupabaseFunction('validateInviteCode', {
-        code: inviteCode.toUpperCase().trim(),
+        code: normalizeInviteCode(inviteCode),
       });
       if (!data?.valid) {
         setError(data?.error || 'Invalid invite code');

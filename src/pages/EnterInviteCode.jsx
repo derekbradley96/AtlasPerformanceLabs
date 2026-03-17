@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { trackPersonalConvertedToClient } from '@/services/analyticsService';
@@ -21,7 +21,7 @@ export default function EnterInviteCode() {
   const joinMutation = useMutation({
     mutationFn: async (inviteCode) => {
       if (!user?.id) throw new Error('Please sign in first');
-      const result = await invokeSupabaseFunction('validateInviteCode', { code: inviteCode });
+      const result = await invokeSupabaseFunction('validateInviteCode', { code: normalizeInviteCode(inviteCode) });
       if (result.error || !result.data?.valid) {
         throw new Error(result.data?.message || result.error || 'Invalid invite code');
       }

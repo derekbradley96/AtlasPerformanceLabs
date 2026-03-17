@@ -1,8 +1,14 @@
 /**
  * Validate coach invite code. Uses Supabase profiles.referral_code.
+ * Comparison is case-insensitive: input is trimmed and lowercased before lookup.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+
+function normalizeCode(raw: unknown): string {
+  const s = typeof raw === "string" ? raw : "";
+  return s.trim().toLowerCase();
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -15,16 +21,14 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const code = typeof body?.code === "string" ? body.code.trim() : "";
-    if (!code) {
+    const normalized = normalizeCode(body?.code);
+    if (!normalized) {
       return new Response(JSON.stringify({ valid: false, error: "Invalid code" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
-    const normalized = code.trim().toLowerCase();
     const { data: rows, error } = await supabase
       .from("profiles")
       .select("id, display_name, role, stripe_account_id")
-      .ilike("referral_code", normalized);
+      .eq("referral_code", normalized);
 
     if (error) {
       console.error("validateInviteCode error:", error);

@@ -20,6 +20,12 @@ const getFunctionsUrl = () => {
   return `${base}/functions/v1`;
 };
 
+/** Normalize invite/coach code for validation: trim + lowercase so case never matters. */
+export function normalizeInviteCode(raw) {
+  const s = typeof raw === 'string' ? raw : '';
+  return s.trim().toLowerCase();
+}
+
 // Dev-only: log Supabase wiring once on boot
 if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
   const raw = import.meta.env?.VITE_SUPABASE_URL;

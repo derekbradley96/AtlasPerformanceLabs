@@ -10,7 +10,7 @@ import { ChevronLeft, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 
 import { colors } from '@/ui/tokens';
 const BG = colors.bg;
@@ -74,15 +74,15 @@ export default function ClientCode() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     await lightHaptic();
-    const codeTrim = (code.trim() || '').toUpperCase();
-    if (!codeTrim) {
+    const normalized = normalizeInviteCode(code);
+    if (!normalized) {
       toast.error('Please enter your coach code');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      const result = await invokeSupabaseFunction('validateInviteCode', { code: codeTrim });
+      const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
       if (result.error || !result.data?.valid) {
         setLoading(false);
         setError(result.data?.error || result.error || 'Invalid coach code');
@@ -91,9 +91,9 @@ export default function ClientCode() {
       }
       const trainerId = result.data.trainer_id ?? result.data.coach_id ?? '';
       if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(CLIENT_CODE_KEY, codeTrim);
+        window.localStorage.setItem(CLIENT_CODE_KEY, normalized);
       }
-      setPendingInvite(codeTrim, trainerId);
+      setPendingInvite(normalized, trainerId);
       toast.success('Code accepted. Sign up to continue.');
       navigate('/auth?mode=signup&account=client', { replace: true });
     } catch (err) {

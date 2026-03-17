@@ -4,4 +4,4 @@
  * Uses VITE_SUPABASE_URL; when missing, calls return { data: null, error }.
  */
 
-export { invokeSupabaseFunction } from '@/lib/supabaseStripeApi';
+export { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseStripeApi';
