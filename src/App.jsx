@@ -7,7 +7,7 @@ import { queryClientInstance } from '@/lib/query-client'
 import NavigationTracker from '@/lib/NavigationTracker'
 import DeepLinkHandler from '@/components/DeepLinkHandler'
 import LocalClientsInit from '@/data/LocalClientsInit'
-import { BrowserRouter, HashRouter, Route, Routes, Navigate, Outlet, useSearchParams, useNavigate } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Route, Routes, Navigate, Outlet, useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
@@ -20,6 +20,7 @@ import TrainerLogin from './pages/TrainerLogin';
 import SoloLogin from './pages/SoloLogin';
 import ClientCode from './pages/ClientCode';
 import ClientOnboarding from './pages/ClientOnboarding';
+import PersonalOnboardingPage from './pages/PersonalOnboardingPage';
 import AdminDevPanel from './pages/AdminDevPanel';
 import BetaFeedbackInboxPage from './pages/BetaFeedbackInboxPage';
 import BetaHealthDashboard from './pages/BetaHealthDashboard';
@@ -283,9 +284,13 @@ function ProfileLoadErrorBanner() {
 /** Root: MarketingGate shows splash until auth ready, then redirects logged-in users to /home (app) or marketing outlet. */
 
 
-/** Layout guard: while hydrating show loading; if Supabase configured but no session redirect to /auth; if session but no role yet show loading (profile in background); if no role after timeout redirect to /auth; else render Outlet. */
+/** Paths that are part of role onboarding; don't redirect away when onboarding_complete is false. */
+const ONBOARDING_PATHS = ['/coach-onboarding-flow', '/clientonboarding', '/onboarding/personal', '/coach-onboarding', '/onboarding'];
+
+/** Layout guard: while hydrating show loading; if Supabase configured but no session redirect to /auth; if session but no role yet show loading; if onboarding not complete redirect to role onboarding; else render Outlet. */
 function RequireAuthLayout() {
-  const { isHydratingAppState, isAuthenticated, isAdminBypass, role, supabaseUser, hasSupabase } = useAuth();
+  const location = useLocation();
+  const { isHydratingAppState, isAuthenticated, isAdminBypass, role, profile, supabaseUser, hasSupabase } = useAuth();
   const [profileWaitTimedOut, setProfileWaitTimedOut] = React.useState(false);
   React.useEffect(() => {
     if (!hasSupabase || !supabaseUser || role) return;
@@ -299,6 +304,16 @@ function RequireAuthLayout() {
   const hasRole = role === 'coach' || role === 'client' || role === 'personal' || role === 'trainer' || role === 'solo';
   const allowed = (isAuthenticated || isAdminBypass) && hasRole;
   if (!allowed) return <Navigate to="/auth" replace />;
+
+  const onboardingComplete = profile?.onboarding_complete === true;
+  const pathname = location?.pathname ?? '';
+  const isOnOnboardingPath = ONBOARDING_PATHS.some((p) => pathname.startsWith(p));
+  if (!isAdminBypass && hasRole && !onboardingComplete && !isOnOnboardingPath) {
+    if (role === 'coach' || role === 'trainer') return <Navigate to="/coach-onboarding-flow" replace />;
+    if (role === 'client') return <Navigate to="/clientonboarding" replace />;
+    if (role === 'personal' || role === 'solo') return <Navigate to="/onboarding/personal" replace />;
+  }
+
   return <Outlet />;
 }
 
@@ -425,6 +440,7 @@ const AppRoutes = () => (
       <Route element={<RequireAuthLayout />}>
         <Route path="coach-type" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Coach type is for trainers only."><CoachTypeOnboarding /></RequireRole>} />
         <Route path="clientonboarding" element={<ClientOnboarding />} />
+        <Route path="onboarding/personal" element={<PersonalOnboardingPage />} />
         <Route element={<FeedbackProvider><AppShell /></FeedbackProvider>}>
           <Route path="coach-onboarding" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Onboarding is for trainers only."><CoachOnboardingWizard /></RequireRole>} />
           <Route path="coach-onboarding-flow" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Onboarding is for trainers only."><CoachOnboardingFlow /></RequireRole>} />

@@ -129,12 +129,25 @@ export default function InviteClient() {
     }
   }, [inviteCode, inviteMessage]);
 
-  const handleRegenerate = useCallback(() => {
-    lightHaptic();
-    const newCode = regenerateInviteCode(trainerId);
-    setInviteCode(newCode);
-    toast.success('New code generated');
-  }, [trainerId]);
+  const handleRegenerate = useCallback(async () => {
+    await lightHaptic();
+    if (isDemoMode) {
+      const newCode = regenerateInviteCode(trainerId);
+      setInviteCode(newCode);
+      toast.success('New code generated');
+      return;
+    }
+    setLoading(true);
+    try {
+      const code = await atlasRepo.getInviteCode(trainerId, false);
+      setInviteCode(code || '');
+      toast.success('Code refreshed');
+    } catch {
+      toast.error('Could not refresh code');
+    } finally {
+      setLoading(false);
+    }
+  }, [trainerId, isDemoMode]);
 
   if (loading) {
     return (

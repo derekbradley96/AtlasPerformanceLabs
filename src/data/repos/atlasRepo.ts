@@ -123,28 +123,24 @@ export async function getInboxItems(
   };
 }
 
-/** Invite code for trainer. Demo: inviteCodeStore (localStorage allowed for demo). Live: Edge Function atlas-invite-code. */
+/** Invite code for coach = profiles.referral_code so client can enter the same code. Demo: inviteCodeStore. Live: generateInviteCode (uses JWT). */
 export async function getInviteCode(trainerId: string, isDemoMode: boolean): Promise<string> {
   if (isDemoMode) return getOrCreateInviteCode(trainerId);
   if (!isSupabaseConfigured()) return '';
-  const { data, error } = await invokeSupabaseFunction('atlas-invite-code', { trainer_id: trainerId });
+  const { data, error } = await invokeSupabaseFunction('generateInviteCode', {});
   if (error || !data) return '';
   const d = data as Record<string, unknown>;
   return (d?.code ?? '') as string;
 }
 
-/** Pending invites for trainer. Demo: inviteCodeStore. Live: Edge Function atlas-invite-code. */
+/** Pending invites for trainer. Demo: inviteCodeStore. Live: no list API; return empty. */
 export async function getPendingInvitesList(
   trainerId: string,
   isDemoMode: boolean
 ): Promise<Array<{ id: string; code: string; created_date: string; status: string }>> {
   if (isDemoMode) return getPendingInvites();
   if (!SUPABASE_ENABLED) return [];
-  const { data, error } = await invokeSupabaseFunction('atlas-invite-code', { trainer_id: trainerId });
-  if (error || !data) return [];
-  const d = data as Record<string, unknown>;
-  const arr = (d?.pending_invites ?? data) ?? [];
-  return Array.isArray(arr) ? arr : [];
+  return [];
 }
 
 /** Coach (Stripe, plan tier). Demo: stub. Live: getCoach from supabaseStripeApi. */

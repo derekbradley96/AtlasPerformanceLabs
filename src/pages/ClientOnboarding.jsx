@@ -173,11 +173,13 @@ export default function ClientOnboarding() {
     }
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     clearPendingInvite();
-    // Reload so auth refetches profile and new client role is applied
+    try {
+      await updateProfile({ onboarding_complete: true });
+    } catch (_) {}
     if (typeof window !== 'undefined') {
-      const path = '/client-dashboard';
+      const path = '/home';
       if (window.Capacitor?.isNativePlatform?.()) {
         window.location.hash = path;
         window.location.reload();
@@ -185,7 +187,7 @@ export default function ClientOnboarding() {
         window.location.assign(path);
       }
     } else {
-      navigate('/client-dashboard', { replace: true });
+      navigate('/home', { replace: true });
     }
   };
 
