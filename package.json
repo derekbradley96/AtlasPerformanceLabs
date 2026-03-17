@@ -30,6 +30,8 @@
     "android:live": "CAPACITOR_SERVER_URL=http://localhost:5174 npx cap sync android && npx cap open android",
     "db:push": "npx supabase db push --include-all",
     "db:push:dry": "npx supabase db push --include-all --dry-run",
+    "deploy:validate-invite": "npx supabase functions deploy validateInviteCode",
+    "deploy:web": "npm run build && npx vercel --prod",
     "db:check-migrations": "node scripts/check-migrations.mjs",
     "doctor": "node scripts/doctor.js",
     "doctor:legacy": "npm run lint && npm run typecheck && npm run analyze && npm run test:unit",

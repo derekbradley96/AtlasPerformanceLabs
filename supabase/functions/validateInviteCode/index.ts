@@ -1,14 +1,9 @@
 /**
- * Validate coach invite code. Uses Supabase profiles.referral_code.
- * Comparison is case-insensitive: input is trimmed and lowercased before lookup.
+ * Validate coach invite code. Calls DB RPC validate_invite_code(p_code)
+ * so lookup is done in SQL (case-insensitive, no PostgREST filter quirks).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
-
-function normalizeCode(raw: unknown): string {
-  const s = typeof raw === "string" ? raw : "";
-  return s.trim().toLowerCase();
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -21,41 +16,33 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const normalized = normalizeCode(body?.code);
-    if (!normalized) {
-      return new Response(JSON.stringify({ valid: false, error: "Invalid code" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    const { data: rows, error } = await supabase
-      .from("profiles")
-      .select("id, display_name, role, stripe_account_id")
-      .eq("referral_code", normalized);
+    const code = typeof body?.code === "string" ? body.code : "";
+    const { data, error } = await supabase.rpc("validate_invite_code", { p_code: code });
 
     if (error) {
-      console.error("validateInviteCode error:", error);
+      console.error("validateInviteCode RPC error:", error);
       return new Response(JSON.stringify({ valid: false, error: "Lookup failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const profile = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-    if (!profile) {
-      return new Response(JSON.stringify({ valid: false }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const result = data as { valid?: boolean; error?: string } | null;
+    if (!result || typeof result.valid !== "boolean") {
+      const payload: Record<string, unknown> = { valid: false };
+      if (req.headers.get("X-Debug-Invite") === "1") {
+        try {
+          const u = new URL(supabaseUrl);
+          payload._debug = { project: u.hostname.replace(".supabase.co", "") };
+        } catch (_) {}
+      }
+      return new Response(JSON.stringify(payload), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
-    const isCoach = (profile as { role?: string }).role === "coach" || (profile as { role?: string }).role === "trainer";
-    if (!isCoach) {
-      return new Response(JSON.stringify({ valid: false, error: "Code is not for a coach" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const payload: Record<string, unknown> = { ...result };
+    if (result.valid === false) {
+      try {
+        const u = new URL(supabaseUrl);
+        payload._debug = { project: u.hostname.replace(".supabase.co", "") };
+      } catch (_) {}
     }
-
-    return new Response(JSON.stringify({
-      valid: true,
-      trainer_id: (profile as { id: string }).id,
-      coach_id: (profile as { id: string }).id,
-      trainer: {
-        id: (profile as { id: string }).id,
-        name: (profile as { display_name?: string }).display_name ?? "Coach",
-        niche: "",
-        monthlyRate: 10000,
-      },
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(payload), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("validateInviteCode:", err);
     return new Response(JSON.stringify({ error: (err as Error).message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });

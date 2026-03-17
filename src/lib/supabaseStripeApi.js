@@ -53,12 +53,18 @@ export async function invokeSupabaseFunction(name, body = {}) {
     }
   } catch (_) {}
   try {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && name === 'validateInviteCode') {
+      console.log('[Invite code] request:', { code: body?.code });
+    }
     const res = await fetch(`${base}/${name}`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
+    if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && name === 'validateInviteCode') {
+      console.log('[Invite code] response:', res.ok ? data : { ok: res.ok, status: res.status, body: data });
+    }
     if (!res.ok) return { error: data?.error ?? res.statusText, data: null };
     return { data, error: null };
   } catch (e) {
