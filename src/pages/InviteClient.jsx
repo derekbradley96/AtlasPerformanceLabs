@@ -9,7 +9,7 @@ import Button from '@/ui/Button';
 import EmptyState from '@/ui/EmptyState';
 import { colors, spacing } from '@/ui/tokens';
 import { safeDate } from '@/lib/format';
-import { regenerateInviteCode, addPendingInvite, getPendingInvites } from '@/lib/inviteCodeStore';
+import { addPendingInvite, getPendingInvites } from '@/lib/inviteCodeStore';
 import * as atlasRepo from '@/data/repos/atlasRepo';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -29,14 +29,20 @@ function formatDate(iso) {
 }
 
 export default function InviteClient() {
-  const { user, isDemoMode } = useAuth();
+  const { user, profile, isDemoMode } = useAuth();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? 'trainer-1';
 
-  const [loading, setLoading] = useState(true);
-  const [inviteCode, setInviteCode] = useState('');
+  // Show coach's persistent code straight away from profile (e.g. atlas-3034); API ensures same code
+  const [inviteCode, setInviteCode] = useState(() => (profile?.referral_code ?? '').trim() || '');
   const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [pendingInvites, setPendingInvites] = useState([]);
+
+  React.useEffect(() => {
+    const code = (profile?.referral_code ?? '').trim();
+    if (code) setInviteCode(code);
+  }, [profile?.referral_code]);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,10 +51,10 @@ export default function InviteClient() {
       atlasRepo.getPendingInvitesList(trainerId, isDemoMode),
     ]).then(([code, list]) => {
       if (!cancelled) {
-        setInviteCode(code || '');
+        if (code) setInviteCode(code);
         setPendingInvites(Array.isArray(list) ? list : []);
       }
-    }).catch(() => { if (!cancelled) setInviteCode(''); }).finally(() => { if (!cancelled) setLoading(false); });
+    }).catch(() => {}).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [trainerId, isDemoMode]);
 
@@ -129,27 +135,8 @@ export default function InviteClient() {
     }
   }, [inviteCode, inviteMessage]);
 
-  const handleRegenerate = useCallback(async () => {
-    await lightHaptic();
-    if (isDemoMode) {
-      const newCode = regenerateInviteCode(trainerId);
-      setInviteCode(newCode);
-      toast.success('New code generated');
-      return;
-    }
-    setLoading(true);
-    try {
-      const code = await atlasRepo.getInviteCode(trainerId, false);
-      setInviteCode(code || '');
-      toast.success('Code refreshed');
-    } catch {
-      toast.error('Could not refresh code');
-    } finally {
-      setLoading(false);
-    }
-  }, [trainerId, isDemoMode]);
-
-  if (loading) {
+  // Only show full loading when we have no code yet and are still fetching (e.g. first load before profile has referral_code)
+  if (loading && !inviteCode) {
     return (
       <div className="app-screen min-w-0 max-w-full overflow-x-hidden">
         <Card style={{ padding: spacing[24], marginBottom: spacing[16] }}>
@@ -197,14 +184,9 @@ export default function InviteClient() {
             Share
           </Button>
         </div>
-        <button
-          type="button"
-          onClick={handleRegenerate}
-          className="w-full text-sm font-medium"
-          style={{ color: colors.muted }}
-        >
-          Regenerate code
-        </button>
+        <p className="text-xs mt-2" style={{ color: colors.muted }}>
+          This is your permanent code (e.g. atlas-3034). Clients enter it when they sign up.
+        </p>
       </Card>
 
       {/* QR code */}

@@ -217,7 +217,7 @@ export async function fetchProfile(userId) {
   if (!supabase || !userId) return null;
   if (import.meta.env.DEV) console.log('[ATLAS] Fetching profile for', userId);
   try {
-    const { data, error } = await supabase.from('profiles').select('id, role, display_name, coach_type, coach_focus, is_beta_user, beta_group, is_admin, onboarding_complete').eq('id', userId).maybeSingle();
+    const { data, error } = await supabase.from('profiles').select('id, role, display_name, coach_type, coach_focus, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code').eq('id', userId).maybeSingle();
     if (error) {
       if (import.meta.env.DEV) console.log('[AUTH] profile error', error?.message);
       return null;
