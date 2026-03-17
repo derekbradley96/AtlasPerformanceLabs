@@ -100,7 +100,7 @@ export default function ClientCode() {
         window.localStorage.setItem(CLIENT_CODE_KEY, normalized);
       }
       setPendingInvite(normalized, trainerId);
-      toast.success('Code accepted. Sign up to continue.');
+      toast.success('Code accepted. Complete your details to continue.');
       navigate('/auth?mode=signup&account=client', { replace: true });
     } catch (err) {
       setLoading(false);

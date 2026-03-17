@@ -41,7 +41,7 @@ Required for Stripe-related functions:
 
 ## Implemented functions
 
-- **validateInviteCode** – Validates coach invite code via `profiles.referral_code`. Body: `{ code }`.
+- **validateInviteCode** – Validates coach invite code via `profiles.referral_code`. Body: `{ code }`. Callable with project anon key (no user session). Uses `verify_jwt = false`; if you get 401, redeploy with `npx supabase functions deploy validateInviteCode --no-verify-jwt`.
 - **generateInviteCode** – Returns or creates referral code for coach. Body: `{ user_id }`.
 - **getTrainerEarnings** – Coach earnings: activeClients, pendingPayouts (Stripe Connect balance), currentPlan. Body: `{ user_id }`.
 - **upgradeToProPlan** – Creates Stripe Checkout session for Pro plan. Body: `{ user_id }`. Returns `{ url, sessionUrl }`.

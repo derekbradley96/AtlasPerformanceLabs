@@ -84,9 +84,11 @@ export default function AuthScreen() {
     if (paramMode === 'signup') setMode('signup');
     else if (paramMode === 'login') setMode('login');
   }, [paramMode]);
+  // When URL has account=client, ensure we're in signup mode and role is client (so client-only UI shows)
   useEffect(() => {
     if (paramAccount === 'coach' || paramAccount === 'personal' || paramAccount === 'client') {
       setSignupRole(paramAccount);
+      if (paramAccount === 'client') setMode('signup');
     }
   }, [paramAccount]);
 
@@ -131,6 +133,8 @@ export default function AuthScreen() {
   const [errorVisible, setErrorVisible] = useState(false);
 
   const isLogin = mode === 'login';
+  // Derive from URL so client flow shows correct UI as soon as they land with ?account=client
+  const isClientSignup = !isLogin && (paramAccount === 'client' || signupRole === 'client');
   const emailTrim = (email ?? '').trim();
   const passwordLen = (password ?? '').length;
 
@@ -331,13 +335,14 @@ export default function AuthScreen() {
         </div>
 
         <h1 className="text-xl font-bold text-center mb-1" style={{ color: colors.text }}>
-          {isLogin ? 'Log in' : 'Sign up'}
+          {isLogin ? 'Log in' : isClientSignup ? 'Complete your details' : 'Sign up'}
         </h1>
         <p className="text-sm text-center mb-5" style={{ color: colors.muted }}>
-          {isLogin ? 'Sign in to your Atlas account.' : 'Create your Atlas account.'}
+          {isLogin ? 'Sign in to your Atlas account.' : isClientSignup ? "You're joining as a client. Enter your details to continue." : 'Create your Atlas account.'}
         </p>
 
-        {/* Tab bar with smooth transition */}
+        {/* Tab bar: hide for client flow so they stay on "complete your details" */}
+        {!isClientSignup && (
         <div
           className="flex rounded-xl overflow-hidden mb-4"
           style={{
@@ -374,6 +379,7 @@ export default function AuthScreen() {
             Sign up
           </button>
         </div>
+        )}
 
         {/* Auth card: fade in + slide up */}
         <Card
@@ -387,7 +393,8 @@ export default function AuthScreen() {
           <form onSubmit={handleSubmit}>
             {!isLogin && (
               <>
-                {/* Section 1: Account type */}
+                {/* Section 1: Account type (hidden for client — they're joining via coach code) */}
+                {!isClientSignup && (
                 <div
                   className="mb-3 rounded-xl overflow-hidden"
                   style={{
@@ -445,6 +452,7 @@ export default function AuthScreen() {
                     </button>
                   </div>
                 </div>
+                )}
 
                 {/* Section 2: Coaching Focus (Trainer only) – premium selection cards */}
                 {signupRole === 'coach' && (
@@ -502,7 +510,7 @@ export default function AuthScreen() {
                   </div>
                 )}
 
-                {/* Section 3: Account details */}
+                {/* Section 3: Your details / Account details */}
                 <div
                   className="mb-3 rounded-xl overflow-hidden"
                   style={{
@@ -513,7 +521,7 @@ export default function AuthScreen() {
                   }}
                 >
                   <label id="auth-details" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
-                    Account details
+                    {isClientSignup ? 'Your details' : 'Account details'}
                   </label>
                   <label id="auth-display-name" className="sr-only">
                     Display name
@@ -688,7 +696,7 @@ export default function AuthScreen() {
             <button
               type="submit"
               disabled={isDisabled}
-              aria-label={isLogin ? 'Log in' : 'Sign up'}
+              aria-label={isLogin ? 'Log in' : isClientSignup ? 'Continue' : 'Sign up'}
               onMouseDown={() => setPressing(true)}
               onMouseLeave={() => setPressing(false)}
               onMouseUp={() => setPressing(false)}
@@ -718,10 +726,10 @@ export default function AuthScreen() {
                     className="rounded-full border-2 border-white/30 border-t-white flex-shrink-0"
                     style={{ width: 20, height: 20, animation: 'spin 0.7s linear infinite' }}
                   />
-                  <span>{isLogin ? 'Signing in…' : 'Creating account…'}</span>
+                  <span>{isLogin ? 'Signing in…' : isClientSignup ? 'Continuing…' : 'Creating account…'}</span>
                 </>
               ) : (
-                <span>{isLogin ? 'Log in' : 'Sign up'}</span>
+                <span>{isLogin ? 'Log in' : isClientSignup ? 'Continue' : 'Sign up'}</span>
               )}
             </button>
           </form>

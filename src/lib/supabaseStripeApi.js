@@ -14,6 +14,11 @@ function getSupabaseUrl() {
   return url.replace(/\/$/, '');
 }
 
+function getAnonKey() {
+  const key = typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY;
+  return key && typeof key === 'string' && key.trim() !== '' ? key.trim() : null;
+}
+
 const getFunctionsUrl = () => {
   const base = getSupabaseUrl();
   if (!base) return null;
@@ -45,13 +50,19 @@ export async function invokeSupabaseFunction(name, body = {}) {
   const base = getFunctionsUrl();
   if (!base) return { error: SUPABASE_URL_ERROR, data: null };
   const headers = { 'Content-Type': 'application/json' };
-  try {
-    const supabase = getSupabase?.() ?? null;
-    if (supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
-    }
-  } catch (_) {}
+  // validateInviteCode is used before signup — use anon key so gateway accepts request (no user JWT)
+  if (name === 'validateInviteCode') {
+    const anon = getAnonKey();
+    if (anon) headers['Authorization'] = `Bearer ${anon}`;
+  } else {
+    try {
+      const supabase = getSupabase?.() ?? null;
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+    } catch (_) {}
+  }
   try {
     if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && name === 'validateInviteCode') {
       console.log('[Invite code] request:', { code: body?.code });
