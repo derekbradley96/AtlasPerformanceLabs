@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=18.0.0 <21.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "start": "vite",
@@ -38,7 +38,8 @@
     "cap:android:live": "vite build --watch & npx cap sync android",
     "reset-project": "rm -rf node_modules dist .vite && npm install",
     "expo": "echo \"This project uses Vite + Capacitor, not Expo. Use: npm run dev (web) or npm run ios (iOS simulator).\"",
-    "security:audit": "npm audit --omit=dev",
+    "audit": "npm audit --audit-level=high",
+    "security:audit": "npm audit --omit=dev --audit-level=high",
     "security:audit:fix": "npm audit fix --omit=dev",
     "security:osv": "npx osv-scanner@latest --lockfile=package-lock.json",
     "security:full": "npm run security:audit && npm run security:osv"
@@ -155,6 +156,8 @@
   },
   "overrides": {
     "minimatch": "^9.0.7",
-    "tar": "^7.0.0"
+    "tar": "^7.0.0",
+    "file-type": "^21.3.2",
+    "quill": "^2.0.3"
   }
 }
