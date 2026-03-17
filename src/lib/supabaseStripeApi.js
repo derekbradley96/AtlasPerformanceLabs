@@ -20,6 +20,20 @@ const getFunctionsUrl = () => {
   return `${base}/functions/v1`;
 };
 
+/** Project ref from VITE_SUPABASE_URL (e.g. qujteojdjxoqrjdpaljs) for display/diagnostics. */
+export function getSupabaseProjectRef() {
+  const base = getSupabaseUrl();
+  if (!base) return null;
+  try {
+    const u = new URL(base);
+    const host = u.hostname || '';
+    if (host.endsWith('.supabase.co')) return host.replace('.supabase.co', '');
+    return host || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /** Normalize invite/coach code for validation: trim + lowercase so case never matters. */
 export function normalizeInviteCode(raw) {
   const s = typeof raw === 'string' ? raw : '';

@@ -10,7 +10,7 @@ import { ChevronLeft, Users } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
+import { invokeSupabaseFunction, normalizeInviteCode, getSupabaseProjectRef } from '@/lib/supabaseApi';
 
 import { colors } from '@/ui/tokens';
 const BG = colors.bg;
@@ -65,6 +65,7 @@ export default function ClientCode() {
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [lastResponse, setLastResponse] = useState(null);
 
   const handleBack = async () => {
     await lightHaptic();
@@ -81,10 +82,12 @@ export default function ClientCode() {
     }
     setLoading(true);
     setError('');
+    setLastResponse(null);
     try {
       const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
       if (result.error || !result.data?.valid) {
         setLoading(false);
+        setLastResponse(result);
         const msg = result.data?.error || result.error || 'Invalid coach code';
         const project = result.data?._debug?.project;
         if (result.error && !result.data) {
@@ -100,10 +103,11 @@ export default function ClientCode() {
         window.localStorage.setItem(CLIENT_CODE_KEY, normalized);
       }
       setPendingInvite(normalized, trainerId);
-      toast.success('Code accepted. Sign up to continue.');
+      toast.success('Code accepted. Complete your details to continue.');
       navigate('/auth?mode=signup&account=client', { replace: true });
     } catch (err) {
       setLoading(false);
+      setLastResponse({ error: (err && (err.message || String(err))) || 'Request failed', data: null });
       setError('Could not validate code');
       toast.error('Could not validate code');
     }
@@ -180,17 +184,35 @@ export default function ClientCode() {
                   In that project open SQL Editor and run: set_coach_invite_code(&apos;your-coach@email.com&apos;, &apos;atlas-3034&apos;)
                 </p>
               ) : null}
+              {lastResponse && (
+                <p style={{ marginTop: 12, fontSize: 11, color: colors.muted, wordBreak: 'break-all' }}>
+                  API response: {lastResponse.error ? `error: ${lastResponse.error}` : ''}
+                  {lastResponse.data != null ? ` data: ${JSON.stringify(lastResponse.data)}` : ''}
+                </p>
+              )}
             </div>
           ) : null}
           <Button
             type="submit"
             disabled={loading}
             className="w-full min-h-[48px] rounded-xl font-semibold text-white"
-style={{ background: colors.primary }}
+            style={{ background: colors.primary }}
           >
             {loading ? 'Checking…' : 'Continue'}
           </Button>
         </form>
+        <p style={{ marginTop: 24, fontSize: 11, color: colors.muted, textAlign: 'center', maxWidth: 320, marginLeft: 'auto', marginRight: 'auto' }}>
+          The code is checked against your coach&apos;s Supabase project. If it keeps failing, a coach profile in that project needs referral_code set to this code (e.g. in SQL Editor).
+        </p>
+        {getSupabaseProjectRef() ? (
+          <p style={{ marginTop: 8, fontSize: 10, color: colors.muted, textAlign: 'center' }}>
+            This site uses Supabase project: <strong style={{ color: TEXT }}>{getSupabaseProjectRef()}</strong> — run set_coach_invite_code in that project&apos;s SQL Editor.
+          </p>
+        ) : (
+          <p style={{ marginTop: 8, fontSize: 10, color: colors.error || '#ef4444', textAlign: 'center' }}>
+            Supabase URL not set. Set VITE_SUPABASE_URL in your deployment env and redeploy.
+          </p>
+        )}
       </div>
     </div>
   );
