@@ -1,4 +1,0 @@
-# Project-level config. See https://supabase.com/docs/guides/functions/function-configuration
-# validateInviteCode is called by the Client code page before sign-in, so it must not require JWT.
-[functions.validateInviteCode]
-verify_jwt = false

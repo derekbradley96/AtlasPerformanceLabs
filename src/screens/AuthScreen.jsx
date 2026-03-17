@@ -331,10 +331,10 @@ export default function AuthScreen() {
         </div>
 
         <h1 className="text-xl font-bold text-center mb-1" style={{ color: colors.text }}>
-          {isLogin ? 'Log in' : paramAccount === 'client' ? 'Complete your details' : 'Sign up'}
+          {isLogin ? 'Log in' : 'Sign up'}
         </h1>
         <p className="text-sm text-center mb-5" style={{ color: colors.muted }}>
-          {isLogin ? 'Sign in to your Atlas account.' : paramAccount === 'client' ? "You're joining as a client. Enter your details to continue." : 'Create your Atlas account.'}
+          {isLogin ? 'Sign in to your Atlas account.' : 'Create your Atlas account.'}
         </p>
 
         {/* Tab bar with smooth transition */}
@@ -387,66 +387,64 @@ export default function AuthScreen() {
           <form onSubmit={handleSubmit}>
             {!isLogin && (
               <>
-                {/* Account type: only when not already coming as client (from coach code) */}
-                {paramAccount !== 'client' && (
+                {/* Section 1: Account type */}
+                <div
+                  className="mb-3 rounded-xl overflow-hidden"
+                  style={{
+                    background: colors.surface1,
+                    border: `1px solid ${colors.border}`,
+                    padding: spacing[16],
+                    borderRadius: radii.sm,
+                  }}
+                >
+                  <label id="auth-account-type" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
+                    Account type
+                  </label>
                   <div
-                    className="mb-3 rounded-xl overflow-hidden"
+                    className="flex overflow-hidden"
                     style={{
-                      background: colors.surface1,
+                      background: colors.surface2,
                       border: `1px solid ${colors.border}`,
-                      padding: spacing[16],
-                      borderRadius: radii.sm,
+                      borderRadius: radii.button,
+                      minHeight: touchTargetMin,
                     }}
                   >
-                    <label id="auth-account-type" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
-                      Account type
-                    </label>
-                    <div
-                      className="flex overflow-hidden"
+                    <button
+                      type="button"
+                      aria-label="Trainer"
+                      onClick={async () => {
+                        setSignupRole('coach');
+                        if (signupCoachFocus == null || signupCoachFocus === '') setSignupCoachFocus('transformation');
+                        await lightHaptic();
+                      }}
+                      className="flex-1 py-3 text-sm font-medium transition-colors duration-200"
                       style={{
-                        background: colors.surface2,
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: radii.button,
                         minHeight: touchTargetMin,
+                        background: signupRole === 'coach' ? colors.primarySubtle : 'transparent',
+                        color: signupRole === 'coach' ? colors.accent : colors.muted,
                       }}
                     >
-                      <button
-                        type="button"
-                        aria-label="Trainer"
-                        onClick={async () => {
-                          setSignupRole('coach');
-                          if (signupCoachFocus == null || signupCoachFocus === '') setSignupCoachFocus('transformation');
-                          await lightHaptic();
-                        }}
-                        className="flex-1 py-3 text-sm font-medium transition-colors duration-200"
-                        style={{
-                          minHeight: touchTargetMin,
-                          background: signupRole === 'coach' ? colors.primarySubtle : 'transparent',
-                          color: signupRole === 'coach' ? colors.accent : colors.muted,
-                        }}
-                      >
-                        Trainer
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Personal"
-                        onClick={async () => {
-                          setSignupRole('personal');
-                          setSignupCoachFocus(null);
-                          await lightHaptic();
-                        }}
-                        className="flex-1 py-3 text-sm font-medium transition-colors duration-200"
-                        style={{
-                          minHeight: touchTargetMin,
-                          background: signupRole === 'personal' ? colors.primarySubtle : 'transparent',
-                          color: signupRole === 'personal' ? colors.accent : colors.muted,
-                        }}
-                      >
-                        Personal
-                      </button>
-                    </div>
+                      Trainer
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Personal"
+                      onClick={async () => {
+                        setSignupRole('personal');
+                        setSignupCoachFocus(null);
+                        await lightHaptic();
+                      }}
+                      className="flex-1 py-3 text-sm font-medium transition-colors duration-200"
+                      style={{
+                        minHeight: touchTargetMin,
+                        background: signupRole === 'personal' ? colors.primarySubtle : 'transparent',
+                        color: signupRole === 'personal' ? colors.accent : colors.muted,
+                      }}
+                    >
+                      Personal
+                    </button>
                   </div>
-                )}
+                </div>
 
                 {/* Section 2: Coaching Focus (Trainer only) – premium selection cards */}
                 {signupRole === 'coach' && (
@@ -504,7 +502,7 @@ export default function AuthScreen() {
                   </div>
                 )}
 
-                {/* Section 3: Account details / Your details (client onboarding) */}
+                {/* Section 3: Account details */}
                 <div
                   className="mb-3 rounded-xl overflow-hidden"
                   style={{
@@ -515,7 +513,7 @@ export default function AuthScreen() {
                   }}
                 >
                   <label id="auth-details" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
-                    {paramAccount === 'client' ? 'Your details' : 'Account details'}
+                    Account details
                   </label>
                   <label id="auth-display-name" className="sr-only">
                     Display name
@@ -690,7 +688,7 @@ export default function AuthScreen() {
             <button
               type="submit"
               disabled={isDisabled}
-              aria-label={isLogin ? 'Log in' : paramAccount === 'client' ? 'Continue' : 'Sign up'}
+              aria-label={isLogin ? 'Log in' : 'Sign up'}
               onMouseDown={() => setPressing(true)}
               onMouseLeave={() => setPressing(false)}
               onMouseUp={() => setPressing(false)}
@@ -720,10 +718,10 @@ export default function AuthScreen() {
                     className="rounded-full border-2 border-white/30 border-t-white flex-shrink-0"
                     style={{ width: 20, height: 20, animation: 'spin 0.7s linear infinite' }}
                   />
-                  <span>{isLogin ? 'Signing in…' : paramAccount === 'client' ? 'Continuing…' : 'Creating account…'}</span>
+                  <span>{isLogin ? 'Signing in…' : 'Creating account…'}</span>
                 </>
               ) : (
-                <span>{isLogin ? 'Log in' : paramAccount === 'client' ? 'Continue' : 'Sign up'}</span>
+                <span>{isLogin ? 'Log in' : 'Sign up'}</span>
               )}
             </button>
           </form>
