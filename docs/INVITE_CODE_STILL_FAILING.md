@@ -61,7 +61,13 @@ ORDER BY display_name;
 
 **4b) Set one coach’s code to `atlas-3034`**
 
-Pick **one** of these and run it (replace the placeholder).
+**Easiest (after running the migration that adds the helper):** run this in SQL Editor (replace with the coach’s email):
+
+```sql
+SELECT set_coach_invite_code('your-coach@example.com', 'atlas-3034');
+```
+
+If that returns `{"ok": true, ...}`, the code is set. If you don’t have the helper, use one of these:
 
 By **profile id** (copy from 4a):
 

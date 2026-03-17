@@ -85,8 +85,14 @@ export default function ClientCode() {
       const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
       if (result.error || !result.data?.valid) {
         setLoading(false);
-        setError(result.data?.error || result.error || 'Invalid coach code');
-        toast.error(result.data?.error || result.error || 'Invalid coach code');
+        const msg = result.data?.error || result.error || 'Invalid coach code';
+        const project = result.data?._debug?.project;
+        if (result.error && !result.data) {
+          setError(msg);
+        } else {
+          setError(project ? `${msg} (Supabase project: ${project})` : msg);
+        }
+        toast.error(msg);
         return;
       }
       const trainerId = result.data.trainer_id ?? result.data.coach_id ?? '';
@@ -167,9 +173,14 @@ export default function ClientCode() {
             className="border-slate-700 font-mono"
           />
           {error ? (
-            <p style={{ marginBottom: 16, fontSize: 13, color: colors.error || '#ef4444', textAlign: 'center' }}>
-              {error}
-            </p>
+            <div style={{ marginBottom: 16, fontSize: 13, color: colors.error || '#ef4444', textAlign: 'center' }}>
+              <p style={{ margin: 0 }}>{error}</p>
+              {error.includes('Supabase project:') ? (
+                <p style={{ marginTop: 8, fontSize: 12, color: colors.muted, fontWeight: 500 }}>
+                  In that project open SQL Editor and run: set_coach_invite_code(&apos;your-coach@email.com&apos;, &apos;atlas-3034&apos;)
+                </p>
+              ) : null}
+            </div>
           ) : null}
           <Button
             type="submit"
