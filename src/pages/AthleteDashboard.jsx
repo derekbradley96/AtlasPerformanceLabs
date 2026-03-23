@@ -162,7 +162,7 @@ export default function AthleteDashboard() {
 
   return (
     <div className="min-h-screen pb-24" style={{ background: colors.bg, color: colors.text }}>
-      <TopBar title="Athlete dashboard" onBack={() => navigate(-1)} />
+      <TopBar title="Personal dashboard" onBack={() => navigate(-1)} />
 
       <div className="p-4 space-y-4">
         {/* Today workout */}
