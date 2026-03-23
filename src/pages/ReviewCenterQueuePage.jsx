@@ -46,6 +46,7 @@ const ITEM_TYPE_LABELS = {
   streak_broken: 'Streak broken',
   no_checkin: 'No check-in',
   no_workout: 'No workout',
+  adaptive_recommendation: 'Adaptive recommendation',
 };
 
 /** Filter tabs: value for URL, label, hide for transformation. */
@@ -62,6 +63,7 @@ const FILTER_OPTIONS = [
   { value: 'momentum_low', label: 'Low momentum' },
   { value: 'no_checkin', label: 'No check-in' },
   { value: 'no_workout', label: 'No workout' },
+  { value: 'adaptive_recommendation', label: 'Adaptive' },
 ];
 
 const SORT_OPTIONS = [
@@ -99,6 +101,51 @@ async function fetchReviewQueue(coachFilter) {
       .order('created_at', { ascending: false });
     if (error) return [];
     return Array.isArray(data) ? data : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+/** Pending adaptive recommendations surfaced in Review Center queue. */
+async function fetchAdaptiveRecommendationQueue(coachFilter) {
+  const ids = Array.isArray(coachFilter)
+    ? coachFilter.filter(Boolean)
+    : coachFilter
+      ? [coachFilter]
+      : [];
+  if (!hasSupabase || ids.length === 0) return [];
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  try {
+    let query = supabase
+      .from('training_adjustment_recommendations')
+      .select('id, coach_id, client_id, recommendation_type, severity, title, description, created_at, status, adjustment_payload, clients(name)')
+      .eq('status', 'pending');
+    query = ids.length === 1 ? query.eq('coach_id', ids[0]) : query.in('coach_id', ids);
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(60);
+    if (error || !Array.isArray(data)) return [];
+    const pr = { high: 95, medium: 80, low: 65 };
+    return data.map((row) => {
+      const severity = String(row.severity || 'low').toLowerCase();
+      return {
+        coach_id: row.coach_id,
+        client_id: row.client_id,
+        client_name: (row.clients && row.clients.name) || 'Client',
+        item_type: 'adaptive_recommendation',
+        priority: pr[severity] ?? 70,
+        reasons: [row.recommendation_type, severity].filter(Boolean),
+        created_at: row.created_at,
+        payload: {
+          recommendation_id: row.id,
+          recommendation_type: row.recommendation_type,
+          severity,
+          reason_summary: row.description || row.title || 'Adaptive recommendation is ready for review.',
+          title: row.title || null,
+          adjustment_payload: row.adjustment_payload || {},
+        },
+        resolved_at: null,
+      };
+    });
   } catch (_) {
     return [];
   }
@@ -154,6 +201,10 @@ export default function ReviewCenterQueuePage() {
       setCoachId(scope.coachId);
       const coachFilter = scope.mode === 'org_wide' ? scope.coachIds : scope.coachId;
       let list = await fetchReviewQueue(coachFilter);
+      const adaptive = await fetchAdaptiveRecommendationQueue(coachFilter);
+      if (Array.isArray(adaptive) && adaptive.length > 0) {
+        list = [...(list || []), ...adaptive];
+      }
       if (isTransformation) {
         list = (list || []).filter((item) => !TRANSFORMATION_EXCLUDED_ITEM_TYPES.includes(item.item_type));
       }
@@ -351,6 +402,12 @@ export default function ReviewCenterQueuePage() {
           { label: 'Review', onClick: navClient, icon: <FileCheck size={16} /> },
           { label: 'Mark Resolved', onClick: () => handleResolve(item), disabled: resolving, icon: <Check size={16} /> },
         ];
+      case 'adaptive_recommendation':
+        return [
+          { label: 'Open Client', onClick: navClient, primary: true, icon: <User size={16} /> },
+          { label: 'Review Recommendation', onClick: navClient, icon: <FileCheck size={16} /> },
+          { label: 'Message Client', onClick: navMessages, icon: <MessageCircle size={16} /> },
+        ];
       default:
         return [
           { label: 'View Client', onClick: navClient, primary: true, icon: <User size={16} /> },
@@ -491,6 +548,21 @@ export default function ReviewCenterQueuePage() {
                         <p className="text-xs mt-1" style={{ color: colors.muted }}>
                           {item.payload.days_since_last_workout === 0 ? 'No workout yet' : `${item.payload.days_since_last_workout} days since last workout`}
                         </p>
+                      )}
+                      {item.item_type === 'adaptive_recommendation' && (
+                        <>
+                          <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                            Type: {String(item.payload?.recommendation_type || 'adaptive_recommendation').replaceAll('_', ' ')}
+                          </p>
+                          <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                            Severity: {String(item.payload?.severity || 'low')}
+                          </p>
+                          {item.payload?.reason_summary && (
+                            <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                              {item.payload.reason_summary}
+                            </p>
+                          )}
+                        </>
                       )}
                       <p className="text-xs mt-1" style={{ color: colors.muted }}>
                         {formatCreatedAt(item.created_at)}

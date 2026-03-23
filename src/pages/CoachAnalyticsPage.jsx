@@ -67,10 +67,11 @@ async function fetchAnalyticsData(coachFilter, showPrep) {
       clientIds: [],
       momentum: [],
       habitAdherence: [],
+      adaptiveSummary: null,
     };
   }
   const supabase = getSupabase();
-  if (!supabase) return { money: null, metrics: [], retention: [], retentionSignals: [], attention: [], checkinsByWeek: [], clientIds: [], momentum: [], habitAdherence: [] };
+  if (!supabase) return { money: null, metrics: [], retention: [], retentionSignals: [], attention: [], checkinsByWeek: [], clientIds: [], momentum: [], habitAdherence: [], adaptiveSummary: null };
 
   const maxWeeksAgo = new Date();
   maxWeeksAgo.setDate(maxWeeksAgo.getDate() - MAX_TREND_WEEKS * 7);
@@ -79,7 +80,7 @@ async function fetchAnalyticsData(coachFilter, showPrep) {
 
   const primaryCoachId = coachIds[0];
 
-  const [moneyRes, metricsRes, retentionRes, signalsRes, attentionRes, checkinsRes, clientsRes] = await Promise.all([
+  const [moneyRes, metricsRes, retentionRes, signalsRes, attentionRes, checkinsRes, clientsRes, adaptiveRes] = await Promise.all([
     supabase.from('v_coach_money_dashboard').select('*').eq('coach_id', primaryCoachId).maybeSingle(),
     supabase
       .from('v_client_progress_metrics')
@@ -105,6 +106,10 @@ async function fetchAnalyticsData(coachFilter, showPrep) {
       .select('client_id, week_start')
       .gte('submitted_at', since),
     supabase.from('clients').select('id').in('assigned_coach_id', coachIds),
+    supabase
+      .from('v_adaptive_training_summary')
+      .select('coach_id, total_recommendations, applied_recommendations, ignored_recommendations, high_severity_count, deload_recommendations, recovery_session_recommendations')
+      .in('coach_id', coachIds),
   ]);
 
   const money = moneyRes.data || null;
@@ -114,6 +119,27 @@ async function fetchAnalyticsData(coachFilter, showPrep) {
   const attention = attentionRes.data || [];
   const checkins = checkinsRes.data || [];
   const coachClientIds = (clientsRes.data || []).map((c) => c.id).filter(Boolean);
+  const adaptiveRows = Array.isArray(adaptiveRes.data) ? adaptiveRes.data : [];
+  const adaptiveSummary = adaptiveRows.reduce(
+    (acc, row) => ({
+      coach_id: null,
+      total_recommendations: acc.total_recommendations + (Number(row.total_recommendations) || 0),
+      applied_recommendations: acc.applied_recommendations + (Number(row.applied_recommendations) || 0),
+      ignored_recommendations: acc.ignored_recommendations + (Number(row.ignored_recommendations) || 0),
+      high_severity_count: acc.high_severity_count + (Number(row.high_severity_count) || 0),
+      deload_recommendations: acc.deload_recommendations + (Number(row.deload_recommendations) || 0),
+      recovery_session_recommendations: acc.recovery_session_recommendations + (Number(row.recovery_session_recommendations) || 0),
+    }),
+    {
+      coach_id: null,
+      total_recommendations: 0,
+      applied_recommendations: 0,
+      ignored_recommendations: 0,
+      high_severity_count: 0,
+      deload_recommendations: 0,
+      recovery_session_recommendations: 0,
+    }
+  );
 
   const clientIds = [...new Set(metrics.map((m) => m.client_id).filter(Boolean))];
   let nameMap = {};
@@ -169,6 +195,7 @@ async function fetchAnalyticsData(coachFilter, showPrep) {
     clientIds: clientIds.length > 0 ? clientIds : coachClientIds,
     momentum,
     habitAdherence,
+    adaptiveSummary,
     showPrep,
   };
 }
@@ -297,6 +324,7 @@ export default function CoachAnalyticsPage() {
     clientIds: [],
     momentum: [],
     habitAdherence: [],
+    adaptiveSummary: null,
   });
 
   const coachId = user?.id ?? null;
@@ -404,6 +432,17 @@ export default function CoachAnalyticsPage() {
     .filter((m) => m.avg_compliance_last_4w != null)
     .sort((a, b) => Number(a.avg_compliance_last_4w) - Number(b.avg_compliance_last_4w))
     .slice(0, TOP_LIST_SIZE);
+  const adaptive = data.adaptiveSummary || {
+    total_recommendations: 0,
+    applied_recommendations: 0,
+    ignored_recommendations: 0,
+    high_severity_count: 0,
+    deload_recommendations: 0,
+    recovery_session_recommendations: 0,
+  };
+  const adaptiveUseRate = adaptive.total_recommendations > 0
+    ? Math.round((adaptive.applied_recommendations / adaptive.total_recommendations) * 100)
+    : null;
 
   const cardStyle = {
     background: colors.card,
@@ -552,6 +591,49 @@ export default function CoachAnalyticsPage() {
               <p className="text-xs font-medium" style={{ color: colors.muted }}>With active flags</p>
               <p className="text-lg font-semibold" style={{ color: colors.text }}>{roster.clientsWithFlags}</p>
             </div>
+          </div>
+        </Card>
+
+        {/* Adaptive insights */}
+        <div className="mb-2">
+          <span className="text-xs font-medium uppercase tracking-wide" style={{ color: colors.muted }}>Adaptive insights</span>
+        </div>
+        <Card style={{ ...cardStyle, marginBottom: spacing[16] }}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Total recommendations</p>
+              <p className="text-lg font-semibold" style={{ color: colors.text }}>{adaptive.total_recommendations}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Applied</p>
+              <p className="text-lg font-semibold" style={{ color: colors.success }}>{adaptive.applied_recommendations}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Ignored</p>
+              <p className="text-lg font-semibold" style={{ color: adaptive.ignored_recommendations > 0 ? colors.warning : colors.text }}>
+                {adaptive.ignored_recommendations}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>High severity</p>
+              <p className="text-lg font-semibold" style={{ color: adaptive.high_severity_count > 0 ? colors.danger : colors.text }}>
+                {adaptive.high_severity_count}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Deload recommendations</p>
+              <p className="text-lg font-semibold" style={{ color: colors.text }}>{adaptive.deload_recommendations}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Recovery session recommendations</p>
+              <p className="text-lg font-semibold" style={{ color: colors.text }}>{adaptive.recovery_session_recommendations}</p>
+            </div>
+          </div>
+          <div className="pt-3 mt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
+            <p className="text-xs font-medium" style={{ color: colors.muted }}>Recommendation use rate</p>
+            <p className="text-base font-semibold" style={{ color: colors.text }}>
+              {adaptiveUseRate == null ? '—' : `${adaptiveUseRate}% applied`}
+            </p>
           </div>
         </Card>
 

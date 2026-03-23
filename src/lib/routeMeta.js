@@ -37,8 +37,10 @@ const ROUTE_TITLES = {
   '/earnings': 'Earnings',
   '/workout': 'Workout',
   '/today': 'Today',
+  '/workout-player': 'Workout',
+  '/readiness-checkin': 'Readiness',
   '/progress': 'Progress',
-  '/findtrainer': 'Find Trainer',
+  '/findtrainer': 'Find a coach',
   '/mytrainer': 'My Trainer',
   '/myprogram': 'My Program',
   '/clientdetail': 'Client',
@@ -46,6 +48,7 @@ const ROUTE_TITLES = {
   '/conversationthread': 'Conversation',
   '/programbuilder': 'Program Builder',
   '/program-builder': 'Program Builder',
+  '/nutrition-builder': 'Nutrition builder',
   '/program-assignments': 'Assign Program',
   '/program-viewer': 'Program',
   '/programdayeditor': 'Program Day',
@@ -91,6 +94,8 @@ const ROUTE_TITLES = {
   '/onboardingrole': 'Choose Role',
   '/roleselection': 'Choose Role',
   '/clientonboarding': 'Onboarding',
+  '/client-onboarding-flow': 'Join your coach',
+  '/personal-onboarding-flow': 'Your plan',
   '/traineronboarding': 'Onboarding',
   '/consultations': 'Consultations',
   '/onboarding-link': 'Onboarding Link',
@@ -188,6 +193,7 @@ export function isPushedRoute(pathname) {
   if (/^\/clients\/[^/]+\/checkins\/[^/]+$/.test(path)) return true;
   if (/^\/programs\/[^/]+$/.test(path)) return true;
   if (path === '/programbuilder' || path === '/program-builder') return true;
+  if (path === '/nutrition-builder') return true;
   if (path === '/inviteclient' || path === '/invite-client') return true;
   if (path.startsWith('/settings/')) return true;
   if (path === '/editprofile' || path === '/edit-profile') return true;

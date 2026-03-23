@@ -12,6 +12,7 @@ import { Capacitor } from '@capacitor/core';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
 import { isCoach, isClient, isPersonal, roleHomePath, Roles } from '@/lib/roles';
+import { isProfileOnboardingComplete } from '@/lib/onboardingStatus';
 import RequireRole from '@/components/auth/RequireRole';
 import { SettingsProvider } from '@/lib/SettingsContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
@@ -19,8 +20,8 @@ import RoleSelect from './pages/RoleSelect';
 import TrainerLogin from './pages/TrainerLogin';
 import SoloLogin from './pages/SoloLogin';
 import ClientCode from './pages/ClientCode';
-import ClientOnboarding from './pages/ClientOnboarding';
-import PersonalOnboardingPage from './pages/PersonalOnboardingPage';
+import ClientOnboardingFlow from './pages/ClientOnboardingFlow';
+import PersonalOnboardingFlow from './pages/PersonalOnboardingFlow';
 import AdminDevPanel from './pages/AdminDevPanel';
 import BetaFeedbackInboxPage from './pages/BetaFeedbackInboxPage';
 import BetaHealthDashboard from './pages/BetaHealthDashboard';
@@ -58,6 +59,7 @@ import Programs from './pages/Programs';
 import Account from './pages/Account';
 import EditProfile from './pages/EditProfile';
 import InviteClient from './pages/InviteClient';
+import CoachOnboardingDocumentsPage from './pages/CoachOnboardingDocumentsPage';
 import CapacityDashboard from './pages/CapacityDashboard';
 import NotificationSettings from './pages/NotificationSettings';
 import NotificationSettingsPage from './pages/NotificationSettingsPage';
@@ -164,6 +166,8 @@ import Workout from './pages/Workout';
 import Progress from './pages/Progress';
 import ProgressPage from './pages/ProgressPage';
 import TodayPage from './pages/TodayPage';
+import WorkoutPlayerPage from './pages/WorkoutPlayerPage';
+import ReadinessCheckinPage from './pages/ReadinessCheckinPage';
 import FindTrainer from './pages/FindTrainer';
 import MyProgram from './pages/MyProgram';
 import ClientCheckIn from './pages/ClientCheckIn';
@@ -205,6 +209,7 @@ import AuthCallback from './screens/AuthCallback';
 const CompPrepHomeLazy = React.lazy(() => import('./pages/compPrep/CompPrepHome'));
 const ProgramBuilderLazy = React.lazy(() => import('./pages/ProgramBuilder'));
 const ProgramBuilderPageLazy = React.lazy(() => import('./pages/ProgramBuilderPage'));
+const NutritionBuilderLazy = React.lazy(() => import('./pages/NutritionBuilder'));
 const ProgramAssignmentsPageLazy = React.lazy(() => import('./pages/ProgramAssignmentsPage'));
 const ProgramViewerPageLazy = React.lazy(() => import('./pages/ProgramViewerPage'));
 const ProgramBlockBuilderLazy = React.lazy(() => import('./pages/ProgramBlockBuilder'));
@@ -250,7 +255,7 @@ const EntryLoadingView = () => (
   </div>
 );
 
-const BOOT_LOADING_TIMEOUT_MS = 10000;
+const BOOT_LOADING_TIMEOUT_MS = 30000;
 
 /** Wraps EntryLoadingView with a 10s timeout; then shows BootErrorScreen. Also shows error immediately if bootError is set. */
 function BootLoadingWithTimeout() {
@@ -285,12 +290,14 @@ function ProfileLoadErrorBanner() {
 
 
 /** Paths that are part of role onboarding; don't redirect away when onboarding_complete is false. */
-const ONBOARDING_PATHS = ['/coach-onboarding-flow', '/clientonboarding', '/onboarding/personal', '/coach-onboarding', '/onboarding'];
+const ONBOARDING_PATHS = ['/coach-onboarding-flow', '/client-onboarding-flow', '/clientonboarding', '/onboarding/personal', '/coach-onboarding', '/onboarding'];
 
 /** Layout guard: while hydrating show loading; if Supabase configured but no session redirect to /auth; if session but no role yet show loading; if onboarding not complete redirect to role onboarding; else render Outlet. */
 function RequireAuthLayout() {
   const location = useLocation();
   const { isHydratingAppState, isAuthenticated, isAdminBypass, role, profile, supabaseUser, hasSupabase } = useAuth();
+  const hasRole = role === 'coach' || role === 'client' || role === 'personal' || role === 'trainer' || role === 'solo';
+  const devRoleBypass = import.meta.env.DEV && hasSupabase && !supabaseUser && hasRole;
   const [profileWaitTimedOut, setProfileWaitTimedOut] = React.useState(false);
   React.useEffect(() => {
     if (!hasSupabase || !supabaseUser || role) return;
@@ -298,20 +305,30 @@ function RequireAuthLayout() {
     return () => clearTimeout(t);
   }, [hasSupabase, supabaseUser, role]);
   if (isHydratingAppState) return <BootLoadingWithTimeout />;
-  if (hasSupabase && !supabaseUser) return <Navigate to="/auth" replace />;
-  if (hasSupabase && supabaseUser && !role && profileWaitTimedOut) return <Navigate to="/auth" replace />;
+  // Dev/admin sandbox role switching can run without a Supabase session.
+  if (hasSupabase && !supabaseUser && !isAdminBypass && !devRoleBypass) return <Navigate to="/auth" replace />;
+  if (hasSupabase && supabaseUser && !role && profileWaitTimedOut) return <BootLoadingWithTimeout />;
   if (hasSupabase && supabaseUser && !role) return <BootLoadingWithTimeout />;
-  const hasRole = role === 'coach' || role === 'client' || role === 'personal' || role === 'trainer' || role === 'solo';
-  const allowed = (isAuthenticated || isAdminBypass) && hasRole;
+  const allowed = ((isAuthenticated || isAdminBypass) && hasRole) || devRoleBypass;
   if (!allowed) return <Navigate to="/auth" replace />;
 
-  const onboardingComplete = profile?.onboarding_complete === true;
+  const onboardingComplete = isProfileOnboardingComplete(profile);
   const pathname = location?.pathname ?? '';
   const isOnOnboardingPath = ONBOARDING_PATHS.some((p) => pathname.startsWith(p));
+  const isCoachBuilderPath = pathname.startsWith('/program-builder')
+    || pathname.startsWith('/program-assignments')
+    || pathname.startsWith('/programviewer')
+    || pathname.startsWith('/programbuilder');
+  const search = location?.search ?? '';
+  const params = new URLSearchParams(search);
+  const onboardingBypass = params.get('onboarding') === '1';
   if (!isAdminBypass && hasRole && !onboardingComplete && !isOnOnboardingPath) {
-    if (role === 'coach' || role === 'trainer') return <Navigate to="/coach-onboarding-flow" replace />;
-    if (role === 'client') return <Navigate to="/clientonboarding" replace />;
-    if (role === 'personal' || role === 'solo') return <Navigate to="/onboarding/personal" replace />;
+    if ((role === 'coach' || role === 'trainer') && !isCoachBuilderPath && !onboardingBypass) {
+      return <Navigate to="/coach-onboarding-flow" replace />;
+    }
+    // Only send to coach-code flow when we have a profile row; avoid trapping users if profile fetch failed.
+    if (role === 'client' && profile?.id) return <Navigate to="/client-onboarding-flow" replace />;
+    if (role === 'personal' || role === 'solo') return <Navigate to="/personal-onboarding-flow" replace />;
   }
 
   return <Outlet />;
@@ -343,6 +360,34 @@ const RedirectClientDetail = () => {
   return <Navigate to="/clients" replace />;
 };
 
+/**
+ * Canonical coach builder entry:
+ * - coach/admin => Supabase builder (/program-builder)
+ * - personal => legacy local builder (/programbuilder)
+ */
+function ProgramBuilderCanonicalEntry() {
+  const { effectiveRole } = useAuth();
+  const location = useLocation();
+  const isCoachRole = isCoach(effectiveRole) || effectiveRole === Roles.ADMIN;
+  if (!isCoachRole) {
+    return (
+      <Suspense fallback={<LazyRouteFallback />}>
+        <ProgramBuilderLazy />
+      </Suspense>
+    );
+  }
+  const params = new URLSearchParams(location.search || '');
+  const next = new URLSearchParams();
+  const clientId = params.get('clientId') || params.get('assignTo');
+  const blockId = params.get('blockId');
+  const source = params.get('source');
+  if (clientId) next.set('clientId', clientId);
+  if (blockId) next.set('blockId', blockId);
+  if (source) next.set('source', source);
+  const qs = next.toString();
+  return <Navigate to={qs ? `/program-builder?${qs}` : '/program-builder'} replace />;
+}
+
 /** Renders the correct dashboard for current role on /home. Coach lands on CoachHomePage (command center). */
 function HomePageByRole() {
   const { effectiveRole } = useAuth();
@@ -350,6 +395,14 @@ function HomePageByRole() {
   if (isClient(effectiveRole)) return <ClientDashboardPage />;
   if (isPersonal(effectiveRole)) return <SoloDashboardPage />;
   return <SoloDashboardPage />;
+}
+
+/** Auth screen gate: if already signed in, send user back into app flow. */
+function AuthScreenGate() {
+  const { isHydratingAppState, hasSupabase: hasSupabaseAuth, supabaseUser } = useAuth();
+  if (isHydratingAppState) return <BootLoadingWithTimeout />;
+  if (hasSupabaseAuth && supabaseUser?.id) return <Navigate to="/home" replace />;
+  return <AuthScreen />;
 }
 
 /** Admin dev panel: allow in DEV or when logged in as admin email (always visible on that account). */
@@ -398,13 +451,14 @@ const AppRoutes = () => (
           </Route>
         </Route>
       )}
-      <Route path="/auth" element={<AuthScreen />} />
+      <Route path="/auth" element={<AuthScreenGate />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/role-select" element={import.meta.env.DEV ? <RoleSelect /> : <Navigate to="/auth" replace />} />
       {/* Legacy login entrypoints – always redirect to canonical /auth */}
       <Route path="/trainer-login" element={<Navigate to="/auth?mode=login&account=coach" replace />} />
       <Route path="/solo-login" element={<Navigate to="/auth?mode=login&account=personal" replace />} />
       <Route path="/client-code" element={<ClientCode />} />
+      <Route path="/client-onboarding-flow" element={<ClientOnboardingFlow />} />
       <Route path="/join/:slug" element={<JoinPage />} />
       <Route path="/onboard/:trainerSlug" element={<OnboardPage />} />
       <Route path="/forgot" element={<ForgotPassword />} />
@@ -439,8 +493,16 @@ const AppRoutes = () => (
       <Route path="/solo" element={<Navigate to="/home" replace />} />
       <Route element={<RequireAuthLayout />}>
         <Route path="coach-type" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Coach type is for trainers only."><CoachTypeOnboarding /></RequireRole>} />
-        <Route path="clientonboarding" element={<ClientOnboarding />} />
-        <Route path="onboarding/personal" element={<PersonalOnboardingPage />} />
+        <Route path="clientonboarding" element={<Navigate to="/client-onboarding-flow" replace />} />
+        <Route path="onboarding/personal" element={<Navigate to="/personal-onboarding-flow" replace />} />
+        <Route
+          path="personal-onboarding-flow"
+          element={
+            <RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="This quick setup is for Personal accounts.">
+              <PersonalOnboardingFlow />
+            </RequireRole>
+          }
+        />
         <Route element={<FeedbackProvider><AppShell /></FeedbackProvider>}>
           <Route path="coach-onboarding" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Onboarding is for trainers only."><CoachOnboardingWizard /></RequireRole>} />
           <Route path="coach-onboarding-flow" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Onboarding is for trainers only."><CoachOnboardingFlow /></RequireRole>} />
@@ -515,6 +577,28 @@ const AppRoutes = () => (
           <Route path="workout" element={<RequireAuth><Workout /></RequireAuth>} />
           <Route path="progress" element={<RequireAuth><ProgressPage /></RequireAuth>} />
           <Route path="today" element={<RequireAuth><TodayPage /></RequireAuth>} />
+          <Route
+            path="workout-player"
+            element={
+              <RequireRole
+                allow={[Roles.CLIENT, Roles.PERSONAL]}
+                accessDeniedMessage="The workout player is for clients and personal accounts."
+              >
+                <WorkoutPlayerPage />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="readiness-checkin"
+            element={
+              <RequireRole
+                allow={[Roles.CLIENT, Roles.PERSONAL]}
+                accessDeniedMessage="Readiness check-in is for clients and personal accounts."
+              >
+                <ReadinessCheckinPage />
+              </RequireRole>
+            }
+          />
           <Route path="peak-week" element={<RequireAuth><ErrorBoundary><ClientPeakWeekPage /></ErrorBoundary></RequireAuth>} />
           <Route path="peak-week-checkin" element={<RequireAuth><PeakWeekCheckinSubmitPage /></RequireAuth>} />
           <Route path="habits-daily" element={<RequireAuth><ClientHabitsDailyPage /></RequireAuth>} />
@@ -554,11 +638,13 @@ const AppRoutes = () => (
           <Route path="programs" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for trainers only."><Programs /></RequireRole>} />
           <Route path="account" element={<Navigate to="/settings/account" replace />} />
           <Route path="editprofile" element={<RequireAuth><EditProfile /></RequireAuth>} />
-          <Route path="programbuilder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN, Roles.PERSONAL]} accessDeniedMessage="Program Builder is for coaches and personal accounts."><Suspense fallback={<LazyRouteFallback />}><ProgramBuilderLazy /></Suspense></RequireRole>} />
+          <Route path="programbuilder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN, Roles.PERSONAL]} accessDeniedMessage="Program Builder is for coaches and personal accounts."><ProgramBuilderCanonicalEntry /></RequireRole>} />
           <Route path="program-builder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN, Roles.PERSONAL]} accessDeniedMessage="Program Builder is for coaches and personal accounts."><Suspense fallback={<LazyRouteFallback />}><ProgramBuilderPageLazy /></Suspense></RequireRole>} />
+          <Route path="nutrition-builder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Nutrition builder is for coaches only."><Suspense fallback={<LazyRouteFallback />}><NutritionBuilderLazy /></Suspense></RequireRole>} />
           <Route path="program-assignments" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Assignments are for coaches only."><Suspense fallback={<LazyRouteFallback />}><ProgramAssignmentsPageLazy /></Suspense></RequireRole>} />
           <Route path="program-viewer" element={<RequireAuth><Suspense fallback={<LazyRouteFallback />}><ProgramViewerPageLazy /></Suspense></RequireAuth>} />
           <Route path="inviteclient" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for trainers only."><InviteClient /></RequireRole>} />
+          <Route path="onboarding-documents" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Onboarding documents are for trainers only."><CoachOnboardingDocumentsPage /></RequireRole>} />
           <Route path="onboarding-link" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for trainers only."><OnboardingLink /></RequireRole>} />
           <Route path="public-link" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for trainers only."><PublicLink /></RequireRole>} />
           <Route path="services" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for trainers only."><ServicesBuilder /></RequireRole>} />

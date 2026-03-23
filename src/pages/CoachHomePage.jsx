@@ -3,13 +3,13 @@
  * Data: v_coach_attention_queue, v_client_progress_metrics, v_coach_review_queue, v_client_retention_risk, v_coach_peak_week_due.
  * coach_focus: transformation hides prep metrics; competition/integrated show peak week + pose checks due.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { isCoach } from '@/lib/roles';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getWeekStart } from '@/lib/date';
-import { getCoachClients, getWeekStartISO } from '@/lib/checkins';
+import { getWeekStartISO } from '@/lib/checkins';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import PressableCard from '@/components/PressableCard';
@@ -20,6 +20,12 @@ import { captureUiError } from '@/services/errorLogger';
 import { hapticLight } from '@/lib/haptics';
 import { colors, spacing, shadows } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
+import { coachFocusAllowsPrepFeatures } from '@/lib/coachFocus';
+import { journeyRosterBucket } from '@/lib/clientJourney';
+import { coachFocusLabel } from '@/lib/data/coachTypeHelpers';
+import { getCoachClientSignupLink } from '@/lib/referrals';
+import * as atlasRepo from '@/data/repos/atlasRepo';
+import { trackFirstCoachLinkCopied, trackFirstDashboardView } from '@/services/firstSessionTracker';
 
 function formatCurrency(val) {
   if (val == null || Number.isNaN(Number(val))) return '—';
@@ -39,21 +45,27 @@ import {
   MessageSquare,
   Calendar,
   User,
+  Users,
   SearchCheck,
   Send,
   Building2,
   AlertCircle,
+  Link2,
+  Layers,
+  Copy,
 } from 'lucide-react';
 import { getReengagementTemplate, sendReengagementNudge } from '@/lib/reengagementTemplates';
 import { toast } from 'sonner';
 
 const PAYMENT_REMINDER_MSG = 'Hi! This is a friendly reminder that your payment is overdue. Please settle at your earliest convenience. Thanks!';
-const ATTENTION_LIMIT = 5;
-const CHECKINS_LIMIT = 5;
-const POSE_LIMIT = 5;
+/** Fetch enough rows for large prep rosters; UI caps display via NEEDS_ATTENTION_DISPLAY_PREP / _TRANSFORMATION. */
+const ATTENTION_LIMIT = 14;
+const CHECKINS_LIMIT = 8;
+const POSE_LIMIT = 8;
 const OVERDUE_LIMIT = 5;
 const HOURS_48 = 48;
-const NEEDS_ATTENTION_DISPLAY = 5;
+const NEEDS_ATTENTION_DISPLAY_TRANSFORMATION = 5;
+const NEEDS_ATTENTION_DISPLAY_PREP = 10;
 
 /** Labels for attention_reason (coaching intelligence) and legacy reasons. */
 function reasonLabel(r) {
@@ -71,6 +83,7 @@ function reasonLabel(r) {
     low_momentum: 'Low momentum',
     habit_adherence_low: 'Low habit adherence',
     streak_broken: 'Streak broken',
+    adaptive_recommendation: 'Adaptive recommendation',
   };
   return map[r] || r;
 }
@@ -87,12 +100,12 @@ async function fetchLowMomentumClients(coachId) {
   try {
     const { data: clientRows, error: clientsErr } = await supabase
       .from('clients')
-      .select('id, name, full_name')
+      .select('id, name')
       .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`);
     if (clientsErr || !Array.isArray(clientRows) || clientRows.length === 0) return [];
     const clientIds = clientRows.map((c) => c.id).filter(Boolean);
     const nameBy = {};
-    clientRows.forEach((c) => { nameBy[c.id] = c.full_name || c.name || 'Client'; });
+    clientRows.forEach((c) => { nameBy[c.id] = c.name || 'Client'; });
     const { data: momentumRows, error: momErr } = await supabase
       .from('v_client_momentum')
       .select('client_id, total_score')
@@ -131,9 +144,9 @@ async function fetchRetentionAlertClients(coachId) {
       .or('low_habit_adherence.eq.true,habit_streak_broken.eq.true');
     if (error || !Array.isArray(signals) || signals.length === 0) return [];
     const clientIds = [...new Set(signals.map((r) => r.client_id).filter(Boolean))];
-    const { data: clientRows } = await supabase.from('clients').select('id, name, full_name').in('id', clientIds);
+    const { data: clientRows } = await supabase.from('clients').select('id, name').in('id', clientIds);
     const nameBy = {};
-    (clientRows || []).forEach((c) => { nameBy[c.id] = c.full_name || c.name || 'Client'; });
+    (clientRows || []).forEach((c) => { nameBy[c.id] = c.name || 'Client'; });
     return signals.map((r) => {
       const reasons = [];
       if (r.low_habit_adherence) reasons.push('habit_adherence_low');
@@ -162,7 +175,7 @@ async function fetchCoachingAlerts(coachId) {
   try {
     const { data, error } = await supabase
       .from('coaching_insights')
-      .select('id, client_id, coach_id, insight_type, severity, title, description, is_resolved, created_at, clients!inner(full_name, name)')
+      .select('id, client_id, coach_id, insight_type, severity, title, description, is_resolved, created_at, clients!inner(name)')
       .eq('coach_id', coachId)
       .eq('severity', 'high')
       .eq('is_resolved', false)
@@ -172,13 +185,50 @@ async function fetchCoachingAlerts(coachId) {
     return data.map((row) => ({
       id: row.id,
       client_id: row.client_id,
-      client_name: (row.clients && (row.clients.full_name || row.clients.name)) || 'Client',
+      client_name: (row.clients && row.clients.name) || 'Client',
       insight_type: row.insight_type,
       severity: row.severity,
       title: row.title,
       description: row.description,
       created_at: row.created_at,
     }));
+  } catch {
+    return [];
+  }
+}
+
+/** Pending adaptive recommendations that need coach review. */
+async function fetchAdaptiveRecommendationAlerts(coachId) {
+  if (!hasSupabase || !coachId) return [];
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('training_adjustment_recommendations')
+      .select('id, client_id, coach_id, recommendation_type, severity, title, description, created_at, status, clients!inner(name)')
+      .eq('coach_id', coachId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error || !Array.isArray(data)) return [];
+    const severityPriority = { high: 45, medium: 35, low: 25 };
+    return data.map((row) => {
+      const severity = String(row.severity || 'low').toLowerCase();
+      return {
+        id: row.id,
+        client_id: row.client_id,
+        client_name: (row.clients && row.clients.name) || 'Client',
+        risk_level: severity === 'high' ? 'high' : severity === 'medium' ? 'medium' : 'low',
+        attention_reason: ['adaptive_recommendation'],
+        attention_priority: severityPriority[severity] ?? 25,
+        last_checkin_at: null,
+        engagement_score: null,
+        compliance_score: null,
+        recommendation_type: row.recommendation_type || null,
+        adaptive_severity: severity,
+        adaptive_reason_summary: row.description || row.title || 'Adaptive recommendation is ready for review.',
+      };
+    });
   } catch {
     return [];
   }
@@ -209,9 +259,9 @@ async function fetchAttention(coachId) {
       .limit(ATTENTION_LIMIT);
     if (error || !Array.isArray(stateRows) || stateRows.length === 0) return [];
     const ids = stateRows.map((r) => r.client_id).filter(Boolean);
-    const { data: clientRows } = await supabase.from('clients').select('id, full_name, name').in('id', ids);
+    const { data: clientRows } = await supabase.from('clients').select('id, name').in('id', ids);
     const nameMap = {};
-    (clientRows || []).forEach((c) => { nameMap[c.id] = c.full_name || c.name || 'Client'; });
+    (clientRows || []).forEach((c) => { nameMap[c.id] = c.name || 'Client'; });
     return stateRows.map((r) => ({
       client_id: r.client_id,
       client_name: nameMap[r.client_id] || 'Client',
@@ -236,7 +286,7 @@ async function fetchNewCheckins(coachId) {
   try {
     const { data, error } = await supabase
       .from('checkins')
-      .select('id, client_id, submitted_at, week_start, clients(full_name, name)')
+      .select('id, client_id, submitted_at, week_start, clients(name)')
       .gte('submitted_at', since)
       .order('submitted_at', { ascending: false })
       .limit(CHECKINS_LIMIT);
@@ -246,7 +296,7 @@ async function fetchNewCheckins(coachId) {
       client_id: row.client_id,
       submitted_at: row.submitted_at,
       week_start: row.week_start,
-      client_name: (row.clients && (row.clients.full_name || row.clients.name)) || 'Client',
+      client_name: (row.clients && row.clients.name) || 'Client',
     }));
   } catch (_) {
     return [];
@@ -264,11 +314,14 @@ async function fetchPoseCheckItems(coachId) {
   const [newRes, clientsRes, submittedThisWeekRes] = await Promise.all([
     supabase
       .from('pose_checks')
-      .select('id, client_id, submitted_at, week_start, clients(full_name, name)')
+      .select('id, client_id, submitted_at, week_start, clients(name)')
       .gte('submitted_at', since)
       .order('submitted_at', { ascending: false })
       .limit(POSE_LIMIT),
-    getCoachClients(),
+    supabase
+      .from('clients')
+      .select('id, name')
+      .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`),
     supabase.from('pose_checks').select('client_id').eq('week_start', weekStart),
   ]);
 
@@ -277,15 +330,31 @@ async function fetchPoseCheckItems(coachId) {
     client_id: row.client_id,
     submitted_at: row.submitted_at,
     week_start: row.week_start,
-    client_name: (row.clients && (row.clients.full_name || row.clients.name)) || 'Client',
+    client_name: (row.clients && row.clients.name) || 'Client',
   }));
 
   const submittedClientIds = new Set((submittedThisWeekRes.data || []).map((r) => r.client_id));
-  const coachClientIds = (clientsRes || []).map((c) => c.id);
+  const coachClientRows = Array.isArray(clientsRes?.data) ? clientsRes.data : [];
+  const coachClientIds = coachClientRows.map((c) => c.id);
   const dueClientIds = coachClientIds.filter((id) => !submittedClientIds.has(id));
-  const dueClients = (clientsRes || []).filter((c) => dueClientIds.includes(c.id)).slice(0, POSE_LIMIT);
+  const dueClients = coachClientRows.filter((c) => dueClientIds.includes(c.id)).slice(0, POSE_LIMIT);
 
   return { new: newList, due: dueClients };
+}
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out`)), ms)),
+  ]);
+}
+
+function safePromise(promise, fallback) {
+  return Promise.resolve(promise).catch(() => fallback);
+}
+
+function timedSafe(promise, ms, fallback, label) {
+  return safePromise(withTimeout(promise, ms, label), fallback);
 }
 
 /** Money dashboard row + overdue clients (top 5). */
@@ -298,7 +367,7 @@ async function fetchMoney(coachId) {
       supabase.from('v_coach_money_dashboard').select('*').eq('coach_id', coachId).maybeSingle(),
       supabase
         .from('clients')
-        .select('id, name, full_name, monthly_fee, next_due_date')
+        .select('id, name, monthly_fee, next_due_date')
         .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`)
         .eq('billing_status', 'overdue')
         .order('next_due_date', { ascending: true, nullsFirst: false })
@@ -367,7 +436,7 @@ async function fetchRetentionRiskCounts(coachId) {
   }
 }
 
-const HEALTH_ALERTS_LIMIT = 5;
+const HEALTH_ALERTS_LIMIT = 10;
 const RETENTION_REASON_LABELS = {
   days_since_last_checkin_high: 'Check-in overdue',
   no_workouts_last_7d: 'No workout this week',
@@ -494,15 +563,19 @@ async function fetchReviewQueueCountsByType(coachId, { excludePrep = false } = {
   }
 }
 
-/** Base tiles shown for all coaches. Pose Checks tile added only when showPoseAndPeak. Icon + label only; no subtitles. */
+/** Base tiles: order tuned for first-session clarity (invite → roster → programs → review). */
+/** Order tuned for first meaningful actions: invite → build plans → roster → rest. */
 const SHORTCUT_TILES_BASE = [
+  { label: 'Invite client', icon: UserPlus, path: '/inviteclient' },
+  { label: 'Program Builder', icon: Layers, path: '/program-builder' },
+  { label: 'Nutrition builder', icon: UtensilsCrossed, path: '/nutrition-builder' },
   { label: 'Clients', icon: ClipboardCheck, path: '/clients' },
-  { label: 'Analytics', icon: BarChart3, path: '/analytics' },
   { label: 'Programs', icon: FileText, path: '/programs' },
-  { label: 'Nutrition', icon: UtensilsCrossed, path: '/trainer/nutrition' },
+  { label: 'Assign program', icon: Link2, path: '/program-assignments' },
   { label: 'Review Center', icon: ListChecks, path: '/review-center/queue' },
+  { label: 'Analytics', icon: BarChart3, path: '/analytics' },
+  { label: 'Client nutrition list', icon: Users, path: '/trainer/nutrition' },
   { label: 'Earnings', icon: DollarSign, path: '/earnings' },
-  { label: 'Add Client', icon: UserPlus, path: '/inviteclient' },
   { label: 'My Training', icon: Dumbbell, path: '/my-training' },
   { label: 'Create Team', icon: Building2, path: '/organisation/setup' },
 ];
@@ -520,7 +593,7 @@ function getCoachFocus(profile, coachFocusFromAuth) {
 
 /** True when coach_focus is competition or integrated (show pose/peak week). */
 function showPoseAndPeakByFocus(coachFocus) {
-  return coachFocus === 'competition' || coachFocus === 'integrated';
+  return coachFocusAllowsPrepFeatures(coachFocus);
 }
 
 /** Format last_checkin_at for display (relative or short date). */
@@ -544,6 +617,119 @@ function riskBadgeStyle(riskLevel) {
   return { bg: colors.surface2, color: colors.muted };
 }
 
+/** Single row in Needs Attention queue (shared flat list + integrated prep/lifestyle split). */
+function AttentionItemRow({
+  item,
+  navigate,
+  onOpenAttention,
+  attentionReasons,
+  reasonLabel,
+  formatLastCheckin,
+  riskBadgeStyle,
+  hapticLight,
+  toast,
+}) {
+  const reasons = attentionReasons(item);
+  const topReasons = reasons.slice(0, 3).map(reasonLabel).join(' · ');
+  const riskStyle = riskBadgeStyle(item.risk_level);
+  const lastCheckin = formatLastCheckin(item.last_checkin_at);
+  const isAdaptive = Array.isArray(reasons) && reasons.includes('adaptive_recommendation');
+  const adaptiveType = item.recommendation_type ? String(item.recommendation_type).replaceAll('_', ' ') : null;
+  const adaptiveSeverity = item.adaptive_severity ? String(item.adaptive_severity).toLowerCase() : null;
+  const adaptiveSummary = item.adaptive_reason_summary || null;
+  return (
+    <li style={{ borderBottom: `1px solid ${colors.border}` }}>
+      <div className="py-3">
+        <div className="flex items-start justify-between gap-2 mb-1.5">
+          <div className="min-w-0 flex-1">
+            <p className="font-medium truncate text-left text-sm" style={{ color: colors.text }}>{item.client_name || 'Client'}</p>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              {item.risk_level && (
+                <span
+                  className="px-2 py-0.5 rounded-md text-[11px] font-medium capitalize"
+                  style={{ background: riskStyle.bg, color: riskStyle.color }}
+                >
+                  {item.risk_level}
+                </span>
+              )}
+              {lastCheckin && (
+                <span className="text-[11px]" style={{ color: colors.muted }}>Last check-in: {lastCheckin}</span>
+              )}
+            </div>
+            {topReasons && (
+              <p className="text-xs truncate text-left mt-0.5" style={{ color: colors.muted }}>{topReasons}</p>
+            )}
+            {isAdaptive && (
+              <>
+                <p className="text-xs text-left mt-1" style={{ color: colors.text }}>
+                  <span style={{ fontWeight: 600 }}>Type:</span> {adaptiveType || 'adaptive recommendation'}
+                  {adaptiveSeverity ? (
+                    <span style={{ marginLeft: 8 }}>
+                      <span style={{ fontWeight: 600 }}>Severity:</span> {adaptiveSeverity}
+                    </span>
+                  ) : null}
+                </p>
+                {adaptiveSummary && (
+                  <p className="text-xs text-left mt-0.5" style={{ color: colors.muted }}>
+                    {adaptiveSummary}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => onOpenAttention(item.client_id)}
+            className="shrink-0 p-1.5 rounded-lg active:opacity-80"
+            style={{ background: 'transparent', color: colors.muted }}
+            aria-label="Open client"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2 mt-2">
+          <button
+            type="button"
+            onClick={() => { hapticLight(); navigate(`/clients/${item.client_id}`); }}
+            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
+            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
+          >
+            <User size={14} /> Open Client
+          </button>
+          <button
+            type="button"
+            onClick={() => { hapticLight(); navigate(`/messages/${item.client_id}`); }}
+            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
+            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
+          >
+            <MessageSquare size={14} /> Message
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              hapticLight();
+              const template = getReengagementTemplate(attentionReasons(item));
+              sendReengagementNudge({ clientId: item.client_id, template, navigate, toast });
+            }}
+            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
+            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
+          >
+            <Send size={14} /> Send Nudge
+          </button>
+          <button
+            type="button"
+            onClick={() => { hapticLight(); navigate('/review-center/queue'); }}
+            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
+            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
+          >
+            <SearchCheck size={14} /> {isAdaptive ? 'Review Recommendation' : 'Review'}
+          </button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function revenueStabilityPill(overdueCount, highRisk, mediumRisk) {
   const hasOverdue = Number(overdueCount) > 0;
   const hasHigh = Number(highRisk) >= 2;
@@ -557,7 +743,7 @@ function revenueStabilityPill(overdueCount, highRisk, mediumRisk) {
 
 export default function CoachHomePage() {
   const navigate = useNavigate();
-  const { user, effectiveRole, profile, coachFocus: coachFocusFromAuth } = useAuth();
+  const { user, effectiveRole, profile, coachFocus: coachFocusFromAuth, isDemoMode } = useAuth();
   const [loading, setLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState(false);
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
@@ -580,11 +766,54 @@ export default function CoachHomePage() {
     clientsWithFlags: 0,
     checkinsDue: 0,
   });
+  /** @type {Record<string, { client_type?: string | null; show_date?: string | null }>} */
+  const [clientJourneyById, setClientJourneyById] = useState({});
+  const [startHereInviteCode, setStartHereInviteCode] = useState(() => (profile?.referral_code ?? '').toString().trim());
+  const [startHereCodeLoading, setStartHereCodeLoading] = useState(false);
 
   const coachId = user?.id ?? null;
   const isCoachRole = isCoach(effectiveRole);
   const coachFocus = getCoachFocus(profile, coachFocusFromAuth);
   const showPoseAndPeak = showPoseAndPeakByFocus(coachFocus);
+  const isIntegratedCoach = coachFocus === 'integrated';
+
+  useEffect(() => {
+    const c = (profile?.referral_code ?? '').toString().trim();
+    if (c) setStartHereInviteCode(c);
+  }, [profile?.referral_code]);
+
+  useEffect(() => {
+    if (!isCoachRole || !coachId) return;
+    const hasCode = (profile?.referral_code ?? '').toString().trim() || startHereInviteCode;
+    if (hasCode) return;
+    let cancelled = false;
+    setStartHereCodeLoading(true);
+    atlasRepo
+      .getInviteCode(coachId, !!isDemoMode)
+      .then((code) => {
+        if (!cancelled && code) setStartHereInviteCode((code ?? '').toString().trim());
+      })
+      .finally(() => {
+        if (!cancelled) setStartHereCodeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCoachRole, coachId, isDemoMode, profile?.referral_code, startHereInviteCode]);
+
+  const coachingSignupLink = useMemo(() => getCoachClientSignupLink(startHereInviteCode), [startHereInviteCode]);
+
+  const copyCoachingLinkStartHere = () => {
+    if (!coachingSignupLink) {
+      toast.message('Your link is loading — try again in a moment.');
+      return;
+    }
+    hapticLight();
+    navigator.clipboard?.writeText(coachingSignupLink).then(
+      () => toast.success('Coaching link copied'),
+      () => toast.error('Could not copy')
+    );
+  };
 
   useEffect(() => {
     if (!isCoachRole || !coachId) {
@@ -592,17 +821,21 @@ export default function CoachHomePage() {
       return;
     }
     let cancelled = false;
+    setLoading(true);
     setDashboardError(false);
     (async () => {
       try {
         const baseFetches = [
-          fetchAttention(coachId),
-          fetchMoney(coachId),
-          fetchRevenueSummary(coachId),
-          fetchRetentionRiskCounts(coachId),
+          timedSafe(fetchAttention(coachId), 4000, [], 'Attention'),
+          timedSafe(fetchMoney(coachId), 4000, { dashboard: null, overdue: [] }, 'Money'),
+          timedSafe(fetchRevenueSummary(coachId), 4000, null, 'Revenue summary'),
+          timedSafe(fetchRetentionRiskCounts(coachId), 3000, { high: 0, medium: 0 }, 'Retention risk counts'),
         ];
         if (showPoseAndPeak) {
-          baseFetches.push(fetchPoseCheckItems(coachId), fetchPeakWeekDueCount(coachId));
+          baseFetches.push(
+            timedSafe(fetchPoseCheckItems(coachId), 4000, { new: [], due: [] }, 'Pose checks'),
+            timedSafe(fetchPeakWeekDueCount(coachId), 3000, 0, 'Peak week due'),
+          );
         }
         const results = await Promise.all(baseFetches);
         let att = results[0];
@@ -615,15 +848,16 @@ export default function CoachHomePage() {
           poseItems = results[4] ?? { new: [], due: [] };
           peakCount = results[5] ?? 0;
         }
-        const [checkins, reviewCount, countsByType, health, lowMomentum, retentionAlerts, overdueSubs, coachingAlerts] = await Promise.all([
-          fetchNewCheckins(coachId),
-          fetchReviewQueueCount(coachId, { excludePrep: !showPoseAndPeak }),
-          fetchReviewQueueCountsByType(coachId, { excludePrep: !showPoseAndPeak }),
-          fetchRosterHealthMetrics(coachId),
-          fetchLowMomentumClients(coachId),
-          fetchRetentionAlertClients(coachId),
-          fetchOverdueSubscriptions(coachId),
-          fetchCoachingAlerts(coachId),
+        const [checkins, reviewCount, countsByType, health, lowMomentum, retentionAlerts, overdueSubs, coachingAlerts, adaptiveAlerts] = await Promise.all([
+          timedSafe(fetchNewCheckins(coachId), 4000, [], 'New check-ins'),
+          timedSafe(fetchReviewQueueCount(coachId, { excludePrep: !showPoseAndPeak }), 4000, 0, 'Review queue count'),
+          timedSafe(fetchReviewQueueCountsByType(coachId, { excludePrep: !showPoseAndPeak }), 4000, { checkin: 0, pose_check: 0 }, 'Review queue by type'),
+          timedSafe(fetchRosterHealthMetrics(coachId), 4000, { avgCompliance: null, clientsWithFlags: 0, checkinsDue: 0 }, 'Roster health'),
+          timedSafe(fetchLowMomentumClients(coachId), 4000, [], 'Low momentum'),
+          timedSafe(fetchRetentionAlertClients(coachId), 4000, [], 'Retention alerts'),
+          timedSafe(fetchOverdueSubscriptions(coachId), 4000, [], 'Overdue subscriptions'),
+          timedSafe(fetchCoachingAlerts(coachId), 3000, [], 'Coaching alerts'),
+          timedSafe(fetchAdaptiveRecommendationAlerts(coachId), 3000, [], 'Adaptive recommendations'),
         ]);
         if (cancelled) return;
         const byClientId = new Map();
@@ -647,10 +881,56 @@ export default function CoachHomePage() {
             byClientId.set(item.client_id, { ...existing, attention_reason: newReasons });
           }
         });
+        (adaptiveAlerts || []).forEach((item) => {
+          if (!byClientId.has(item.client_id)) {
+            byClientId.set(item.client_id, item);
+          } else {
+            const existing = byClientId.get(item.client_id);
+            if ((item.attention_priority ?? 0) > (existing.attention_priority ?? 0)) {
+              byClientId.set(item.client_id, {
+                ...existing,
+                ...item,
+                attention_reason: [...new Set([...(existing.attention_reason || []), ...(item.attention_reason || [])])],
+              });
+            } else {
+              const existingReasons = Array.isArray(existing.attention_reason) ? existing.attention_reason : [];
+              byClientId.set(item.client_id, {
+                ...existing,
+                attention_reason: [...new Set([...existingReasons, ...(item.attention_reason || [])])],
+              });
+            }
+          }
+        });
+        const riskOrder = { high: 3, medium: 2, low: 1 };
         att = Array.from(byClientId.values())
-          .sort((a, b) => (b.attention_priority ?? 0) - (a.attention_priority ?? 0))
+          .sort((a, b) => {
+            const rd = (riskOrder[(b.risk_level || '').toLowerCase()] || 0) - (riskOrder[(a.risk_level || '').toLowerCase()] || 0);
+            if (rd !== 0) return rd;
+            return (b.attention_priority ?? 0) - (a.attention_priority ?? 0);
+          })
           .slice(0, ATTENTION_LIMIT);
         setAttention(att);
+        /** Integrated: load client_type/show_date so Needs Attention can split prep vs lifestyle. */
+        let journeyMap = {};
+        if (!isIntegratedCoach) {
+          journeyMap = {};
+        } else if (!Array.isArray(att) || att.length === 0 || !hasSupabase) {
+          journeyMap = {};
+        } else {
+          const ids = [...new Set(att.map((x) => x.client_id).filter(Boolean))];
+          try {
+            const sb = getSupabase();
+            if (sb && ids.length) {
+              const { data: rows } = await sb.from('clients').select('id, client_type, show_date').in('id', ids);
+              (rows || []).forEach((r) => {
+                if (r?.id) journeyMap[r.id] = { client_type: r.client_type, show_date: r.show_date };
+              });
+            }
+          } catch (_) {
+            journeyMap = {};
+          }
+        }
+        setClientJourneyById(journeyMap);
         setNewCheckins(checkins);
         setPoseNew(poseItems.new ?? []);
         setPoseDue(poseItems.due ?? []);
@@ -664,7 +944,7 @@ export default function CoachHomePage() {
         setRosterHealth(health ?? { avgCompliance: null, clientsWithFlags: 0, checkinsDue: 0 });
         setOverdueSubscriptions(overdueSubs ?? []);
         setCoachingAlerts(Array.isArray(coachingAlerts) ? coachingAlerts : []);
-        const alerts = await fetchHealthAlerts(coachId);
+        const alerts = await timedSafe(fetchHealthAlerts(coachId), 3000, [], 'Health alerts');
         if (!cancelled) setHealthAlerts(Array.isArray(alerts) ? alerts : []);
       } catch (err) {
         if (!cancelled) {
@@ -676,7 +956,12 @@ export default function CoachHomePage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isCoachRole, coachId, showPoseAndPeak, dashboardRefreshKey]);
+  }, [isCoachRole, coachId, showPoseAndPeak, dashboardRefreshKey, isIntegratedCoach]);
+
+  useEffect(() => {
+    if (!coachId || loading || dashboardError) return;
+    trackFirstDashboardView(coachId, 'coach', { coach_focus: coachFocus });
+  }, [coachId, loading, dashboardError, coachFocus]);
 
   const handleOpenAttention = (clientId) => {
     if (clientId) navigate(`/clients/${clientId}`);
@@ -733,6 +1018,27 @@ export default function CoachHomePage() {
 
   const dash = moneyDashboard || {};
   const overdueCount = Number(dash.overdue_clients_count) || 0;
+  const activeClientCount = Number(revenueSummary?.active_clients ?? dash.active_clients_count ?? 0) || 0;
+  const coachHasNoClients = activeClientCount === 0;
+  const coachHomeIntro = useMemo(() => {
+    const eyebrow = coachFocusLabel(coachFocus);
+    if (coachFocus === 'competition') {
+      return {
+        eyebrow,
+        line: 'Your command center for stage clients — check-ins, posing, and peak week. Add clients with Invite client, assign programs so they see Today.',
+      };
+    }
+    if (coachFocus === 'integrated') {
+      return {
+        eyebrow,
+        line: 'Transformation and competition in one workspace. Use Clients to filter by journey; Review Center for everything waiting on you.',
+      };
+    }
+    return {
+      eyebrow,
+      line: 'Invite clients, build programs, assign blocks — they train from Today. Review Center lines up check-ins and work that needs you.',
+    };
+  }, [coachFocus]);
   const risk = retentionRisk || {};
   const revenuePill = revenueStabilityPill(overdueCount, risk.high, risk.medium);
   const pillBg = revenuePill.variant === 'success' ? colors.successSubtle : revenuePill.variant === 'danger' ? 'rgba(239,68,68,0.2)' : colors.warningSubtle;
@@ -742,17 +1048,182 @@ export default function CoachHomePage() {
   const attentionList = Array.isArray(attention) ? attention : [];
   const alertsList = Array.isArray(healthAlerts) ? healthAlerts : [];
   const hasAnyAttention = attentionList.length > 0 || alertsList.length > 0;
+  const attentionSplitBuckets = useMemo(() => {
+    if (!isIntegratedCoach || attentionList.length === 0) return null;
+    if (!clientJourneyById || Object.keys(clientJourneyById).length === 0) return null;
+    const prep = attentionList.filter((i) => journeyRosterBucket(clientJourneyById[i.client_id] || {}) === 'prep');
+    const lifestyle = attentionList.filter((i) => journeyRosterBucket(clientJourneyById[i.client_id] || {}) === 'lifestyle');
+    if (prep.length === 0 && lifestyle.length === 0) return null;
+    return { prep, lifestyle };
+  }, [isIntegratedCoach, attentionList, clientJourneyById]);
+  const INTEGRATED_ATTENTION_PER_LANE = 6;
   const shortcutTiles = [...SHORTCUT_TILES_BASE, ...(showPoseAndPeak ? [POSE_CHECKS_TILE, PEAK_WEEK_COMMAND_TILE, PEAK_WEEK_DASHBOARD_TILE, PEAK_WEEK_CHECKINS_TILE] : [])];
   const attentionReasons = (item) => Array.isArray(item.attention_reason) ? item.attention_reason : (item.reasons || []);
+  const attentionDisplayLimit = showPoseAndPeak ? NEEDS_ATTENTION_DISPLAY_PREP : NEEDS_ATTENTION_DISPLAY_TRANSFORMATION;
+  const churnAlerts = (alertsList || []).filter((a) => a.risk_band === 'churn_risk').slice(0, 4);
 
   return (
-    <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
-      <div className="max-w-lg mx-auto" style={{ ...pageContainer, paddingBottom: spacing[32] }}>
-        <div style={{ marginBottom: sectionGap }}>
-          <h1 className="atlas-page-title">Coach Home</h1>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
+      <div className="max-w-lg mx-auto" style={{ ...pageContainer, paddingBottom: spacing[24] }}>
+        <div
+          style={{
+            marginBottom: sectionGap,
+            paddingBottom: spacing[12],
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: colors.accent,
+              margin: 0,
+              textTransform: 'uppercase',
+            }}
+          >
+            {coachHomeIntro.eyebrow}
+          </p>
+          <h1 className="atlas-page-title" style={{ marginTop: spacing[8] }}>Home</h1>
+          <p style={{ fontSize: 14, color: colors.muted, marginTop: spacing[8], marginBottom: 0, lineHeight: 1.55 }}>
+            {coachHomeIntro.line}
+          </p>
         </div>
 
-        {/* 1) Hero – review card: check-ins waiting, pose checks (if applicable), overdue, peak week (if applicable); single primary CTA */}
+        {/* First actions — hidden when roster empty (Start here already covers same paths; less mobile crowding). */}
+        {!coachHasNoClients && (
+        <div className="flex flex-col gap-2" style={{ marginBottom: sectionGap }}>
+          <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: colors.muted, letterSpacing: '0.06em' }}>
+            First actions
+          </p>
+          <Button
+            type="button"
+            className="w-full font-semibold min-h-[52px] text-base sm:text-sm"
+            style={{ background: colors.primary, color: '#fff' }}
+            onClick={() => { hapticLight(); navigate('/inviteclient'); }}
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <UserPlus size={18} strokeWidth={2} aria-hidden />
+              Add client
+            </span>
+          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full font-semibold min-h-[48px] text-[13px]"
+              onClick={() => { hapticLight(); navigate('/program-builder'); }}
+            >
+              <span className="inline-flex items-center justify-center gap-1.5">
+                <Layers size={16} strokeWidth={2} aria-hidden />
+                Program Builder
+              </span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full font-semibold min-h-[48px] text-[13px]"
+              onClick={() => { hapticLight(); navigate('/nutrition-builder'); }}
+            >
+              <span className="inline-flex items-center justify-center gap-1.5">
+                <UtensilsCrossed size={16} strokeWidth={2} aria-hidden />
+                Nutrition
+              </span>
+            </Button>
+          </div>
+        </div>
+        )}
+
+        {coachHasNoClients && (
+          <Card
+            style={{
+              ...cardStyle,
+              padding: spacing[20],
+              marginBottom: sectionGap,
+              border: `1px solid ${colors.primary}44`,
+              background: `linear-gradient(160deg, ${colors.primarySubtle} 0%, ${colors.surface1} 55%)`,
+            }}
+          >
+            <p
+              className="text-[11px] font-bold uppercase tracking-wider mb-2"
+              style={{ color: colors.accent, letterSpacing: '0.08em' }}
+            >
+              Start here
+            </p>
+            <h2 className="text-lg font-semibold leading-snug" style={{ color: colors.text }}>
+              Welcome — open for business in three moves
+            </h2>
+            <p className="text-sm mt-2 leading-relaxed" style={{ color: colors.muted }}>
+              Share your link, then build what you deliver. Assign programs from Clients or Program assignments once someone joins.
+            </p>
+
+            <div
+              className="rounded-xl mt-4 p-3"
+              style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+            >
+              <p className="text-[11px] font-semibold uppercase mb-2" style={{ color: colors.muted, letterSpacing: '0.06em' }}>
+                Your coaching link
+              </p>
+              {startHereCodeLoading && !coachingSignupLink ? (
+                <p className="text-sm" style={{ color: colors.muted }}>Loading link…</p>
+              ) : coachingSignupLink ? (
+                <>
+                  <p className="text-xs font-mono break-all mb-3 leading-relaxed" style={{ color: colors.text }}>
+                    {coachingSignupLink}
+                  </p>
+                  <Button
+                    type="button"
+                    className="w-full font-semibold gap-2"
+                    style={{ background: colors.primary, color: '#fff' }}
+                    onClick={copyCoachingLinkStartHere}
+                  >
+                    <Copy size={16} strokeWidth={2} aria-hidden />
+                    Copy coaching link
+                  </Button>
+                </>
+              ) : (
+                <p className="text-sm" style={{ color: colors.muted }}>
+                  Open <strong style={{ color: colors.text }}>Clients</strong> to generate your invite code, then return here.
+                </p>
+              )}
+            </div>
+
+            <p className="text-[11px] font-semibold uppercase mt-4 mb-2" style={{ color: colors.muted, letterSpacing: '0.06em' }}>
+              Top actions
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <PressableCard
+                className="rounded-xl p-3 text-left min-h-[72px] flex flex-col justify-center gap-1"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/inviteclient'); }}
+              >
+                <UserPlus size={18} className="shrink-0" style={{ color: colors.primary }} aria-hidden />
+                <span className="text-sm font-semibold" style={{ color: colors.text }}>Add first client</span>
+                <span className="text-[11px] leading-tight" style={{ color: colors.muted }}>Invite code or link</span>
+              </PressableCard>
+              <PressableCard
+                className="rounded-xl p-3 text-left min-h-[72px] flex flex-col justify-center gap-1"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/program-builder'); }}
+              >
+                <Layers size={18} className="shrink-0" style={{ color: colors.primary }} aria-hidden />
+                <span className="text-sm font-semibold" style={{ color: colors.text }}>Create first program</span>
+                <span className="text-[11px] leading-tight" style={{ color: colors.muted }}>Program Builder</span>
+              </PressableCard>
+              <PressableCard
+                className="rounded-xl p-3 text-left min-h-[72px] flex flex-col justify-center gap-1 col-span-2"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/nutrition-builder'); }}
+              >
+                <UtensilsCrossed size={18} className="shrink-0" style={{ color: colors.primary }} aria-hidden />
+                <span className="text-sm font-semibold" style={{ color: colors.text }}>Create first nutrition plan</span>
+                <span className="text-[11px] leading-tight" style={{ color: colors.muted }}>Targets &amp; meals for clients</span>
+              </PressableCard>
+            </div>
+          </Card>
+        )}
+
+        {/* 1) Hero — queue snapshot; primary CTA is invite when roster empty, else Review Center */}
         <Card style={{ ...cardStyle, padding: spacing[20], marginBottom: 0 }}>
           <div className="flex flex-wrap items-center gap-2 mb-4">
             <CountPill label="Check-ins waiting" value={reviewCountsByType.checkin} tone="primary" />
@@ -760,14 +1231,107 @@ export default function CoachHomePage() {
             <CountPill label="Overdue payments" value={overdueCount} tone={overdueCount > 0 ? 'danger' : 'neutral'} />
             {showPoseAndPeak && <CountPill label="Peak week due" value={peakWeekDueCount} tone="neutral" />}
           </div>
-          <PressableCard
-            className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl text-sm font-semibold"
-            style={{ background: colors.primary, color: '#fff', boxShadow: shadows.glow }}
-            onClick={() => { hapticLight(); navigate('/review-center/queue'); }}
-          >
-            <ListChecks size={20} className="shrink-0" /> Open Review Center
-          </PressableCard>
+          {coachHasNoClients ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm mb-1" style={{ color: colors.muted }}>
+                Your queue stays at zero until clients join — use <strong style={{ color: colors.text }}>Start here</strong> above, then open Review Center anytime.
+              </p>
+              <PressableCard
+                className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl text-sm font-semibold"
+                style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/review-center/queue'); }}
+              >
+                <ListChecks size={20} className="shrink-0" style={{ color: colors.primary }} /> Open Review Center
+              </PressableCard>
+            </div>
+          ) : (
+            <PressableCard
+              className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 rounded-xl text-sm font-semibold"
+              style={{ background: colors.primary, color: '#fff', boxShadow: shadows.glow }}
+              onClick={() => { hapticLight(); navigate('/review-center/queue'); }}
+            >
+              <ListChecks size={20} className="shrink-0" /> Open Review Center
+            </PressableCard>
+          )}
         </Card>
+
+        {showPoseAndPeak && !coachHasNoClients && (
+          <Card style={{ ...cardStyle, marginTop: sectionGap, padding: spacing[16], border: `1px solid ${colors.border}` }}>
+            <p className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: colors.muted }}>
+              Prep priorities
+            </p>
+            <p className="text-xs mb-3" style={{ color: colors.muted }}>
+              {isIntegratedCoach
+                ? 'Prep tools (posing, peak week) apply to competition clients. Lifestyle clients live in Programs & check-ins — use roster filters on Clients to switch context.'
+                : 'Large roster mode: highest-risk and time-sensitive items first. Tap a row to act.'}
+            </p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <PressableCard
+                className="rounded-xl p-3 text-left"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/review-center/queue'); }}
+              >
+                <p className="text-[11px] font-semibold uppercase" style={{ color: colors.muted }}>Check-ins</p>
+                <p className="text-xl font-bold mt-0.5" style={{ color: reviewCountsByType.checkin > 0 ? colors.warning : colors.text }}>
+                  {reviewCountsByType.checkin}
+                </p>
+                <p className="text-[11px] mt-1" style={{ color: colors.muted }}>In queue</p>
+              </PressableCard>
+              <PressableCard
+                className="rounded-xl p-3 text-left"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/review-center/pose-checks'); }}
+              >
+                <p className="text-[11px] font-semibold uppercase" style={{ color: colors.muted }}>Posing</p>
+                <p className="text-xl font-bold mt-0.5" style={{ color: reviewCountsByType.pose_check > 0 ? colors.primary : colors.text }}>
+                  {reviewCountsByType.pose_check}
+                </p>
+                <p className="text-[11px] mt-1" style={{ color: colors.muted }}>To review</p>
+              </PressableCard>
+              <PressableCard
+                className="rounded-xl p-3 text-left"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/peak-week-command-center'); }}
+              >
+                <p className="text-[11px] font-semibold uppercase" style={{ color: colors.muted }}>Peak week</p>
+                <p className="text-xl font-bold mt-0.5" style={{ color: peakWeekDueCount > 0 ? colors.warning : colors.text }}>
+                  {peakWeekDueCount}
+                </p>
+                <p className="text-[11px] mt-1" style={{ color: colors.muted }}>Clients due</p>
+              </PressableCard>
+              <PressableCard
+                className="rounded-xl p-3 text-left"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticLight(); navigate('/clients'); }}
+              >
+                <p className="text-[11px] font-semibold uppercase" style={{ color: colors.muted }}>Pose due</p>
+                <p className="text-xl font-bold mt-0.5" style={{ color: poseDue.length > 0 ? colors.warning : colors.text }}>
+                  {poseDue.length}
+                </p>
+                <p className="text-[11px] mt-1" style={{ color: colors.muted }}>No weekly submit</p>
+              </PressableCard>
+            </div>
+            {churnAlerts.length > 0 && (
+              <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: spacing[12] }}>
+                <p className="text-[11px] font-bold uppercase mb-2" style={{ color: colors.danger }}>High churn risk</p>
+                <ul className="space-y-1">
+                  {churnAlerts.map((a) => (
+                    <li key={a.client_id}>
+                      <button
+                        type="button"
+                        className="text-sm font-medium text-left w-full py-1.5 rounded-lg px-2 -mx-2"
+                        style={{ color: colors.text, background: 'transparent', border: 'none', cursor: 'pointer' }}
+                        onClick={() => { hapticLight(); navigate(`/clients/${a.client_id}`); }}
+                      >
+                        {a.client_name || 'Client'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* 2) Needs Attention – coaching intelligence queue: risk badge, reasons, last check-in, quick actions */}
         <section style={{ marginTop: sectionGap }}>
@@ -790,102 +1354,105 @@ export default function CoachHomePage() {
                 <div className="w-12 h-12 rounded-full flex items-center justify-center mb-3" style={{ background: colors.primarySubtle, color: colors.primary }}>
                   <ClipboardCheck size={24} strokeWidth={2} />
                 </div>
-                <p className="text-base font-semibold" style={{ color: colors.text }}>You're all caught up</p>
-                <p className="text-sm mt-1 max-w-[260px]" style={{ color: colors.muted }}>
-                  No retention alerts, check-ins, or at-risk clients need your attention right now.
+                <p className="text-base font-semibold" style={{ color: colors.text }}>
+                  {coachHasNoClients ? 'Review queue opens with your roster' : "You're all caught up"}
+                </p>
+                <p className="text-sm mt-1 max-w-[280px] leading-relaxed" style={{ color: colors.muted }}>
+                  {coachHasNoClients
+                    ? 'Use First actions above to add a client — then check-ins and review work will surface here automatically.'
+                    : 'No retention alerts, check-ins, or at-risk clients need your attention right now.'}
                 </p>
                 <button
                   type="button"
-                  onClick={() => { hapticLight(); navigate('/clients'); }}
-                  className="mt-4 text-sm font-medium py-2.5 px-5 rounded-lg"
+                  onClick={() => { hapticLight(); navigate(coachHasNoClients ? '/review-center/queue' : '/clients'); }}
+                  className="mt-4 text-sm font-semibold py-2.5 px-5 rounded-lg"
                   style={{ background: colors.primarySubtle, color: colors.primary, border: 'none', cursor: 'pointer' }}
                 >
-                  View clients
+                  {coachHasNoClients ? 'Peek Review Center' : 'View clients'}
                 </button>
               </div>
             ) : (
               <ul className="space-y-0">
-                {attentionList.slice(0, NEEDS_ATTENTION_DISPLAY).map((item) => {
-                  const reasons = attentionReasons(item);
-                  const topReasons = reasons.slice(0, 3).map(reasonLabel).join(' · ');
-                  const riskStyle = riskBadgeStyle(item.risk_level);
-                  const lastCheckin = formatLastCheckin(item.last_checkin_at);
-                  return (
-                    <li key={`att-${item.client_id}`} style={{ borderBottom: `1px solid ${colors.border}` }}>
-                      <div className="py-3">
-                        <div className="flex items-start justify-between gap-2 mb-1.5">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium truncate text-left text-sm" style={{ color: colors.text }}>{item.client_name || 'Client'}</p>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                              {item.risk_level && (
-                                <span
-                                  className="px-2 py-0.5 rounded-md text-[11px] font-medium capitalize"
-                                  style={{ background: riskStyle.bg, color: riskStyle.color }}
-                                >
-                                  {item.risk_level}
-                                </span>
-                              )}
-                              {lastCheckin && (
-                                <span className="text-[11px]" style={{ color: colors.muted }}>Last check-in: {lastCheckin}</span>
-                              )}
-                            </div>
-                            {topReasons && (
-                              <p className="text-xs truncate text-left mt-0.5" style={{ color: colors.muted }}>{topReasons}</p>
-                            )}
+                {!attentionSplitBuckets
+                  ? attentionList.slice(0, attentionDisplayLimit).map((item) => (
+                      <AttentionItemRow
+                        key={`att-${item.client_id}`}
+                        item={item}
+                        navigate={navigate}
+                        onOpenAttention={handleOpenAttention}
+                        attentionReasons={attentionReasons}
+                        reasonLabel={reasonLabel}
+                        formatLastCheckin={formatLastCheckin}
+                        riskBadgeStyle={riskBadgeStyle}
+                        hapticLight={hapticLight}
+                        toast={toast}
+                      />
+                    ))
+                  : (
+                    <>
+                      {attentionSplitBuckets.prep.length > 0 && (
+                        <li className="list-none" style={{ listStyle: 'none', borderBottom: `1px solid ${colors.border}` }}>
+                          <div className="py-3 px-1">
+                            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>Prep / stage roster</p>
+                            <p className="text-[11px] mt-0.5" style={{ color: colors.muted }}>Peak week, posing, show timeline — open client for prep tools</p>
+                            <button
+                              type="button"
+                              className="text-[11px] font-semibold mt-2"
+                              style={{ color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                              onClick={() => { hapticLight(); navigate('/clients?journey=prep'); }}
+                            >
+                              View prep roster →
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenAttention(item.client_id)}
-                            className="shrink-0 p-1.5 rounded-lg active:opacity-80"
-                            style={{ background: 'transparent', color: colors.muted }}
-                            aria-label="Open client"
-                          >
-                            <ChevronRight size={18} />
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <button
-                            type="button"
-                            onClick={() => { hapticLight(); navigate(`/clients/${item.client_id}`); }}
-                            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
-                            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
-                          >
-                            <User size={14} /> Open Client
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { hapticLight(); navigate(`/messages/${item.client_id}`); }}
-                            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
-                            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
-                          >
-                            <MessageSquare size={14} /> Message
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              hapticLight();
-                              const template = getReengagementTemplate(attentionReasons(item));
-                              sendReengagementNudge({ clientId: item.client_id, template, navigate, toast });
-                            }}
-                            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
-                            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
-                          >
-                            <Send size={14} /> Send Nudge
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { hapticLight(); navigate('/review-center/queue'); }}
-                            className="inline-flex items-center gap-1 text-xs font-medium rounded-lg py-1.5 px-2.5"
-                            style={{ background: colors.surface1, color: colors.primary, border: `1px solid ${colors.border}` }}
-                          >
-                            <SearchCheck size={14} /> Review
-                          </button>
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-                {attentionList.length === 0 && alertsList.length > 0 && alertsList.slice(0, 2).map((item) => {
+                        </li>
+                      )}
+                      {attentionSplitBuckets.prep.slice(0, INTEGRATED_ATTENTION_PER_LANE).map((item) => (
+                        <AttentionItemRow
+                          key={`att-prep-${item.client_id}`}
+                          item={item}
+                          navigate={navigate}
+                          onOpenAttention={handleOpenAttention}
+                          attentionReasons={attentionReasons}
+                          reasonLabel={reasonLabel}
+                          formatLastCheckin={formatLastCheckin}
+                          riskBadgeStyle={riskBadgeStyle}
+                          hapticLight={hapticLight}
+                          toast={toast}
+                        />
+                      ))}
+                      {attentionSplitBuckets.lifestyle.length > 0 && (
+                        <li className="list-none" style={{ listStyle: 'none', borderBottom: `1px solid ${colors.border}` }}>
+                          <div className="py-3 px-1">
+                            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>Lifestyle roster</p>
+                            <p className="text-[11px] mt-0.5" style={{ color: colors.muted }}>Programs, habits, check-ins — prep UI stays hidden on their profile</p>
+                            <button
+                              type="button"
+                              className="text-[11px] font-semibold mt-2"
+                              style={{ color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                              onClick={() => { hapticLight(); navigate('/clients?journey=lifestyle'); }}
+                            >
+                              View lifestyle roster →
+                            </button>
+                          </div>
+                        </li>
+                      )}
+                      {attentionSplitBuckets.lifestyle.slice(0, INTEGRATED_ATTENTION_PER_LANE).map((item) => (
+                        <AttentionItemRow
+                          key={`att-life-${item.client_id}`}
+                          item={item}
+                          navigate={navigate}
+                          onOpenAttention={handleOpenAttention}
+                          attentionReasons={attentionReasons}
+                          reasonLabel={reasonLabel}
+                          formatLastCheckin={formatLastCheckin}
+                          riskBadgeStyle={riskBadgeStyle}
+                          hapticLight={hapticLight}
+                          toast={toast}
+                        />
+                      ))}
+                    </>
+                  )}
+                {attentionList.length === 0 && alertsList.length > 0 && alertsList.slice(0, attentionDisplayLimit).map((item) => {
                   const topReason = Array.isArray(item.reasons) && item.reasons.length > 0 ? retentionReasonLabel(item.reasons[0]) : null;
                   const bandLabel = item.risk_band === 'churn_risk' ? 'Churn risk' : 'At risk';
                   return (
@@ -1165,7 +1732,10 @@ export default function CoachHomePage() {
 
         {/* 5) Shortcut tiles – icon + label only, uniform size */}
         <section style={{ marginTop: sectionGap }}>
-          <div style={sectionLabel}>Shortcuts</div>
+          <div style={sectionLabel}>Quick links</div>
+          <p className="text-xs mb-3" style={{ color: colors.muted }}>
+            More shortcuts below — invite, builder, and roster are also at the top under First actions.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             {shortcutTiles.map((item) => {
               const Icon = item.icon;

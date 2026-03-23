@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Calendar, ClipboardList, CreditCard, ChevronRight, Trophy, Download, History, AlertTriangle, TrendingUp, TrendingDown, Minus, MessageCircle, Dumbbell } from 'lucide-react';
+import { Calendar, ClipboardList, CreditCard, ChevronRight, Trophy, Download, History, AlertTriangle, TrendingUp, TrendingDown, Minus, MessageCircle, Dumbbell, Utensils, Calculator } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getClientPrograms,
@@ -25,6 +25,7 @@ import { getAchievementsList, getShownAchievementIds, markAchievementShown } fro
 import { unlockMilestone } from '@/lib/milestonesStore';
 import { evaluateClientMilestones } from '@/lib/milestoneEngine';
 import { useAuth } from '@/lib/AuthContext';
+import { journeyRosterBucket, journeyRosterBadgeLabel } from '@/lib/clientJourney';
 import { getClientPerformanceSnapshot } from '@/lib/performanceService';
 import { getClientRiskEvaluation } from '@/lib/riskService';
 import { getClientPhase, setClientPhase, PHASES } from '@/lib/clientPhaseStore';
@@ -47,6 +48,7 @@ import { getClientProgram } from '@/lib/clientProgramStore';
 import { getClientTimeline as getLegacyTimeline } from '@/lib/timeline/buildTimeline';
 import { getClientTimeline as getPerformanceTimeline } from '@/lib/performanceGraph';
 import { appendActionLog } from '@/lib/timeline/actionLogRepo';
+import { getAdjustmentSummary } from '@/lib/adaptiveTrainingEngine';
 import {
   getSubmissionsByClient,
   getLatestApprovedSubmission,
@@ -98,7 +100,7 @@ import ClientHealthCard from '@/components/clients/ClientHealthCard';
 import ClientCheckinsPanel from '@/components/clients/ClientCheckinsPanel';
 import ClientProgramPanel from '@/components/clients/ClientProgramPanel';
 import ClientAnalyticsSnapshot from '@/components/clients/ClientAnalyticsSnapshot';
-import { colors, spacing, radii } from '@/ui/tokens';
+import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
 import { standardCard, pageContainer, sectionLabel, sectionGap } from '@/ui/pageLayout';
 
 const DEFAULT_HEALTH_RESULT = {
@@ -279,12 +281,11 @@ export default function ClientDetail() {
     setLoadError(null);
     setClientLoaded(false);
     let cancelled = false;
-    const FAILSAFE_MS = 8000;
+    const FAILSAFE_MS = 30000;
     const timeoutId = setTimeout(() => {
-      setClientLoaded((prev) => {
-        if (import.meta.env.DEV) console.log('[ClientDetail] load timeout (8s)');
-        return true;
-      });
+      if (import.meta.env.DEV) console.log('[ClientDetail] load timeout (30s)');
+      setLoadError(new Error('Client detail load timed out. Please retry.'));
+      setClientLoaded(true);
     }, FAILSAFE_MS);
     (async () => {
       try {
@@ -627,6 +628,78 @@ export default function ClientDetail() {
     onError: (err) => {
       console.error('[ClientDetail] markInsightResolved', err);
       toast.error(err?.message ?? 'Failed to update insight');
+    },
+  });
+
+  const canReviewAdaptiveRecommendations = role === 'coach' || role === 'trainer' || role === 'admin';
+  const { data: adaptiveRecommendations = [] } = useQuery({
+    queryKey: ['adaptive_recommendations', clientId],
+    queryFn: async () => {
+      if (!hasSupabase || !clientId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase
+        .from('training_adjustment_recommendations')
+        .select('*')
+        .eq('client_id', clientId)
+        .order('status', { ascending: true })
+        .order('created_at', { ascending: false })
+        .limit(40);
+      if (error) return [];
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: Boolean(hasSupabase && clientId && canReviewAdaptiveRecommendations),
+  });
+
+  const [editingAdaptiveId, setEditingAdaptiveId] = useState(null);
+  const [editingAdaptiveTitle, setEditingAdaptiveTitle] = useState('');
+  const [editingAdaptiveDescription, setEditingAdaptiveDescription] = useState('');
+
+  const adaptiveStatusMutation = useMutation({
+    mutationFn: async ({ id, status }) => {
+      if (!hasSupabase || !id || !status) return;
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('training_adjustment_recommendations')
+        .update({ status })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adaptive_recommendations', clientId] });
+    },
+    onError: (err) => {
+      console.error('[ClientDetail] adaptiveStatusMutation', err);
+      toast.error(err?.message ?? 'Failed to update recommendation');
+    },
+  });
+
+  const adaptiveEditMutation = useMutation({
+    mutationFn: async ({ id, title, description }) => {
+      if (!hasSupabase || !id) return;
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const patch = {
+        title: (title || '').trim() || 'Adaptive recommendation',
+        description: (description || '').trim() || null,
+      };
+      const { error } = await supabase
+        .from('training_adjustment_recommendations')
+        .update(patch)
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setEditingAdaptiveId(null);
+      setEditingAdaptiveTitle('');
+      setEditingAdaptiveDescription('');
+      queryClient.invalidateQueries({ queryKey: ['adaptive_recommendations', clientId] });
+      toast.success('Recommendation updated');
+    },
+    onError: (err) => {
+      console.error('[ClientDetail] adaptiveEditMutation', err);
+      toast.error(err?.message ?? 'Failed to save edits');
     },
   });
 
@@ -1180,6 +1253,11 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
 
   const clientName = client?.full_name ?? client?.name ?? 'Client';
   const isPrep = Boolean(progressMetrics?.has_active_prep ?? client?.show_date ?? client?.showDate);
+  const clientOnPrepTrack = client ? journeyRosterBucket(client) === 'prep' : false;
+  const showPrepTimelineSurfaces =
+    hasSupabase &&
+    clientId &&
+    (coachFocus === 'competition' || (coachFocus === 'integrated' && clientOnPrepTrack));
   const daysOut = healthResultRef.current?.meta?.daysOut ?? progressMetrics?.days_out;
   const prepStatusText = isPrep && typeof daysOut === 'number'
     ? (daysOut <= 0 ? 'Peak / show' : `${daysOut} weeks out`)
@@ -1202,9 +1280,12 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
       {/* Top summary: client name, status badges, phase, prep, momentum/health, primary actions */}
       {client && (
         <Card style={{ ...standardCard, padding: spacing[16], marginBottom: sectionGap }}>
-          <h1 className="text-[20px] font-semibold truncate" style={{ color: colors.text, marginBottom: spacing[12] }}>
+          <h1 className="text-[20px] font-semibold truncate" style={{ color: colors.text, marginBottom: spacing[6] }}>
             {clientName}
           </h1>
+          <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginBottom: spacing[12], lineHeight: 1.45 }}>
+            Message, adjust training, and open nutrition from here.
+          </p>
           <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: spacing[12] }}>
             <span
               className="rounded-full px-2.5 py-1 text-[11px] font-medium"
@@ -1212,12 +1293,28 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
             >
               {statusLabel}
             </span>
+            {coachFocus === 'integrated' && (
+              <span
+                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                style={{ background: colors.surface2, color: colors.textSecondary }}
+              >
+                {journeyRosterBadgeLabel(client)} track
+              </span>
+            )}
+            {coachFocus !== 'integrated' && String(client?.client_type ?? '').toLowerCase() === 'competition' && (
+              <span
+                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                style={{ background: colors.primarySubtle, color: colors.primary }}
+              >
+                Competition
+              </span>
+            )}
             {isPrep && (
               <span
                 className="rounded-full px-2.5 py-1 text-[11px] font-medium"
                 style={{ background: colors.surface2, color: colors.muted }}
               >
-                Prep
+                Active prep
               </span>
             )}
             {hasRetentionRisk && (
@@ -1262,7 +1359,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
                 await openOrCreateThread({ clientId, clientName: client?.full_name || client?.name || 'Client' });
                 navigate(getMessagesThreadPath(clientId), { state: { from: location.pathname } });
               } : undefined}
-              style={{ minHeight: 40 }}
+              style={{ minHeight: touchTargetMin }}
             >
               <MessageCircle size={16} style={{ marginRight: 6 }} aria-hidden />
               Message Client
@@ -1273,22 +1370,66 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
               onClick={activeBlockSummary?.blockId
                 ? async () => { await lightHaptic(); navigate(`/program-builder?clientId=${clientId}&blockId=${activeBlockSummary.blockId}&source=client_detail`); }
                 : async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); }}
-              style={{ minHeight: 40 }}
+              style={{ minHeight: touchTargetMin }}
             >
               <Dumbbell size={16} style={{ marginRight: 6 }} aria-hidden />
               Adjust Program
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clientId ? async () => { await lightHaptic(); navigate(`/clients/${clientId}/nutrition`); } : undefined}
+              style={{ minHeight: touchTargetMin }}
+            >
+              <Utensils size={16} style={{ marginRight: 6 }} aria-hidden />
+              Nutrition plan
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={clientId ? async () => { await lightHaptic(); navigate(`/nutrition-builder?clientId=${encodeURIComponent(clientId)}`); } : undefined}
+              style={{ minHeight: touchTargetMin }}
+            >
+              <Calculator size={16} style={{ marginRight: 6 }} aria-hidden />
+              Macro calculator
             </Button>
           </div>
         </Card>
       )}
 
-      {/* Prep header (active contest prep): weeks out, pose check status */}
-      {hasSupabase && clientId && (
+      {/* Prep command centre: quick links for competition journey (reduces hunt through menus) */}
+      {client && clientId && (coachFocus === 'competition' || coachFocus === 'integrated') &&
+        (String(client?.client_type ?? '').toLowerCase() === 'competition' || isPrep) && (
+        <Card style={{ ...standardCard, padding: spacing[16], marginBottom: sectionGap }}>
+          <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Prep command centre</p>
+          <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginBottom: spacing[12], lineHeight: 1.45 }}>
+            {prepStatusText
+              ? `Timeline: ${prepStatusText}. Use the shortcuts below to assign training, peak week, and reviews.`
+              : 'Set a show date when you add the athlete (or in contest prep) so weeks-out and peak tools activate.'}
+          </p>
+          <div className="flex flex-col gap-2">
+            <Button variant="secondary" size="sm" className="justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${encodeURIComponent(clientId)}`); }}>
+              Assign program
+            </Button>
+            <Button variant="secondary" size="sm" className="justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); navigate(`/clients/${clientId}/peak-week-editor`); }}>
+              Peak week editor
+            </Button>
+            <Button variant="secondary" size="sm" className="justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); navigate('/review-center/pose-checks'); }}>
+              Pose check queue
+            </Button>
+            <Button variant="secondary" size="sm" className="justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); navigate('/checkintemplates'); }}>
+              Check-in templates & cadence
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* Prep header + timeline: competition coaches, or integrated only when this client is on a prep/stage track */}
+      {showPrepTimelineSurfaces && (
         <div data-prep-header style={{ marginBottom: spacing[16] }}>
-          <PrepHeader clientId={clientId} showPrepInsights={coachFocus === 'competition' || coachFocus === 'integrated'} />
+          <PrepHeader clientId={clientId} showPrepInsights />
           {/* Prep timeline components for competition/integrated coaches */}
-          {(coachFocus === 'competition' || coachFocus === 'integrated') && (
-            <>
+          <>
               {progressMetrics?.has_active_prep ? (
                 <>
                   <PrepInsightsBlock clientId={clientId} />
@@ -1304,8 +1445,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
                 />
               )}
               <PrepHistoryCard clientId={clientId} />
-            </>
-            )}
+          </>
         </div>
       )}
       {/* Overview – Master Dashboard (phase, week, compliance) */}
@@ -1760,6 +1900,151 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
                           >
                             Mark resolved
                           </button>
+                        )}
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Adaptive Training Recommendations (coach review controls) */}
+          {canReviewAdaptiveRecommendations && Array.isArray(adaptiveRecommendations) && adaptiveRecommendations.length > 0 && (
+            <section style={{ marginBottom: sectionGap }}>
+              <p style={{ ...sectionLabel }}>Adaptive Training Recommendations</p>
+              <div className="flex flex-col gap-2">
+                {adaptiveRecommendations.map((rec) => {
+                  const severity = String(rec.severity || 'low').toLowerCase();
+                  const status = String(rec.status || 'pending').toLowerCase();
+                  const severityColor =
+                    severity === 'high' ? colors.danger
+                      : severity === 'medium' ? colors.warning
+                        : colors.success;
+                  const isEditing = editingAdaptiveId === rec.id;
+                  const summary = getAdjustmentSummary(rec);
+                  return (
+                    <Card key={rec.id} style={{ ...standardCard, padding: spacing[12], opacity: status === 'ignored' ? 0.68 : 1 }}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {!isEditing ? (
+                            <>
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="text-sm font-semibold m-0" style={{ color: colors.text }}>{rec.title || 'Adaptive recommendation'}</p>
+                                <span
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide"
+                                  style={{ background: `${severityColor}22`, color: severityColor, border: `1px solid ${severityColor}55` }}
+                                >
+                                  {severity}
+                                </span>
+                                <span
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide"
+                                  style={{ background: `${colors.primary}22`, color: colors.primary, border: `1px solid ${colors.primary}55` }}
+                                >
+                                  {status}
+                                </span>
+                              </div>
+                              <p className="text-[12px] mb-1" style={{ color: colors.muted }}>
+                                <span style={{ fontWeight: 600 }}>Why triggered:</span>{' '}
+                                {rec.description || 'Readiness/fatigue trend triggered this recommendation.'}
+                              </p>
+                              <p className="text-[12px] m-0" style={{ color: colors.text }}>
+                                <span style={{ fontWeight: 600 }}>Suggested adjustment:</span> {summary}
+                              </p>
+                            </>
+                          ) : (
+                            <div className="flex flex-col gap-2">
+                              <input
+                                type="text"
+                                value={editingAdaptiveTitle}
+                                onChange={(e) => setEditingAdaptiveTitle(e.target.value)}
+                                placeholder="Recommendation title"
+                                style={{
+                                  width: '100%',
+                                  borderRadius: 8,
+                                  border: `1px solid ${colors.border}`,
+                                  background: colors.surface2,
+                                  color: colors.text,
+                                  padding: '8px 10px',
+                                  fontSize: 13,
+                                }}
+                              />
+                              <textarea
+                                rows={2}
+                                value={editingAdaptiveDescription}
+                                onChange={(e) => setEditingAdaptiveDescription(e.target.value)}
+                                placeholder="Reason/notes"
+                                style={{
+                                  width: '100%',
+                                  borderRadius: 8,
+                                  border: `1px solid ${colors.border}`,
+                                  background: colors.surface2,
+                                  color: colors.text,
+                                  padding: '8px 10px',
+                                  fontSize: 12,
+                                  resize: 'vertical',
+                                }}
+                              />
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => adaptiveEditMutation.mutate({ id: rec.id, title: editingAdaptiveTitle, description: editingAdaptiveDescription })}
+                                  className="text-[11px] font-medium px-2 py-1 rounded-full"
+                                  style={{ background: colors.primary, color: '#fff', border: 'none' }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAdaptiveId(null);
+                                    setEditingAdaptiveTitle('');
+                                    setEditingAdaptiveDescription('');
+                                  }}
+                                  className="text-[11px] font-medium px-2 py-1 rounded-full"
+                                  style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}` }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {!isEditing && (
+                          <div className="flex flex-col gap-2">
+                            {status === 'pending' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => adaptiveStatusMutation.mutate({ id: rec.id, status: 'applied' })}
+                                  className="text-[11px] font-medium px-2 py-1 rounded-full"
+                                  style={{ background: `${colors.success}22`, color: colors.success, border: `1px solid ${colors.success}55`, whiteSpace: 'nowrap' }}
+                                >
+                                  Apply
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => adaptiveStatusMutation.mutate({ id: rec.id, status: 'ignored' })}
+                                  className="text-[11px] font-medium px-2 py-1 rounded-full"
+                                  style={{ background: `${colors.warning}22`, color: colors.warning, border: `1px solid ${colors.warning}55`, whiteSpace: 'nowrap' }}
+                                >
+                                  Ignore
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingAdaptiveId(rec.id);
+                                setEditingAdaptiveTitle(rec.title || '');
+                                setEditingAdaptiveDescription(rec.description || '');
+                              }}
+                              className="text-[11px] font-medium px-2 py-1 rounded-full"
+                              style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}`, whiteSpace: 'nowrap' }}
+                            >
+                              Edit
+                            </button>
+                          </div>
                         )}
                       </div>
                     </Card>
