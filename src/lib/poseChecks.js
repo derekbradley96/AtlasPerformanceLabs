@@ -219,24 +219,52 @@ export async function getPoseCheckItems(poseCheckId) {
 }
 
 /**
- * Update a single pose_check_item (coach_rating, coach_notes).
+ * Update a single pose_check_item. Pass only fields to change.
+ * Clients typically set `photo_path`; coaches set `coach_rating` / `coach_notes`.
  * @param {string} itemId - pose_check_items.id
- * @param {{ coach_rating?: number | null, coach_notes?: string | null }}
+ * @param {{ coach_rating?: number | null, coach_notes?: string | null, photo_path?: string | null }} updates
  * @returns {Promise<boolean>}
  */
-export async function updatePoseCheckItem(itemId, { coach_rating = null, coach_notes = null }) {
-  if (!hasSupabase || !itemId) return false;
+export async function updatePoseCheckItem(itemId, updates) {
+  if (!hasSupabase || !itemId || !updates || typeof updates !== 'object') return false;
   const supabase = getSupabase();
   if (!supabase) return false;
   try {
     const payload = {};
-    if (coach_rating !== undefined) payload.coach_rating = coach_rating;
-    if (coach_notes !== undefined) payload.coach_notes = coach_notes;
+    if ('coach_rating' in updates) payload.coach_rating = updates.coach_rating;
+    if ('coach_notes' in updates) payload.coach_notes = updates.coach_notes;
+    if ('photo_path' in updates) payload.photo_path = updates.photo_path;
     if (Object.keys(payload).length === 0) return true;
     const { error } = await supabase.from('pose_check_items').update(payload).eq('id', itemId);
     return !error;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Latest pose_check for this client strictly before the given week_start (for coach compare / progression).
+ * @param {string} clientId
+ * @param {string} weekStartISO - YYYY-MM-DD Monday of current check week
+ * @returns {Promise<{ id: string, week_start: string } | null>}
+ */
+export async function getPoseCheckPriorToWeek(clientId, weekStartISO) {
+  if (!hasSupabase || !clientId || !weekStartISO) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('pose_checks')
+      .select('id, week_start')
+      .eq('client_id', clientId)
+      .lt('week_start', weekStartISO)
+      .order('week_start', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data?.id) return null;
+    return { id: data.id, week_start: data.week_start };
+  } catch {
+    return null;
   }
 }
 

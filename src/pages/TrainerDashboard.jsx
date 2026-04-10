@@ -33,7 +33,9 @@ import { getTrainerSilentMode } from '@/lib/trainerPreferencesStorage';
 import Button from '@/ui/Button';
 import { SkeletonCard, SkeletonRow } from '@/ui/Skeleton';
 import { colors, spacing } from '@/ui/tokens';
+import { CANONICAL_COACH_ONBOARDING_PATH } from '@/lib/coachOnboardingRoutes';
 import { toast } from 'sonner';
+import { atlasMigrationDataAttributes, deriveCoachHomeRouteState } from '@/lib/atlasMigrationPhases';
 
 const STATUS_ORDER = { attention: 0, needs_review: 1, on_track: 2 };
 const STATUS_COLORS = { on_track: '#22C55E', needs_review: '#EAB308', attention: '#EF4444' };
@@ -165,7 +167,7 @@ export default function TrainerDashboard() {
 
   const handleOpenInbox = useCallback(async () => {
     await impactLight();
-    navigate('/review-center?tab=active&filter=all');
+    navigate('/review-center');
   }, [navigate]);
 
   const handleClientRow = useCallback((clientId) => {
@@ -192,9 +194,20 @@ export default function TrainerDashboard() {
       .slice(0, 2);
   }
 
+  const coachHomeMigration = useMemo(() => {
+    if (loading) return deriveCoachHomeRouteState({ surface: 'loading' });
+    return deriveCoachHomeRouteState({
+      surface: allClients.length === 0 ? 'empty_roster' : 'hub',
+    });
+  }, [loading, allClients.length]);
+
   if (loading) {
     return (
-      <div className="min-w-0 max-w-full overflow-x-hidden" style={{ display: 'flex', flexDirection: 'column', gap: spacing[24] }}>
+      <div
+        {...atlasMigrationDataAttributes(coachHomeMigration.phase, coachHomeMigration.primary)}
+        className="min-w-0 max-w-full overflow-x-hidden"
+        style={{ display: 'flex', flexDirection: 'column', gap: spacing[24] }}
+      >
         <SkeletonCard />
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[12] }}>
           <div style={{ height: 18, width: '40%', background: 'rgba(255,255,255,0.08)', borderRadius: 4 }} />
@@ -220,7 +233,10 @@ export default function TrainerDashboard() {
   const showPrepFeatures = hasCompetitionPrep && shouldShowModule(coachFocus, 'comp_prep');
 
   return (
-    <div className="app-screen min-w-0 max-w-full overflow-x-hidden">
+    <div
+      {...atlasMigrationDataAttributes(coachHomeMigration.phase, coachHomeMigration.primary)}
+      className="app-screen min-w-0 max-w-full overflow-x-hidden"
+    >
       <div className="app-section" style={{ gap: spacing[20] }}>
         {coachFocus && (
           <p className="text-[13px]" style={{ color: colors.muted }}>{coachFocusLabel(coachFocus)}</p>
@@ -234,7 +250,7 @@ export default function TrainerDashboard() {
           >
             <button
               type="button"
-              onClick={() => { impactLight(); navigate('/setup'); }}
+              onClick={() => { impactLight(); navigate(CANONICAL_COACH_ONBOARDING_PATH); }}
               className="w-full text-left rounded-xl border py-3 px-4 flex items-center justify-between"
               style={{ background: 'rgba(234,179,8,0.12)', borderColor: 'rgba(234,179,8,0.4)', color: colors.text }}
             >
@@ -275,11 +291,11 @@ export default function TrainerDashboard() {
                 </div>
                 <button
                   type="button"
-                  onClick={async () => { await impactLight(); navigate('/review-center?tab=active&filter=all'); }}
+                  onClick={async () => { await impactLight(); navigate('/review-center'); }}
                   className="w-full rounded-xl py-2.5 text-[14px] font-semibold min-w-0"
                   style={{ background: colors.accent, color: '#fff' }}
                 >
-                  Open Review Center
+                  Open review queue
                 </button>
               </div>
             </div>
@@ -480,7 +496,7 @@ export default function TrainerDashboard() {
           </div>
         </motion.section>
 
-        {/* Quick Actions – 2-col grid: Row1 Clients, Programs; Row2 Nutrition, Review Center; Row3 Earnings, Add Client; Row4 My Training */}
+        {/* Quick Actions – 2-col grid: Row1 Clients, Programs; Row2 Nutrition, Review Center; Row3 Earnings, Invite client; Row4 My Training */}
         <motion.section
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: mounted ? 1 : 0, y: mounted ? 0 : 6 }}
@@ -492,9 +508,9 @@ export default function TrainerDashboard() {
               { label: 'Clients', icon: ClipboardList, path: '/clients' },
               { label: 'Programs', icon: FileText, path: '/programs' },
               { label: 'Nutrition', icon: UtensilsCrossed, path: '/trainer/nutrition' },
-              { label: 'Review Center', icon: ListChecks, path: '/review-center' },
+              { label: 'Review queue', icon: ListChecks, path: '/review-center' },
               { label: 'Earnings', icon: DollarSign, path: '/earnings' },
-              { label: 'Add Client', icon: UserPlus, path: '/inviteclient' },
+              { label: 'Get Clients', icon: UserPlus, path: '/get-clients' },
               { label: 'My Training', icon: Dumbbell, path: '/my-training' },
             ].map((item) => {
               const Icon = item.icon;

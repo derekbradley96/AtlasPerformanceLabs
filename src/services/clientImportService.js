@@ -2,11 +2,12 @@
  * Client import service: parse CSV exports from other coaching apps and
  * prepare/create Atlas clients, programs, and (optionally) progress data.
  *
- * This module is intentionally conservative: it focuses on safe parsing and
- * minimal inserts. Heavier mapping can be layered on top in the UI.
+ * Used only from ImportClientsPage, which is gated to dev / demo / admin — not a production acquisition path.
+ * Production roster growth uses coach link + code (InviteClient / join flows).
  */
 
-import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
+import { addClientForTrainer } from '@/data/clientsService';
 
 function normaliseHeader(h) {
   return (h || '')
@@ -125,26 +126,33 @@ export function parseClientCSV(csvText) {
 /**
  * Create Atlas clients from parsed CSV rows.
  * - Uses Supabase auth to resolve current coach id when not provided.
- * - Inserts into public.clients with minimal fields (full_name, email, coach_id).
+ * - Uses addClientForTrainer (same path as manual coach add) so rows match canonical defaults.
  *
  * @param {{ rows: ReturnType<typeof parseClientCSV>['rows'], supabase?: import('@supabase/supabase-js').SupabaseClient | null, coachId?: string | null }} params
  * @returns {Promise<{ created: Array<{ clientId: string, name: string | null, email: string | null }>, errors: Array<{ rowIndex: number, message: string }> }>}
  */
-export async function createClients({ rows, supabase, coachId }) {
+export async function createClients({ rows, supabase: _legacySupabase, coachId }) {
   const created = [];
   const errors = [];
   if (!rows || rows.length === 0) return { created, errors };
 
-  const client = supabase ?? (hasSupabase ? getSupabase() : null);
-  if (!client) {
-    throw new Error('Supabase client is required to create clients');
+  if (!hasSupabase) {
+    throw new Error('Supabase is required to create clients');
   }
 
   let coachIdResolved = coachId ?? null;
   if (!coachIdResolved) {
-    const { data: { user } } = await client.auth.getUser();
+    const { getSupabase } = await import('@/lib/supabaseClient');
+    const sb = getSupabase();
+    if (!sb) throw new Error('Supabase client is required to create clients');
+    const { data: { user } } = await sb.auth.getUser();
     coachIdResolved = user?.id ?? null;
   }
+  if (!coachIdResolved) {
+    throw new Error('Could not resolve coach id for import');
+  }
+
+  const startDate = new Date().toISOString().slice(0, 10);
 
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i];
@@ -153,20 +161,26 @@ export async function createClients({ rows, supabase, coachId }) {
       continue;
     }
     try {
-      const payload = {
-        full_name: row.clientName ?? row.email ?? 'Imported Client',
-        email: row.email ?? null,
-        coach_id: coachIdResolved,
-      };
-      const { data, error } = await client
-        .from('clients')
-        .insert(payload)
-        .select('id, full_name, email')
-        .maybeSingle();
-      if (error || !data) {
-        errors.push({ rowIndex: i, message: error?.message || 'Insert failed' });
+      const displayName = (row.clientName ?? row.email ?? 'Imported Client').toString().trim();
+      const data = await addClientForTrainer(coachIdResolved, {
+        full_name: displayName,
+        name: displayName,
+        email: row.email ?? undefined,
+        client_type: 'transformation',
+        client_journey: 'transformation',
+        start_date: startDate,
+        goal: 'maintain',
+        phase: 'Maintenance',
+        gym_equipment: [],
+      });
+      if (!data?.id) {
+        errors.push({ rowIndex: i, message: 'Insert failed' });
       } else {
-        created.push({ clientId: data.id, name: data.full_name ?? null, email: data.email ?? null });
+        created.push({
+          clientId: data.id,
+          name: data.full_name ?? data.name ?? displayName,
+          email: row.email ?? null,
+        });
       }
     } catch (e) {
       errors.push({ rowIndex: i, message: e?.message || 'Unexpected error' });

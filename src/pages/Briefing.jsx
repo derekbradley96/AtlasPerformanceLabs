@@ -40,7 +40,7 @@ export default function Briefing() {
 
   const handleStartReview = useCallback(async () => {
     await impactLight();
-    navigate('/global-review?tab=active&filter=all');
+    navigate('/review-center');
   }, [navigate]);
 
   const handleGo = useCallback(async (route) => {
@@ -72,6 +72,12 @@ export default function Briefing() {
   }
 
   const { counts, topPriorities, changes } = briefing;
+  const prioritiesForFocus = hasCompetitionPrep
+    ? topPriorities
+    : topPriorities.filter(
+        (p) =>
+          p.type !== 'PEAK_WEEK_DUE' && p.type !== 'POSING_REVIEW' && p.type !== 'MISSING_MANDATORY_POSES'
+      );
   const hasChanges = changes.healthDrops.length > 0 || changes.newRetentionFlags.length > 0 || changes.newlyOverdue.length > 0;
 
   return (
@@ -86,10 +92,12 @@ export default function Briefing() {
           <div className="rounded-[20px] overflow-hidden border min-w-0" style={{ background: colors.card, borderColor: colors.border }}>
             <div style={{ padding: spacing[14], paddingLeft: spacing[16], paddingRight: spacing[16] }}>
               <div className="grid gap-y-2">
-                <div className="flex justify-between text-[14px]">
-                  <span style={{ color: colors.muted }}>Peak week due today</span>
-                  <span className="font-medium tabular-nums" style={{ color: colors.text }}>{counts.peakWeekDueToday}</span>
-                </div>
+                {hasCompetitionPrep && (
+                  <div className="flex justify-between text-[14px]">
+                    <span style={{ color: colors.muted }}>Peak week due today</span>
+                    <span className="font-medium tabular-nums" style={{ color: colors.text }}>{counts.peakWeekDueToday}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-[14px]">
                   <span style={{ color: colors.muted }}>Overdue payments</span>
                   <span className="font-medium tabular-nums" style={{ color: counts.overduePayments > 0 ? colors.attention : colors.text }}>{counts.overduePayments}</span>
@@ -130,12 +138,12 @@ export default function Briefing() {
         <section>
           <h2 className="text-[15px] font-semibold mb-2" style={{ color: colors.text }}>Top priorities</h2>
           <div className="rounded-[20px] overflow-hidden border min-w-0" style={{ background: colors.card, borderColor: colors.border }}>
-            {topPriorities.length === 0 ? (
+            {prioritiesForFocus.length === 0 ? (
               <div style={{ padding: spacing[16] }}>
                 <p className="text-[14px]" style={{ color: colors.muted }}>No priorities right now.</p>
               </div>
             ) : (
-              topPriorities.map((p, idx) => (
+              prioritiesForFocus.map((p, idx) => (
                 <button
                   key={`${p.clientId}-${p.type}-${idx}`}
                   type="button"
@@ -146,7 +154,7 @@ export default function Briefing() {
                     padding: spacing[12],
                     paddingLeft: spacing[16],
                     paddingRight: spacing[16],
-                    borderBottom: idx < topPriorities.length - 1 ? `1px solid ${colors.border}` : 'none',
+                    borderBottom: idx < prioritiesForFocus.length - 1 ? `1px solid ${colors.border}` : 'none',
                     background: 'transparent',
                     border: 'none',
                     color: colors.text,
@@ -223,7 +231,7 @@ export default function Briefing() {
           )}
         </section>
 
-        {/* 4) Start review */}
+        {/* 4) Open global triage queue */}
         <section>
           <button
             type="button"
@@ -231,7 +239,7 @@ export default function Briefing() {
             className="w-full rounded-xl py-3 text-[15px] font-semibold"
             style={{ background: colors.accent, color: '#fff' }}
           >
-            Start review
+            Open review queue
           </button>
         </section>
       </div>

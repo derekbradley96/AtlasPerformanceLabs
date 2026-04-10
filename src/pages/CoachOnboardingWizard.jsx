@@ -1,6 +1,6 @@
 /**
  * Coach onboarding wizard (steps 2–5 of activation): Add client → Create program → Assign program → Finish.
- * Step 1 (choose coach focus) is /coach-type. Completing or skipping sets onboardingComplete and navigates to /home.
+ * Deprecated: routes redirect to /coach-onboarding-flow. Kept for reference only.
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -11,8 +11,14 @@ import { impactLight } from '@/lib/haptics';
 import { colors, spacing } from '@/ui/tokens';
 import Button from '@/ui/Button';
 import { UserPlus, FileText, Link2, CheckCircle, Store } from 'lucide-react';
+import { getPostOnboardingPath } from '@/lib/postOnboardingRoutes';
 
 const ONBOARDING_STEP_OFFSET = 1; // Step 1 = coach focus (separate page). Wizard = steps 2–5.
+const DRAFT_VERSION = 1;
+
+function draftKey(trainerId) {
+  return `atlas_coach_onboarding_wizard_v${DRAFT_VERSION}:${trainerId}`;
+}
 
 const STEPS = [
   {
@@ -22,7 +28,7 @@ const STEPS = [
     description: 'Add clients manually or import from CSV. You need at least one client to assign programs and receive check-ins.',
     icon: UserPlus,
     ctaLabel: 'Add client',
-    ctaPath: '/clients',
+    ctaPath: '/get-clients?onboarding=1',
   },
   {
     id: 'create-program',
@@ -62,6 +68,26 @@ export default function CoachOnboardingWizard() {
   const trainerId = isDemoMode ? 'demo-trainer' : (user?.id ?? '');
 
   const [step, setStep] = useState(1);
+  useEffect(() => {
+    if (!trainerId || typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(draftKey(trainerId));
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const savedStep = Number(parsed?.step);
+      if (Number.isFinite(savedStep) && savedStep >= 1 && savedStep <= WIZARD_STEP_COUNT) {
+        setStep(savedStep);
+      }
+    } catch (_) {}
+  }, [trainerId]);
+
+  useEffect(() => {
+    if (!trainerId || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(draftKey(trainerId), JSON.stringify({ step }));
+    } catch (_) {}
+  }, [trainerId, step]);
+
   const current = STEPS[step - 1];
   const stepNumber = ONBOARDING_STEP_OFFSET + step; // 2..5
   const progress = (stepNumber / TOTAL_ONBOARDING_STEPS) * 100;
@@ -87,7 +113,10 @@ export default function CoachOnboardingWizard() {
         onboardingComplete: true,
         onboardingSkipped: false,
       });
-      navigate('/home', { replace: true });
+      try {
+        if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey(trainerId));
+      } catch (_) {}
+      navigate(getPostOnboardingPath('coach'), { replace: true });
     }
   }, [step, trainerId, navigate]);
 
@@ -113,7 +142,10 @@ export default function CoachOnboardingWizard() {
       ...(getCoachProfile(trainerId) || {}),
       onboardingSkipped: true,
     });
-    navigate('/home', { replace: true });
+    try {
+      if (typeof window !== 'undefined') window.localStorage.removeItem(draftKey(trainerId));
+    } catch (_) {}
+    navigate(getPostOnboardingPath('coach'), { replace: true });
   }, [trainerId, navigate]);
 
   if (!trainerId) {
@@ -174,10 +206,18 @@ export default function CoachOnboardingWizard() {
           </Button>
         )}
         {current.id === 'finish' && (
-          <Button variant="secondary" onClick={() => navigate('/marketplace-setup')} style={{ width: '100%' }}>
-            <Store size={18} className="mr-2 inline" />
-            Set up marketplace listing
-          </Button>
+          <>
+            <p className="text-sm text-center leading-relaxed" style={{ color: colors.muted }}>
+              Finish your profile to get in front of the right athletes — optional, but it helps enquiries land faster.
+            </p>
+            <Button variant="secondary" onClick={() => navigate('/marketplace-setup?quick=1')} style={{ width: '100%' }}>
+              Quick profile polish (about 2 minutes)
+            </Button>
+            <Button variant="secondary" onClick={() => navigate('/marketplace-setup')} style={{ width: '100%' }}>
+              <Store size={18} className="mr-2 inline" />
+              Full marketplace listing
+            </Button>
+          </>
         )}
         <div className="flex gap-3">
           {step > 1 && (

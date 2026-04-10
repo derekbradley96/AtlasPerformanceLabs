@@ -2,7 +2,7 @@
  * Client: submit a peak week check-in (weight, photos, pump/flat-full ratings, notes).
  * Saves to peak_week_checkins. Competition clients with active peak week only.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -64,6 +64,7 @@ export default function PeakWeekCheckinSubmitPage() {
   const [flatFullRating, setFlatFullRating] = useState('');
   const [clientNotes, setClientNotes] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [checkinPeriod, setCheckinPeriod] = useState('morning');
 
   const { data: clientAndFocus, isLoading: loadingClient } = useQuery({
     queryKey: ['client-peak-week-identity', user?.id],
@@ -92,9 +93,65 @@ export default function PeakWeekCheckinSubmitPage() {
     enabled: !!supabase && !!clientId && canSeePeakWeek,
   });
 
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const { data: todayPeakWeekDay } = useQuery({
+    queryKey: ['peak-week-day-today', peakWeek?.id, todayIso],
+    queryFn: async () => {
+      if (!supabase || !peakWeek?.id) return null;
+      const { data, error } = await supabase
+        .from('peak_week_days')
+        .select('id, day_label, target_date, morning_checkin_required, evening_checkin_required')
+        .eq('peak_week_id', peakWeek.id)
+        .eq('target_date', todayIso)
+        .maybeSingle();
+      return error ? null : data;
+    },
+    enabled: !!supabase && !!peakWeek?.id,
+  });
+
+  const { data: todayPeriodCheckins = [] } = useQuery({
+    queryKey: ['peak-week-checkins-today-periods', clientId, peakWeek?.id, todayIso],
+    queryFn: async () => {
+      if (!supabase || !clientId || !peakWeek?.id) return [];
+      const start = `${todayIso}T00:00:00.000Z`;
+      const end = `${todayIso}T23:59:59.999Z`;
+      const { data, error } = await supabase
+        .from('peak_week_checkins')
+        .select('id, checkin_period, created_at')
+        .eq('client_id', clientId)
+        .eq('peak_week_id', peakWeek.id)
+        .gte('created_at', start)
+        .lte('created_at', end)
+        .order('created_at', { ascending: false });
+      return error ? [] : (data || []);
+    },
+    enabled: !!supabase && !!clientId && !!peakWeek?.id,
+  });
+
+  const morningRequired = !!todayPeakWeekDay?.morning_checkin_required;
+  const eveningRequired = !!todayPeakWeekDay?.evening_checkin_required;
+  const morningSubmitted = todayPeriodCheckins.some((c) => c.checkin_period === 'morning');
+  const eveningSubmitted = todayPeriodCheckins.some((c) => c.checkin_period === 'evening');
+  const availablePeriods = [
+    ...(morningRequired ? ['morning'] : []),
+    ...(eveningRequired ? ['evening'] : []),
+  ];
+  const periodSelectionRequired = availablePeriods.length > 0;
+  useEffect(() => {
+    if (periodSelectionRequired && !availablePeriods.includes(checkinPeriod)) {
+      setCheckinPeriod(availablePeriods[0]);
+    }
+  }, [availablePeriods, checkinPeriod, periodSelectionRequired]);
+
   const submitMutation = useMutation({
     mutationFn: async () => {
       if (!supabase || !peakWeek?.id || !clientId) throw new Error('Missing peak week or client');
+      if (periodSelectionRequired && !availablePeriods.includes(checkinPeriod)) {
+        throw new Error('Select the required check-in period.');
+      }
+      if ((checkinPeriod === 'morning' && morningSubmitted) || (checkinPeriod === 'evening' && eveningSubmitted)) {
+        throw new Error(`You already submitted the ${checkinPeriod} check-in today.`);
+      }
       const { error } = await supabase.from('peak_week_checkins').insert({
         peak_week_id: peakWeek.id,
         client_id: clientId,
@@ -103,6 +160,7 @@ export default function PeakWeekCheckinSubmitPage() {
         pump_rating: pumpRating !== '' ? Math.min(RATING_MAX, Math.max(RATING_MIN, Number(pumpRating))) : null,
         flat_full_rating: flatFullRating !== '' ? Math.min(RATING_MAX, Math.max(RATING_MIN, Number(flatFullRating))) : null,
         client_notes: clientNotes.trim() || null,
+        checkin_period: periodSelectionRequired ? checkinPeriod : 'evening',
       });
       if (error) throw error;
     },
@@ -206,7 +264,11 @@ export default function PeakWeekCheckinSubmitPage() {
     );
   }
 
-  const canSubmit = true;
+  const canSubmit =
+    !uploading &&
+    !(checkinPeriod === 'morning' && morningSubmitted) &&
+    !(checkinPeriod === 'evening' && eveningSubmitted);
+  const noCheckinDueToday = !!todayPeakWeekDay && !morningRequired && !eveningRequired;
 
   return (
     <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
@@ -221,6 +283,50 @@ export default function PeakWeekCheckinSubmitPage() {
             <div style={sectionLabel}>Submit check-in</div>
 
             <div className="space-y-4">
+              {noCheckinDueToday && (
+                <div
+                  className="rounded-lg px-3 py-2 text-xs font-medium"
+                  style={{ border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.muted }}
+                >
+                  No check-in is required today. You can still submit an optional update if needed.
+                </div>
+              )}
+              <div>
+                <Label className="text-xs" style={{ color: colors.muted }}>Check-in period</Label>
+                <div className="flex gap-2 mt-1">
+                  {['morning', 'evening'].map((p) => {
+                    const required = availablePeriods.includes(p);
+                    const submitted = p === 'morning' ? morningSubmitted : eveningSubmitted;
+                    const disabled = periodSelectionRequired ? !required : false;
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setCheckinPeriod(p)}
+                        disabled={disabled}
+                        style={{
+                          flex: 1,
+                          minHeight: 42,
+                          borderRadius: 8,
+                          border: `1px solid ${checkinPeriod === p ? colors.primary : colors.border}`,
+                          background: checkinPeriod === p ? colors.primarySubtle : colors.surface2,
+                          color: checkinPeriod === p ? colors.primary : colors.text,
+                          fontWeight: 600,
+                          opacity: disabled ? 0.45 : 1,
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {p[0].toUpperCase() + p.slice(1)}{required ? '' : ' (optional)'}{submitted ? ' ✓' : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+                {periodSelectionRequired && (
+                  <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                    Required today: {availablePeriods.join(' + ')}.
+                  </p>
+                )}
+              </div>
               <div>
                 <Label className="text-xs" style={{ color: colors.muted }}>Weight (kg)</Label>
                 <Input

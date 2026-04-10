@@ -3,6 +3,7 @@
  * Show sender name, message preview, date, status; actions: mark contacted / converted / closed, convert to client (placeholder).
  */
 import React, { useMemo } from 'react';
+import { computeCoachProfileStrength, COACH_PROFILE_BEST_MATCH_MIN_PERCENT } from '@/lib/coachProfileStrength';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -61,6 +62,22 @@ export default function CoachInquiryInboxPage() {
     enabled: !!supabase && !!coachId,
   });
 
+  const { data: marketplaceListing } = useQuery({
+    queryKey: ['coach-marketplace-listing', coachId],
+    queryFn: async () => {
+      if (!supabase || !coachId) return null;
+      const { data, error } = await supabase.from('coach_marketplace_profiles').select('*').eq('coach_id', coachId).maybeSingle();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!supabase && !!coachId,
+  });
+
+  const listingStrength = useMemo(() => {
+    if (!marketplaceListing) return null;
+    return computeCoachProfileStrength({ listing: marketplaceListing, profile: authProfile || {} });
+  }, [marketplaceListing, authProfile]);
+
   const userIds = useMemo(() => [...new Set(inquiries.map((i) => i.user_profile_id).filter(Boolean))], [inquiries]);
 
   const { data: nameMap = {} } = useQuery({
@@ -112,12 +129,34 @@ export default function CoachInquiryInboxPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 100 }}>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Inquiry inbox" onBack={() => navigate(-1)} />
       <div style={{ padding: spacing[16], maxWidth: 600, margin: '0 auto' }}>
         <p className="text-sm mb-4" style={{ color: colors.muted }}>
           Marketplace leads who reached out. Update status or convert to client.
         </p>
+        {inquiries.length === 0 &&
+        listingStrength &&
+        listingStrength.percent < COACH_PROFILE_BEST_MATCH_MIN_PERCENT + 8 ? (
+          <Card
+            style={{
+              marginBottom: spacing[16],
+              padding: spacing[16],
+              border: `1px solid rgba(59,130,246,0.25)`,
+              background: 'rgba(59,130,246,0.06)',
+            }}
+          >
+            <p className="text-sm font-medium mb-1" style={{ color: colors.text }}>
+              Coaches with pricing and proof tend to get more responses
+            </p>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: colors.muted }}>
+              Your listing strength is {listingStrength.percent}%. A clearer offer and a little credibility goes a long way — whenever you&apos;re ready.
+            </p>
+            <Button type="button" variant="outline" className="w-full text-[13px]" onClick={() => navigate('/marketplace-setup')}>
+              Improve marketplace listing
+            </Button>
+          </Card>
+        ) : null}
 
         {isLoading ? (
           <div className="flex items-center justify-center" style={{ minHeight: 200 }}>

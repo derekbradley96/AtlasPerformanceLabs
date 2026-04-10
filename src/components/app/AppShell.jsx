@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import AppHeader from './AppHeader';
 import TabBar from './TabBar';
 import { useEdgeSwipeBack } from './useEdgeSwipeBack';
+import { shell } from '@/ui/tokens';
 
 const HEADER_OFFSET = 56;
 const TAB_BAR_OFFSET = 76;
@@ -28,7 +29,7 @@ export default function AppShell() {
         style={{
           WebkitOverflowScrolling: 'touch',
           paddingTop: `calc(env(safe-area-inset-top, 0px) + ${HEADER_OFFSET}px)`,
-          paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${TAB_BAR_OFFSET}px)`,
+          paddingBottom: `calc(env(safe-area-inset-bottom, 0px) + ${TAB_BAR_OFFSET}px + ${shell.scrollContentInsetBottom}px)`,
           paddingLeft: 16,
           paddingRight: 16,
           background: '#0B1220',

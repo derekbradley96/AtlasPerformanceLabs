@@ -13,8 +13,9 @@ import { PeakWeekDashboardSkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
-import { Calendar, MessageSquare, ClipboardList, Scale, Activity } from 'lucide-react';
+import { Calendar, MessageSquare, ClipboardList, Scale, Activity, AlertTriangle, CheckCircle2, Circle } from 'lucide-react';
 import { hapticLight } from '@/lib/haptics';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 function getCoachFocus(profile, coachFocusFromAuth) {
   const raw = (coachFocusFromAuth ?? profile?.coach_focus ?? 'transformation').toString().trim().toLowerCase();
@@ -41,11 +42,11 @@ function isToday(iso) {
   return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
 }
 
-/** Fetch active peak weeks for coach with client name, latest check-in, latest readiness. */
+/** Fetch active peak weeks for coach with client name, latest check-in, latest readiness, and today's compliance. */
 async function fetchPeakWeekDashboard(coachId) {
-  if (!hasSupabase || !coachId) return { rows: [], checkinsByPeakWeek: {}, readinessByClient: {} };
+  if (!hasSupabase || !coachId) return { rows: [], checkinsByPeakWeek: {}, readinessByClient: {}, complianceByClient: {} };
   const supabase = getSupabase();
-  if (!supabase) return { rows: [], checkinsByPeakWeek: {}, readinessByClient: {} };
+  if (!supabase) return { rows: [], checkinsByPeakWeek: {}, readinessByClient: {}, complianceByClient: {} };
   try {
     const { data: weeks, error: weeksErr } = await supabase
       .from('peak_weeks')
@@ -54,10 +55,13 @@ async function fetchPeakWeekDashboard(coachId) {
       .eq('is_active', true)
       .order('show_date', { ascending: true });
     if (weeksErr || !Array.isArray(weeks) || weeks.length === 0) {
-      return { rows: weeks || [], checkinsByPeakWeek: {}, readinessByClient: {} };
+      return { rows: weeks || [], checkinsByPeakWeek: {}, readinessByClient: {}, complianceByClient: {} };
     }
     const peakWeekIds = weeks.map((w) => w.id);
     const clientIds = [...new Set(weeks.map((w) => w.client_id))];
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const startIso = `${todayIso}T00:00:00.000Z`;
+    const endIso = `${todayIso}T23:59:59.999Z`;
     const { data: clients } = await supabase.from('clients').select('id, name, full_name').in('id', clientIds);
     const nameByClientId = {};
     (clients || []).forEach((c) => { nameByClientId[c.id] = c.name || c.full_name || 'Client'; });
@@ -79,6 +83,39 @@ async function fetchPeakWeekDashboard(coachId) {
     (readiness || []).forEach((r) => {
       if (!latestReadinessByClient[r.client_id]) latestReadinessByClient[r.client_id] = r;
     });
+    const { data: todayDays } = await supabase
+      .from('peak_week_days')
+      .select('id, peak_week_id, target_date, morning_checkin_required, evening_checkin_required')
+      .in('peak_week_id', peakWeekIds)
+      .eq('target_date', todayIso);
+    const todayDayByPeakWeek = {};
+    (todayDays || []).forEach((d) => {
+      if (d?.peak_week_id && !todayDayByPeakWeek[d.peak_week_id]) todayDayByPeakWeek[d.peak_week_id] = d;
+    });
+    const todayDayIds = (todayDays || []).map((d) => d.id).filter(Boolean);
+    let todayStatusByClient = {};
+    if (todayDayIds.length) {
+      const { data: statuses } = await supabase
+        .from('peak_week_day_status')
+        .select('peak_week_day_id, client_id, macros_completed, water_completed, cardio_completed, posing_completed, morning_checkin_completed, evening_checkin_completed')
+        .in('peak_week_day_id', todayDayIds)
+        .in('client_id', clientIds);
+      (statuses || []).forEach((s) => {
+        todayStatusByClient[`${s.client_id}:${s.peak_week_day_id}`] = s;
+      });
+    }
+    const { data: todayCheckins } = await supabase
+      .from('peak_week_checkins')
+      .select('client_id, peak_week_id, checkin_period, created_at')
+      .in('peak_week_id', peakWeekIds)
+      .gte('created_at', startIso)
+      .lte('created_at', endIso);
+    const todayCheckinPeriodsByClient = {};
+    (todayCheckins || []).forEach((c) => {
+      if (!c?.client_id) return;
+      if (!todayCheckinPeriodsByClient[c.client_id]) todayCheckinPeriodsByClient[c.client_id] = new Set();
+      todayCheckinPeriodsByClient[c.client_id].add(c.checkin_period || 'evening');
+    });
     const rows = weeks.map((w) => ({
       ...w,
       client_name: nameByClientId[w.client_id] || 'Client',
@@ -86,7 +123,43 @@ async function fetchPeakWeekDashboard(coachId) {
       latest_checkin: latestCheckinByPeakWeek[w.id] ?? null,
       latest_readiness: latestReadinessByClient[w.client_id] ?? null,
     }));
-    return { rows, checkinsByPeakWeek: latestCheckinByPeakWeek, readinessByClient: latestReadinessByClient };
+    const complianceByClient = {};
+    rows.forEach((r) => {
+      const todayDay = todayDayByPeakWeek[r.id] || null;
+      const todayStatus = todayDay ? (todayStatusByClient[`${r.client_id}:${todayDay.id}`] || null) : null;
+      const checkinPeriods = todayCheckinPeriodsByClient[r.client_id] || new Set();
+      const morningRequired = !!todayDay?.morning_checkin_required;
+      const eveningRequired = !!todayDay?.evening_checkin_required;
+      const checkinsCompleted =
+        !todayDay
+          ? false
+          : (morningRequired ? checkinPeriods.has('morning') || !!todayStatus?.morning_checkin_completed : true) &&
+            (eveningRequired ? checkinPeriods.has('evening') || !!todayStatus?.evening_checkin_completed : true);
+      const hasRequiredItems = !!todayDay;
+      const missingRequired =
+        hasRequiredItems &&
+        (
+          !todayStatus?.macros_completed ||
+          !todayStatus?.water_completed ||
+          !todayStatus?.cardio_completed ||
+          !todayStatus?.posing_completed ||
+          !checkinsCompleted
+        );
+      complianceByClient[r.client_id] = {
+        peakWeekId: r.id,
+        todayDayId: todayDay?.id || null,
+        hasRequiredItems,
+        macrosCompleted: !!todayStatus?.macros_completed,
+        waterCompleted: !!todayStatus?.water_completed,
+        cardioCompleted: !!todayStatus?.cardio_completed,
+        posingCompleted: !!todayStatus?.posing_completed,
+        checkinsCompleted,
+        checkinPeriodsLabel:
+          `${morningRequired ? 'Morning' : ''}${morningRequired && eveningRequired ? ' + ' : ''}${eveningRequired ? 'Evening' : ''}` || 'None',
+        missingRequired,
+      };
+    });
+    return { rows, checkinsByPeakWeek: latestCheckinByPeakWeek, readinessByClient: latestReadinessByClient, complianceByClient };
   } catch (e) {
     if (import.meta.env?.DEV) console.error('[CoachPeakWeekDashboard] fetch error', e);
     throw e;
@@ -96,12 +169,13 @@ async function fetchPeakWeekDashboard(coachId) {
 export default function CoachPeakWeekDashboard() {
   const navigate = useNavigate();
   const { user, profile, coachFocus: coachFocusFromAuth } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const coachFocus = getCoachFocus(profile, coachFocusFromAuth);
   const showPeakWeek = showPeakWeekByFocus(coachFocus);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [data, setData] = useState({ rows: [], checkinsByPeakWeek: {}, readinessByClient: {} });
+  const [data, setData] = useState({ rows: [], checkinsByPeakWeek: {}, readinessByClient: {}, complianceByClient: {} });
 
   const coachId = user?.id ?? null;
 
@@ -111,7 +185,7 @@ export default function CoachPeakWeekDashboard() {
     setLoading(true);
     fetchPeakWeekDashboard(coachId)
       .then((out) => {
-        setData(out ?? { rows: [], checkinsByPeakWeek: {}, readinessByClient: {} });
+        setData(out ?? { rows: [], checkinsByPeakWeek: {}, readinessByClient: {}, complianceByClient: {} });
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
@@ -127,7 +201,7 @@ export default function CoachPeakWeekDashboard() {
     setError(false);
     fetchPeakWeekDashboard(coachId)
       .then((out) => {
-        if (!cancelled) setData(out ?? { rows: [], checkinsByPeakWeek: {}, readinessByClient: {} });
+        if (!cancelled) setData(out ?? { rows: [], checkinsByPeakWeek: {}, readinessByClient: {}, complianceByClient: {} });
       })
       .catch(() => {
         if (!cancelled) setError(true);
@@ -154,6 +228,13 @@ export default function CoachPeakWeekDashboard() {
     }).length;
     return { total, withinSeven, checkInsDueToday, needingUpdate };
   }, [data?.rows]);
+  const complianceRows = useMemo(() => {
+    const rows = Array.isArray(data?.rows) ? data.rows : [];
+    return rows.map((r) => ({
+      ...r,
+      compliance: data?.complianceByClient?.[r.client_id] || null,
+    }));
+  }, [data?.complianceByClient, data?.rows]);
 
   if (error && showPeakWeek) {
     return (
@@ -233,15 +314,103 @@ export default function CoachPeakWeekDashboard() {
             </section>
 
             {/* Athlete list */}
+            <section style={{ marginBottom: sectionGap }}>
+              <div style={sectionLabel}>Today&apos;s Compliance</div>
+              {(complianceRows.length ?? 0) === 0 ? (
+                <Card style={{ ...cardStyle, padding: spacing[16] }}>
+                  <p className="text-sm" style={{ color: colors.muted }}>No active peak week clients to review today.</p>
+                </Card>
+              ) : (
+                <ul className="space-y-2">
+                  {complianceRows.map((row) => {
+                    const c = row.compliance;
+                    const warning = !!c?.missingRequired;
+                    const StatusIcon = warning ? AlertTriangle : CheckCircle2;
+                    const statusColor = warning ? colors.warning : colors.success;
+                    const items = [
+                      { label: 'Macros', done: !!c?.macrosCompleted },
+                      { label: 'Water', done: !!c?.waterCompleted },
+                      { label: 'Cardio', done: !!c?.cardioCompleted },
+                      { label: 'Posing', done: !!c?.posingCompleted },
+                      { label: 'Check-ins', done: !!c?.checkinsCompleted },
+                    ];
+                    return (
+                      <li key={`compliance-${row.id}`}>
+                        <Card
+                          style={{
+                            ...cardStyle,
+                            borderLeft: `4px solid ${statusColor}`,
+                            background: warning ? colors.surface1 : colors.surface,
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div>
+                              <p className="font-semibold" style={{ color: colors.text }}>{row.client_name}</p>
+                              <p className="text-xs" style={{ color: colors.muted }}>
+                                {c?.hasRequiredItems ? `Required check-ins: ${c.checkinPeriodsLabel}` : 'No day scheduled for today'}
+                              </p>
+                            </div>
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: statusColor }}>
+                              <StatusIcon size={14} />
+                              {warning ? 'Needs follow-up' : 'On track'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-3">
+                            {items.map((item) => (
+                              <div key={item.label} className="flex items-center gap-1.5 text-sm">
+                                {item.done ? <CheckCircle2 size={14} style={{ color: colors.success }} /> : <Circle size={14} style={{ color: colors.muted }} />}
+                                <span style={{ color: colors.muted }}>{item.label}</span>
+                                <span className="font-medium" style={{ color: colors.text }}>{item.done ? 'Done' : 'Pending'}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="inline-flex items-center gap-1.5"
+                              onClick={() => { hapticLight(); navigate(`/messages/${row.client_id}`); }}
+                            >
+                              <MessageSquare size={14} /> Message client
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="inline-flex items-center gap-1.5"
+                              onClick={() => { hapticLight(); navigate(`/clients/${row.client_id}/peak-week`); }}
+                            >
+                              <Calendar size={14} /> Open day
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="inline-flex items-center gap-1.5"
+                              onClick={() => { hapticLight(); navigate(`/review-center/peak-week-checkins`); }}
+                            >
+                              <ClipboardList size={14} /> Review check-in
+                            </Button>
+                          </div>
+                        </Card>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            {/* Athlete list */}
             <section>
               <div style={sectionLabel}>Athletes</div>
               {(data?.rows?.length ?? 0) === 0 ? (
                 <Card style={{ ...cardStyle, padding: spacing[24], textAlign: 'center' }}>
                   <Calendar size={40} style={{ color: colors.muted, marginBottom: spacing[12] }} />
-                  <p className="text-[15px] font-medium" style={{ color: colors.text }}>No active peak weeks</p>
+                  <p className="text-[15px] font-medium" style={{ color: colors.text }}>No active peak week</p>
                   <p className="text-sm mt-1" style={{ color: colors.muted }}>
-                    Add a peak week for a prep client to see them here.
+                    Create a peak week from any prep client profile to unlock daily controls and compliance tracking.
                   </p>
+                  <Button variant="outline" size="sm" className="mt-3" onClick={() => { hapticLight(); navigate('/clients'); }}>
+                    Open clients
+                  </Button>
                 </Card>
               ) : (
                 <ul className="space-y-0">
@@ -286,7 +455,7 @@ export default function CoachPeakWeekDashboard() {
                               <Scale size={14} style={{ color: colors.muted }} />
                               <span style={{ color: colors.muted }}>Weight</span>
                               <span className="font-medium" style={{ color: colors.text }}>
-                                {latestWeight != null ? `${Number(latestWeight)} kg` : '—'}
+                                {latestWeight != null ? formatWeightForViewer(Number(latestWeight), viewerWU) : '—'}
                               </span>
                             </div>
                             <div className="flex items-center gap-1.5">

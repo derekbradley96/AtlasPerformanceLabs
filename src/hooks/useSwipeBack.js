@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '@/lib/AuthContext';
 import { isTabRoute } from '@/lib/routeMeta';
+import { DEFAULT_ROLE } from '@/lib/roles';
 
 const EDGE_THRESHOLD_PX = 24;
 const HORIZONTAL_THRESHOLD_PX = 80;
@@ -16,6 +18,8 @@ const VERTICAL_MAX_PX = 40;
 export function useSwipeBack(containerRef) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { effectiveRole, role } = useAuth();
+  const shellRole = effectiveRole ?? role ?? DEFAULT_ROLE;
   const startX = useRef(0);
   const startY = useRef(0);
   const tracking = useRef(false);
@@ -28,7 +32,7 @@ export function useSwipeBack(containerRef) {
     const el = containerRef?.current;
     if (!el) return;
 
-    if (isTabRoute(location.pathname)) return;
+    if (isTabRoute(location.pathname, shellRole)) return;
 
     const handleTouchStart = (e) => {
       const t = e.touches[0];
@@ -76,5 +80,5 @@ export function useSwipeBack(containerRef) {
       el.removeEventListener('touchend', handleTouchEnd);
       el.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [containerRef, location.pathname, goBack]);
+  }, [containerRef, location.pathname, goBack, shellRole]);
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Switch } from '@/components/ui/switch';
 import Card from '@/ui/Card';
@@ -6,7 +6,9 @@ import { colors, spacing } from '@/ui/tokens';
 import { getNotificationSettings, setNotificationSetting } from '@/lib/notificationSettingsStorage';
 import { getTrainerAutoOpenReview, setTrainerAutoOpenReview, getTrainerSilentMode, setTrainerSilentMode } from '@/lib/trainerPreferencesStorage';
 import { useAuth } from '@/lib/AuthContext';
+import { normalizeRole } from '@/lib/roles';
 import { impactLight } from '@/lib/haptics';
+import { atlasMigrationDataAttributes, deriveNotificationSettingsRouteState } from '@/lib/atlasMigrationPhases';
 
 const TOGGLES = [
   { key: 'checkin_reminders', label: 'Check-in due reminders', description: 'Remind when client check-ins are due' },
@@ -15,8 +17,9 @@ const TOGGLES = [
 ];
 
 export default function NotificationSettings() {
-  const { role } = useAuth();
-  const isCoach = role === 'coach' || role === 'trainer';
+  const { role, effectiveRole, user } = useAuth();
+  const canonicalRole = normalizeRole(effectiveRole ?? role ?? user?.role ?? null);
+  const isCoach = canonicalRole === 'coach';
   const [settings, setSettings] = useState(() => getNotificationSettings());
   const [autoOpenReview, setAutoOpenReview] = useState(() => getTrainerAutoOpenReview());
   const [silentMode, setSilentMode] = useState(() => getTrainerSilentMode());
@@ -68,6 +71,11 @@ export default function NotificationSettings() {
     }
   }, []);
 
+  const notificationSettingsMigrationAttrs = useMemo(() => {
+    const s = deriveNotificationSettingsRouteState({ roleView: canonicalRole });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [canonicalRole]);
+
   return (
     <div
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
@@ -76,6 +84,7 @@ export default function NotificationSettings() {
         paddingRight: spacing[16],
         paddingBottom: `calc(${spacing[24]} + env(safe-area-inset-bottom, 0px))`,
       }}
+      {...notificationSettingsMigrationAttrs}
     >
       <div style={{ marginBottom: spacing[8] }}>
         <p className="text-[13px]" style={{ color: colors.muted }}>

@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { base44 } from '@/lib/emptyApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Input } from '@/components/ui/input';
@@ -14,7 +13,12 @@ import ExerciseSearchModal from '@/components/workout/ExerciseSearchModal';
 import WorkoutExerciseCard from '@/components/workout/WorkoutExerciseCard';
 import ExerciseDemoModal from '@/components/workout/ExerciseDemoModal';
 import { PageLoader } from '@/components/ui/LoadingState';
+import { atlasMigrationDataAttributes, deriveWorkoutBuilderLegacyRouteState } from '@/lib/atlasMigrationPhases';
 
+/**
+ * Legacy builder retained for compatibility.
+ * Canonical planning flow is Program Builder, canonical execution is Workout Player.
+ */
 export default function WorkoutBuilder() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -63,7 +67,7 @@ export default function WorkoutBuilder() {
       return workout;
     },
     onSuccess: (workout) => {
-      navigate(createPageUrl('ActiveWorkout'));
+      navigate('/workout-player');
     }
   });
 
@@ -106,17 +110,28 @@ export default function WorkoutBuilder() {
     setExercises(newExercises);
   };
 
-  if (!displayUser) return <PageLoader />;
+  const workoutBuilderMigrationAttrs = useMemo(() => {
+    const s = deriveWorkoutBuilderLegacyRouteState({ surface: !displayUser ? 'loading' : 'form' });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [displayUser]);
+
+  if (!displayUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" {...workoutBuilderMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
+  }
 
   const totalSets = exercises.reduce((sum, e) => sum + parseInt(e.sets || 0), 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-32">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-32" {...workoutBuilderMigrationAttrs}>
       {/* Header */}
       <div className="sticky top-0 z-40 bg-gradient-to-b from-slate-900 to-transparent border-b border-slate-800 p-4 md:p-6">
         <div className="flex items-center gap-3 mb-4">
           <button
-            onClick={() => navigate(createPageUrl('Workout'))}
+            onClick={() => navigate('/today')}
             className="flex items-center justify-center w-10 h-10 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />

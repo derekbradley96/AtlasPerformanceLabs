@@ -7,6 +7,7 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 import { Calendar, Zap, TrendingUp } from 'lucide-react';
+import { formatWeightDeltaKg, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 async function fetchPrepTimeline(clientId) {
   if (!hasSupabase || !clientId) return { header: null, metrics: null };
@@ -86,10 +87,10 @@ export default function PrepTimelineCard({ clientId }) {
           )}
           {metrics.latest_weight != null && (
             <span className="text-xs" style={{ color: colors.muted }}>
-              Weight {Number(metrics.latest_weight).toFixed(1)} kg
+              Weight {formatWeightForViewer(Number(metrics.latest_weight), viewerWU)}
               {metrics.weight_change != null && (
                 <span style={{ color: Number(metrics.weight_change) < 0 ? colors.success : colors.text }}>
-                  {' '}({Number(metrics.weight_change) > 0 ? '+' : ''}{Number(metrics.weight_change).toFixed(1)})
+                  {' '}({formatWeightDeltaKg(Number(metrics.weight_change), viewerWU)})
                 </span>
               )}
             </span>

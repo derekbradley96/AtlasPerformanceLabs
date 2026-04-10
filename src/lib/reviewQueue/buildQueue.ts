@@ -27,6 +27,7 @@ import {
 import { evaluateFatigue } from '@/lib/energy/fatigueRules';
 import { listSubmissionsNeedingReview } from '@/lib/intake/intakeSubmissionRepo';
 import { getClientPhase } from '@/lib/clientPhaseStore';
+import { buildCoachCheckinReviewUrl } from '@/lib/coachReviewRoutes';
 
 function weekStartMonday(iso: string): string {
   const d = new Date(iso);
@@ -80,7 +81,7 @@ function buildItems(trainerId: string, now: Date): QueueItem[] {
       subtitle,
       why: 'Check-in awaiting review',
       ctaLabel: 'Review',
-      route: `/review/checkin/${encodeURIComponent(c.id)}?clientId=${encodeURIComponent(c.client_id)}`,
+      route: buildCoachCheckinReviewUrl(c.id, c.client_id),
       priorityScore: 0,
       createdAt: submitted || new Date().toISOString(),
       dueAt: c.due_date,

@@ -76,11 +76,11 @@ export const repo = {
     },
   },
   threads: {
-    list(trainerId) {
-      return messagingService.listThreads(trainerId ?? 'local-trainer');
+    list(trainerId, options = {}) {
+      return messagingService.listThreads(trainerId ?? 'local-trainer', options);
     },
-    getByClientId(clientId, trainerId) {
-      return messagingService.getThreadByClientId(clientId, trainerId ?? 'local-trainer').then((t) => t ?? null);
+    getByClientId(clientId, trainerId, options = {}) {
+      return messagingService.getThreadByClientId(clientId, trainerId ?? 'local-trainer', options).then((t) => t ?? null);
     },
     ensureThreadForClient(clientId, trainerId) {
       return messagingService.ensureThreadForClient(clientId, trainerId ?? 'local-trainer');
@@ -91,15 +91,21 @@ export const repo = {
     },
   },
   messages: {
-    list(threadIdOrClientId, trainerId) {
-      return messagingService.listMessages(threadIdOrClientId, trainerId ?? 'local-trainer');
+    list(threadIdOrClientId, trainerId, options = {}) {
+      return messagingService.listMessages(threadIdOrClientId, trainerId ?? 'local-trainer', options);
     },
-    add(threadIdOrClientId, message, trainerId) {
+    add(threadIdOrClientId, message, trainerId, options = {}) {
       const text = message?.body ?? message?.text ?? '';
-      return messagingService.sendMessage(threadIdOrClientId, text, trainerId ?? 'local-trainer').then((m) => m ?? null);
+      const senderRole = message?.sender === 'client' ? 'client' : 'coach';
+      return messagingService
+        .sendMessage(threadIdOrClientId, text, trainerId ?? 'local-trainer', { ...options, senderRole })
+        .then((m) => m ?? null);
     },
-    addVoice(threadIdOrClientId, { blob, mimeType, durationMs }, trainerId) {
-      return messagingService.sendVoiceMessage(threadIdOrClientId, { blob, mimeType, durationMs }, trainerId ?? 'local-trainer').then((m) => m ?? null);
+    addVoice(threadIdOrClientId, { blob, mimeType, durationMs }, trainerId, options = {}) {
+      const senderRole = options.senderRole === 'client' ? 'client' : 'coach';
+      return messagingService
+        .sendVoiceMessage(threadIdOrClientId, { blob, mimeType, durationMs }, trainerId ?? 'local-trainer', { ...options, senderRole })
+        .then((m) => m ?? null);
     },
   },
   programs: {
@@ -157,16 +163,14 @@ export const repo = {
       return Promise.resolve();
     },
   },
-  markThreadRead(threadIdOrClientId) {
-    sandbox.markThreadRead(threadIdOrClientId);
-    return Promise.resolve();
+  markThreadRead(threadIdOrClientId, trainerId, options = {}) {
+    return messagingService.markThreadRead(threadIdOrClientId, trainerId ?? 'local-trainer', options);
   },
-  markAllThreadsRead() {
-    sandbox.markAllThreadsRead();
-    return Promise.resolve();
+  markAllThreadsRead(trainerId, options = {}) {
+    return messagingService.markAllThreadsRead(trainerId ?? 'local-trainer', options);
   },
-  getUnreadCountTotal(trainerId) {
-    return Promise.resolve(sandbox.getUnreadCountTotal(trainerId) ?? 0);
+  getUnreadCountTotal(trainerId, options = {}) {
+    return messagingService.getUnreadCountTotal(trainerId ?? 'local-trainer', options);
   },
   nutrition: {
     getActivePlan(trainerId, clientId) {

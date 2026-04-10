@@ -22,36 +22,42 @@ export default function AdminBillingSettings({ adminEmail }) {
   });
 
   const [form, setForm] = useState({
-    platform_fee_default_percent: 0.10,
-    pro_monthly_price_gbp: 59,
-    pro_platform_fee_percent: 0.05,
-    early_access_fee_percent: 0.07
+    platform_fee_default_percent: '0.10',
+    pro_monthly_price_gbp: '59',
+    pro_platform_fee_percent: '0.05',
+    early_access_fee_percent: '0.07'
   });
 
   React.useEffect(() => {
     if (settings) {
       setForm({
-        platform_fee_default_percent: settings.platform_fee_default_percent || 0.10,
-        pro_monthly_price_gbp: settings.pro_monthly_price_gbp || 59,
-        pro_platform_fee_percent: settings.pro_platform_fee_percent || 0.05,
-        early_access_fee_percent: settings.early_access_fee_percent || 0.07
+        platform_fee_default_percent: String(settings.platform_fee_default_percent ?? 0.10),
+        pro_monthly_price_gbp: String(settings.pro_monthly_price_gbp ?? 59),
+        pro_platform_fee_percent: String(settings.pro_platform_fee_percent ?? 0.05),
+        early_access_fee_percent: String(settings.early_access_fee_percent ?? 0.07)
       });
     }
   }, [settings]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const payload = {
+        platform_fee_default_percent: Number(form.platform_fee_default_percent) || 0,
+        pro_monthly_price_gbp: Number(form.pro_monthly_price_gbp) || 0,
+        pro_platform_fee_percent: Number(form.pro_platform_fee_percent) || 0,
+        early_access_fee_percent: Number(form.early_access_fee_percent) || 0,
+      };
       if (settings) {
-        await base44.entities.BillingSettings.update(settings.id, form);
+        await base44.entities.BillingSettings.update(settings.id, payload);
       } else {
-        await base44.entities.BillingSettings.create(form);
+        await base44.entities.BillingSettings.create(payload);
       }
       await base44.entities.AdminAuditLog.create({
         admin_email: adminEmail,
         action_type: 'billing_settings_updated',
         target_type: 'BillingSettings',
         old_value: JSON.stringify(settings),
-        new_value: JSON.stringify(form),
+        new_value: JSON.stringify(payload),
         timestamp: new Date().toISOString()
       });
     },
@@ -80,7 +86,8 @@ export default function AdminBillingSettings({ adminEmail }) {
               min="0"
               max="1"
               value={form.platform_fee_default_percent}
-              onChange={(e) => setForm({ ...form, platform_fee_default_percent: parseFloat(e.target.value) })}
+              onChange={(e) => setForm({ ...form, platform_fee_default_percent: e.target.value })}
+              onFocus={(e) => e.target.select()}
               className="bg-slate-900 border-slate-700"
             />
             <p className="text-xs text-slate-500 mt-1">Free tier fee (0.10 = 10%)</p>
@@ -92,7 +99,8 @@ export default function AdminBillingSettings({ adminEmail }) {
               type="number"
               min="0"
               value={form.pro_monthly_price_gbp}
-              onChange={(e) => setForm({ ...form, pro_monthly_price_gbp: parseInt(e.target.value) })}
+              onChange={(e) => setForm({ ...form, pro_monthly_price_gbp: e.target.value })}
+              onFocus={(e) => e.target.select()}
               className="bg-slate-900 border-slate-700"
             />
           </div>
@@ -105,7 +113,8 @@ export default function AdminBillingSettings({ adminEmail }) {
               min="0"
               max="1"
               value={form.pro_platform_fee_percent}
-              onChange={(e) => setForm({ ...form, pro_platform_fee_percent: parseFloat(e.target.value) })}
+              onChange={(e) => setForm({ ...form, pro_platform_fee_percent: e.target.value })}
+              onFocus={(e) => e.target.select()}
               className="bg-slate-900 border-slate-700"
             />
             <p className="text-xs text-slate-500 mt-1">Pro tier fee (0.05 = 5%)</p>
@@ -119,7 +128,8 @@ export default function AdminBillingSettings({ adminEmail }) {
               min="0"
               max="1"
               value={form.early_access_fee_percent}
-              onChange={(e) => setForm({ ...form, early_access_fee_percent: parseFloat(e.target.value) })}
+              onChange={(e) => setForm({ ...form, early_access_fee_percent: e.target.value })}
+              onFocus={(e) => e.target.select()}
               className="bg-slate-900 border-slate-700"
             />
             <p className="text-xs text-slate-500 mt-1">Early access tier fee (0.07 = 7%)</p>

@@ -1,14 +1,15 @@
 /**
  * Client/personal pose check submission. One per week (Monday week_start).
- * Reuses getMyClientId + getWeekStartISO from checkins pattern.
+ * Prep clients with division templates get pose_check_items — upload one photo per mandatory pose.
+ * Others use legacy multi-photo on pose_checks.photos.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
-import { colors, spacing } from '@/ui/tokens';
+import { colors, spacing, shadows } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { getMyClientId } from '@/lib/checkins';
 import {
@@ -17,10 +18,13 @@ import {
   insertPoseCheck,
   uploadPoseCheckPhoto,
   updatePoseCheckPhotos,
+  getPoseCheckItems,
+  updatePoseCheckItem,
 } from '@/lib/poseChecks';
 import { trackPoseCheckSubmitted, trackProgressPhotoUploaded } from '@/services/engagementTracker';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { ImagePlus } from 'lucide-react';
+import { ImagePlus, CheckCircle2, Sparkles } from 'lucide-react';
+import { hapticLight } from '@/lib/haptics';
 
 function isClientOrPersonal(role) {
   const r = (role ?? '').toString().toLowerCase();
@@ -29,40 +33,113 @@ function isClientOrPersonal(role) {
 
 export default function PoseCheckSubmitPage() {
   const navigate = useNavigate();
-  const { profile, role } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const { role } = useAuth();
+  const [initLoading, setInitLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [clientId, setClientId] = useState(null);
   const [weekStart, setWeekStart] = useState('');
-  const [existing, setExisting] = useState(null);
+  /** 'form' | 'structured' | 'submitted' */
+  const [flow, setFlow] = useState('form');
+  const [submittedRow, setSubmittedRow] = useState(null);
+  const [submittedItems, setSubmittedItems] = useState([]);
+  const [poseCheckRow, setPoseCheckRow] = useState(null);
+  const [structuredItems, setStructuredItems] = useState([]);
   const [clientNotes, setClientNotes] = useState('');
-  const [photoFiles, setPhotoFiles] = useState([]);
+  const [legacyPhotoFiles, setLegacyPhotoFiles] = useState([]);
+  const [structuredExtraFiles, setStructuredExtraFiles] = useState([]);
+  /** @type {Record<string, File | undefined>} */
+  const [poseFilesByItemId, setPoseFilesByItemId] = useState({});
+
+  const loadWeekState = useCallback(async () => {
+    const w = getWeekStartISO();
+    setWeekStart(w);
+    const cid = await getMyClientId();
+    setClientId(cid);
+    if (!cid) {
+      setFlow('form');
+      return;
+    }
+    const ex = await getPoseCheckForWeek(cid, w);
+    if (!ex) {
+      setFlow('form');
+      setSubmittedRow(null);
+      setSubmittedItems([]);
+      setPoseCheckRow(null);
+      setStructuredItems([]);
+      return;
+    }
+    const items = await getPoseCheckItems(ex.id);
+    const needsPoseUploads = items.length > 0 && items.some((i) => !i.photo_path);
+    if (needsPoseUploads) {
+      setPoseCheckRow(ex);
+      setStructuredItems(items);
+      setFlow('structured');
+      setSubmittedRow(null);
+      setSubmittedItems([]);
+    } else {
+      setSubmittedRow(ex);
+      setSubmittedItems(items);
+      setPoseCheckRow(null);
+      setStructuredItems([]);
+      setFlow('submitted');
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const w = getWeekStartISO();
-      setWeekStart(w);
-      const cid = await getMyClientId();
-      if (cancelled) return;
-      setClientId(cid);
-      if (cid) {
-        const ex = await getPoseCheckForWeek(cid, w);
-        if (!cancelled) setExisting(ex);
-      }
-      setLoading(false);
+      setInitLoading(true);
+      await loadWeekState();
+      if (!cancelled) setInitLoading(false);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [loadWeekState]);
 
-  const handlePhotoChange = (e) => {
+  const previewsLegacy = useMemo(() => {
+    return legacyPhotoFiles.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
+  }, [legacyPhotoFiles]);
+
+  useEffect(() => () => { previewsLegacy.forEach((p) => URL.revokeObjectURL(p.url)); }, [previewsLegacy]);
+
+  const structuredPreviews = useMemo(() => {
+    const out = {};
+    for (const item of structuredItems) {
+      const f = poseFilesByItemId[item.id];
+      if (f) out[item.id] = URL.createObjectURL(f);
+    }
+    return out;
+  }, [structuredItems, poseFilesByItemId]);
+
+  const structuredExtraPreviews = useMemo(
+    () => structuredExtraFiles.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })),
+    [structuredExtraFiles]
+  );
+
+  useEffect(() => () => {
+    Object.values(structuredPreviews).forEach((u) => URL.revokeObjectURL(u));
+  }, [structuredPreviews]);
+  useEffect(() => () => {
+    structuredExtraPreviews.forEach((p) => URL.revokeObjectURL(p.url));
+  }, [structuredExtraPreviews]);
+
+  const handleLegacyPhotoChange = (e) => {
     const files = Array.from(e.target.files || []);
-    setPhotoFiles((prev) => [...prev, ...files]);
+    setLegacyPhotoFiles((prev) => [...prev, ...files]);
   };
 
-  const handleSubmit = async (e) => {
+  const handleStructuredFile = (itemId, e) => {
+    const file = (e.target.files || [])[0];
+    if (!file) return;
+    setPoseFilesByItemId((prev) => ({ ...prev, [itemId]: file }));
+  };
+  const handleStructuredExtraFiles = (e) => {
+    const files = Array.from(e.target.files || []);
+    setStructuredExtraFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleCreateCheck = async (e) => {
     e.preventDefault();
-    if (!clientId || existing || submitting) return;
+    if (!clientId || submitting) return;
     setSubmitting(true);
     try {
       const row = await insertPoseCheck({
@@ -71,11 +148,21 @@ export default function PoseCheckSubmitPage() {
         client_notes: clientNotes.trim() || null,
       });
       if (!row?.id) {
-        toast.error('Failed to submit pose check');
+        toast.error('Failed to start pose check');
+        return;
+      }
+      const items = await getPoseCheckItems(row.id);
+      if (items.length > 0) {
+        hapticLight();
+        setPoseCheckRow(row);
+        setStructuredItems(items);
+        setFlow('structured');
+        setLegacyPhotoFiles([]);
+        toast.message('Now add a photo for each pose below.');
         return;
       }
       const paths = [];
-      for (const file of photoFiles) {
+      for (const file of legacyPhotoFiles) {
         const path = await uploadPoseCheckPhoto({
           clientId,
           poseCheckId: row.id,
@@ -84,10 +171,8 @@ export default function PoseCheckSubmitPage() {
         if (path) paths.push(path);
       }
       if (paths.length > 0) await updatePoseCheckPhotos(row.id, paths);
-      toast.success('Pose check submitted');
-      setExisting({ ...row, client_notes: clientNotes.trim() || null, photos: paths });
-      setPhotoFiles([]);
-      setClientNotes('');
+      toast.success('Posing check sent to your coach');
+      hapticLight();
       let coachId = null;
       if (hasSupabase && clientId) {
         try {
@@ -100,17 +185,73 @@ export default function PoseCheckSubmitPage() {
       if (paths.length > 0) {
         trackProgressPhotoUploaded(clientId, coachId, { pose_check_id: row.id, photo_count: paths.length }).catch(() => {});
       }
-    } catch (err) {
-      toast.error('Failed to submit pose check');
+      await loadWeekState();
+    } catch {
+      toast.error('Something went wrong');
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (loading) {
+  const handleFinishStructured = async (e) => {
+    e.preventDefault();
+    if (!clientId || !poseCheckRow?.id || submitting) return;
+    const missing = structuredItems.filter((i) => !i.photo_path && !poseFilesByItemId[i.id]);
+    if (missing.length > 0) {
+      toast.error(`Add a photo for: ${missing.map((m) => m.pose_label).join(', ')}`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const paths = [];
+      for (const item of structuredItems) {
+        const file = poseFilesByItemId[item.id];
+        if (!file) continue;
+        const path = await uploadPoseCheckPhoto({
+          clientId,
+          poseCheckId: poseCheckRow.id,
+          file,
+        });
+        if (path) {
+          paths.push(path);
+          await updatePoseCheckItem(item.id, { photo_path: path });
+        }
+      }
+      for (const file of structuredExtraFiles) {
+        const path = await uploadPoseCheckPhoto({
+          clientId,
+          poseCheckId: poseCheckRow.id,
+          file,
+        });
+        if (path) paths.push(path);
+      }
+      if (paths.length > 0) await updatePoseCheckPhotos(poseCheckRow.id, paths);
+      toast.success('Posing check sent to your coach');
+      hapticLight();
+      let coachId = null;
+      if (hasSupabase && clientId) {
+        try {
+          const supabase = getSupabase();
+          const { data: clientRow } = await supabase.from('clients').select('coach_id, trainer_id').eq('id', clientId).maybeSingle();
+          coachId = clientRow?.coach_id ?? clientRow?.trainer_id ?? null;
+        } catch (_) {}
+      }
+      trackPoseCheckSubmitted(clientId, coachId, { pose_check_id: poseCheckRow.id, photo_count: paths.length }).catch(() => {});
+      trackProgressPhotoUploaded(clientId, coachId, { pose_check_id: poseCheckRow.id, photo_count: paths.length }).catch(() => {});
+      setPoseFilesByItemId({});
+      setStructuredExtraFiles([]);
+      await loadWeekState();
+    } catch {
+      toast.error('Upload failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (initLoading) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Pose check" onBack={() => navigate(-1)} />
+        <TopBar title="Posing check" onBack={() => navigate(-1)} />
         <div className="p-4 flex items-center justify-center" style={{ minHeight: 200 }}>
           <p style={{ color: colors.muted }}>Loading…</p>
         </div>
@@ -121,7 +262,7 @@ export default function PoseCheckSubmitPage() {
   if (!isClientOrPersonal(role)) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Pose check" onBack={() => navigate(-1)} />
+        <TopBar title="Posing check" onBack={() => navigate(-1)} />
         <div className="p-6 text-center">
           <p style={{ color: colors.muted }}>Pose check submission is for clients and personal accounts.</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>Go back</Button>
@@ -133,7 +274,7 @@ export default function PoseCheckSubmitPage() {
   if (!clientId) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Pose check" onBack={() => navigate(-1)} />
+        <TopBar title="Posing check" onBack={() => navigate(-1)} />
         <div className="p-6 text-center">
           <p style={{ color: colors.muted, marginBottom: spacing[16] }}>
             Link your account to a coach to submit pose checks.
@@ -144,35 +285,194 @@ export default function PoseCheckSubmitPage() {
     );
   }
 
-  if (existing) {
+  if (flow === 'submitted' && submittedRow) {
+    const reviewed = !!(submittedRow.reviewed_at || submittedRow.reviewed_by);
+    const hasItemFeedback = submittedItems.some((i) => (i.coach_notes && String(i.coach_notes).trim()) || i.coach_rating != null);
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Pose check" onBack={() => navigate(-1)} />
-        <div className="p-6">
-          <p className="font-semibold mb-2" style={{ color: colors.text }}>Submitted</p>
-          <p className="text-sm mb-4" style={{ color: colors.muted }}>
-            You’ve already submitted a pose check for the week of {weekStart}.
-          </p>
-          {existing.client_notes && (
+      <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
+        <TopBar title="Posing check" onBack={() => navigate(-1)} />
+        <div className="p-4" style={{ paddingBottom: spacing[32] }}>
+          <Card
+            style={{
+              padding: spacing[20],
+              marginBottom: spacing[16],
+              border: `1px solid ${colors.border}`,
+              boxShadow: shadows.glow,
+              background: 'linear-gradient(145deg, rgba(59,130,246,0.12) 0%, rgba(15,23,42,0.4) 100%)',
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className="shrink-0 w-12 h-12 rounded-xl flex items-center justify-center"
+                style={{ background: colors.primarySubtle, color: colors.primary }}
+              >
+                <Sparkles size={24} />
+              </div>
+              <div>
+                <p className="text-lg font-bold" style={{ color: colors.text }}>Weekly posing check</p>
+                <p className="text-sm mt-1" style={{ color: colors.muted }}>
+                  Week of {weekStart} · Core prep workflow — your coach reviews poses here every week.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle2 size={22} style={{ color: colors.success }} />
+            <p className="font-semibold" style={{ color: colors.text }}>Submitted</p>
+          </div>
+
+          {reviewed ? (
+            <Card style={{ padding: spacing[16], marginBottom: spacing[16], border: `2px solid ${colors.primary}`, boxShadow: shadows.brandGlow }}>
+              <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: colors.primary }}>Coach feedback</p>
+              {submittedRow.coach_notes ? (
+                <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: colors.text }}>{submittedRow.coach_notes}</p>
+              ) : (
+                <p className="text-sm" style={{ color: colors.muted }}>Your coach reviewed this submission. Check per-pose notes below.</p>
+              )}
+            </Card>
+          ) : (
             <Card style={{ padding: spacing[16], marginBottom: spacing[16] }}>
-              <p className="text-xs font-medium mb-1" style={{ color: colors.muted }}>Your notes</p>
-              <p className="text-sm" style={{ color: colors.text }}>{existing.client_notes}</p>
+              <p className="text-sm" style={{ color: colors.muted }}>
+                Waiting for coach review. You&apos;ll see their feedback here when it&apos;s ready.
+              </p>
             </Card>
           )}
-          {existing.photos?.length > 0 && (
-            <p className="text-sm" style={{ color: colors.muted }}>{existing.photos.length} photo(s) uploaded.</p>
+
+          {submittedRow.client_notes && (
+            <Card style={{ padding: spacing[16], marginBottom: spacing[16] }}>
+              <p className="text-xs font-medium mb-1" style={{ color: colors.muted }}>Your notes</p>
+              <p className="text-sm" style={{ color: colors.text }}>{submittedRow.client_notes}</p>
+            </Card>
           )}
-          <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>Go back</Button>
+
+          {hasItemFeedback && (
+            <div style={{ marginBottom: spacing[16] }}>
+              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Per-pose notes</p>
+              <div className="space-y-2">
+                {submittedItems.filter((i) => (i.coach_notes && String(i.coach_notes).trim()) || i.coach_rating != null).map((i) => (
+                  <Card key={i.id} style={{ padding: spacing[12] }}>
+                    <p className="text-sm font-semibold" style={{ color: colors.text }}>{i.pose_label}</p>
+                    {i.coach_rating != null && (
+                      <p className="text-xs mt-1" style={{ color: colors.accent }}>Rating {i.coach_rating}/10</p>
+                    )}
+                    {i.coach_notes && (
+                      <p className="text-sm mt-1 whitespace-pre-wrap" style={{ color: colors.text }}>{i.coach_notes}</p>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(submittedRow.photos) && submittedRow.photos.length > 0 && submittedItems.length === 0 && (
+            <p className="text-sm" style={{ color: colors.muted }}>{submittedRow.photos.length} photo(s) on file.</p>
+          )}
+
+          <Button variant="outline" className="mt-6 w-full" onClick={() => navigate(-1)}>Done</Button>
         </div>
       </div>
     );
   }
 
+  if (flow === 'structured' && poseCheckRow && structuredItems.length > 0) {
+    const doneCount = structuredItems.filter((i) => i.photo_path || poseFilesByItemId[i.id]).length;
+    const total = structuredItems.length;
+    return (
+      <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
+        <TopBar title="Posing check" onBack={() => navigate(-1)} />
+        <form onSubmit={handleFinishStructured} className="p-4" style={{ paddingBottom: spacing[32] }}>
+          <Card style={{ padding: spacing[16], marginBottom: spacing[16], border: `1px solid ${colors.primary}55` }}>
+            <p className="text-base font-semibold" style={{ color: colors.text }}>Upload your poses</p>
+            <p className="text-sm mt-1" style={{ color: colors.muted }}>
+              Week of {weekStart} · {doneCount}/{total} poses ready · one clear photo per pose helps your coach compare week to week.
+            </p>
+          </Card>
+          <div className="space-y-3">
+            {structuredItems.map((item) => {
+              const hasPath = !!item.photo_path;
+              const file = poseFilesByItemId[item.id];
+              const preview = structuredPreviews[item.id];
+              return (
+                <Card key={item.id} style={{ padding: spacing[16] }}>
+                  <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>{item.pose_label}</p>
+                  {hasPath ? (
+                    <p className="text-xs" style={{ color: colors.success }}>Photo on file — replace?</p>
+                  ) : null}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    id={`pose-file-${item.id}`}
+                    onChange={(ev) => handleStructuredFile(item.id, ev)}
+                  />
+                  <label
+                    htmlFor={`pose-file-${item.id}`}
+                    className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed cursor-pointer py-6 mt-2"
+                    style={{ borderColor: colors.border, color: colors.muted }}
+                  >
+                    <ImagePlus size={22} />
+                    <span className="text-sm">{file || hasPath ? 'Change photo' : 'Add photo'}</span>
+                  </label>
+                  {preview && (
+                    <img src={preview} alt="" className="mt-3 w-full max-h-64 object-contain rounded-lg" style={{ background: colors.surface2 }} />
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+          <Card style={{ padding: spacing[16], marginTop: spacing[12] }}>
+            <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>Optional extra photos</p>
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              className="sr-only"
+              id="pose-check-extra-files"
+              onChange={handleStructuredExtraFiles}
+            />
+            <label
+              htmlFor="pose-check-extra-files"
+              className="flex items-center justify-center gap-2 rounded-lg border border-dashed cursor-pointer py-4"
+              style={{ borderColor: colors.border, color: colors.muted }}
+            >
+              <ImagePlus size={20} />
+              <span>{structuredExtraFiles.length > 0 ? `${structuredExtraFiles.length} selected` : 'Add optional extras'}</span>
+            </label>
+            {structuredExtraPreviews.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {structuredExtraPreviews.map((p) => (
+                  <img key={p.url} src={p.url} alt="" className="w-16 h-16 object-cover rounded-lg" />
+                ))}
+              </div>
+            )}
+          </Card>
+          <Button type="submit" disabled={submitting} className="w-full mt-6" style={{ minHeight: 48 }}>
+            {submitting ? 'Uploading…' : 'Send to coach'}
+          </Button>
+        </form>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-      <TopBar title="Pose check" onBack={() => navigate(-1)} />
-      <form onSubmit={handleSubmit} className="p-4 pb-8" style={{ paddingBottom: spacing[32] }}>
-        <p className="text-sm mb-4" style={{ color: colors.muted }}>
+    <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
+      <TopBar title="Posing check" onBack={() => navigate(-1)} />
+      <form onSubmit={handleCreateCheck} className="p-4" style={{ paddingBottom: spacing[32] }}>
+        <Card
+          style={{
+            padding: spacing[20],
+            marginBottom: spacing[16],
+            border: `1px solid ${colors.primary}44`,
+            boxShadow: shadows.glow,
+          }}
+        >
+          <p className="text-lg font-bold" style={{ color: colors.text }}>Weekly posing check</p>
+          <p className="text-sm mt-2 leading-relaxed" style={{ color: colors.muted }}>
+            Send stage photos so your coach can review posing and track progress. If you&apos;re in contest prep with mandatory poses, you&apos;ll upload one shot per pose after this step.
+          </p>
+        </Card>
+        <p className="text-xs font-medium mb-4" style={{ color: colors.muted }}>
           Week of {weekStart}
         </p>
 
@@ -181,7 +481,7 @@ export default function PoseCheckSubmitPage() {
           <textarea
             value={clientNotes}
             onChange={(e) => setClientNotes(e.target.value)}
-            placeholder="How you're feeling, condition, etc."
+            placeholder="Condition, how posing felt, what you want feedback on…"
             rows={3}
             className="w-full rounded-lg border bg-black/20 text-white placeholder:text-gray-500"
             style={{ padding: 10, borderColor: colors.border }}
@@ -189,12 +489,15 @@ export default function PoseCheckSubmitPage() {
         </Card>
 
         <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
-          <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Photos</label>
+          <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Photos (if not using mandatory poses)</label>
+          <p className="text-xs mb-3" style={{ color: colors.muted }}>
+            Prep athletes with a division usually skip this — you&apos;ll add front / side / back per pose next. Everyone else: add progress shots here.
+          </p>
           <input
             type="file"
             multiple
             accept="image/*"
-            onChange={handlePhotoChange}
+            onChange={handleLegacyPhotoChange}
             className="sr-only"
             id="pose-check-photos"
           />
@@ -204,17 +507,19 @@ export default function PoseCheckSubmitPage() {
             style={{ borderColor: colors.border, color: colors.muted }}
           >
             <ImagePlus size={20} />
-            <span>{photoFiles.length > 0 ? `${photoFiles.length} selected` : 'Select images'}</span>
+            <span>{legacyPhotoFiles.length > 0 ? `${legacyPhotoFiles.length} selected` : 'Select images'}</span>
           </label>
+          {previewsLegacy.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {previewsLegacy.map((p) => (
+                <img key={p.url} src={p.url} alt="" className="w-16 h-16 object-cover rounded-lg" />
+              ))}
+            </div>
+          )}
         </Card>
 
-        <Button
-          type="submit"
-          disabled={submitting}
-          className="w-full"
-          style={{ minHeight: 48 }}
-        >
-          {submitting ? 'Submitting…' : 'Submit pose check'}
+        <Button type="submit" disabled={submitting} className="w-full" style={{ minHeight: 48 }}>
+          {submitting ? 'Working…' : 'Continue'}
         </Button>
       </form>
     </div>

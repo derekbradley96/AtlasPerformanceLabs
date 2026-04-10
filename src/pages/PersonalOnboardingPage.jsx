@@ -1,13 +1,15 @@
 /**
  * Personal (solo) onboarding: set up profile (name, weight, goals) then mark complete and go to dashboard.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { getPostOnboardingPath, PERSONAL_POST_ONBOARDING_SESSION_KEY } from '@/lib/postOnboardingRoutes';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Loader2, User, Target } from 'lucide-react';
 import { toast } from 'sonner';
+import { derivePersonalOnboardingSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 
 export default function PersonalOnboardingPage() {
   const navigate = useNavigate();
@@ -17,6 +19,8 @@ export default function PersonalOnboardingPage() {
   const [goal, setGoal] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const onboardingMigration = useMemo(() => derivePersonalOnboardingSurfaceState({ saving }), [saving]);
+
   const handleComplete = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -25,7 +29,12 @@ export default function PersonalOnboardingPage() {
       if (displayName.trim()) patch.display_name = displayName.trim();
       await updateProfile(patch);
       toast.success("You're all set!");
-      navigate('/home', { replace: true });
+      try {
+        window.sessionStorage?.setItem(PERSONAL_POST_ONBOARDING_SESSION_KEY, '1');
+      } catch (_) {
+        /* ignore */
+      }
+      navigate(getPostOnboardingPath('personal'), { replace: true });
     } catch (err) {
       toast.error(err?.message || 'Could not save');
     } finally {
@@ -42,7 +51,10 @@ export default function PersonalOnboardingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-4 flex flex-col items-center justify-center">
+    <div
+      className="min-h-screen bg-slate-950 text-white p-4 flex flex-col items-center justify-center"
+      {...atlasMigrationDataAttributes(onboardingMigration.phase, onboardingMigration.primary)}
+    >
       <div className="max-w-md w-full">
         <h1 className="text-2xl font-bold mb-2">Set up your profile</h1>
         <p className="text-slate-400 mb-8">A few details so we can personalise your experience.</p>

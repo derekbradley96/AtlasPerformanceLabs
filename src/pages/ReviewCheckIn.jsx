@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
@@ -14,12 +14,15 @@ import { PageLoader } from '@/components/ui/LoadingState';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
+import { resolveCheckinTemplateAnswers } from '@/lib/checkinTemplateAnswers';
 
 export default function ReviewCheckIn() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [feedback, setFeedback] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -91,6 +94,8 @@ export default function ReviewCheckIn() {
     }
   });
 
+  const templateAnswers = useMemo(() => resolveCheckinTemplateAnswers(checkin), [checkin]);
+
   if (!user || !checkin || !client) return <PageLoader />;
 
   const thisWeekWorkouts = recentWorkouts.filter(w => {
@@ -161,7 +166,7 @@ export default function ReviewCheckIn() {
                 <Weight className="w-4 h-4 text-blue-400" />
                 <p className="text-xs text-slate-400">Weight</p>
               </div>
-              <p className="text-xl font-bold text-white">{checkin.weight_kg}kg</p>
+              <p className="text-xl font-bold text-white">{formatWeightForViewer(Number(checkin.weight_kg), viewerWU)}</p>
             </div>
           )}
 
@@ -196,15 +201,17 @@ export default function ReviewCheckIn() {
           )}
         </motion.div>
 
-        {/* Custom Answers */}
-        {checkin.answers && checkin.answers.length > 0 && (
+        {/* Template Q&A (questions JSON) — also parsed client-side if API omits answers */}
+        {templateAnswers.length > 0 && (
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
             <h3 className="font-semibold text-white mb-4">Responses</h3>
             <div className="space-y-3">
-              {checkin.answers.map((answer, i) => (
-                <div key={i} className="border-b border-slate-700/50 pb-3 last:border-b-0">
-                  <p className="text-sm text-slate-400 mb-1">{answer.question_text}</p>
-                  <p className="text-white">{answer.answer}</p>
+              {templateAnswers.map((answer, i) => (
+                <div key={answer.question_id || i} className="border-b border-slate-700/50 pb-3 last:border-b-0">
+                  <p className="text-sm text-slate-400 mb-1">
+                    {answer.question_text || answer.question_id || 'Question'}
+                  </p>
+                  <p className="text-white">{answer.answer || '—'}</p>
                 </div>
               ))}
             </div>

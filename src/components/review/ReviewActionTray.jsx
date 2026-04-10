@@ -18,7 +18,10 @@ export default function ReviewActionTray({ actions, className = '', style = {} }
       className={className}
       style={{
         display: 'flex',
-        flexWrap: 'wrap',
+        flexWrap: 'nowrap',
+        overflowX: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        scrollSnapType: 'x proximity',
         gap: spacing[8],
         marginTop: spacing[16],
         paddingTop: spacing[12],
@@ -39,6 +42,8 @@ export default function ReviewActionTray({ actions, className = '', style = {} }
               alignItems: 'center',
               justifyContent: 'center',
               gap: spacing[8],
+              flexShrink: 0,
+              scrollSnapAlign: 'start',
               padding: `${spacing[10]}px ${spacing[16]}px`,
               borderRadius: radii.button,
               fontSize: 14,
@@ -48,6 +53,7 @@ export default function ReviewActionTray({ actions, className = '', style = {} }
               border: isPrimary ? 'none' : `1px solid ${shell.cardBorder}`,
               background: isPrimary ? colors.primary : 'transparent',
               color: isPrimary ? '#fff' : colors.text,
+              transition: 'transform 120ms ease, opacity 120ms ease',
             }}
           >
             {action.icon}

@@ -3,6 +3,8 @@
  * Handles both cold start (getLaunchUrl) and app-in-background (appUrlOpen).
  * When user taps capacitor://localhost/auth/callback#access_token=...,
  * we navigate to /auth/callback and preserve search + hash so AuthCallback can read tokens.
+ *
+ * With HashRouter (native), auth fragments stay on the hash; keep callback routes aligned with AuthCallback.
  */
 
 import { useEffect } from 'react';

@@ -1,5 +1,5 @@
 /**
- * Home overview: Coach Briefing (max 5 rows) + Open Global Review CTA + 2x2 quick actions.
+ * Home overview: Coach Briefing (max 5 rows) + Review next CTA + 2x2 quick actions.
  * Data from getDailyBriefing; no duplicate counts, no pull-to-refresh label.
  */
 import React, { useState, useEffect, useMemo } from 'react';
@@ -18,8 +18,8 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import AtlasLogo from '@/components/Brand/AtlasLogo';
 import { getDailyBriefing } from '@/lib/briefing/briefingService';
+import { REVIEW_NEXT_PATH } from '@/lib/coachReviewRoutes';
 import { colors, spacing, radii } from '@/ui/tokens';
 import BackendStatusBadge from '@/components/dev/BackendStatusBadge';
 
@@ -91,9 +91,9 @@ export default function TrainerDashboard({ user, refreshKey = 0 }) {
     navigate(path);
   };
 
-  const handleOpenGlobalReview = async () => {
+  const handleOpenReviewNext = async () => {
     await lightHaptic();
-    navigate('/review-global');
+    navigate(REVIEW_NEXT_PATH);
   };
 
   return (
@@ -115,9 +115,8 @@ export default function TrainerDashboard({ user, refreshKey = 0 }) {
         className="sticky top-0 z-10 flex items-center justify-between gap-3 pb-4 mb-2 border-b"
         style={{ background: colors.bg, borderColor: BORDER }}
       >
-        <div className="flex items-center gap-2 min-h-[44px] min-w-0">
-          <AtlasLogo variant="header" />
-          {isDev && <BackendStatusBadge />}
+        <div className="flex items-center gap-2 min-h-[44px] min-w-0" style={{ minWidth: 88 }}>
+          {isDev ? <BackendStatusBadge /> : <span className="inline-block w-10 shrink-0" aria-hidden />}
         </div>
         <h1 className="flex-1 text-center text-base font-semibold truncate" style={{ color: TEXT }}>
           {greeting}, {firstName}
@@ -202,7 +201,7 @@ export default function TrainerDashboard({ user, refreshKey = 0 }) {
               )}
               <button
                 type="button"
-                onClick={handleOpenGlobalReview}
+                onClick={handleOpenReviewNext}
                 className="w-full flex items-center justify-center gap-2 rounded-xl font-semibold text-sm border-none"
                 style={{
                   height: 48,
@@ -210,7 +209,7 @@ export default function TrainerDashboard({ user, refreshKey = 0 }) {
                   color: '#fff',
                 }}
               >
-                Open Global Review
+                Review next
                 <ChevronRight size={18} />
               </button>
             </>

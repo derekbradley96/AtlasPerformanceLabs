@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 
 const ROLE_OPTIONS = [
   { value: 'coach', label: 'Coach' },
-  { value: 'athlete', label: 'Athlete' },
+  { value: 'personal', label: 'Personal' },
   { value: 'both', label: 'Both' },
 ];
 
@@ -47,7 +47,7 @@ export default function WaitlistForm() {
       setSubmitted(true);
       setEmail('');
       setRoleInterest('');
-      toast.success("You're on the list. We'll be in touch.");
+      toast.success("You're on the early access list. We'll reach out when the next batch opens.");
     } catch (err) {
       if (import.meta.env.DEV) console.warn('[waitlist]', err);
       toast.error('Something went wrong. Please try again.');
@@ -63,10 +63,10 @@ export default function WaitlistForm() {
         style={{ borderColor: colors.border, background: colors.surface }}
       >
         <p className="text-lg font-medium" style={{ color: colors.text }}>
-          Thanks for joining the waitlist.
+          You&apos;re on the list for early access.
         </p>
         <p className="text-sm mt-1" style={{ color: colors.muted }}>
-          We&apos;ll notify you when we launch.
+          We onboard in small batches—you&apos;ll hear from us when a spot opens.
         </p>
       </section>
     );
@@ -79,10 +79,13 @@ export default function WaitlistForm() {
     >
       <div className="max-w-md mx-auto">
         <h2 className="text-xl font-bold text-center mb-2" style={{ color: colors.text }}>
-          Join the waitlist
+          Get early access
         </h2>
-        <p className="text-sm text-center mb-6" style={{ color: colors.muted }}>
-          Get early access. We&apos;ll only use your email to notify you.
+        <p className="text-sm text-center mb-2" style={{ color: colors.muted }}>
+          We&apos;re opening Atlas to coaches in limited batches. Add your email to reserve a spot—we only write when it&apos;s your turn.
+        </p>
+        <p className="text-xs text-center mb-6 font-medium" style={{ color: colors.primary }}>
+          Spots fill quickly as each cohort goes live.
         </p>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <input
@@ -125,7 +128,7 @@ export default function WaitlistForm() {
             className="w-full py-3 rounded-xl text-base font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"
             style={{ background: colors.primary, color: '#fff' }}
           >
-            {submitting ? 'Joining…' : 'Join waitlist'}
+            {submitting ? 'Sending…' : 'Request early access'}
           </button>
         </form>
       </div>

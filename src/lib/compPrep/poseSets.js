@@ -278,10 +278,18 @@ const FEMALE_FIGURE = [
 /** Division key to pose set (array of pose entries). */
 export const divisionPoseSets = {
   'Bodybuilding': MALE_BODYBUILDING,
+  mens_bodybuilding: MALE_BODYBUILDING,
+  mens_open_bodybuilding: MALE_BODYBUILDING,
   'Classic Physique': MALE_CLASSIC,
+  classic_physique: MALE_CLASSIC,
   'Men\'s Physique': MALE_PHYSIQUE,
   'Mens Physique': MALE_PHYSIQUE,
   'Physique': MALE_PHYSIQUE,
+  mens_physique: MALE_PHYSIQUE,
+  womens_bodybuilding: MALE_BODYBUILDING,
+  womens_physique: MALE_CLASSIC,
+  figure: FEMALE_FIGURE,
+  bikini: FEMALE_BIKINI,
   Bikini: FEMALE_BIKINI,
   Wellness: FEMALE_WELLNESS,
   Figure: FEMALE_FIGURE,

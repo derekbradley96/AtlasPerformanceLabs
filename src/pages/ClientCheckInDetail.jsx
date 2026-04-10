@@ -7,6 +7,8 @@ import { safeDate } from '@/lib/format';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 async function lightHaptic() {
   try {
@@ -26,6 +28,8 @@ function formatShortDate(iso) {
 export default function ClientCheckInDetail() {
   const { id: clientId, checkinId } = useParams();
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const client = clientId ? getClientById(clientId) : null;
   const checkInsListRaw = clientId ? getClientCheckIns(clientId) : [];
   const checkInsList = Array.isArray(checkInsListRaw) ? checkInsListRaw : [];
@@ -68,7 +72,7 @@ export default function ClientCheckInDetail() {
           {checkIn.weight_kg != null && (
             <div style={{ padding: 8, background: 'rgba(255,255,255,0.06)', borderRadius: 12 }}>
               <p className="text-xs" style={{ color: colors.muted }}>Weight</p>
-              <p className="text-[15px] font-medium" style={{ color: colors.text }}>{checkIn.weight_kg} kg</p>
+              <p className="text-[15px] font-medium" style={{ color: colors.text }}>{formatWeightForViewer(Number(checkIn.weight_kg), viewerWU)}</p>
             </div>
           )}
           {checkIn.steps != null && (

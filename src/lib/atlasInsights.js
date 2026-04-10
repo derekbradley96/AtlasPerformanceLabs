@@ -4,6 +4,8 @@
  * level: "info" | "positive" | "warning"
  */
 
+import { formatWeightDeltaKg, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+
 function toNum(v) {
   if (v == null) return null;
   const n = Number(v);
@@ -120,7 +122,7 @@ export function generateProgressInsight(trends) {
       details.push('Weight trending down');
       if (level !== 'warning') level = 'warning';
     } else if (weightChange > 0) {
-      details.push(`Weight up ${Number(weightChange).toFixed(1)} kg since last check-in`);
+      details.push(`Weight up ${formatWeightDeltaKg(weightChange, wu).replace(/^\+/, '')} since last check-in`);
     }
   } else if (latestWeight != null && previousWeight != null && latestWeight < previousWeight) {
     details.push('Weight trending down');
@@ -199,7 +201,8 @@ export function generateRiskInsight(riskData) {
  * @param {Object} prepData - days_out, show_date, has_active_prep, pose_check_submitted_this_week, weight_change, show_name, division
  * @returns {{ title: string, summary: string, level: 'info' | 'positive' | 'warning', details: string[] }}
  */
-export function generatePrepInsight(prepData) {
+export function generatePrepInsight(prepData, viewerWeightUnit = 'kg') {
+  const wu = normalizeWeightUnit(viewerWeightUnit);
   const details = [];
   let level = 'info';
   let title = 'Prep status';
@@ -252,7 +255,7 @@ export function generatePrepInsight(prepData) {
   }
 
   if (weightChange != null && Math.abs(weightChange) >= 0.5 && daysOut != null && daysOut <= 28) {
-    details.push(`Weight change ${weightChange > 0 ? '+' : ''}${Number(weightChange).toFixed(1)} kg since last check-in`);
+    details.push(`Weight change ${formatWeightDeltaKg(weightChange, wu)} since last check-in`);
     if (level !== 'warning' && Math.abs(weightChange) >= 1) level = 'warning';
   }
 

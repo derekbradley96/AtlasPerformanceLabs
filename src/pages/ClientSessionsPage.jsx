@@ -10,6 +10,7 @@ import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { Calendar, Clock, MapPin, User } from 'lucide-react';
+import { atlasMigrationDataAttributes, deriveClientSessionsRouteState } from '@/lib/atlasMigrationPhases';
 
 async function fetchClientSessions() {
   if (!hasSupabase) return { sessions: [], coachNames: {} };
@@ -135,16 +136,25 @@ export default function ClientSessionsPage() {
     return { upcoming: up, past: pa };
   }, [sessions]);
 
+  const clientSessionsMigrationAttrs = useMemo(() => {
+    let surface = 'list';
+    if (!hasSupabase) surface = 'no_supabase';
+    else if (isLoading) surface = 'loading';
+    else if (sessions.length === 0) surface = 'empty';
+    const s = deriveClientSessionsRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [hasSupabase, isLoading, sessions.length]);
+
   if (!hasSupabase) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }}>
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg }} {...clientSessionsMigrationAttrs}>
         <p style={{ color: colors.muted }}>Sign in to see your sessions.</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen pb-24" style={{ background: colors.bg, color: colors.text }}>
+    <div className="min-h-screen pb-24" style={{ background: colors.bg, color: colors.text }} {...clientSessionsMigrationAttrs}>
       <TopBar title="My sessions" onBack={() => navigate(-1)} />
 
       <div className="p-4">

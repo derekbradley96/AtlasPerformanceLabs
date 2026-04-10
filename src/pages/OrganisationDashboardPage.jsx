@@ -126,7 +126,7 @@ async function fetchOrganisationDashboardPage() {
     coachProfileIds.length > 0
       ? supabase
           .from('v_coach_review_queue')
-          .select('id', { count: 'exact', head: true })
+          .select('coach_id', { count: 'exact', head: true })
           .in('coach_id', coachProfileIds)
           .is('resolved_at', null)
       : Promise.resolve({ count: 0 }),
@@ -238,7 +238,7 @@ const QUICK_ACTIONS_BASE = [
   { key: 'team', label: 'Manage Team', path: '/organisation/team', icon: Users, requiresManage: true },
   { key: 'analytics', label: 'View Organisation Analytics', path: '/organisation/analytics', icon: BarChart3, requiresManage: true },
   { key: 'clients', label: 'Assign Clients', path: '/clients', icon: UserPlus, requiresManage: false },
-  { key: 'review', label: 'Review Queue', path: '/review-center/queue', icon: ListChecks, requiresManage: false },
+  { key: 'review', label: 'Review queue', path: '/review-center', icon: ListChecks, requiresManage: false },
 ];
 
 export default function OrganisationDashboardPage() {

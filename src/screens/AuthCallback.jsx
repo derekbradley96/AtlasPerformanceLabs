@@ -14,6 +14,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, hasSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import { colors, spacing } from '@/ui/tokens';
+import { isProfileOnboardingComplete } from '@/lib/onboardingStatus';
+import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
+import { resolveIncompleteOnboardingDestination } from '@/lib/auth/postAuthNavigation';
+import { getPendingInvite } from '@/pages/ClientCode';
 
 function parseHashParams(hash) {
   if (!hash || !hash.startsWith('#')) return {};
@@ -32,7 +36,7 @@ function getDashboardPath(role) {
 export default function AuthCallback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { supabaseUser, profile } = useAuth();
+  const { supabaseUser, profile, role, profileLoadError } = useAuth();
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
   const hasSetSessionFromUrl = useRef(false);
@@ -107,21 +111,40 @@ export default function AuthCallback() {
     return () => { cancelled = true; };
   }, [searchParams]);
 
-  // 2) When we have session + profile (or recovery), navigate
+  // 2) Route by auth state: no session -> /login, session+no profile -> /onboarding, complete profile -> /home.
   useEffect(() => {
     if (status === 'error') return;
-    if (!supabaseUser) return;
+    if (!supabaseUser) {
+      navigate(LOGIN_PUBLIC_PATH, { replace: true });
+      return;
+    }
 
     if (isRecovery) {
       navigate('/reset', { replace: true });
       return;
     }
 
-    if (profile?.role) {
-      navigate(getDashboardPath(profile.role), { replace: true });
+    if (!profile) {
+      if (profileLoadError === 'PROFILE_MISSING') {
+        navigate('/onboarding', { replace: true });
+      }
+      return;
     }
-  }, [supabaseUser, profile?.role, isRecovery, status, navigate]);
-  // Note: we don't navigate when no profile yet; we keep showing "Finishing sign-in..." until AuthContext has profile
+
+    if (!isProfileOnboardingComplete(profile)) {
+      navigate(
+        resolveIncompleteOnboardingDestination({
+          profile,
+          role,
+          supabaseUser,
+          getPendingInvite,
+        }),
+        { replace: true }
+      );
+      return;
+    }
+    navigate(getDashboardPath(profile.role), { replace: true });
+  }, [supabaseUser, profile, role, profileLoadError, isRecovery, status, navigate]);
 
   if (!hasSupabase || !supabase) {
     return (
@@ -136,7 +159,7 @@ export default function AuthCallback() {
         <p className="text-center mb-4" style={{ color: colors.destructive }}>Auth not configured</p>
         <button
           type="button"
-          onClick={() => navigate('/auth', { replace: true })}
+          onClick={() => navigate(LOGIN_PUBLIC_PATH, { replace: true })}
           style={{
             padding: `${spacing[12]}px ${spacing[24]}px`,
             background: colors.accent,
@@ -166,7 +189,7 @@ export default function AuthCallback() {
         <p className="text-center mb-4" style={{ color: colors.destructive }}>{error}</p>
         <button
           type="button"
-          onClick={() => navigate('/auth', { replace: true })}
+          onClick={() => navigate(LOGIN_PUBLIC_PATH, { replace: true })}
           style={{
             padding: `${spacing[12]}px ${spacing[24]}px`,
             background: colors.accent,

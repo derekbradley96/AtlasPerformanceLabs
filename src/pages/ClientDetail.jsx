@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Calendar, ClipboardList, CreditCard, ChevronRight, Trophy, Download, History, AlertTriangle, TrendingUp, TrendingDown, Minus, MessageCircle, Dumbbell, Utensils, Calculator } from 'lucide-react';
+import { Calendar, ClipboardList, CreditCard, ChevronRight, Trophy, Download, History, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getClientPrograms,
@@ -25,6 +25,7 @@ import { getAchievementsList, getShownAchievementIds, markAchievementShown } fro
 import { unlockMilestone } from '@/lib/milestonesStore';
 import { evaluateClientMilestones } from '@/lib/milestoneEngine';
 import { useAuth } from '@/lib/AuthContext';
+import { formatWeightDeltaKg, resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import { journeyRosterBucket, journeyRosterBadgeLabel } from '@/lib/clientJourney';
 import { getClientPerformanceSnapshot } from '@/lib/performanceService';
 import { getClientRiskEvaluation } from '@/lib/riskService';
@@ -82,7 +83,18 @@ import AchievementUnlockedModal from '@/components/achievements/AchievementUnloc
 import LoyaltyAwardModal from '@/components/achievements/LoyaltyAwardModal';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
-import SegmentedTabs from '@/components/ui/SegmentedTabs';
+import ClientOperatingSystemLayout from '@/components/clients/ClientOperatingSystemLayout';
+import { deriveClientDetailSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
+import { mergeClientOsTimeline, resolveClientOsContext } from '@/lib/clientOsModel';
+import { deriveCoachClientLifecycle } from '@/lib/coachClientLifecycle';
+import { buildWhatChangedStrip, computeWaterSodiumStability } from '@/lib/checkinReviewWorkspaceModel';
+import {
+  fetchClientPrepPrecision,
+  fetchClientPrepPrecisionDailyRange,
+  todayLocalDateString,
+  daysAgoDateString,
+} from '@/data/prepPrecisionService';
+import { fetchClientDailySnapshot, formatClientDailySnapshotLines } from '@/lib/clientDailySnapshot';
 import SkeletonCard from '@/components/ui/SkeletonCard';
 import EmptyState from '@/components/ui/EmptyState';
 import PrepHeader from '@/components/PrepHeader';
@@ -101,7 +113,8 @@ import ClientCheckinsPanel from '@/components/clients/ClientCheckinsPanel';
 import ClientProgramPanel from '@/components/clients/ClientProgramPanel';
 import ClientAnalyticsSnapshot from '@/components/clients/ClientAnalyticsSnapshot';
 import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
-import { standardCard, pageContainer, sectionLabel, sectionGap } from '@/ui/pageLayout';
+import { standardCard, pageContainer, sectionLabel, sectionGap, desktopRhythm, cardContentRhythm } from '@/ui/pageLayout';
+import { usePresentationMode } from '@/lib/presentationMode';
 
 const DEFAULT_HEALTH_RESULT = {
   score: 0,
@@ -120,13 +133,6 @@ const DEFAULT_HEALTH_RESULT = {
 
 const STATUS_COLORS = { on_track: colors.success, needs_review: colors.warning, attention: colors.danger };
 const STATUS_LABELS = { on_track: 'On track', needs_review: 'Needs review', attention: 'Attention' };
-const SEGMENTS = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'checkins', label: 'Check-ins' },
-  { key: 'program', label: 'Program' },
-  { key: 'performance', label: 'Performance Timeline' },
-];
-
 const TIMELINE_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'Review', label: 'Reviews' },
@@ -184,6 +190,9 @@ function safe(fn, fallback) {
 }
 
 export default function ClientDetail() {
+  const { isDesktopWeb } = usePresentationMode();
+  const rhythm = desktopRhythm(isDesktopWeb);
+  const cardRhythm = cardContentRhythm(isDesktopWeb);
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -193,20 +202,12 @@ export default function ClientDetail() {
   if (clientId === 'undefined') clientId = null;
   if (import.meta.env.DEV) console.log('[ClientDetail] Client route param:', clientId);
   const { setHeaderRight, registerRefresh } = useOutletContext() || {};
-  const { role, user: authUser, coachFocus } = useAuth();
+  const { role, user: authUser, coachFocus, profile: coachProfile } = useAuth();
+  const coachViewerWU = resolveViewerBodyweightUnit(coachProfile);
   const data = useData();
+  const queryClient = useQueryClient();
   const trainerId = getEffectiveTrainerId(authUser?.id) || 'local-trainer';
   const tabFromUrl = searchParams.get('tab');
-  const defaultTabByFocus = 'overview';
-  const segmentFromUrl =
-    tabFromUrl === 'checkins' || tabFromUrl === 'program' ? tabFromUrl
-      : tabFromUrl === 'overview' ? 'overview'
-        : defaultTabByFocus;
-  const [segment, setSegment] = useState(segmentFromUrl);
-  useEffect(() => {
-    setSegment(segmentFromUrl);
-  }, [segmentFromUrl]);
-  const tab = segment; // alias so legacy intake block (never shown) does not reference undefined
   const [timelineEvents, setTimelineEvents] = useState([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineFilter, setTimelineFilter] = useState('all');
@@ -220,7 +221,7 @@ export default function ClientDetail() {
       if (!error && Array.isArray(data) && data.length) {
         setTimelineEvents(data);
       } else {
-        const list = await getLegacyTimeline(clientId, new Date());
+        const list = await getLegacyTimeline(clientId, new Date(), { weightUnit: coachViewerWU });
         setTimelineEvents(Array.isArray(list) ? list : []);
       }
     } catch (err) {
@@ -231,22 +232,28 @@ export default function ClientDetail() {
     }
   }, [clientId]);
   const { refresh: refreshTimeline, lastRefreshed: timelineRefreshed } = useAppRefresh(() => {
-    if (clientId && timelineSheetOpen) loadTimeline();
+    if (clientId) loadTimeline();
   });
+  useEffect(() => {
+    if (clientId) loadTimeline();
+  }, [clientId, loadTimeline]);
   useEffect(() => {
     if (clientId && timelineSheetOpen) loadTimeline();
   }, [clientId, timelineSheetOpen, loadTimeline]);
-  useEffect(() => {
-    if (typeof registerRefresh === 'function' && timelineSheetOpen) {
-      return registerRefresh(loadTimeline);
-    }
-  }, [registerRefresh, timelineSheetOpen, loadTimeline]);
-
   useEffect(() => {
     if (clientId) {
       setQuickNotes(safe(() => getClientNotes(clientId), ''));
       setCoachNotesState(safe(() => getCoachNotes(clientId), ''));
       setMarkedPaid(safe(() => getClientMarkedPaid(clientId), false));
+    }
+  }, [clientId]);
+  useEffect(() => {
+    if (!clientId) return;
+    try {
+      const p = localStorage.getItem(`atlas_client_os_pinned_${clientId}`);
+      setOsPinnedNote(p || '');
+    } catch {
+      /* ignore */
     }
   }, [clientId]);
   const [quickNotes, setQuickNotes] = useState(() => safe(() => (clientId ? getClientNotes(clientId) : ''), ''));
@@ -413,6 +420,22 @@ export default function ClientDetail() {
     return valid.sort((a, b) => (safeDate(b?.submitted_at || b?.created_date)?.getTime() ?? 0) - (safeDate(a?.submitted_at || a?.created_date)?.getTime() ?? 0));
   }, [checkInsListRaw]);
 
+  useEffect(() => {
+    if (!clientLoaded || !clientId || !tabFromUrl) return undefined;
+    const map = {
+      program: 'os-program',
+      checkins: 'os-checkins',
+      progress: 'os-timeline',
+      messages: 'os-actions-rail',
+      billing: 'os-billing',
+      overview: 'os-top',
+    };
+    const elId = map[tabFromUrl];
+    if (!elId) return undefined;
+    const t = setTimeout(() => document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    return () => clearTimeout(t);
+  }, [tabFromUrl, clientId, clientLoaded]);
+
   const loadNutrition = useCallback(async () => {
     if (!clientId || !trainerId) return;
     setNutritionLoading(true);
@@ -441,14 +464,20 @@ export default function ClientDetail() {
   }, [clientId, trainerId]);
 
   useEffect(() => {
-    if (segment === 'program' && clientId && trainerId) loadNutrition();
-  }, [segment, clientId, trainerId, loadNutrition]);
+    if (clientId && trainerId) loadNutrition();
+  }, [clientId, trainerId, loadNutrition]);
+
+  const refreshClientDetailPull = useCallback(async () => {
+    if (clientId) await loadTimeline();
+    if (clientId && trainerId) await loadNutrition();
+    await queryClient.invalidateQueries({ queryKey: ['client-daily-snapshot', clientId] });
+  }, [clientId, trainerId, loadTimeline, loadNutrition, queryClient]);
 
   useEffect(() => {
-    if (typeof registerRefresh === 'function' && segment === 'program') {
-      return registerRefresh(loadNutrition);
+    if (typeof registerRefresh === 'function') {
+      return registerRefresh(refreshClientDetailPull);
     }
-  }, [registerRefresh, segment, loadNutrition]);
+  }, [registerRefresh, refreshClientDetailPull]);
 
   const openAdjustWeek = useCallback(() => {
     const weekStart = getMondayOfWeekLocal();
@@ -482,13 +511,14 @@ export default function ClientDetail() {
       toast.success('Week updated');
       setNutritionAdjustOpen(false);
       loadNutrition();
+      queryClient.invalidateQueries({ queryKey: ['client-daily-snapshot', clientId] });
     } catch (err) {
       console.error('[ClientDetail] saveAdjustWeek', err);
       toast.error(err?.message ?? 'Failed to save');
     } finally {
       setNutritionSaving(false);
     }
-  }, [nutritionPlan?.id, nutritionForm, loadNutrition]);
+  }, [nutritionPlan?.id, nutritionForm, loadNutrition, queryClient, clientId]);
 
   const assignedProgramId = useMemo(
     () => (clientLoaded && clientId ? safe(() => getAssignment(clientId), null) : null),
@@ -527,6 +557,10 @@ export default function ClientDetail() {
   const [prepNotesForCall, setPrepNotesForCall] = useState('');
   const [debugOverlayOpen, setDebugOverlayOpen] = useState(false);
   const [removeClientConfirmOpen, setRemoveClientConfirmOpen] = useState(false);
+  const [osMessageDraft, setOsMessageDraft] = useState('');
+  const [osAdjustmentDraft, setOsAdjustmentDraft] = useState('');
+  const [osPinnedNote, setOsPinnedNote] = useState('');
+  const [sendingOsMessage, setSendingOsMessage] = useState(false);
 
   // Master Client Dashboard (Supabase view) + Phase Engine / Program Builder
   const supabaseClient = getSupabase();
@@ -586,13 +620,12 @@ export default function ClientDetail() {
   });
 
   const atlasCoachingInsights = useMemo(() => {
-    const progress = progressMetrics != null ? generateProgressInsight(progressMetrics) : null;
+    const progress = progressMetrics != null ? generateProgressInsight(progressMetrics, coachViewerWU) : null;
     const risk = retentionRiskRow != null ? generateRiskInsight(retentionRiskRow) : generateRiskInsight({ reasons: [] });
     return { progress, risk };
   }, [progressMetrics, retentionRiskRow]);
 
   // Engine-generated coaching insights (public.coaching_insights)
-  const queryClient = useQueryClient();
   const { data: coachingInsights = [] } = useQuery({
     queryKey: ['coaching_insights', clientId],
     queryFn: async () => {
@@ -764,6 +797,49 @@ export default function ClientDetail() {
     const momentumStatus = score != null ? getMomentumStatus(score) : null;
     return { score, status, momentumStatus, trend, streakWeeks, weakest };
   }, [momentumRows]);
+
+  const prepOsFrom = daysAgoDateString(13);
+  const prepOsTo = todayLocalDateString();
+  const { data: osPrepRow } = useQuery({
+    queryKey: ['client-os-prep-precision', clientId],
+    queryFn: async () => {
+      try {
+        return await fetchClientPrepPrecision(clientId);
+      } catch {
+        return null;
+      }
+    },
+    enabled: Boolean(hasSupabase && clientId),
+  });
+  const { data: osPrepDailies = [] } = useQuery({
+    queryKey: ['client-os-prep-dailies', clientId, prepOsFrom, prepOsTo],
+    queryFn: async () => {
+      try {
+        return await fetchClientPrepPrecisionDailyRange(clientId, prepOsFrom, prepOsTo);
+      } catch {
+        return [];
+      }
+    },
+    enabled: Boolean(hasSupabase && clientId),
+  });
+
+  const { data: clientDailySnapshot, isLoading: clientDailySnapshotLoading } = useQuery({
+    queryKey: ['client-daily-snapshot', clientId],
+    queryFn: async () => {
+      if (!hasSupabase || !clientId) return null;
+      const sb = getSupabase();
+      if (!sb) return null;
+      const day = todayLocalDateString();
+      return fetchClientDailySnapshot(sb, clientId, day);
+    },
+    enabled: Boolean(hasSupabase && clientId),
+    staleTime: 45 * 1000,
+  });
+
+  const clientTodayLines = useMemo(
+    () => (clientDailySnapshot ? formatClientDailySnapshotLines(clientDailySnapshot) : null),
+    [clientDailySnapshot]
+  );
 
   const [setPhaseSheetOpen, setSetPhaseSheetOpen] = useState(false);
   const [supabasePhaseForm, setSupabasePhaseForm] = useState({
@@ -1001,7 +1077,7 @@ export default function ClientDetail() {
 
   useEffect(() => {
     if (!clientId || (role === 'coach' || role === 'trainer')) return;
-    const newlyUnlocked = safe(() => evaluateClientMilestones(clientId), null);
+    const newlyUnlocked = safe(() => evaluateClientMilestones(clientId, { viewerWeightUnit: coachViewerWU }), null);
     if (newlyUnlocked && !shownAchievementIds.includes(newlyUnlocked.id)) setAchievementModalRecord(newlyUnlocked);
   }, [clientId, checkInsListRaw.length, role]);
 
@@ -1054,16 +1130,28 @@ export default function ClientDetail() {
     return () => setHeaderRight(null);
   }, [clientId, setHeaderRight]);
 
-  const handleSegment = useCallback(async (key) => {
-    await lightHaptic();
-    setSegment(key);
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (key === 'overview') next.delete('tab');
-      else next.set('tab', key);
-      return next;
-    }, { replace: true });
-  }, [setSearchParams]);
+  const focusSection = useCallback(
+    async (key) => {
+      await lightHaptic();
+      const idMap = {
+        overview: 'os-top',
+        program: 'os-program',
+        checkins: 'os-checkins',
+        progress: 'os-timeline',
+        messages: 'os-actions-rail',
+        billing: 'os-billing',
+      };
+      const elId = idMap[key] || 'os-top';
+      requestAnimationFrame(() => document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (key === 'overview') next.delete('tab');
+        else next.set('tab', key);
+        return next;
+      }, { replace: true });
+    },
+    [setSearchParams]
+  );
 
   const riskEvaluation = useMemo(() => {
     try {
@@ -1087,6 +1175,42 @@ export default function ClientDetail() {
     lightHaptic();
     toast.success('Coach notes saved');
   }, [clientId, coachNotesState]);
+
+  const savePinnedNote = useCallback(() => {
+    if (!clientId) return;
+    try {
+      localStorage.setItem(`atlas_client_os_pinned_${clientId}`, osPinnedNote);
+      toast.success('Pinned note saved');
+    } catch {
+      toast.error('Could not save');
+    }
+  }, [clientId, osPinnedNote]);
+
+  const sendOsMessage = useCallback(async () => {
+    if (!clientId || !osMessageDraft.trim()) return;
+    setSendingOsMessage(true);
+    try {
+      await lightHaptic();
+      const thread = await openOrCreateThread({
+        clientId,
+        clientName: client?.full_name || client?.name || 'Client',
+      });
+      if (thread?.id && typeof data?.sendMessage === 'function') {
+        await data.sendMessage(thread.id, osMessageDraft.trim());
+        setOsMessageDraft('');
+        toast.success('Message sent');
+      } else {
+        navigate(getMessagesThreadPath(clientId), {
+          state: { from: location.pathname, prefilledMessage: osMessageDraft.trim() },
+        });
+        setOsMessageDraft('');
+      }
+    } catch {
+      toast.error('Could not send message');
+    } finally {
+      setSendingOsMessage(false);
+    }
+  }, [clientId, osMessageDraft, client, data, navigate, location.pathname]);
 
   const handleMarkPaid = useCallback(() => {
     if (!clientId) return;
@@ -1125,7 +1249,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
 <p class="muted">${name} · ${new Date().toLocaleDateString()}</p>
 <div class="row"><span class="muted">Weeks with trainer:</span> ${snap?.weeksWithTrainer ?? '—'}</div>
 <div class="row"><span class="muted">Adherence:</span> ${snap?.adherencePct != null ? snap.adherencePct + '%' : '—'}</div>
-<div class="row"><span class="muted">Weight delta since start:</span> ${snap?.weightDelta != null ? (snap.weightDelta > 0 ? '+' : '') + snap.weightDelta + ' kg' : '—'}</div>
+<div class="row"><span class="muted">Weight delta since start:</span> ${snap?.weightDelta != null ? formatWeightDeltaKg(snap.weightDelta, coachViewerWU) : '—'}</div>
 <div class="row"><span class="muted">PRs:</span> ${snap?.prCount ?? 0}</div>
 <div class="row"><span class="muted">Risk:</span> ${snap?.riskBand ?? '—'} (${snap?.riskScore ?? '—'})</div>
 </body></html>`;
@@ -1142,24 +1266,39 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
       URL.revokeObjectURL(url);
     }
     toast.success('Progress summary ready – use Print to save as PDF');
-  }, [clientId, client]);
+  }, [clientId, client, coachViewerWU]);
 
   const handleSendSummaryCard = useCallback(
-    (payload) => {
+    async (payload) => {
       if (!payload || !clientId || typeof data?.sendMessage !== 'function') return;
       const bodyText = [payload.title, (payload.wins ?? []).join(' · '), (payload.nextSteps ?? []).join(' ')].filter(Boolean).join('\n');
-      data.sendMessage(clientId, bodyText).then(() => toast.success('Summary sent to chat')).catch((err) => {
+      try {
+        let tid = thread?.id;
+        if (!tid) {
+          const ensured = await openOrCreateThread({
+            clientId,
+            clientName: client?.full_name || client?.name || 'Client',
+          });
+          tid = ensured?.id;
+        }
+        if (!tid) {
+          toast.error('Could not open chat');
+          return;
+        }
+        await data.sendMessage(tid, bodyText);
+        toast.success('Summary sent to chat');
+      } catch (err) {
         trackFriction('message_send_failed', { clientId });
         trackRecoverableError('ClientDetail', 'sendSummaryToChat', err);
         toast.error('Failed to send');
-      });
+      }
     },
-    [clientId, data]
+    [clientId, client?.full_name, client?.name, data, thread?.id]
   );
   const handleRequestCheckInFromPrep = useCallback(() => {
     toast.info('Check-in request sent');
-    handleSegment('checkins');
-  }, [handleSegment]);
+    focusSection('checkins');
+  }, [focusSection]);
   const handlePaymentReminderFromPrep = useCallback(() => {
     toast.info('Payment reminder sent');
     navigate(`/earnings${clientId ? `?clientId=${clientId}` : ''}`);
@@ -1264,138 +1403,514 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
     : null;
   const currentPhase = (hasSupabase && (dashboardData?.phase ?? dashboardData?.phase_type)) ? String(dashboardData.phase ?? dashboardData.phase_type) : (client?.phase ?? '—');
   const hasRetentionRisk = retentionRiskRow?.risk_band === 'at_risk' || retentionRiskRow?.risk_band === 'churn_risk';
+  const lastCheckinText = lastCheckInAt ? formatRelativeDate(lastCheckInAt) : 'No check-in yet';
+  const sessionsThisWeek = Array.isArray(checkInsList)
+    ? checkInsList.filter((ci) => {
+        const d = ci?.submitted_at || ci?.checkin_date || ci?.created_at || ci?.created_date;
+        if (!d) return false;
+        const t = new Date(d).getTime();
+        return Number.isFinite(t) && Date.now() - t <= 7 * 24 * 60 * 60 * 1000;
+      }).length
+    : 0;
+  const adherencePct = dashboardData?.training_adherence != null
+    ? Number(dashboardData.training_adherence)
+    : dashboardData?.nutrition_adherence != null
+      ? Number(dashboardData.nutrition_adherence)
+      : null;
+  const weightTrend = progressMetrics?.weight_change != null
+    ? formatWeightDeltaKg(Number(progressMetrics.weight_change), coachViewerWU)
+    : 'Starts after first check-in';
+  const strengthTrendLabel = momentumSummary?.trend === 'up'
+    ? 'Strength trending up'
+    : momentumSummary?.trend === 'down'
+      ? 'Strength trending down'
+      : 'Strength stable';
+  const lastCheckinMs = lastCheckInAt ? new Date(lastCheckInAt).getTime() : null;
+  const daysSinceLastCheckin = Number.isFinite(lastCheckinMs) ? Math.floor((Date.now() - lastCheckinMs) / (24 * 60 * 60 * 1000)) : null;
+  const hasAssignedProgram = Array.isArray(programsList) && programsList.length > 0;
+  const hasNutritionAssigned = Boolean(nutritionPlan?.id);
+  const hasMessageHistory = Boolean(
+    demoMessages?.length > 0 ||
+    thread?.last_message_at ||
+    (thread?.unread_count ?? 0) > 0
+  );
+  const lifecycleState = deriveCoachClientLifecycle(client, {
+    checkInCount: Array.isArray(checkInsList) ? checkInsList.length : 0,
+    hasProgram: hasAssignedProgram,
+    hasNutrition: hasNutritionAssigned,
+    hasMessage: hasMessageHistory,
+  });
+  const setupChecklistItems = [
+    {
+      key: 'training',
+      done: lifecycleState.setupTasks?.trainingAssigned,
+      label: 'Assign training program',
+      cta: 'Assign training',
+      action: async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); },
+    },
+    {
+      key: 'nutrition',
+      done: lifecycleState.setupTasks?.nutritionAssigned,
+      label: 'Assign nutrition plan',
+      cta: 'Open nutrition',
+      action: async () => { await lightHaptic(); navigate(`/clients/${clientId}/nutrition`); },
+    },
+    {
+      key: 'message',
+      done: lifecycleState.setupTasks?.firstMessageSent,
+      label: 'Send first coaching message',
+      cta: 'Message client',
+      action: async () => { await lightHaptic(); navigate(getMessagesThreadPath(clientId), { state: { from: location.pathname } }); },
+    },
+    {
+      key: 'checkin',
+      done: lifecycleState.setupTasks?.firstCheckinSubmitted,
+      label: 'Set first check-in cadence',
+      cta: 'Request check-in',
+      action: async () => {
+        await lightHaptic();
+        navigate(getMessagesThreadPath(clientId), {
+          state: { from: location.pathname, prefilledMessage: 'Welcome to Atlas. Please complete your first check-in so I can calibrate your plan this week.' },
+        });
+      },
+    },
+  ];
+  const priorityItems = [
+    showPaymentOverdue
+      ? {
+          key: 'payment',
+          source: 'required',
+          priority: 100,
+          title: 'Payment issue',
+          body: 'Payment is overdue for this client.',
+          cta: 'Fix',
+          action: async () => { await lightHaptic(); navigate(`/clients/${clientId}/billing`); },
+        }
+      : null,
+    pendingCheckIns.length > 0
+      ? {
+          key: 'pending',
+          source: 'required',
+          priority: pendingCheckIns.length >= 2 ? 95 : 88,
+          title: 'Pending check-in',
+          body: `${pendingCheckIns.length} check-in waiting for review.`,
+          cta: 'Review',
+          action: () => focusSection('checkins'),
+        }
+      : null,
+    (daysSinceLastCheckin == null || daysSinceLastCheckin >= 10)
+      ? {
+          key: 'missed',
+          source: 'required',
+          priority: 84,
+          title: 'Missed check-in',
+          body: daysSinceLastCheckin == null ? 'No check-in on file yet.' : `No check-in submitted for ${daysSinceLastCheckin} days.`,
+          cta: 'Request',
+          action: async () => {
+            await lightHaptic();
+            navigate(getMessagesThreadPath(clientId), { state: { from: location.pathname, prefilledMessage: 'Quick reminder: please complete your weekly check-in today.' } });
+          },
+        }
+      : null,
+    adherencePct != null && adherencePct < 65
+      ? {
+          key: 'adherence-critical',
+          source: 'required',
+          priority: 82,
+          title: 'Low adherence',
+          body: `Current adherence is ${Math.round(adherencePct)}%.`,
+          cta: 'Message',
+          action: async () => { await lightHaptic(); navigate(getMessagesThreadPath(clientId), { state: { from: location.pathname } }); },
+        }
+      : null,
+    progressMetrics?.weight_change != null && Number(progressMetrics.weight_change) < -1.2
+      ? {
+          key: 'weight-fast',
+          source: 'intelligence',
+          priority: 74,
+          title: 'Weight dropping faster than expected',
+          body: 'Recent weight trend is steeper than target pace.',
+          cta: 'Adjust nutrition',
+          action: async () => { await lightHaptic(); navigate(`/clients/${clientId}/nutrition`); },
+          suggestedAction: 'Review nutrition targets and recovery.',
+        }
+      : null,
+    adherencePct != null && adherencePct >= 65 && adherencePct < 78
+      ? {
+          key: 'adherence-drift',
+          source: 'intelligence',
+          priority: 66,
+          title: 'Adherence declining this week',
+          body: `Adherence is ${Math.round(adherencePct)}% in the latest window.`,
+          cta: 'Message',
+          action: async () => { await lightHaptic(); navigate(getMessagesThreadPath(clientId), { state: { from: location.pathname } }); },
+          suggestedAction: 'Send a quick check-in message and tighten daily targets.',
+        }
+      : null,
+    momentumSummary?.trend === 'down'
+      ? {
+          key: 'strength-down',
+          source: 'intelligence',
+          priority: 62,
+          title: 'Strength trending down',
+          body: 'Momentum trend indicates reduced training output.',
+          cta: 'Adjust program',
+          action: activeBlockSummary?.blockId
+            ? async () => { await lightHaptic(); navigate(`/program-builder?clientId=${clientId}&blockId=${activeBlockSummary.blockId}&source=client_detail`); }
+            : async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); },
+          suggestedAction: 'Adjust program load and review recovery.',
+        }
+      : null,
+  ]
+    .filter(Boolean)
+    .sort((a, b) => b.priority - a.priority);
+  const topPriorityItem = priorityItems[0] ?? null;
+  const actionRequiredItems = priorityItems.filter((item) => item.source === 'required' && item.key !== topPriorityItem?.key);
+  const intelligenceItems = priorityItems.filter((item) => item.source === 'intelligence' && item.key !== topPriorityItem?.key);
+
+  const mergedOsTimeline = useMemo(
+    () => mergeClientOsTimeline(timelineEvents, checkInsList, formatShortDate),
+    [timelineEvents, checkInsList, formatShortDate]
+  );
+  const sinceCheckinChips = useMemo(() => {
+    if (!Array.isArray(checkInsList) || checkInsList.length === 0) return [];
+    const latest = checkInsList[0];
+    const prev = checkInsList[1];
+    const stab = computeWaterSodiumStability(osPrepDailies);
+    return buildWhatChangedStrip(latest, prev, { waterStability: stab.waterStability, sodiumStability: stab.sodiumStability }, coachViewerWU);
+  }, [checkInsList, osPrepDailies, coachViewerWU]);
+  const osContextResolved = useMemo(() => resolveClientOsContext(client), [client]);
+  const latestCiOs = checkInsList[0];
+  const readinessSummaryOs = latestCiOs
+    ? `Sleep ${latestCiOs.sleep_score ?? '—'} · Energy ${latestCiOs.energy_level ?? '—'}`
+    : '—';
+  const stabOs = useMemo(() => computeWaterSodiumStability(osPrepDailies), [osPrepDailies]);
+  const osSummaryItems = useMemo(() => {
+    const items = [
+      { label: 'Weight trend', value: weightTrend },
+      { label: 'Adherence', value: adherencePct != null ? `${Math.round(adherencePct)}%` : '—' },
+      { label: 'Readiness', value: readinessSummaryOs },
+    ];
+    if (isPrep || osPrepRow?.water_target_ml != null) {
+      items.push({
+        label: 'Water',
+        value:
+          stabOs.waterStability === 'stable'
+            ? 'Stable pattern'
+            : stabOs.waterStability === 'mixed'
+              ? 'Mixed'
+              : stabOs.waterStability === 'inconsistent'
+                ? 'Inconsistent'
+                : `${osPrepRow?.water_target_ml ?? '—'} ml target`,
+      });
+    }
+    if (isPrep || osPrepRow?.sodium_target_mg != null) {
+      items.push({
+        label: 'Sodium',
+        value:
+          stabOs.sodiumStability === 'stable'
+            ? 'Stable pattern'
+            : stabOs.sodiumStability === 'mixed'
+              ? 'Mixed'
+              : stabOs.sodiumStability === 'inconsistent'
+                ? 'Inconsistent'
+                : `${osPrepRow?.sodium_target_mg ?? '—'} mg target`,
+      });
+    }
+    if (isPrep || osPrepRow?.day_type) {
+      items.push({ label: 'Day type', value: osPrepRow?.day_type || '—' });
+    }
+    return items;
+  }, [weightTrend, adherencePct, readinessSummaryOs, isPrep, osPrepRow, stabOs]);
+
+  const osTimelineLeft = useMemo(() => {
+    if (timelineLoading) {
+      return (
+        <div className="space-y-2">
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      );
+    }
+    if (!mergedOsTimeline.length) {
+      return (
+        <EmptyState
+          title="No events yet"
+          description="Check-ins and activity will show here as the client engages."
+        />
+      );
+    }
+    return (
+      <div className="flex flex-col gap-2" id="os-timeline">
+        {mergedOsTimeline.map((row) => {
+          const createdAt = row.created_at;
+          const label = timelineDateLabel(createdAt, new Date());
+          const Icon = timelineIconForBadge(row.badge);
+          return (
+            <Card
+              key={row.id}
+              style={{
+                ...standardCard,
+                padding: spacing[12],
+                display: 'flex',
+                gap: spacing[12],
+                alignItems: 'flex-start',
+              }}
+            >
+              <div
+                className="flex h-9 w-9 items-center justify-center rounded-full"
+                style={{ backgroundColor: colors.surfaceElevated, color: colors.primary }}
+              >
+                <Icon size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <p className="text-sm font-medium truncate" style={{ color: colors.text }}>
+                    {row.title}
+                  </p>
+                  <span className="text-xs" style={{ color: colors.muted }}>
+                    {label}
+                  </span>
+                </div>
+                {row.description ? (
+                  <p className="text-xs" style={{ color: colors.muted }}>
+                    {row.description}
+                  </p>
+                ) : null}
+                <span
+                  className="inline-flex mt-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+                  style={{
+                    backgroundColor: colors.surfaceElevated,
+                    color: colors.muted,
+                  }}
+                >
+                  {row.badge}
+                </span>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    );
+  }, [timelineLoading, mergedOsTimeline, standardCard]);
+
+  const handleOpenOsFullThread = useCallback(async () => {
+    if (!clientId || !client) return;
+    await lightHaptic();
+    await openOrCreateThread({ clientId, clientName: client?.full_name || client?.name || 'Client' });
+    navigate(getMessagesThreadPath(clientId), { state: { from: location.pathname } });
+  }, [clientId, client, navigate, location.pathname]);
+
+  const handleApplyOsAdjustment = useCallback(async () => {
+    await lightHaptic();
+    if (clientId) navigate(`/clients/${clientId}/nutrition`);
+  }, [clientId, navigate]);
+
+  const osLayoutHeader = useMemo(
+    () => ({
+      initials: (clientName || 'C').slice(0, 2).toUpperCase(),
+      name: clientName,
+      typeLabel:
+        coachFocus === 'integrated'
+          ? `${osContextResolved.clientTypeLabel} · ${journeyRosterBadgeLabel(client)} track`
+          : osContextResolved.clientTypeLabel,
+      phaseLine: prepStatusText
+        ? `${prepStatusText}${dashboardData?.current_week != null && dashboardData?.total_weeks != null ? ` · Week ${dashboardData.current_week} of ${dashboardData.total_weeks}` : ''} · ${currentPhase}`
+        : dashboardData?.current_week != null && dashboardData?.total_weeks != null
+          ? `Week ${dashboardData.current_week} of ${dashboardData.total_weeks} · ${currentPhase}`
+          : String(currentPhase),
+      statusLabel: [statusLabel, hasRetentionRisk && 'At risk', isPrep && 'Active prep'].filter(Boolean).join(' · '),
+      statusColor: hasRetentionRisk ? colors.danger : statusColor,
+      lastCheckin: lastCheckinText,
+    }),
+    [
+      clientName,
+      coachFocus,
+      osContextResolved.clientTypeLabel,
+      client,
+      prepStatusText,
+      dashboardData,
+      currentPhase,
+      statusLabel,
+      hasRetentionRisk,
+      isPrep,
+      statusColor,
+      lastCheckinText,
+    ]
+  );
+
+  const osPriorityRail = useMemo(
+    () => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[10] }}>
+        {topPriorityItem ? (
+          <div>
+            <p style={{ ...sectionLabel, marginBottom: cardRhythm.sectionTitleBottom }}>Best next action</p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ padding: spacing[10], borderRadius: 10, border: `1px solid ${colors.primary}`, background: colors.primarySubtle }}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold truncate" style={{ color: colors.text, margin: 0 }}>{topPriorityItem.title}</p>
+                <p className="text-xs truncate" style={{ color: colors.muted, margin: `${spacing[2]}px 0 0` }}>{topPriorityItem.body}</p>
+              </div>
+              <Button size="sm" variant="primary" onClick={topPriorityItem.action}>{topPriorityItem.cta}</Button>
+            </div>
+          </div>
+        ) : null}
+        {actionRequiredItems.length > 0 ? (
+          <div>
+            <p style={{ ...sectionLabel, marginBottom: cardRhythm.sectionTitleBottom }}>Action required</p>
+            <div className="flex flex-col gap-2">
+              {actionRequiredItems.map((item) => (
+                <div key={item.key} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ padding: spacing[10], borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1 }}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: colors.text, margin: 0 }}>{item.title}</p>
+                    <p className="text-xs truncate" style={{ color: colors.muted, margin: `${spacing[2]}px 0 0` }}>{item.body}</p>
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={item.action}>{item.cta}</Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    ),
+    [topPriorityItem, actionRequiredItems, sectionLabel, cardRhythm.sectionTitleBottom]
+  );
+
+  const osTopQuickActions = useMemo(
+    () => (
+      <>
+        <Button variant="secondary" size="sm" className="w-full justify-start" style={{ minHeight: touchTargetMin }} onClick={handleApplyOsAdjustment}>
+          Adjust macros
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="w-full justify-start"
+          style={{ minHeight: touchTargetMin }}
+          onClick={activeBlockSummary?.blockId
+            ? async () => { await lightHaptic(); navigate(`/program-builder?clientId=${clientId}&blockId=${activeBlockSummary.blockId}&source=client_detail`); }
+            : async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); }}
+        >
+          Adjust training
+        </Button>
+        <Button variant="secondary" size="sm" className="w-full justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); if (clientId) navigate(`/clients/${clientId}/peak-week-editor`); }}>
+          Adjust cardio / peak tools
+        </Button>
+        <Button variant="secondary" size="sm" className="w-full justify-start" style={{ minHeight: touchTargetMin }} onClick={handleApplyOsAdjustment}>
+          Adjust water & sodium
+        </Button>
+        <Button variant="secondary" size="sm" className="w-full justify-start" style={{ minHeight: touchTargetMin }} onClick={() => focusSection('messages')}>
+          Add note (coach notes)
+        </Button>
+        <Button variant="secondary" size="sm" className="w-full justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); focusSection('checkins'); }}>
+          Request check-in
+        </Button>
+        <Button variant="secondary" size="sm" className="w-full justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); }}>
+          Assign program
+        </Button>
+      </>
+    ),
+    [handleApplyOsAdjustment, activeBlockSummary?.blockId, clientId, navigate, focusSection]
+  );
+
+  const osIntelligenceRailExtra = useMemo(
+    () => (
+      <div>
+        <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Coaching signals</p>
+        {intelligenceItems.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {intelligenceItems.map((item) => (
+              <div key={item.key} style={{ padding: spacing[10], borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface2 }}>
+                <p className="text-sm font-semibold" style={{ color: colors.text, margin: 0 }}>{item.title}</p>
+                <p className="text-xs" style={{ color: colors.muted, margin: `${spacing[4]}px 0 0` }}>{item.body}</p>
+                {!!item.suggestedAction && (
+                  <p className="text-xs font-medium" style={{ color: colors.primary, margin: `${spacing[6]}px 0 0` }}>{item.suggestedAction}</p>
+                )}
+                <Button size="sm" variant="secondary" style={{ marginTop: spacing[8] }} onClick={item.action}>{item.cta}</Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs m-0" style={{ color: colors.muted }}>More signals appear after check-ins land.</p>
+        )}
+      </div>
+    ),
+    [intelligenceItems, sectionLabel]
+  );
+
+  const clientDetailMigration = useMemo(
+    () => deriveClientDetailSurfaceState({ hasClient: !!client }),
+    [client]
+  );
 
   // Single return so hook count is never affected by which view we show (fixes React #310).
   const mainContent = (
     <div
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
+      {...atlasMigrationDataAttributes(clientDetailMigration.phase, clientDetailMigration.primary)}
       style={{
         minHeight: '100%',
         background: colors.bg,
         color: colors.text,
         ...pageContainer,
+        maxWidth: isDesktopWeb ? 1400 : undefined,
+        margin: '0 auto',
+        paddingTop: rhythm.top,
+        paddingLeft: isDesktopWeb ? spacing[20] : pageContainer.paddingLeft,
+        paddingRight: isDesktopWeb ? spacing[20] : pageContainer.paddingRight,
         paddingBottom: `calc(${spacing[24]}px + env(safe-area-inset-bottom, 0px))`,
       }}
     >
-      {/* Top summary: client name, status badges, phase, prep, momentum/health, primary actions */}
-      {client && (
-        <Card style={{ ...standardCard, padding: spacing[16], marginBottom: sectionGap }}>
-          <h1 className="text-[20px] font-semibold truncate" style={{ color: colors.text, marginBottom: spacing[6] }}>
-            {clientName}
-          </h1>
-          <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginBottom: spacing[12], lineHeight: 1.45 }}>
-            Message, adjust training, and open nutrition from here.
+      <ClientOperatingSystemLayout
+        isDesktopWeb={isDesktopWeb}
+        header={osLayoutHeader}
+        summaryItems={osSummaryItems}
+        leftColumn={osTimelineLeft}
+        priorityRail={osPriorityRail}
+        topQuickActions={osTopQuickActions}
+        messageDraft={osMessageDraft}
+        onMessageDraftChange={setOsMessageDraft}
+        onSendMessage={sendOsMessage}
+        sendingMessage={sendingOsMessage}
+        adjustmentDraft={osAdjustmentDraft}
+        onAdjustmentDraftChange={setOsAdjustmentDraft}
+        onApplyAdjustment={handleApplyOsAdjustment}
+        coachNotes={coachNotesState}
+        onCoachNotesChange={setCoachNotesState}
+        onSaveCoachNotes={handleSaveCoachNotes}
+        pinnedNote={osPinnedNote}
+        onPinnedNoteChange={setOsPinnedNote}
+        onSavePinnedNote={savePinnedNote}
+        onOpenFullThread={handleOpenOsFullThread}
+        rightPanel={osIntelligenceRailExtra}
+      >
+      {lifecycleState.key === 'joined_unset' ? (
+        <Card style={{ ...standardCard, padding: spacing[16], marginBottom: sectionGap, border: `1px solid ${colors.warning}` }}>
+          <p style={{ ...sectionLabel, marginBottom: spacing[6] }}>Newly joined client setup</p>
+          <p className="text-sm" style={{ color: colors.muted, marginBottom: spacing[10] }}>
+            This client joined through invite/code and still needs activation. Complete the checklist below to move them to active coaching.
           </p>
-          <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: spacing[12] }}>
-            <span
-              className="rounded-full px-2.5 py-1 text-[11px] font-medium"
-              style={{ background: `${statusColor}22`, color: statusColor }}
-            >
-              {statusLabel}
-            </span>
-            {coachFocus === 'integrated' && (
-              <span
-                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                style={{ background: colors.surface2, color: colors.textSecondary }}
+          <div className="flex flex-col gap-2">
+            {setupChecklistItems.map((item) => (
+              <div
+                key={item.key}
+                className="flex items-center justify-between gap-2 rounded-lg"
+                style={{ border: `1px solid ${colors.border}`, background: colors.surface1, padding: spacing[10] }}
               >
-                {journeyRosterBadgeLabel(client)} track
-              </span>
-            )}
-            {coachFocus !== 'integrated' && String(client?.client_type ?? '').toLowerCase() === 'competition' && (
-              <span
-                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                style={{ background: colors.primarySubtle, color: colors.primary }}
-              >
-                Competition
-              </span>
-            )}
-            {isPrep && (
-              <span
-                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                style={{ background: colors.surface2, color: colors.muted }}
-              >
-                Active prep
-              </span>
-            )}
-            {hasRetentionRisk && (
-              <span
-                className="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                style={{ background: 'rgba(239,68,68,0.2)', color: colors.danger }}
-              >
-                At risk
-              </span>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]" style={{ color: colors.muted, marginBottom: spacing[12] }}>
-            <span>Phase: {currentPhase}</span>
-            {prepStatusText && <span>· {prepStatusText}</span>}
-          </div>
-          <div className="flex flex-wrap items-center gap-4 text-sm" style={{ marginBottom: spacing[12] }}>
-            <span style={{ color: colors.text }}>
-              Momentum: <strong>{momentumSummary?.score != null ? `${momentumSummary.score}` : '—'}</strong>
-              {momentumSummary?.score != null && <span style={{ color: colors.muted }}> / 100</span>}
-            </span>
-            <button
-              type="button"
-              onClick={async () => { await lightHaptic(); setHealthSheetOpen(true); }}
-              className="rounded-full px-2.5 py-1 text-[11px] font-medium inline-flex items-center gap-1.5 active:opacity-80"
-              style={{
-                background: healthResultRef.current?.riskLevel === 'red' ? 'rgba(239,68,68,0.2)' : healthResultRef.current?.riskLevel === 'amber' ? 'rgba(234,179,8,0.2)' : colors.surface2,
-                color: healthPillColor,
-                border: 'none',
-              }}
-              aria-label="Health score"
-            >
-              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: healthPillColor }} aria-hidden />
-              Health {healthResultRef.current?.score != null ? healthResultRef.current.score : '—'}
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={clientId && client ? async () => {
-                await lightHaptic();
-                await openOrCreateThread({ clientId, clientName: client?.full_name || client?.name || 'Client' });
-                navigate(getMessagesThreadPath(clientId), { state: { from: location.pathname } });
-              } : undefined}
-              style={{ minHeight: touchTargetMin }}
-            >
-              <MessageCircle size={16} style={{ marginRight: 6 }} aria-hidden />
-              Message Client
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={activeBlockSummary?.blockId
-                ? async () => { await lightHaptic(); navigate(`/program-builder?clientId=${clientId}&blockId=${activeBlockSummary.blockId}&source=client_detail`); }
-                : async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); }}
-              style={{ minHeight: touchTargetMin }}
-            >
-              <Dumbbell size={16} style={{ marginRight: 6 }} aria-hidden />
-              Adjust Program
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={clientId ? async () => { await lightHaptic(); navigate(`/clients/${clientId}/nutrition`); } : undefined}
-              style={{ minHeight: touchTargetMin }}
-            >
-              <Utensils size={16} style={{ marginRight: 6 }} aria-hidden />
-              Nutrition plan
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={clientId ? async () => { await lightHaptic(); navigate(`/nutrition-builder?clientId=${encodeURIComponent(clientId)}`); } : undefined}
-              style={{ minHeight: touchTargetMin }}
-            >
-              <Calculator size={16} style={{ marginRight: 6 }} aria-hidden />
-              Macro calculator
-            </Button>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: item.done ? colors.success : colors.text }}>
+                    {item.done ? 'Done' : 'Next'} · {item.label}
+                  </p>
+                </div>
+                {!item.done ? (
+                  <Button size="sm" variant="secondary" onClick={item.action}>{item.cta}</Button>
+                ) : (
+                  <span className="text-xs font-semibold" style={{ color: colors.success }}>Completed</span>
+                )}
+              </div>
+            ))}
           </div>
         </Card>
-      )}
+      ) : null}
 
       {/* Prep command centre: quick links for competition journey (reduces hunt through menus) */}
       {client && clientId && (coachFocus === 'competition' || coachFocus === 'integrated') &&
@@ -1405,7 +1920,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
           <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginBottom: spacing[12], lineHeight: 1.45 }}>
             {prepStatusText
               ? `Timeline: ${prepStatusText}. Use the shortcuts below to assign training, peak week, and reviews.`
-              : 'Set a show date when you add the athlete (or in contest prep) so weeks-out and peak tools activate.'}
+              : 'Set a show date when you add the client (or in contest prep) so weeks-out and peak tools activate.'}
           </p>
           <div className="flex flex-col gap-2">
             <Button variant="secondary" size="sm" className="justify-start" style={{ minHeight: touchTargetMin }} onClick={async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${encodeURIComponent(clientId)}`); }}>
@@ -1542,17 +2057,123 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
         </div>
       )}
 
-      {/* Segmented control – sticky, below dashboard */}
-      <div className="sticky top-0 z-10 -mx-4 px-4 pt-2 pb-3" style={{ background: colors.bg, marginTop: hasSupabase ? 0 : spacing[12], marginBottom: spacing[16] }}>
-        <SegmentedTabs
-          options={SEGMENTS.map((s) => ({ key: s.key, label: s.label }))}
-          value={segment}
-          onChange={handleSegment}
-        />
-      </div>
-
-      {segment === 'overview' && (
+      {sinceCheckinChips.length > 0 && (
         <>
+          <p style={{ ...sectionLabel }}>Since last check-in</p>
+          <Card style={{ ...standardCard, padding: spacing[14], marginBottom: sectionGap }}>
+            <div className="flex flex-wrap gap-2">
+              {sinceCheckinChips.map((chip) => (
+                <span
+                  key={chip.id}
+                  className="rounded-full px-3 py-1 text-xs font-medium"
+                  style={{
+                    background: colors.surface2,
+                    border: `1px solid ${colors.border}`,
+                    color:
+                      chip.tone === 'down'
+                        ? colors.warning
+                        : chip.tone === 'up'
+                          ? colors.success
+                          : colors.text,
+                  }}
+                >
+                  <span style={{ color: colors.muted }}>{chip.label}: </span>
+                  {chip.text}
+                </span>
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+
+      <p style={{ ...sectionLabel }}>Progress snapshot</p>
+      {hasSupabase && clientId && (
+        <div style={{ marginBottom: sectionGap }}>
+          <ClientAnalyticsSnapshot
+            metrics={progressMetrics}
+            loading={progressMetricsLoading}
+            clientId={clientId}
+            onAdjustProgram={activeBlockSummary?.blockId ? async () => { await lightHaptic(); navigate(`/program-builder?clientId=${clientId}&blockId=${activeBlockSummary.blockId}&source=client_detail`); } : async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); }}
+          />
+        </div>
+      )}
+
+      <p style={{ ...sectionLabel }}>Current plan targets</p>
+      <Card style={{ ...standardCard, padding: spacing[16], marginBottom: sectionGap }}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+          <div>
+            <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Macros</p>
+            <p style={{ color: colors.text }}>
+              {nutritionLatestWeek
+                ? [
+                    nutritionLatestWeek.calories != null ? `${nutritionLatestWeek.calories} cal` : null,
+                    nutritionLatestWeek.protein != null ? `P ${nutritionLatestWeek.protein}g` : null,
+                    nutritionLatestWeek.carbs != null ? `C ${nutritionLatestWeek.carbs}g` : null,
+                    nutritionLatestWeek.fats != null ? `F ${nutritionLatestWeek.fats}g` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || '—'
+                : '—'}
+            </p>
+          </div>
+          <div>
+            <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Water target</p>
+            <p style={{ color: colors.text }}>{osPrepRow?.water_target_ml != null ? `${osPrepRow.water_target_ml} ml` : '—'}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Sodium target</p>
+            <p style={{ color: colors.text }}>{osPrepRow?.sodium_target_mg != null ? `${osPrepRow.sodium_target_mg} mg` : '—'}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Day type</p>
+            <p style={{ color: colors.text }}>{osPrepRow?.day_type || '—'}</p>
+          </div>
+          <div className="col-span-2 sm:col-span-2">
+            <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Precision notes</p>
+            <p style={{ color: colors.text }}>{osPrepRow?.coach_precision_notes || '—'}</p>
+          </div>
+        </div>
+        <Button variant="secondary" size="sm" style={{ marginTop: spacing[12] }} onClick={handleApplyOsAdjustment}>
+          Edit macros & targets
+        </Button>
+      </Card>
+
+      <p style={{ ...sectionLabel }}>Today snapshot</p>
+      <Card style={{ ...standardCard, padding: spacing[16], marginBottom: sectionGap }}>
+        {clientDailySnapshotLoading ? (
+          <SkeletonCard lines={4} />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Workout</p>
+                <p style={{ color: colors.text }}>{clientTodayLines?.workout ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Steps</p>
+                <p style={{ color: colors.text }}>{clientTodayLines?.steps ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Food</p>
+                <p style={{ color: colors.text }}>{clientTodayLines?.food ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Water / sodium</p>
+                <p style={{ color: colors.text }}>{clientTodayLines?.water ?? '—'}</p>
+              </div>
+            </div>
+            {clientId ? (
+              <Button variant="ghost" size="sm" className="h-auto p-0 mt-3 -ml-1" onClick={() => navigate(`/clients/${clientId}/nutrition`)}>
+                Open nutrition plan
+              </Button>
+            ) : null}
+            <p className="text-[10px] m-0 mt-2" style={{ color: colors.muted }}>
+              Day boundary uses your device date. Client may be in another timezone.
+            </p>
+          </>
+        )}
+      </Card>
+
           {/* Active program */}
           <p style={{ ...sectionLabel }}>Active program</p>
           <div style={{ marginBottom: sectionGap }}>
@@ -1577,7 +2198,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={activeBlockSummary?.blockId ? async () => { await lightHaptic(); navigate(`/program-viewer?clientId=${clientId}&blockId=${activeBlockSummary.blockId}`); } : () => handleSegment('program')}
+                    onClick={activeBlockSummary?.blockId ? async () => { await lightHaptic(); navigate(`/program-viewer?clientId=${clientId}&blockId=${activeBlockSummary.blockId}`); } : () => focusSection('program')}
                   >
                     View program
                   </Button>
@@ -1596,59 +2217,49 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
             )}
           </div>
 
-          {/* Progress snapshot */}
-          <p style={{ ...sectionLabel }}>Progress snapshot</p>
-          {hasSupabase && clientId && (
-            <div style={{ marginBottom: sectionGap }}>
-              <ClientAnalyticsSnapshot
-                metrics={progressMetrics}
-                loading={progressMetricsLoading}
-                clientId={clientId}
-                onAdjustProgram={activeBlockSummary?.blockId ? async () => { await lightHaptic(); navigate(`/program-builder?clientId=${clientId}&blockId=${activeBlockSummary.blockId}&source=client_detail`); } : async () => { await lightHaptic(); navigate(`/program-assignments?clientId=${clientId}`); }}
-              />
+          {/* Check-ins: summary + full list (single section for deep-link os-checkins) */}
+          <div id="os-checkins" style={{ marginBottom: sectionGap, scrollMarginTop: 12 }}>
+            <p style={{ ...sectionLabel }}>Check-ins</p>
+            <div style={{ marginBottom: spacing[12] }}>
+              <Card style={{ ...standardCard, padding: spacing[16] }}>
+                {Array.isArray(checkInsList) && checkInsList.length > 0 ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Last check-in</p>
+                        <p style={{ color: colors.text }}>{lastCheckInAt ? formatRelativeDate(lastCheckInAt) : '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Next due</p>
+                        <p style={{ color: colors.text }}>{nextCheckInDue ?? '—'}</p>
+                      </div>
+                    </div>
+                    {pendingCheckIns.length > 0 && (
+                      <p className="text-[13px] mt-2" style={{ color: colors.warning }}>
+                        {pendingCheckIns.length} pending
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <EmptyState
+                    title="No check-ins yet"
+                    description="Check-ins will appear here once the client submits."
+                    icon={ClipboardList}
+                    actionLabel="View program"
+                    onAction={() => focusSection('program')}
+                  />
+                )}
+              </Card>
             </div>
-          )}
-
-          {/* Check-ins */}
-          <p style={{ ...sectionLabel }}>Check-ins</p>
-          <div style={{ marginBottom: sectionGap }}>
-            <Card style={{ ...standardCard, padding: spacing[16] }}>
-              {Array.isArray(checkInsList) && checkInsList.length > 0 ? (
-                <>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                    <div>
-                      <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Last check-in</p>
-                      <p style={{ color: colors.text }}>{lastCheckInAt ? formatRelativeDate(lastCheckInAt) : '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-medium" style={{ color: colors.muted, marginBottom: 2 }}>Next due</p>
-                      <p style={{ color: colors.text }}>{nextCheckInDue ?? '—'}</p>
-                    </div>
-                  </div>
-                  {pendingCheckIns.length > 0 && (
-                    <p className="text-[13px] mt-2" style={{ color: colors.warning }}>
-                      {pendingCheckIns.length} pending
-                    </p>
-                  )}
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={async () => { await lightHaptic(); handleSegment('checkins'); }}
-                    style={{ marginTop: spacing[12] }}
-                  >
-                    View all check-ins
-                  </Button>
-                </>
-              ) : (
-                <EmptyState
-                  title="No check-ins yet"
-                  description="Check-ins will appear here once the client submits."
-                  icon={ClipboardList}
-                  actionLabel="View program"
-                  onAction={() => handleSegment('program')}
-                />
-              )}
-            </Card>
+            {Array.isArray(checkInsList) && checkInsList.length > 0 ? (
+              <ClientCheckinsPanel
+                clientId={clientId}
+                checkInsList={checkInsList}
+                getCheckinReviewed={getCheckinReviewed}
+                formatShortDate={formatShortDate}
+                onCheckinSelect={async (c) => { await lightHaptic(); if (clientId && c?.id) navigate(`/clients/${clientId}/checkins/${c.id}`); }}
+              />
+            ) : null}
           </div>
 
           {/* Pose checks (when prep) */}
@@ -1694,7 +2305,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
           {(client?.monthly_fee != null || client?.next_due_date || showPaymentOverdue) && (
             <>
               <p style={{ ...sectionLabel }}>Billing summary</p>
-              <div style={{ marginBottom: sectionGap }}>
+              <div id="os-billing" style={{ marginBottom: sectionGap }}>
                 <Card style={{ ...standardCard, padding: spacing[16] }}>
                   {showPaymentOverdue && (
                     <p className="text-[13px] font-medium mb-2" style={{ color: colors.danger }}>Payment overdue</p>
@@ -2107,20 +2718,8 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
             </button>
           </div>
         )}
-        </>
-      )}
 
-      {segment === 'checkins' && (
-        <ClientCheckinsPanel
-          clientId={clientId}
-          checkInsList={checkInsList}
-          getCheckinReviewed={getCheckinReviewed}
-          formatShortDate={formatShortDate}
-          onCheckinSelect={async (c) => { await lightHaptic(); if (clientId && c?.id) navigate(`/clients/${clientId}/checkins/${c.id}`); }}
-        />
-      )}
-
-      {segment === 'program' && (
+      <div id="os-program" style={{ marginBottom: sectionGap }}>
         <ClientProgramPanel
           clientId={clientId}
           clientPlanForDetail={clientPlanForDetail}
@@ -2165,87 +2764,25 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
           }}
           lightHaptic={lightHaptic}
         />
+      </div>
+
+      {clientId && !(client?.monthly_fee != null || client?.next_due_date || showPaymentOverdue) && (
+        <div id="os-billing" style={{ marginBottom: sectionGap }}>
+          <p style={{ ...sectionLabel }}>Billing</p>
+          <Card style={{ ...standardCard, padding: spacing[16] }}>
+            <p className="text-sm m-0" style={{ color: colors.muted }}>No fee or due date on file.</p>
+            <Button variant="secondary" size="sm" style={{ marginTop: spacing[12] }} onClick={async () => { await lightHaptic(); navigate(`/clients/${clientId}/billing`); }}>
+              Open billing
+            </Button>
+          </Card>
+        </div>
       )}
 
-      {segment === 'performance' && (
-        <section style={{ marginTop: spacing[16], marginBottom: sectionGap }}>
-          <p style={{ ...sectionLabel }}>Performance timeline</p>
-          {timelineLoading && (
-            <div className="space-y-2">
-              <SkeletonCard />
-              <SkeletonCard />
-            </div>
-          )}
-          {!timelineLoading && (!timelineEvents || timelineEvents.length === 0) && (
-            <EmptyState
-              title="No performance events yet"
-              description="As this client engages with programs, check-ins, and habits, their performance timeline will appear here."
-            />
-          )}
-          {!timelineLoading && timelineEvents && timelineEvents.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {timelineEvents.map((evt) => {
-                const key = evt.id || `${evt.event_type || evt.badge || 'event'}-${evt.created_at || evt.date}-${evt.title || ''}`;
-                const createdAt = evt.created_at || evt.date || evt.occurred_at;
-                const label = timelineDateLabel(createdAt, new Date());
-                const badge = evt.badge || evt.event_type || 'System';
-                const Icon = timelineIconForBadge(badge);
-                const title = evt.title || evt.summary || evt.event_type || 'Update';
-                const description = evt.description || evt.details || evt.event_data?.note || '';
-                return (
-                  <Card
-                    key={key}
-                    style={{
-                      ...standardCard,
-                      padding: spacing[12],
-                      display: 'flex',
-                      gap: spacing[12],
-                      alignItems: 'flex-start',
-                    }}
-                  >
-                    <div
-                      className="flex h-9 w-9 items-center justify-center rounded-full"
-                      style={{ backgroundColor: colors.surfaceElevated, color: colors.primary }}
-                    >
-                      <Icon size={18} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <p className="text-sm font-medium truncate" style={{ color: colors.text }}>
-                          {title}
-                        </p>
-                        <span className="text-xs" style={{ color: colors.muted }}>
-                          {label}
-                        </span>
-                      </div>
-                      {description && (
-                        <p className="text-xs" style={{ color: colors.muted }}>
-                          {description}
-                        </p>
-                      )}
-                      {badge && (
-                        <span
-                          className="inline-flex mt-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
-                          style={{
-                            backgroundColor: colors.surfaceElevated,
-                            color: colors.muted,
-                          }}
-                        >
-                          {badge}
-                        </span>
-                      )}
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      )}
+      </ClientOperatingSystemLayout>
 
       {/* Legacy tab blocks removed: nutrition is inside Program panel; intake via /clients/:id/intake; timeline in sheet below */}
 
-      {false && tab === 'nutrition' && (
+      {false && tabFromUrl === 'nutrition' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[16] }}>
           {nutritionLoading && (
             <div className="py-8 text-center text-sm" style={{ color: colors.muted }}>Loading nutrition…</div>
@@ -2317,7 +2854,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
         </div>
       )}
 
-      {tab === 'intake' && clientId && (() => {
+      {tabFromUrl === 'intake' && clientId && (() => {
         const intakeSubmissionsRaw = safe(() => getSubmissionsByClient(clientId), []);
         const intakeSubmissions = Array.isArray(intakeSubmissionsRaw) ? intakeSubmissionsRaw : [];
         const latestApproved = safe(() => getLatestApprovedSubmission(clientId), null);
@@ -2562,7 +3099,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
                   await lightHaptic();
                   setExportingType(key);
                   try {
-                    const blob = await fn(clientId, trainerId);
+                    const blob = await fn(clientId, trainerId, { weightUnit: coachViewerWU });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -2656,7 +3193,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
         wins={contextSnapshot?.wins}
         slips={contextSnapshot?.slips}
         checkIns={checkInsListRaw ?? []}
-        onAdjustPlan={() => { lightHaptic(); setHealthSheetOpen(false); handleSegment('program'); }}
+        onAdjustPlan={() => { lightHaptic(); setHealthSheetOpen(false); focusSection('program'); }}
         onSendSummary={() => { lightHaptic(); setHealthSheetOpen(false); setCallPrepOpen(true); }}
         onRequestCheckIn={() => { lightHaptic(); setHealthSheetOpen(false); handleRequestCheckInFromPrep(); }}
         onMessageClient={clientId && client ? () => {

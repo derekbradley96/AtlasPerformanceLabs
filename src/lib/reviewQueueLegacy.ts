@@ -83,13 +83,15 @@ function mapFilterToFeedFilter(filterType: string | null): string | null {
 export function getReviewQueue(
   trainerId: string,
   status: ReviewItemStatus,
-  filterType?: string | null
+  filterType?: string | null,
+  weightUnit?: string | null
 ): ReviewItem[] {
   const feedFilter = mapFilterToFeedFilter(filterType ?? null);
   let feed = getTrainerReviewFeed(trainerId, {
     status: status === 'done' ? 'done' : status === 'waiting' ? 'waiting' : 'active',
     filterType: feedFilter,
     sort: 'priority',
+    weightUnit: weightUnit ?? 'kg',
   });
 
   const now = new Date().toISOString();
@@ -128,8 +130,8 @@ export function getReviewQueue(
   return items.filter((i) => i.status === 'waiting').sort((a, b) => b.priorityScore - a.priorityScore);
 }
 
-export function getTopActiveReviewItem(trainerId: string): ReviewItem | null {
-  const queue = getReviewQueue(trainerId, 'active', null);
+export function getTopActiveReviewItem(trainerId: string, weightUnit?: string | null): ReviewItem | null {
+  const queue = getReviewQueue(trainerId, 'active', null, weightUnit);
   return queue.length > 0 ? queue[0] : null;
 }
 
@@ -150,9 +152,10 @@ export interface ReviewQueueItemForUI {
 export function getReviewQueueForUI(
   trainerId: string,
   status: ReviewItemStatus,
-  filterType?: string | null
+  filterType?: string | null,
+  weightUnit?: string | null
 ): ReviewQueueItemForUI[] {
-  const queue = getReviewQueue(trainerId, status, filterType);
+  const queue = getReviewQueue(trainerId, status, filterType, weightUnit);
   return queue.map((item) => ({
     id: item.id,
     clientId: item.clientId,

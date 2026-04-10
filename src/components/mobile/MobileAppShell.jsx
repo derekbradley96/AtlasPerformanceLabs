@@ -2,6 +2,7 @@ import React, { useRef, useCallback, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { getRouteTitle, isTabRoute, getTabRoutesForRole } from '@/lib/routeMeta';
+import { DEFAULT_ROLE } from '@/lib/roles';
 import { useSwipeBack } from '@/hooks/useSwipeBack';
 import { ChevronLeft, Home, Users, MessageSquare, MoreHorizontal, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,17 +13,21 @@ const FALLBACK_ICON = HelpCircle;
 export default function MobileAppShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { effectiveRole, isDemoMode, exitDemo } = useAuth();
+  const { effectiveRole, role, isDemoMode, exitDemo } = useAuth();
+  const shellRole = effectiveRole ?? role ?? DEFAULT_ROLE;
   const contentRef = useRef(null);
 
   useSwipeBack(contentRef);
 
   const pathname = location.pathname?.toLowerCase() ?? '';
   const tabRoutes = useMemo(() => getTabRoutesForRole(effectiveRole), [effectiveRole]);
-  const showBack = !isTabRoute(pathname);
+  const showBack = !isTabRoute(pathname, shellRole);
   const title = getRouteTitle(location.pathname);
 
-  const homePath = effectiveRole === 'client' ? '/client-dashboard' : (effectiveRole === 'personal' || effectiveRole === 'solo') ? '/solo-dashboard' : '/home';
+  const homePath = (() => {
+    const tr = getTabRoutesForRole(shellRole);
+    return tr[0]?.path ?? '/home';
+  })();
 
   const handleBack = useCallback(() => {
     navigate(-1);
@@ -122,7 +127,7 @@ export default function MobileAppShell({ children }) {
         style={{
           background: 'var(--app-card)',
           WebkitOverflowScrolling: 'touch',
-          paddingBottom: 'calc(var(--app-tabbar) + env(safe-area-inset-bottom, 0px) + var(--app-space-16))',
+          paddingBottom: 'calc(var(--app-tabbar) + env(safe-area-inset-bottom, 0px) + 40px)',
         }}
       >
         <div

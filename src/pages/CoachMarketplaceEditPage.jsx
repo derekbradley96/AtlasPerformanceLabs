@@ -1,7 +1,7 @@
 /**
- * Coach: create and manage marketplace listing (display name, headline, bio, specialties,
- * divisions, coaching focus, price, listed toggle, profile images).
- * Uses marketplace_coach_profiles, marketplace_coach_media, storage bucket marketplace_coach_media.
+ * Legacy marketplace editor (marketplace_coach_profiles + marketplace_coach_media).
+ * Canonical coach listing UX is CoachMarketplaceSetupPage at /marketplace-setup.
+ * Route /marketplace-profile redirects there (see App.jsx).
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -245,7 +245,7 @@ export default function CoachMarketplaceEditPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 96 }}>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Marketplace profile" onBack={() => navigate(-1)} />
       <div style={{ padding: spacing[16], maxWidth: 560, margin: '0 auto' }}>
         <p className="text-sm mb-6" style={{ color: colors.muted }}>

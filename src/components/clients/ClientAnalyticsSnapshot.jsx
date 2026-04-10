@@ -8,13 +8,8 @@ import { TrendingUp, ClipboardList, ListChecks } from 'lucide-react';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
-
-function formatWeightChange(change) {
-  if (change == null || Number.isNaN(Number(change))) return '—';
-  const n = Number(change);
-  const sign = n > 0 ? '+' : '';
-  return `${sign}${n.toFixed(1)} kg`;
-}
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightDeltaKg, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 export default function ClientAnalyticsSnapshot({
   metrics,
@@ -25,12 +20,14 @@ export default function ClientAnalyticsSnapshot({
   onAdjustProgram,
 }) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const handleViewProgress = () => {
     if (clientId) navigate(`/clients/${clientId}/progress`);
     onViewProgress?.();
   };
   const handleReviewCheckins = () => {
-    if (clientId) navigate('/review-center/queue');
+    if (clientId) navigate('/review-center');
     onReviewCheckins?.();
   };
   const handleAdjustProgram = () => {
@@ -52,8 +49,8 @@ export default function ClientAnalyticsSnapshot({
     );
   }
 
-  const weight = metrics?.latest_weight != null ? `${Number(metrics.latest_weight)} kg` : '—';
-  const weightChange = formatWeightChange(metrics?.weight_change);
+  const weight = metrics?.latest_weight != null ? formatWeightForViewer(Number(metrics.latest_weight), viewerWU) : '—';
+  const weightChange = formatWeightDeltaKg(metrics?.weight_change, viewerWU);
   const compliance = metrics?.avg_compliance_last_4w != null ? `${Math.round(Number(metrics.avg_compliance_last_4w))}%` : '—';
   const flags = metrics?.active_flags_count != null ? Number(metrics.active_flags_count) : 0;
   const phase = metrics?.latest_phase_type ? String(metrics.latest_phase_type) : '—';

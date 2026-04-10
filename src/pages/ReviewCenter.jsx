@@ -14,8 +14,15 @@ import EmptyState from '@/ui/EmptyState';
 import { colors, spacing, touchTargetMin } from '@/ui/tokens';
 import { impactLight } from '@/lib/haptics';
 import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import { listReviewItems, completeReviewItem } from '@/lib/supabaseStripeApi';
 import { toast } from 'sonner';
+import {
+  deriveReviewCenterHubState,
+  deriveReviewCenterClientQueueState,
+  atlasMigrationDataAttributes,
+} from '@/lib/atlasMigrationPhases';
+import { PageShell, PageHeader } from '@/components/atlas-ui';
 
 const SEGMENTS = [
   { key: 'active', label: 'Active' },
@@ -23,7 +30,7 @@ const SEGMENTS = [
   { key: 'done', label: 'Done' },
 ];
 
-const FILTER_CHIPS = [
+const FILTER_CHIPS_ALL = [
   { key: null, label: 'All' },
   { key: 'checkin', label: 'Check-ins' },
   { key: 'posing', label: 'Posing' },
@@ -117,19 +124,32 @@ function ReviewCenterAll({ navigate, userId }) {
   const clients = Array.isArray(clientsList) ? clientsList : [];
   const loading = loadingClients || loadingStripe;
 
+  const hubMigration = useMemo(
+    () =>
+      deriveReviewCenterHubState({
+        loading,
+        clientsCount: clients.length,
+        hasStripeItems,
+      }),
+    [loading, clients.length, hasStripeItems]
+  );
+
   return (
-    <div
-      className="app-screen min-w-0 max-w-full overflow-x-hidden"
-      style={{
-        paddingLeft: spacing[16],
-        paddingRight: spacing[16],
-        paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
-        background: colors.bg,
-        color: colors.text,
-      }}
-    >
-      <h1 className="text-[22px] font-semibold mb-2" style={{ color: colors.text }}>Review Center</h1>
-      <p className="text-sm mb-6" style={{ color: colors.muted }}>Clients with items needing review</p>
+    <PageShell showTabBar variant="compact" noHorizontalPadding noTopPadding style={{ background: colors.bg, color: colors.text }}>
+      <div
+        className="app-screen min-w-0 max-w-full overflow-x-hidden"
+        {...atlasMigrationDataAttributes(hubMigration.phase, hubMigration.primary)}
+        style={{
+          paddingLeft: spacing[16],
+          paddingRight: spacing[16],
+          paddingBottom: spacing[8],
+        }}
+      >
+        <PageHeader
+          title="Review Center"
+          subtitle="Clients with items needing review"
+          marginBottom={spacing[24]}
+        />
 
       {hasStripeItems && (
         <section style={{ marginBottom: spacing[20] }}>
@@ -209,9 +229,10 @@ function ReviewCenterAll({ navigate, userId }) {
       )}
 
       {!loading && !hasStripeItems && clients.length === 0 && (
-        <EmptyState icon={Check} title="You're clear." subtext="No clients yet. Add clients to see check-ins and review items here." />
+        <EmptyState icon={Check} title="You're clear." subtext="No clients yet. Invite athletes with your link or coach code; after they join, check-ins and reviews appear here." />
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }
 
@@ -289,7 +310,8 @@ export default function ReviewCenter() {
   const { id: clientId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user, isDemoMode } = useAuth();
+  const { user, isDemoMode, profile, hasCompetitionPrep } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const userId = isDemoMode ? 'demo-trainer' : (user?.id ?? '');
   const filterFromUrl = searchParams.get('filter');
   const [segment, setSegment] = useState('active');
@@ -298,17 +320,32 @@ export default function ReviewCenter() {
     if (filterFromUrl && ['checkin', 'posing', 'photo'].includes(filterFromUrl)) setFilterType(filterFromUrl);
   }, [filterFromUrl]);
 
+  React.useEffect(() => {
+    if (!hasCompetitionPrep && filterType === 'posing') setFilterType(null);
+  }, [hasCompetitionPrep, filterType]);
+
   const client = clientId ? getClientById(clientId) : null;
   const phase = clientId && client ? getClientPhase(clientId, client) : (client?.phase || '—');
   const statusPillLabel = phase === 'PEAK_WEEK' || (client?.prepPhase === 'PEAK_WEEK') ? 'Peak week' : client?.status === 'at_risk' || client?.status === 'attention' ? 'At risk' : 'On track';
   const statusPillColor = statusPillLabel === 'Peak week' ? '#8B5CF6' : statusPillLabel === 'At risk' ? '#EF4444' : '#22C55E';
 
   const feed = useMemo(
-    () => (clientId ? getClientReviewFeed(clientId, { status: segment, filterType }) : []),
-    [clientId, segment, filterType]
+    () => (clientId ? getClientReviewFeed(clientId, { status: segment, filterType, weightUnit: viewerWU }) : []),
+    [clientId, segment, filterType, viewerWU]
   );
   const grouped = useMemo(() => groupByDate(feed), [feed]);
   const isEmpty = feed.length === 0;
+
+  const filterChips = useMemo(
+    () =>
+      hasCompetitionPrep ? FILTER_CHIPS_ALL : FILTER_CHIPS_ALL.filter((c) => c.key !== 'posing'),
+    [hasCompetitionPrep]
+  );
+
+  const clientQueueMigration = useMemo(
+    () => deriveReviewCenterClientQueueState({ segment, isEmpty }),
+    [segment, isEmpty]
+  );
 
   const handleReview = useCallback(
     (item) => {
@@ -336,35 +373,45 @@ export default function ReviewCenter() {
 
   if (!client) {
     return (
-      <div className="min-w-0 max-w-full px-4 py-8 app-screen" style={{ background: colors.bg, color: colors.muted }}>
-        <p className="text-sm">Client not found.</p>
-      </div>
+      <PageShell showTabBar variant="compact">
+        <div className="min-w-0 max-w-full app-screen" style={{ background: colors.bg, color: colors.muted }}>
+          <PageHeader title="Review" subtitle="Client not found." marginBottom={spacing[16]} />
+          <p className="text-sm">This client is not on your roster or could not be loaded.</p>
+        </div>
+      </PageShell>
     );
   }
 
   return (
-    <div
-      className="app-screen min-w-0 max-w-full overflow-x-hidden"
-      style={{
-        minHeight: '100%',
-        background: colors.bg,
-        color: colors.text,
-        paddingLeft: spacing[16],
-        paddingRight: spacing[16],
-        paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
-      }}
+    <PageShell
+      showTabBar
+      variant="compact"
+      noHorizontalPadding
+      noTopPadding
+      style={{ background: colors.bg, color: colors.text }}
     >
-      <div style={{ marginBottom: spacing[16] }}>
-        <h1 className="text-[22px] font-semibold" style={{ color: colors.text, marginBottom: 4 }}>
-          {client.full_name || 'Client'}
-        </h1>
-        <span
-          className="inline-block px-2.5 py-1 rounded-full text-xs font-medium text-white"
-          style={{ background: statusPillColor }}
-        >
-          {statusPillLabel}
-        </span>
-      </div>
+      <div
+        className="app-screen min-w-0 max-w-full overflow-x-hidden"
+        {...atlasMigrationDataAttributes(clientQueueMigration.phase, clientQueueMigration.primary)}
+        style={{
+          minHeight: '100%',
+          paddingLeft: spacing[16],
+          paddingRight: spacing[16],
+          paddingBottom: spacing[8],
+        }}
+      >
+        <PageHeader
+          title={client.full_name || 'Client'}
+          actions={
+            <span
+              className="inline-block px-2.5 py-1 rounded-full text-xs font-medium text-white"
+              style={{ background: statusPillColor }}
+            >
+              {statusPillLabel}
+            </span>
+          }
+          marginBottom={spacing[16]}
+        />
 
       <SegmentedControl
         options={SEGMENTS}
@@ -372,7 +419,7 @@ export default function ReviewCenter() {
         onChange={async (k) => { await impactLight(); setSegment(k); }}
       />
       <div className="flex flex-wrap gap-2" style={{ marginTop: spacing[12], marginBottom: spacing[16] }}>
-        {FILTER_CHIPS.map(({ key, label }) => {
+        {filterChips.map(({ key, label }) => {
           const active = filterType === key;
           return (
             <button
@@ -429,6 +476,7 @@ export default function ReviewCenter() {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }

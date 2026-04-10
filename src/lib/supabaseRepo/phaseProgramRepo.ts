@@ -91,6 +91,7 @@ export interface ProgramExerciseRow {
   percentage: number | null;
   scheme: SchemeType | null;
   notes: string | null;
+  rest_seconds?: number | null;
   sort_order: number;
 }
 
@@ -102,6 +103,7 @@ export interface UpsertProgramExercisePayload {
   percentage?: number | null;
   scheme?: SchemeType | null;
   notes?: string | null;
+  rest_seconds?: number | null;
   sort_order?: number;
 }
 
@@ -277,6 +279,7 @@ export async function upsertProgramExercise(
     percentage: exercise.percentage ?? null,
     scheme: exercise.scheme ?? null,
     notes: exercise.notes ?? null,
+    rest_seconds: exercise.rest_seconds ?? null,
     sort_order: exercise.sort_order ?? 0,
   };
 
@@ -354,6 +357,7 @@ export async function duplicateWeek(
         percentage: ex.percentage,
         scheme: ex.scheme,
         notes: ex.notes,
+        rest_seconds: ex.rest_seconds ?? null,
         sort_order: ex.sort_order,
       });
     }
@@ -378,6 +382,7 @@ export async function duplicateDay(
       percentage: ex.percentage,
       scheme: ex.scheme,
       notes: ex.notes,
+      rest_seconds: ex.rest_seconds ?? null,
       sort_order: ex.sort_order,
     });
   }
@@ -399,6 +404,57 @@ export async function listProgramBlocks(clientId: string): Promise<ProgramBlockR
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as ProgramBlockRow[];
+}
+
+/**
+ * Duplicate full block structure (weeks, days, exercises) to another client.
+ * Returns new block id for fast follow-up assignment.
+ */
+export async function duplicateBlockToClient(
+  sourceBlockId: string,
+  targetClientId: string,
+  options: { titlePrefix?: string } = {}
+): Promise<{ blockId: string }> {
+  const db = requireSupabase();
+  const sourceBlock = await getProgramBlock(sourceBlockId);
+  if (!sourceBlock) throw new Error('Source block not found');
+
+  const prefix = (options.titlePrefix || 'Copy').trim();
+  const title = `${prefix}: ${sourceBlock.title || 'Program Block'}`;
+  const { block: newBlock } = await createProgramBlockWithWeeksDays(targetClientId, {
+    title,
+    total_weeks: Number(sourceBlock.total_weeks) || 1,
+    phase_id: sourceBlock.phase_id ?? null,
+  });
+
+  const sourceWeeks = await listProgramWeeks(sourceBlockId);
+  for (const sourceWeek of sourceWeeks) {
+    const targetWeek = (await listProgramWeeks(newBlock.id)).find((w) => w.week_number === sourceWeek.week_number);
+    if (!targetWeek) continue;
+    const sourceDays = await listProgramDays(sourceWeek.id);
+    const targetDays = await listProgramDays(targetWeek.id);
+    for (const sourceDay of sourceDays) {
+      const targetDay = targetDays.find((d) => d.day_number === sourceDay.day_number);
+      if (!targetDay) continue;
+      const sourceExercises = await listProgramExercises(sourceDay.id);
+      await db.from('program_exercises').delete().eq('day_id', targetDay.id);
+      for (const ex of sourceExercises) {
+        await db.from('program_exercises').insert({
+          day_id: targetDay.id,
+          exercise_name: ex.exercise_name,
+          sets: ex.sets,
+          reps: ex.reps,
+          percentage: ex.percentage,
+          scheme: ex.scheme,
+          notes: ex.notes,
+          rest_seconds: ex.rest_seconds ?? null,
+          sort_order: ex.sort_order,
+        });
+      }
+    }
+  }
+
+  return { blockId: newBlock.id };
 }
 
 export async function getLatestClientPhase(clientId: string): Promise<{ id: string } | null> {

@@ -15,13 +15,14 @@
  * - createClientRecords({ rows, supabase? }) -> { created, errors }
  *
  * Notes:
- * - This is aimed at migration flows run by a coach/Admin user.
+ * - Dev / admin migration tooling — not the production invite/code acquisition path.
  * - It creates clients under the current coach id.
  * - It attempts to link to an existing profile (by email) when possible; if not found,
  *   it still creates the client without a profile (RLS-safe), and records a warning.
  */
 
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { createClient as insertCanonicalClient } from '@/data/supabaseClientsRepo';
 
 function normaliseHeader(h) {
   return (h || '')
@@ -121,11 +122,8 @@ export function validateClientData(rows) {
 
 /**
  * Create client records from validated rows.
- * - Uses Supabase auth to resolve current coach id.
- * - Inserts into public.clients with minimal, safe fields:
- *   - full_name, email, phone, notes, baseline_weight, phase_started_at (from startDate)
- *   - trainer_id / coach_id depending on schema (we set both when present).
- * - Attempts to link to an existing profile by email when RLS allows; otherwise, warns.
+ * Uses the same canonical insert as manual add and CSV import (`supabaseClientsRepo.createClient`).
+ * Attempts to link user_id when a profile exists for the email (RLS may hide it).
  *
  * @param {{ rows: ReturnType<typeof parseCSV>['rows'], supabase?: import('@supabase/supabase-js').SupabaseClient | null }} params
  * @returns {Promise<{ created: Array<{ clientId: string, name: string | null, email: string | null }>, errors: Array<{ rowIndex: number, message: string }> }>}
@@ -142,6 +140,7 @@ export async function createClientRecords({ rows, supabase }) {
     data: { user },
   } = await client.auth.getUser();
   const coachId = user?.id ?? null;
+  if (!coachId) throw new Error('Could not resolve coach id for migration import');
 
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i];
@@ -164,33 +163,28 @@ export async function createClientRecords({ rows, supabase }) {
         }
       }
 
+      const noteParts = [];
+      if (row.notes) noteParts.push(String(row.notes).trim());
+      if (row.phone) noteParts.push(`Imported phone: ${String(row.phone).trim()}`);
+
       const payload = {
         full_name: row.name || email || 'Imported Client',
-        email,
-        phone: row.phone || null,
-        notes: row.notes || null,
-        baseline_weight: row.bodyweight != null ? Number(row.bodyweight) : null,
-        phase_started_at: row.startDate || null,
-        trainer_id: coachId, // canonical schema
-        coach_id: coachId, // newer schema
-        user_id: profileId,
+        email: email || undefined,
+        client_type: 'transformation',
+        client_journey: 'transformation',
+        start_date: row.startDate ? String(row.startDate).trim().slice(0, 10) : undefined,
+        onboarding_notes: noteParts.length > 0 ? noteParts.join('\n') : undefined,
+        baseline_weight: row.bodyweight != null ? Number(row.bodyweight) : undefined,
+        phase_started_at: row.startDate ? String(row.startDate).trim().slice(0, 10) : undefined,
+        user_id: profileId || undefined,
       };
 
-      const { data: inserted, error } = await client
-        .from('clients')
-        .insert(payload)
-        .select('id, full_name, email')
-        .maybeSingle();
-
-      if (error || !inserted) {
-        errors.push({ rowIndex: i, message: error?.message || 'Insert failed' });
-        continue;
-      }
+      const inserted = await insertCanonicalClient(coachId, payload);
 
       created.push({
         clientId: inserted.id,
-        name: inserted.full_name ?? null,
-        email: inserted.email ?? null,
+        name: inserted.name ?? null,
+        email: email ?? (inserted.email != null ? String(inserted.email) : null),
       });
     } catch (e) {
       errors.push({ rowIndex: i, message: e?.message || 'Unexpected error' });

@@ -208,7 +208,12 @@ export default function ConversationThread() {
       <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate(-1)} className="text-slate-400 hover:text-white">
+            <button
+              type="button"
+              aria-label="Back"
+              onClick={() => navigate(-1)}
+              className="inline-flex items-center justify-center rounded-lg min-h-[44px] min-w-[44px] text-slate-400 hover:text-white"
+            >
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
@@ -244,8 +249,9 @@ export default function ConversationThread() {
             <>
               {checkinOverdue && (
                 <button
+                  type="button"
                   onClick={() => navigate(createPageUrl('CheckIns'))}
-                  className="w-full bg-orange-500/20 border border-orange-500/30 rounded-lg px-3 py-2 text-sm text-orange-300 hover:bg-orange-500/30 transition-colors flex items-center gap-2"
+                  className="w-full min-h-[44px] bg-orange-500/20 border border-orange-500/30 rounded-lg px-3 py-2 text-sm text-orange-300 hover:bg-orange-500/30 transition-colors flex items-center gap-2"
                 >
                   <AlertCircle className="w-4 h-4" />
                   Check-in overdue - Review now
@@ -330,9 +336,11 @@ export default function ConversationThread() {
             className="hidden"
           />
           <button
+            type="button"
+            aria-label="Attach image"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="text-slate-400 hover:text-white disabled:opacity-50"
+            className="inline-flex items-center justify-center shrink-0 min-h-[44px] min-w-[44px] rounded-lg text-slate-400 hover:text-white disabled:opacity-50"
           >
             <ImageIcon className="w-5 h-5" />
           </button>

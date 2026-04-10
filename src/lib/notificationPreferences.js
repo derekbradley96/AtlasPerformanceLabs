@@ -11,6 +11,9 @@ const DEFAULTS = {
   habits: true,
   peak_week: true,
   payments: true,
+  workouts: true,
+  nutrition: true,
+  progress_reminders: true,
 };
 
 /**
@@ -25,7 +28,7 @@ export async function getNotificationPreferences(profileId) {
 
   const { data: row, error: selectError } = await supabase
     .from('notification_preferences')
-    .select('checkins, messages, habits, peak_week, payments')
+    .select('checkins, messages, habits, peak_week, payments, workouts, nutrition, progress_reminders')
     .eq('profile_id', profileId)
     .maybeSingle();
 
@@ -41,13 +44,16 @@ export async function getNotificationPreferences(profileId) {
       habits: !!row.habits,
       peak_week: !!row.peak_week,
       payments: !!row.payments,
+      workouts: row.workouts == null ? true : !!row.workouts,
+      nutrition: row.nutrition == null ? true : !!row.nutrition,
+      progress_reminders: row.progress_reminders == null ? true : !!row.progress_reminders,
     };
   }
 
   const { data: inserted, error: insertError } = await supabase
     .from('notification_preferences')
     .insert({ profile_id: profileId, ...DEFAULTS })
-    .select('checkins, messages, habits, peak_week, payments')
+    .select('checkins, messages, habits, peak_week, payments, workouts, nutrition, progress_reminders')
     .single();
 
   if (insertError) {
@@ -62,6 +68,9 @@ export async function getNotificationPreferences(profileId) {
         habits: !!inserted.habits,
         peak_week: !!inserted.peak_week,
         payments: !!inserted.payments,
+        workouts: inserted.workouts == null ? true : !!inserted.workouts,
+        nutrition: inserted.nutrition == null ? true : !!inserted.nutrition,
+        progress_reminders: inserted.progress_reminders == null ? true : !!inserted.progress_reminders,
       }
     : { ...DEFAULTS };
 }
@@ -69,13 +78,13 @@ export async function getNotificationPreferences(profileId) {
 /**
  * Update a single preference. Upserts so the row exists.
  * @param {string} profileId - profiles.id
- * @param {string} key - One of: checkins, messages, habits, peak_week, payments
+ * @param {string} key - One of: checkins, messages, habits, peak_week, payments, workouts, nutrition, progress_reminders
  * @param {boolean} value
  * @returns {Promise<boolean>} true if update succeeded
  */
 export async function updateNotificationPreference(profileId, key, value) {
   if (!hasSupabase || !profileId || !key) return false;
-  const allowed = ['checkins', 'messages', 'habits', 'peak_week', 'payments'];
+  const allowed = ['checkins', 'messages', 'habits', 'peak_week', 'payments', 'workouts', 'nutrition', 'progress_reminders'];
   if (!allowed.includes(key)) return false;
   const supabase = getSupabase();
   if (!supabase) return false;
@@ -101,7 +110,7 @@ export async function updateNotificationPreference(profileId, key, value) {
 /**
  * Update multiple preferences at once.
  * @param {string} profileId - profiles.id
- * @param {Partial<Record<'checkins'|'messages'|'habits'|'peak_week'|'payments', boolean>>} prefs
+ * @param {Partial<Record<'checkins'|'messages'|'habits'|'peak_week'|'payments'|'workouts'|'nutrition'|'progress_reminders', boolean>>} prefs
  * @returns {Promise<boolean>}
  */
 export async function updateNotificationPreferences(profileId, prefs) {
@@ -109,7 +118,7 @@ export async function updateNotificationPreferences(profileId, prefs) {
   const supabase = getSupabase();
   if (!supabase) return false;
 
-  const allowed = ['checkins', 'messages', 'habits', 'peak_week', 'payments'];
+  const allowed = ['checkins', 'messages', 'habits', 'peak_week', 'payments', 'workouts', 'nutrition', 'progress_reminders'];
   const payload = { profile_id: profileId, updated_at: new Date().toISOString() };
   for (const k of allowed) {
     if (k in prefs && typeof prefs[k] === 'boolean') payload[k] = prefs[k];

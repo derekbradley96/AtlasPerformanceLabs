@@ -5,6 +5,7 @@
  */
 
 import { safeGetJson, safeSetJson } from '@/lib/storageSafe';
+import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
 const SANDBOX_KEY = 'atlas_sandbox_v2';
 const LOCAL_TRAINER_ID = 'local-trainer';
@@ -382,7 +383,8 @@ export function addCheckIn(clientId, checkInPartial) {
 }
 
 // --- Inbox / review
-export function getInboxItems(trainerId) {
+export function getInboxItems(trainerId, weightUnit = 'kg') {
+  const wu = normalizeWeightUnit(weightUnit);
   const state = getState();
   const active = [];
   const done = [];
@@ -395,7 +397,7 @@ export function getInboxItems(trainerId) {
       type: 'CHECKIN_REVIEW',
       clientId: c.client_id,
       title: client?.full_name ?? 'Check-in',
-      subtitle: `Weight ${c.weight_kg ?? '—'} kg`,
+      subtitle: c.weight_kg != null ? `Weight ${formatWeightForViewer(Number(c.weight_kg), wu)}` : 'Check-in',
       badge: { label: 'Review', tone: 'warning' },
       priorityScore: 75,
     });

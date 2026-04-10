@@ -6,6 +6,8 @@ import { useCallback, useMemo } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import repo from '@/lib/repo';
 import { getTrainerId } from '@/lib/getTrainerId';
+import { normalizeRole } from '@/lib/roles';
+import * as messagingService from '@/data/messagingService';
 import type { Client, ReviewItem, Program, CheckIn } from '@/data/models';
 
 export const LOCAL_TRAINER_ID = 'local-trainer';
@@ -31,7 +33,10 @@ export function useData(): {
   deleteClient: (id: string) => Promise<void>;
   listThreads: () => Promise<Array<{ id: string; client_id: string; trainer_id: string; unread_count?: number; last_message_at?: string | null; last_message_preview?: string | null }>>;
   listMessages: (threadId: string) => Promise<Array<{ id: string; client_id: string; sender: string; body: string; created_date: string; type?: string; media_url?: string | null; durationMs?: number }>>;
-  sendMessage: (threadId: string, text: string) => Promise<{ id: string; created_date: string } | null>;
+  sendMessage: (
+    threadId: string,
+    textOrPayload: string | Record<string, unknown>
+  ) => Promise<{ id: string; created_date: string; media_url?: string } | null>;
   sendVoiceMessage: (threadId: string, payload: { blob: Blob; mimeType: string; durationMs: number }) => Promise<{ id: string; created_date: string; media_url?: string } | null>;
   deleteThread: (clientId: string) => Promise<void>;
   listPrograms: () => Promise<Program[]>;
@@ -50,7 +55,7 @@ export function useData(): {
   getActiveNutritionPlan: (clientId: string) => Promise<Record<string, unknown> | null>;
   upsertNutritionPlan: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
 } {
-  const { supabaseSession, isDemoMode = false, user } = useAuth();
+  const { supabaseSession, isDemoMode = false, user, effectiveRole, clientLinkedRow, clientLinkedResolved } = useAuth();
 
   // If we have a real Supabase session, never use demo/local storage.
   const isAuthed = !!supabaseSession?.user?.id;
@@ -59,6 +64,22 @@ export function useData(): {
   // When authenticated, trainer id MUST be the auth user id.
   // When not authenticated, fall back to any provided user.id (if present) or local-trainer.
   const trainerId = isAuthed ? (supabaseSession!.user!.id as string) : getCanonicalTrainerId(supabaseSession, user ?? null);
+
+  const messagingOpts = useMemo(() => {
+    const messagingRole = normalizeRole(effectiveRole ?? user?.role ?? null);
+    const clientRosterId =
+      messagingRole === 'client' && clientLinkedResolved ? (clientLinkedRow?.id as string | undefined) ?? null : null;
+    return { messagingRole, clientRosterId };
+  }, [effectiveRole, user?.role, clientLinkedResolved, clientLinkedRow?.id]);
+
+  const threadListOptions = useMemo(
+    () =>
+      ({
+        viewerRole: messagingOpts.messagingRole === 'client' ? ('client' as const) : ('coach' as const),
+        clientRosterId: messagingOpts.clientRosterId,
+      }) as const,
+    [messagingOpts.messagingRole, messagingOpts.clientRosterId]
+  );
 
   if (import.meta.env.DEV) {
     // Helpful for debugging stuck loading / empty lists
@@ -73,6 +94,7 @@ export function useData(): {
     (id: string) => repo.clients.get(id, trainerId, effectiveDemoMode),
     [trainerId, effectiveDemoMode]
   );
+  /** Used by dev-gated manual add and imports — not the production invite/code acquisition path. */
   const createClientFn = useCallback(
     (payload: Record<string, unknown>) => repo.clients.create(trainerId, payload, effectiveDemoMode),
     [trainerId, effectiveDemoMode]
@@ -86,23 +108,52 @@ export function useData(): {
     [trainerId, effectiveDemoMode]
   );
   const listThreadsFn = useCallback(
-    () => (typeof repo?.threads?.list === 'function' ? repo.threads.list(trainerId) : Promise.resolve([])),
-    [trainerId]
+    () =>
+      typeof repo?.threads?.list === 'function' ? repo.threads.list(trainerId, { ...threadListOptions }) : Promise.resolve([]),
+    [trainerId, threadListOptions]
   );
-  const listMessagesFn = useCallback((threadId: string) => repo.messages.list(threadId, trainerId), [trainerId]);
+  const listMessagesFn = useCallback(
+    (threadId: string) => repo.messages.list(threadId, trainerId, { ...threadListOptions }),
+    [trainerId, threadListOptions]
+  );
   const deleteThreadFn = useCallback((clientId: string) => repo.threads.deleteByClientId(clientId, trainerId), [trainerId]);
-  const sendMessageFn = useCallback(async (threadId: string, text: string) => {
-    const msg = await repo.messages.add(threadId, { sender: 'coach', body: text }, trainerId);
-    repo.markThreadRead(threadId);
-    return msg ? { id: msg.id, created_date: msg.created_date || new Date().toISOString() } : null;
-  }, [trainerId]);
+  const sendMessageFn = useCallback(
+    async (threadId: string, textOrPayload: string | Record<string, unknown>) => {
+      const senderRole = messagingOpts.messagingRole === 'client' ? 'client' : 'coach';
+      const msg = await messagingService.sendMessage(threadId, textOrPayload as string | Record<string, unknown>, trainerId, {
+        ...threadListOptions,
+        senderRole,
+      });
+      void messagingService.markThreadRead(threadId, trainerId, {
+        ...threadListOptions,
+        asRole: senderRole,
+      });
+      return msg
+        ? {
+            id: msg.id,
+            created_date: msg.created_date || new Date().toISOString(),
+            ...(msg.media_url != null ? { media_url: msg.media_url } : {}),
+          }
+        : null;
+    },
+    [trainerId, threadListOptions, messagingOpts.messagingRole]
+  );
   const sendVoiceMessageFn = useCallback(
     async (threadId: string, payload: { blob: Blob; mimeType: string; durationMs: number }) => {
-      const msg = await repo.messages.addVoice(threadId, payload, trainerId);
-      if (msg) repo.markThreadRead(threadId);
+      const senderRole = messagingOpts.messagingRole === 'client' ? 'client' : 'coach';
+      const msg = await repo.messages.addVoice(threadId, payload, trainerId, {
+        ...threadListOptions,
+        senderRole,
+      });
+      if (msg) {
+        void repo.markThreadRead(threadId, trainerId, {
+          ...threadListOptions,
+          asRole: senderRole,
+        });
+      }
       return msg;
     },
-    [trainerId]
+    [trainerId, threadListOptions, messagingOpts.messagingRole]
   );
   const ensureThreadForClientFn = useCallback(
     (clientId: string) => repo.threads.ensureThreadForClient(clientId, trainerId),
@@ -123,12 +174,28 @@ export function useData(): {
   );
   const listCheckInsForClientFn = useCallback((clientId: string): Promise<CheckIn[]> => repo.checkIns.list(clientId, trainerId), [trainerId]);
   const getClientProgramsFn = useCallback((clientId: string) => repo.programs.list(clientId), []);
-  const getThreadFn = useCallback((clientId: string) => repo.threads.getByClientId(clientId, trainerId), [trainerId]);
-  const markThreadReadFn = useCallback((threadIdOrClientId: string) => {
-    repo.markThreadRead(threadIdOrClientId);
-  }, []);
-  const markAllThreadsReadFn = useCallback(() => repo.markAllThreadsRead(), []);
-  const getUnreadMessageCountTotalFn = useCallback(() => repo.getUnreadCountTotal(trainerId), [trainerId]);
+  const getThreadFn = useCallback(
+    (clientId: string) => repo.threads.getByClientId(clientId, trainerId, { ...threadListOptions }),
+    [trainerId, threadListOptions]
+  );
+  const markThreadReadFn = useCallback(
+    (threadIdOrClientId: string) => {
+      const asRole = messagingOpts.messagingRole === 'client' ? 'client' : 'coach';
+      void repo.markThreadRead(threadIdOrClientId, trainerId, {
+        ...threadListOptions,
+        asRole,
+      });
+    },
+    [trainerId, threadListOptions, messagingOpts.messagingRole]
+  );
+  const markAllThreadsReadFn = useCallback(
+    () => repo.markAllThreadsRead(trainerId, { ...threadListOptions }),
+    [trainerId, threadListOptions]
+  );
+  const getUnreadMessageCountTotalFn = useCallback(
+    () => repo.getUnreadCountTotal(trainerId, { ...threadListOptions }),
+    [trainerId, threadListOptions]
+  );
   const getActiveNutritionPlanFn = useCallback(
     (clientId: string) => repo.nutrition.getActivePlan(trainerId, clientId),
     [trainerId]

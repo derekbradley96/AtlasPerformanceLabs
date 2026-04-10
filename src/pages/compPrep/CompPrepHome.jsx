@@ -8,7 +8,7 @@ import { getClientByUserId } from '@/data/selectors';
 import { getNextShowInfo, getNextShowLabel } from '@/lib/compPrep/nextShow';
 import { impactLight } from '@/lib/haptics';
 import Card from '@/ui/Card';
-import { colors, spacing } from '@/ui/tokens';
+import { colors, spacing, shell, radii, touchTargetMin } from '@/ui/tokens';
 
 const PHASE_LABELS = {
   OFFSEASON: 'Off season',
@@ -85,13 +85,17 @@ export default function CompPrepHome() {
         color: colors.text,
         paddingLeft: spacing[16],
         paddingRight: spacing[16],
-        paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
+        paddingTop: `calc(${spacing[12]}px + env(safe-area-inset-top, 0px))`,
+        paddingBottom: `calc(${spacing[24]}px + env(safe-area-inset-bottom, 0px))`,
       }}
     >
-      <h1 className="text-lg font-semibold mb-1" style={{ color: colors.text }}>
+      <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: colors.accent }}>
+        Prep
+      </p>
+      <h1 className="text-xl font-semibold mb-1" style={{ color: colors.text }}>
         Competition Prep
       </h1>
-      <p className="text-sm mb-4" style={{ color: colors.muted }}>
+      <p className="text-sm mb-4 leading-relaxed" style={{ color: colors.muted }}>
         {isCoach && 'Manage competing clients, posing library, and reviews.'}
         {isClient && 'Your prep plan, poses, and media submissions.'}
         {(role === 'personal' || role === 'solo') && 'Pose guides and local progress logging.'}
@@ -108,11 +112,21 @@ export default function CompPrepHome() {
           <div className="mb-4">
             <input
               type="search"
-              placeholder="Search clients..."
+              placeholder="Search clients by name…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-lg border bg-slate-800/50 text-white placeholder-slate-500 text-sm"
-              style={{ padding: '10px 12px', borderColor: colors.border }}
+              aria-label="Search competing clients"
+              className="w-full text-sm placeholder:opacity-60 focus:outline-none focus:ring-2 focus:ring-inset"
+              style={{
+                minHeight: touchTargetMin,
+                padding: `${spacing[10]}px ${spacing[14]}px`,
+                borderRadius: radii.sm,
+                border: `1px solid ${colors.border}`,
+                background: colors.surface2,
+                color: colors.text,
+                caretColor: colors.accent,
+                boxShadow: 'none',
+              }}
             />
           </div>
           {(filteredClients ?? []).length > 0 && (
@@ -132,8 +146,15 @@ export default function CompPrepHome() {
                     key={p.clientId}
                     type="button"
                     onClick={() => handleNav(`/comp-prep/client/${p.clientId}`)}
-                    className="w-full flex items-center justify-between px-4 py-3 text-left border-b last:border-b-0 hover:bg-white/5 transition-colors"
-                    style={{ borderColor: colors.border }}
+                    className="w-full flex items-center justify-between px-4 text-left border-b last:border-b-0 transition-colors active:opacity-90"
+                    style={{
+                      borderColor: colors.border,
+                      minHeight: touchTargetMin,
+                      paddingTop: spacing[12],
+                      paddingBottom: spacing[12],
+                      color: colors.text,
+                      WebkitTapHighlightColor: 'transparent',
+                    }}
                   >
                     <div>
                       <p className="font-medium text-sm">{name}</p>
@@ -150,11 +171,29 @@ export default function CompPrepHome() {
               })}
             </Card>
           )}
-          {(filteredClients ?? []).length === 0 && !search && (
-            <Card style={{ marginBottom: spacing[16], padding: spacing[24], textAlign: 'center' }}>
-              <Award size={32} className="mx-auto mb-2" style={{ color: colors.muted }} />
-              <p className="text-sm" style={{ color: colors.muted }}>
-                No competing clients yet. Add a comp profile from Clients to get started.
+          {(filteredClients ?? []).length === 0 && search.trim() && (
+            <Card style={{ marginBottom: spacing[16], padding: spacing[20], textAlign: 'center', border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
+              <Award size={28} className="mx-auto mb-2" style={{ color: colors.muted }} />
+              <p className="text-sm font-medium mb-1" style={{ color: colors.text }}>No matches</p>
+              <p className="text-xs leading-relaxed" style={{ color: colors.muted }}>
+                Try another name or clear the search to see your prep roster.
+              </p>
+              <button
+                type="button"
+                className="mt-3 text-sm font-semibold"
+                style={{ color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', minHeight: touchTargetMin }}
+                onClick={() => { impactLight(); setSearch(''); }}
+              >
+                Clear search
+              </button>
+            </Card>
+          )}
+          {(filteredClients ?? []).length === 0 && !search.trim() && (
+            <Card style={{ marginBottom: spacing[16], padding: spacing[24], textAlign: 'center', border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
+              <Award size={32} className="mx-auto mb-3" style={{ color: colors.muted }} />
+              <p className="text-sm font-medium mb-1" style={{ color: colors.text }}>No prep athletes yet</p>
+              <p className="text-sm leading-relaxed max-w-sm mx-auto" style={{ color: colors.muted }}>
+                Invite prep athletes from <strong style={{ color: colors.textSecondary }}>Clients</strong> (they join with your link or code), then set show date / competition context on their profile; they&apos;ll appear here for posing, media, and timeline.
               </p>
             </Card>
           )}
@@ -173,8 +212,17 @@ export default function CompPrepHome() {
           <button
             type="button"
             onClick={() => handleNav('/comp-prep/media/upload')}
-            className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl font-medium text-sm"
-            style={{ background: colors.accent, color: '#fff' }}
+            className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl font-semibold text-sm"
+            style={{
+              background: colors.primary,
+              color: '#fff',
+              minHeight: touchTargetMin,
+              padding: `${spacing[12]}px ${spacing[16]}px`,
+              borderRadius: shell.cardRadius,
+              border: 'none',
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
           >
             <Upload size={18} />
             Submit posing for review
@@ -186,8 +234,15 @@ export default function CompPrepHome() {
         <button
           type="button"
           onClick={() => handleNav('/comp-prep/pose-library')}
-          className="w-full text-left overflow-hidden rounded-xl border transition-colors active:opacity-90"
-          style={{ background: colors.card, borderColor: colors.border, padding: spacing[16] }}
+          className="w-full text-left overflow-hidden border transition-colors active:opacity-90"
+          style={{
+            background: colors.card,
+            borderColor: colors.border,
+            padding: spacing[16],
+            borderRadius: shell.cardRadius,
+            minHeight: touchTargetMin,
+            WebkitTapHighlightColor: 'transparent',
+          }}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -201,8 +256,15 @@ export default function CompPrepHome() {
         <button
           type="button"
           onClick={() => handleNav('/comp-prep/photo-guide')}
-          className="w-full text-left overflow-hidden rounded-xl border transition-colors active:opacity-90"
-          style={{ background: colors.card, borderColor: colors.border, padding: spacing[16] }}
+          className="w-full text-left overflow-hidden border transition-colors active:opacity-90"
+          style={{
+            background: colors.card,
+            borderColor: colors.border,
+            padding: spacing[16],
+            borderRadius: shell.cardRadius,
+            minHeight: touchTargetMin,
+            WebkitTapHighlightColor: 'transparent',
+          }}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -216,8 +278,15 @@ export default function CompPrepHome() {
         <button
           type="button"
           onClick={() => handleNav('/comp-prep/media')}
-          className="w-full text-left overflow-hidden rounded-xl border transition-colors active:opacity-90"
-          style={{ background: colors.card, borderColor: colors.border, padding: spacing[16] }}
+          className="w-full text-left overflow-hidden border transition-colors active:opacity-90"
+          style={{
+            background: colors.card,
+            borderColor: colors.border,
+            padding: spacing[16],
+            borderRadius: shell.cardRadius,
+            minHeight: touchTargetMin,
+            WebkitTapHighlightColor: 'transparent',
+          }}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">

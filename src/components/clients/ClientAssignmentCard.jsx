@@ -28,7 +28,7 @@ async function fetchClientAssignment(clientId, currentUserId) {
 
   const { data: client, error: clientError } = await supabase
     .from('clients')
-    .select('id, full_name, name, assigned_coach_id, coach_id, trainer_id, organisation_id')
+    .select('id, name, assigned_coach_id, coach_id, trainer_id, organisation_id')
     .eq('id', clientId)
     .maybeSingle();
   if (clientError) {
@@ -42,7 +42,7 @@ async function fetchClientAssignment(clientId, currentUserId) {
     return {
       client: {
         id: client.id,
-        name: client.full_name || client.name || 'Client',
+        name: client.name || 'Client',
       },
       organisation: null,
       currentCoachId: client.assigned_coach_id ?? client.coach_id ?? client.trainer_id ?? null,
@@ -114,7 +114,7 @@ async function fetchClientAssignment(clientId, currentUserId) {
   return {
     client: {
       id: client.id,
-      name: client.full_name || client.name || 'Client',
+      name: client.name || 'Client',
     },
     organisation: { id: orgId },
     currentCoachId,

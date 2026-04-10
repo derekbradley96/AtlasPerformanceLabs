@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { createPageUrl } from '@/utils';
+import { CANONICAL_COACH_ONBOARDING_PATH } from '@/lib/coachOnboardingRoutes';
 import { CheckCircle2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -56,7 +56,7 @@ export default function BecomeATrainer() {
     onSuccess: () => {
       queryClient.invalidateQueries(['trainer-profile']);
       toast.success('Trainer profile created!');
-      navigate(createPageUrl('Home'));
+      navigate(CANONICAL_COACH_ONBOARDING_PATH);
     }
   });
 

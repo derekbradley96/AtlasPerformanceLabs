@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import * as atlasRepo from '@/data/repos/atlasRepo';
@@ -10,6 +10,14 @@ import { impactLight } from '@/lib/haptics';
 import { stripeCreatePlanCheckout } from '@/lib/supabaseStripeApi';
 import { toast } from 'sonner';
 import { CURRENCY, PLANS } from '@/config/plans';
+import UpgradePrompt from '@/components/UpgradePrompt';
+import {
+  evaluateUpgradeTriggers,
+  selectUpgradePrompt,
+  markMajorPromptShown,
+  trackUpgradePromptEvent,
+} from '@/utils/upgradeTriggers';
+import { usePresentationMode } from '@/lib/presentationMode';
 
 function getCurrentPlanIdFromStorage() {
   try {
@@ -21,6 +29,7 @@ function getCurrentPlanIdFromStorage() {
 }
 
 export default function TrainerPlan() {
+  const { isDesktopWeb } = usePresentationMode();
   const { user, isDemoMode } = useAuth();
   const [searchParams] = useSearchParams();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
@@ -28,6 +37,7 @@ export default function TrainerPlan() {
   const [planTier, setPlanTier] = useState(getCurrentPlanIdFromStorage());
   const [loading, setLoading] = useState(!!trainerId);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [showPaymentUpgradePrompt, setShowPaymentUpgradePrompt] = useState(false);
 
   const [clients, setClients] = useState([]);
 
@@ -49,14 +59,32 @@ export default function TrainerPlan() {
   }, [trainerId, isDemoMode]);
 
   useEffect(() => {
-    if (searchParams.get('success') === '1') toast.success('Plan updated');
+    if (searchParams.get('success') === '1') {
+      toast.success('Plan updated');
+      setShowPaymentUpgradePrompt(true);
+      trackUpgradePromptEvent({
+        eventType: 'converted',
+        promptId: 'plan_checkout_success',
+        userId: trainerId,
+        properties: { surface: 'trainer_plan', success: true },
+      });
+    }
     if (searchParams.get('canceled') === '1') toast.info('Checkout canceled');
-  }, [searchParams]);
+  }, [searchParams, trainerId]);
 
   const currentPlanId = planTier || getCurrentPlanIdFromStorage();
   const currentPlan = PLANS.find((p) => p.id === currentPlanId) || PLANS[1];
   const currentPlanIndex = PLANS.findIndex((p) => p.id === currentPlanId);
   const usage = { clients: clients.length };
+  const paymentUpgradePrompt = useMemo(() => {
+    const result = evaluateUpgradeTriggers({
+      clientCount: usage.clients,
+      monthlyRevenue: 0,
+      lastPaymentAmount: Number(searchParams.get('payment_amount') || 0),
+      currentPlan: planTier,
+    });
+    return selectUpgradePrompt(result.prompts, { allowMajor: true });
+  }, [usage.clients, searchParams, planTier]);
 
   const getPlanActionLabel = (plan) => {
     if (plan.id === currentPlanId) return null;
@@ -91,7 +119,7 @@ export default function TrainerPlan() {
         paddingTop: spacing[8],
       }}
     >
-      <div className="max-w-lg mx-auto space-y-6">
+      <div className={`${isDesktopWeb ? 'max-w-4xl' : 'max-w-lg'} mx-auto space-y-6`}>
         <h1 className="text-xl font-semibold" style={{ color: colors.text }}>Plan & Billing</h1>
 
         <Card style={{ padding: spacing[20] }}>
@@ -211,6 +239,32 @@ export default function TrainerPlan() {
             </div>
           </div>
         </div>
+      )}
+      {showPaymentUpgradePrompt && paymentUpgradePrompt && (
+        <UpgradePrompt
+          prompt={paymentUpgradePrompt}
+          variant="modal"
+          onShown={(prompt) => {
+            if (prompt?.kind === 'major') markMajorPromptShown();
+            trackUpgradePromptEvent({
+              eventType: 'shown',
+              promptId: prompt?.id || 'unknown',
+              userId: trainerId,
+              properties: { surface: 'trainer_plan', source: 'checkout_success' },
+            });
+          }}
+          onUpgrade={(prompt) => {
+            trackUpgradePromptEvent({
+              eventType: 'clicked',
+              promptId: prompt?.id || 'unknown',
+              userId: trainerId,
+              properties: { surface: 'trainer_plan', source: 'checkout_success' },
+            });
+            setShowPaymentUpgradePrompt(false);
+            setUpgradeModalOpen(true);
+          }}
+          onDismiss={() => setShowPaymentUpgradePrompt(false)}
+        />
       )}
     </div>
   );

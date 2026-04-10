@@ -85,7 +85,7 @@ export function isRole(role, allowed) {
 export function roleHomePath(role) {
   const r = normalizeRole(role);
   if (r === 'coach') return '/home';
-  if (r === 'client') return '/messages';
+  if (r === 'client') return '/client-dashboard';
   return '/home'; // personal
 }
 
@@ -109,10 +109,10 @@ export function isAdmin(role) {
   return role === Roles.ADMIN || role === 'admin';
 }
 
-/** Safe landing path when access is denied. coach/admin -> /home, client -> /messages, personal -> /home. */
+/** Safe landing path when access is denied. coach/admin -> /home, client -> /client-dashboard, personal -> /home. */
 export function getLandingPathForRole(role) {
   const guard = toGuardRole(role);
-  if (guard === Roles.CLIENT) return '/messages';
+  if (guard === Roles.CLIENT) return '/client-dashboard';
   return '/home';
 }
 

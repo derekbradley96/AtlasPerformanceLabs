@@ -24,6 +24,7 @@ import { useAuth } from '@/lib/AuthContext';
 import EmptyState from '@/components/ui/EmptyState';
 import { GitCompare, Calendar } from 'lucide-react';
 import { safeFormatDate } from '@/lib/format';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 const PREP_A_COLOR = colors.primary;
 const PREP_B_COLOR = colors.accent;
@@ -41,7 +42,8 @@ async function fetchCoachClients(supabase, userId) {
 
 export default function PrepComparisonPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const supabase = hasSupabase ? getSupabase() : null;
 
   const [clientId, setClientId] = useState('');
@@ -108,7 +110,7 @@ export default function PrepComparisonPage() {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 96 }}>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Prep Comparison" onBack={() => navigate(-1)} />
       <div className="p-4 max-w-lg mx-auto">
         <p className="text-sm mb-4" style={{ color: colors.muted }}>
@@ -286,8 +288,8 @@ export default function PrepComparisonPage() {
                     <tbody>
                       <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
                         <td style={{ padding: '8px 0', color: colors.text }}>Stage weight</td>
-                        <td style={{ padding: '8px 0', textAlign: 'right', color: colors.text }}>{outcomeA.stage_weight != null ? `${outcomeA.stage_weight} kg` : '—'}</td>
-                        <td style={{ padding: '8px 0', textAlign: 'right', color: colors.text }}>{outcomeB.stage_weight != null ? `${outcomeB.stage_weight} kg` : '—'}</td>
+                        <td style={{ padding: '8px 0', textAlign: 'right', color: colors.text }}>{outcomeA.stage_weight != null ? formatWeightForViewer(Number(outcomeA.stage_weight), viewerWU) : '—'}</td>
+                        <td style={{ padding: '8px 0', textAlign: 'right', color: colors.text }}>{outcomeB.stage_weight != null ? formatWeightForViewer(Number(outcomeB.stage_weight), viewerWU) : '—'}</td>
                       </tr>
                       <tr style={{ borderBottom: `1px solid ${colors.border}` }}>
                         <td style={{ padding: '8px 0', color: colors.text }}>Peak week carbs</td>

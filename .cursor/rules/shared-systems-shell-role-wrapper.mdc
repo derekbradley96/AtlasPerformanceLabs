@@ -1,0 +1,15 @@
+---
+description: Build shared systems once, then wrap by shell and role
+alwaysApply: true
+---
+
+# Shared Systems, Shell-First Delivery
+
+Atlas shared systems must be built once, then wrapped correctly for shell and role.
+
+- Build domain/workflow logic once in shared modules; avoid duplicating core behavior per surface.
+- Add shell-specific wrappers for app and website so each experience feels native to its environment.
+- Keep web and app UI/interaction patterns shell-appropriate (navigation, spacing, safe-area, fixed actions, affordances).
+- When improving Personal workflows, map the same shared workflow to Client where the underlying flow is shared.
+- Preserve role boundaries: shared core, role-specific presentation and access behavior.
+- Prefer adapting wrappers over forking business logic when extending features.

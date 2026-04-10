@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
+import { journeyRosterBucket, journeyRosterBadgeLabel } from '@/lib/clientJourney';
 import { useAppRefresh } from '@/lib/useAppRefresh';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -11,6 +12,8 @@ import { getRetentionItem } from '@/lib/retention/retentionRepo';
 import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
+import { showCoachManualClientAcquisitionTools } from '@/lib/coachClientAcquisition';
+import { deriveCoachClientLifecycle } from '@/lib/coachClientLifecycle';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { resolveOrgCoachScope } from '@/lib/organisationScope';
 import { safeDate } from '@/lib/format';
@@ -22,7 +25,9 @@ import EmptyState from '@/components/ui/EmptyState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { captureUiError } from '@/services/errorLogger';
 import { colors, spacing, shell } from '@/ui/tokens';
-import { pageContainer, standardCard, sectionLabel } from '@/ui/pageLayout';
+import { pageContainer, standardCard, sectionLabel, desktopRhythm, chipPadding } from '@/ui/pageLayout';
+import { usePresentationMode } from '@/lib/presentationMode';
+import { coachFocusAllowsPrepFeatures } from '@/lib/coachFocus';
 import { toast } from 'sonner';
 import { toCSV, downloadCSV } from '@/lib/csvExport';
 import { Download } from 'lucide-react';
@@ -30,7 +35,7 @@ import { Download } from 'lucide-react';
 const STATUS_COLORS = { on_track: '#22C55E', needs_review: '#EAB308', attention: '#EF4444' };
 const STATUS_LABELS = { on_track: 'On track', needs_review: 'Needs review', attention: 'Attention' };
 
-/** Primary filter chips: All, Active, Prep, At Risk, Check-In Due */
+/** Primary filter chips. Prep is shown only when coach focus allows prep roster surfaces (competition / integrated). */
 const FILTER_CHIPS = [
   { key: 'all', label: 'All' },
   { key: 'active', label: 'Active' },
@@ -68,16 +73,42 @@ async function lightHaptic() {
 
 export default function Clients() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const { isDesktopWeb } = usePresentationMode();
+  const rhythm = desktopRhythm(isDesktopWeb);
+  const defaultChipPad = chipPadding({ desktop: isDesktopWeb });
+  const compactChipPad = chipPadding({ desktop: isDesktopWeb, density: 'compact' });
+  const [searchParams, setSearchParams] = useSearchParams();
   const outletContext = useOutletContext() || {};
   const { registerRefresh, setHeaderRight } = outletContext;
   const data = useData();
-  const { supabaseUser, authReady } = useAuth();
+  const { supabaseUser, authReady, profile, isDemoMode, isAdminBypass } = useAuth();
+  const showManualAcquisition = useMemo(
+    () =>
+      showCoachManualClientAcquisitionTools({
+        isDemoMode,
+        isAdminBypass,
+        profile,
+        supabaseUser,
+      }),
+    [isDemoMode, isAdminBypass, profile, supabaseUser]
+  );
   const isAuthed = !!supabaseUser;
   const trainerId = supabaseUser?.id ?? 'local-trainer';
+  const coachFocusRaw = (profile?.coach_focus ?? '').toString().trim().toLowerCase();
+  const showPrepSegmentChip = coachFocusAllowsPrepFeatures(profile?.coach_focus);
+  const showJourneyLaneFilters = coachFocusRaw === 'integrated';
+  const filterChips = useMemo(() => {
+    if (!showPrepSegmentChip) {
+      return FILTER_CHIPS.filter((c) => c.key !== 'prep');
+    }
+    return FILTER_CHIPS;
+  }, [showPrepSegmentChip]);
+  const journeyParam = (searchParams.get('journey') ?? '').toLowerCase();
+  const journeyLaneFilter =
+    showJourneyLaneFilters && (journeyParam === 'lifestyle' || journeyParam === 'prep') ? journeyParam : 'all';
   const filterFromUrl = searchParams.get('filter');
   const [search, setSearch] = useState('');
-  const segmentFromUrl =
+  const segmentFromUrlBase =
     ['all', 'active', 'prep', 'at_risk', 'check_in_due'].includes(filterFromUrl)
       ? filterFromUrl
       : filterFromUrl === 'needsReview' || filterFromUrl === 'dueToday'
@@ -87,6 +118,9 @@ export default function Clients() {
           : filterFromUrl === 'on_track'
             ? 'active'
             : 'all';
+  /** Ignore prep segment / URL when coach focus does not allow prep (stale links, demo data). */
+  const segmentFromUrl =
+    !showPrepSegmentChip && segmentFromUrlBase === 'prep' ? 'all' : segmentFromUrlBase;
   const [segment, setSegment] = useState(segmentFromUrl);
   const [riskFilter, setRiskFilter] = useState('all');
   const [retentionRiskByClientId, setRetentionRiskByClientId] = useState({});
@@ -106,8 +140,10 @@ export default function Clients() {
   const [addClientOpen, setAddClientOpen] = useState(false);
   const [addClientForm, setAddClientForm] = useState({
     full_name: '',
+    email: '',
     phase: 'Maintenance',
     goal: 'maintain',
+    client_journey: 'transformation',
     start_date: new Date().toISOString().slice(0, 10),
     show_date: '',
     federation: '',
@@ -124,10 +160,38 @@ export default function Clients() {
     setSegment(segmentFromUrl);
   }, [filterFromUrl, segmentFromUrl]);
 
+  /** Drop stale ?filter=prep when coach focus does not allow prep roster filtering. */
+  useEffect(() => {
+    if (showPrepSegmentChip) return;
+    if (filterFromUrl !== 'prep') return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('filter');
+      return next;
+    }, { replace: true });
+  }, [showPrepSegmentChip, filterFromUrl, setSearchParams]);
+
+  /** Integrated-only journey deep links: strip for other focuses. */
+  useEffect(() => {
+    if (showJourneyLaneFilters) return;
+    setSearchParams((prev) => {
+      const j = (prev.get('journey') ?? '').trim();
+      if (!j) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete('journey');
+      return next;
+    }, { replace: true });
+  }, [showJourneyLaneFilters, setSearchParams]);
+
+  useEffect(() => {
+    if (showPrepSegmentChip || segment !== 'prep') return;
+    setSegment('all');
+  }, [showPrepSegmentChip, segment]);
+
   useEffect(() => {
     // Reset pagination when filters or search change
     setVisibleCount(PAGE_SIZE);
-  }, [segment, riskFilter, search]);
+  }, [segment, riskFilter, search, journeyLaneFilter]);
 
   useEffect(() => {
     if (typeof registerRefresh === 'function') return registerRefresh(refresh);
@@ -136,18 +200,35 @@ export default function Clients() {
   useEffect(() => {
     if (typeof setHeaderRight !== 'function') return;
     setHeaderRight(
-      <button
-        type="button"
-        onClick={() => setAddClientOpen(true)}
-        className="flex items-center justify-center rounded-lg min-w-[44px] min-h-[44px] text-[20px] font-semibold"
-        style={{ color: colors.accent, background: 'transparent', border: 'none' }}
-        aria-label="Add client"
-      >
-        +
-      </button>
+      <div className="flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => {
+            lightHaptic();
+            navigate('/get-clients');
+          }}
+          className="flex items-center justify-center rounded-lg min-w-[44px] min-h-[44px]"
+          style={{ color: colors.accent, background: 'transparent', border: 'none' }}
+          aria-label="Invite clients — link, code, and QR"
+        >
+          <UserPlus size={22} strokeWidth={2.25} aria-hidden />
+        </button>
+        {showManualAcquisition ? (
+          <button
+            type="button"
+            onClick={() => setAddClientOpen(true)}
+            className="flex items-center justify-center rounded-lg min-w-[40px] min-h-[44px] text-[18px] font-semibold"
+            style={{ color: colors.muted, background: 'transparent', border: 'none' }}
+            aria-label="Add client manually (dev or admin only)"
+            title="Add client manually (dev / admin)"
+          >
+            +
+          </button>
+        ) : null}
+      </div>
     );
     return () => setHeaderRight(null);
-  }, [setHeaderRight]);
+  }, [setHeaderRight, navigate, showManualAcquisition]);
 
   useEffect(() => {
     const listClients = data?.listClients;
@@ -277,6 +358,44 @@ export default function Clients() {
     return map;
   }, [allClients, checkIns, threads]);
 
+  const checkInCountByClientId = useMemo(() => {
+    const map = {};
+    (checkIns ?? []).forEach((ci) => {
+      const cid = ci?.client_id;
+      if (!cid) return;
+      map[cid] = (map[cid] ?? 0) + 1;
+    });
+    return map;
+  }, [checkIns]);
+
+  const lifecycleByClientId = useMemo(() => {
+    const map = {};
+    (allClients ?? []).forEach((c) => {
+      if (!c?.id) return;
+      const thread = threads.find((t) => t?.client_id === c.id) ?? null;
+      map[c.id] = deriveCoachClientLifecycle(c, {
+        checkInCount: checkInCountByClientId[c.id] ?? 0,
+        hasMessage: Boolean(thread?.last_message_at || (thread?.unread_count ?? 0) > 0),
+        hasProgram: false,
+        hasNutrition: false,
+      });
+    });
+    return map;
+  }, [allClients, threads, checkInCountByClientId]);
+
+  const rosterLifecycleSummary = useMemo(() => {
+    let setupIncomplete = 0;
+    let active = 0;
+    (allClients ?? []).forEach((c) => {
+      if (!c?.id) return;
+      const state = lifecycleByClientId[c.id];
+      if (!state) return;
+      if (state.key === 'joined_unset') setupIncomplete += 1;
+      else if (state.key === 'active') active += 1;
+    });
+    return { setupIncomplete, active };
+  }, [allClients, lifecycleByClientId]);
+
   const filteredClients = useMemo(() => {
     let list = [...allClients];
     if (segment === 'active') {
@@ -297,6 +416,11 @@ export default function Clients() {
     }
     if (showRiskFilters && riskFilter !== 'all') {
       list = list.filter((c) => c?.id != null && retentionRiskByClientId[c.id]?.risk_band === riskFilter);
+    }
+    if (showJourneyLaneFilters && journeyLaneFilter === 'lifestyle') {
+      list = list.filter((c) => journeyRosterBucket(c) === 'lifestyle');
+    } else if (showJourneyLaneFilters && journeyLaneFilter === 'prep') {
+      list = list.filter((c) => journeyRosterBucket(c) === 'prep');
     }
     if ((search ?? '').trim()) {
       const q = (search ?? '').trim().toLowerCase();
@@ -332,7 +456,20 @@ export default function Clients() {
       return bAt - aAt;
     });
     return list;
-  }, [allClients, segment, search, riskFilter, showRiskFilters, retentionRiskByClientId, clientIdsWithPendingCheckIns, clientIdsWithNeedsReview, healthByClientId, checkIns]);
+  }, [
+    allClients,
+    segment,
+    search,
+    riskFilter,
+    showRiskFilters,
+    retentionRiskByClientId,
+    clientIdsWithPendingCheckIns,
+    clientIdsWithNeedsReview,
+    healthByClientId,
+    checkIns,
+    showJourneyLaneFilters,
+    journeyLaneFilter,
+  ]);
 
   const visibleClients = useMemo(
     () => filteredClients.slice(0, visibleCount),
@@ -351,6 +488,14 @@ export default function Clients() {
     setRiskFilter(key);
   };
 
+  const handleJourneyLaneChange = async (key) => {
+    await lightHaptic();
+    const next = new URLSearchParams(searchParams);
+    if (key === 'all') next.delete('journey');
+    else next.set('journey', key);
+    setSearchParams(next, { replace: true });
+  };
+
   const handleRow = async (clientId) => {
     const id = clientId != null && clientId !== '' ? String(clientId).trim() : null;
     if (!id) {
@@ -367,11 +512,6 @@ export default function Clients() {
     navigate(`/clients/${id}`);
   };
 
-  const handleInviteClient = async () => {
-    await lightHaptic();
-    navigate('/inviteclient');
-  };
-
   const handleAddClient = async () => {
     const name = (addClientForm.full_name ?? '').trim();
     if (!name) {
@@ -381,20 +521,32 @@ export default function Clients() {
     const goal = addClientForm.goal || 'maintain';
     const phaseMap = { bulk: 'Bulk', cut: 'Cut', maintain: 'Maintenance' };
     try {
+      const journey = addClientForm.client_journey;
+      const showTrim = addClientForm.show_date?.trim() || '';
+      const prepish = journey === 'competition' || journey === 'integrated';
+      if (journey === 'competition' && !showTrim) {
+        toast.message('Tip: add a show date when you have it — prep timeline and contest tools work best with a date.');
+      }
       const client = await data.createClient({
         full_name: name,
+        email: addClientForm.email?.trim() || undefined,
         phase: phaseMap[goal] || 'Maintenance',
         goal,
-        showDate: addClientForm.show_date?.trim() || null,
-        federation: addClientForm.federation?.trim() || null,
+        client_type: journey,
+        client_journey: journey,
+        show_date: prepish && showTrim ? showTrim : null,
+        showDate: prepish && showTrim ? showTrim : null,
+        federation: prepish ? addClientForm.federation?.trim() || null : null,
         gym_equipment: Array.isArray(addClientForm.gym_equipment) ? addClientForm.gym_equipment : [],
         start_date: addClientForm.start_date || new Date().toISOString().slice(0, 10),
       });
       setAddClientOpen(false);
       setAddClientForm({
         full_name: '',
+        email: '',
         phase: 'Maintenance',
         goal: 'maintain',
+        client_journey: 'transformation',
         start_date: new Date().toISOString().slice(0, 10),
         show_date: '',
         federation: '',
@@ -416,6 +568,8 @@ export default function Clients() {
         setRefreshKey((k) => k + 1);
         const { trackClientCreated } = await import('@/services/analyticsService');
         trackClientCreated({ client_id: client.id });
+        const { trackFirstClientAdded } = await import('@/services/firstSessionTracker');
+        if (supabaseUser?.id) trackFirstClientAdded(supabaseUser.id, { client_id: client.id, source: 'manual' });
         navigate(`/clients/${client.id}`);
       } else {
         setRefreshKey((k) => k + 1);
@@ -474,18 +628,67 @@ export default function Clients() {
   }, [allClients]);
 
   return (
-    <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={pageContainer}>
+    <div
+      className="app-screen min-w-0 max-w-full overflow-x-hidden"
+      style={{
+        ...pageContainer,
+        maxWidth: isDesktopWeb ? 1240 : undefined,
+        margin: '0 auto',
+        paddingTop: rhythm.top,
+        paddingLeft: isDesktopWeb ? spacing[20] : pageContainer.paddingLeft,
+        paddingRight: isDesktopWeb ? spacing[20] : pageContainer.paddingRight,
+      }}
+    >
+      {/* Title comes from AppShell header (getRouteTitle /clients); keep wayfinding only here */}
+      <header style={{ marginBottom: rhythm.section }}>
+        <p style={{ fontSize: 13, color: colors.muted, margin: 0, lineHeight: 1.45 }}>
+          Tap a client to open their profile, program, and messaging.
+        </p>
+        {showJourneyLaneFilters && (
+          <p style={{ fontSize: 12, color: colors.muted, margin: `${spacing[10]}px 0 0`, lineHeight: 1.5 }}>
+            <strong style={{ color: colors.textSecondary }}>Integrated coach:</strong> use{' '}
+            <strong>Lifestyle</strong> vs <strong>Prep</strong> below to switch context — profile tools match each track
+            (prep timeline & posing only when relevant).
+          </p>
+        )}
+      </header>
       {/* Search */}
-      <div style={{ marginBottom: spacing[12] }}>
+      {!initialLoad && !dataLoading && allClients.length > 0 && rosterLifecycleSummary.setupIncomplete > 0 ? (
+        <div style={{ marginBottom: rhythm.gutter }}>
+          <div
+            className="rounded-xl p-3"
+            style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: colors.muted }}>
+              New joins to activate
+            </p>
+            <p className="text-sm mt-1" style={{ color: colors.text }}>
+              {rosterLifecycleSummary.setupIncomplete} client{rosterLifecycleSummary.setupIncomplete === 1 ? '' : 's'} joined but still need setup actions.
+            </p>
+            <div className="flex gap-2 mt-2">
+              <Button variant="secondary" onClick={() => navigate('/get-clients')} style={{ minHeight: 38 }}>
+                Invite more
+              </Button>
+              <Button variant="secondary" onClick={() => navigate('/clients?filter=check_in_due')} style={{ minHeight: 38 }}>
+                View setup-needed
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Search */}
+      <div style={{ marginBottom: rhythm.gutter }}>
         <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center" aria-hidden>
             <Search size={18} style={{ color: colors.muted }} />
           </span>
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search clients"
+            placeholder="Search by name"
+            aria-label="Search clients by name"
             className="w-full pl-9 pr-3 text-sm placeholder:opacity-70 focus:outline-none focus:ring-2 focus:ring-inset"
             style={{
               minHeight: 44,
@@ -493,28 +696,34 @@ export default function Clients() {
               background: colors.card,
               border: `1px solid ${colors.border}`,
               borderRadius: shell.cardRadius,
-              paddingTop: spacing[10],
-              paddingBottom: spacing[10],
+              paddingTop: spacing[12],
+              paddingBottom: spacing[12],
             }}
           />
         </div>
       </div>
 
       {/* Export */}
-      <div className="flex justify-end" style={{ marginBottom: spacing[8] }}>
+      <div className="flex justify-end" style={{ marginBottom: rhythm.gutter }}>
         <button
           type="button"
           onClick={handleExportClients}
-          className="flex items-center gap-2 rounded-lg text-sm font-medium py-2 px-3"
-          style={{ color: colors.primary, background: colors.primarySubtle }}
+          className="flex items-center gap-2 rounded-lg text-sm font-medium"
+          style={{
+            color: colors.primary,
+            background: 'transparent',
+            border: `1px solid ${colors.border}`,
+            minHeight: 40,
+            padding: `${spacing[8]}px ${spacing[14]}px`,
+          }}
         >
-          <Download size={16} /> Export clients (CSV)
+          <Download size={16} aria-hidden /> Export CSV
         </button>
       </div>
 
-      {/* Filter chips: All, Active, Prep, At Risk, Check-In Due */}
-      <div className="flex flex-wrap gap-2" style={{ marginBottom: spacing[12] }}>
-        {FILTER_CHIPS.map((chip) => {
+      {/* Primary segment chips (Prep only when coach focus allows prep roster tools) */}
+      <div className="flex flex-wrap gap-2" style={{ marginBottom: rhythm.gutter }}>
+        {filterChips.map((chip) => {
           const active = segment === chip.key;
           return (
             <button
@@ -523,11 +732,8 @@ export default function Clients() {
               onClick={() => handleSegmentChange(chip.key)}
               className="rounded-full text-sm font-medium transition-opacity active:opacity-90"
               style={{
-                paddingLeft: spacing[12],
-                paddingRight: spacing[12],
-                paddingTop: spacing[8],
-                paddingBottom: spacing[8],
-                minHeight: 36,
+                ...defaultChipPad,
+                minHeight: 40,
                 border: `1px solid ${active ? colors.primary : colors.border}`,
                 background: active ? colors.primarySubtle : 'transparent',
                 color: active ? colors.primary : colors.text,
@@ -538,8 +744,40 @@ export default function Clients() {
           );
         })}
       </div>
+
+      {showJourneyLaneFilters && (
+        <div style={{ marginBottom: rhythm.gutter }}>
+          <span style={{ ...sectionLabel, marginBottom: spacing[6], display: 'block' }}>Roster context</span>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: 'all', label: 'All types' },
+              { key: 'lifestyle', label: 'Lifestyle' },
+              { key: 'prep', label: 'Prep / stage' },
+            ].map((chip) => {
+              const active = journeyLaneFilter === chip.key;
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => handleJourneyLaneChange(chip.key)}
+                  className="rounded-full text-sm font-medium transition-opacity active:opacity-90"
+                  style={{
+                    ...defaultChipPad,
+                    minHeight: 40,
+                    border: `1px solid ${active ? colors.accent : colors.border}`,
+                    background: active ? 'rgba(59,130,246,0.12)' : 'transparent',
+                    color: active ? colors.accent : colors.text,
+                  }}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {showRiskFilters && (
-        <div style={{ marginBottom: spacing[12] }}>
+        <div style={{ marginBottom: rhythm.gutter }}>
           <span style={{ ...sectionLabel, marginBottom: spacing[6], display: 'block' }}>Risk</span>
           <div className="flex flex-wrap gap-2">
             {RISK_FILTERS.map((opt) => {
@@ -551,10 +789,7 @@ export default function Clients() {
                   onClick={() => handleRiskFilterChange(opt.key)}
                   className="rounded-full text-xs font-medium"
                   style={{
-                    paddingLeft: spacing[10],
-                    paddingRight: spacing[10],
-                    paddingTop: spacing[6],
-                    paddingBottom: spacing[6],
+                    ...compactChipPad,
                     border: `1px solid ${active ? colors.primary : colors.border}`,
                     background: active ? colors.primarySubtle : 'transparent',
                     color: active ? colors.primary : colors.muted,
@@ -573,8 +808,8 @@ export default function Clients() {
           <button
             type="button"
             onClick={() => { lightHaptic(); navigate('/import-bodyweight'); }}
-            className="text-xs font-medium"
-            style={{ color: colors.primary }}
+            className="text-xs font-medium rounded-lg"
+            style={{ color: colors.primary, minHeight: 40, padding: `${spacing[8]}px 0`, background: 'none', border: 'none', cursor: 'pointer' }}
           >
             Import bodyweight history
           </button>
@@ -595,21 +830,50 @@ export default function Clients() {
         />
       ) : !initialLoad && !dataLoading && showEmptyState ? (
         <EmptyState
-          title="Your roster is empty"
-          description="Share your invite code so clients can sign up and connect to your roster."
+          title="Grow your roster with invites"
+          description="Clients join Atlas with your link or coach code, complete onboarding, then appear here. Share link, code, or QR from Invite clients — there is no separate “create client” in production."
           icon={UserPlus}
-          actionLabel="Open invite code"
-          onAction={() => navigate('/inviteclient')}
+          action={(
+            <div className="flex flex-col gap-3 w-full max-w-[280px]">
+              <Button variant="primary" className="w-full" onClick={() => navigate('/get-clients')}>
+                Invite clients
+              </Button>
+              <Button variant="secondary" className="w-full" onClick={() => navigate('/get-clients?focus=code')}>
+                Coach code &amp; QR
+              </Button>
+              {showManualAcquisition ? (
+                <Button variant="secondary" className="w-full opacity-90" onClick={() => setAddClientOpen(true)}>
+                  Add client manually (dev)
+                </Button>
+              ) : null}
+              <button
+                type="button"
+                className="text-sm font-medium py-2"
+                style={{ color: colors.primary, background: 'none', border: 'none', cursor: 'pointer' }}
+                onClick={() => navigate('/program-builder')}
+              >
+                Open Program Builder
+              </button>
+            </div>
+          )}
         />
       ) : !initialLoad && !dataLoading && isEmpty ? (
         <EmptyState
           title={search.trim() ? 'No clients match your search' : 'No clients in this segment'}
           description={search.trim()
             ? 'Try a different name or clear the search to see all clients.'
-            : 'Change the filter above or add clients to see them here.'}
+            : journeyLaneFilter !== 'all'
+              ? `No clients in the “${journeyLaneFilter === 'prep' ? 'Prep / stage' : 'Lifestyle'}” lane with the current filters. Try All types or another segment.`
+              : 'Change the filter above or invite clients so they appear here after they join.'}
           icon={UserPlus}
-          actionLabel={search.trim() ? 'Clear search' : 'Add client'}
-          onAction={() => { if (search.trim()) setSearch(''); else setAddClientOpen(true); }}
+          actionLabel={
+            search.trim() ? 'Clear search' : journeyLaneFilter !== 'all' ? 'Show all types' : 'Invite clients'
+          }
+          onAction={() => {
+            if (search.trim()) setSearch('');
+            else if (journeyLaneFilter !== 'all') handleJourneyLaneChange('all');
+            else navigate('/get-clients');
+          }}
         />
       ) : !initialLoad && !dataLoading ? (
         <>
@@ -633,6 +897,7 @@ export default function Clients() {
               const coachingType = isPrep && daysOut != null && daysOut >= 0 ? `Prep · ${daysOut}d out` : phase + (monthsWith > 0 ? ` · ${monthsWith} mo` : '');
               const statusKey = client?.status ?? 'on_track';
               const pillColor = STATUS_COLORS[statusKey];
+              const lifecycle = lifecycleByClientId[client.id];
               const riskBand = showRiskFilters ? (retentionRiskByClientId[client.id]?.risk_band ?? null) : null;
               const riskStyle = riskBand && RISK_BAND_INDICATOR[riskBand] ? {
                 borderLeftWidth: 3,
@@ -732,6 +997,15 @@ export default function Clients() {
                             Prep
                           </span>
                         )}
+                        {showJourneyLaneFilters && (
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                            style={{ background: colors.primarySubtle, color: colors.primary }}
+                            title="Roster lane for integrated coaching"
+                          >
+                            {journeyRosterBadgeLabel(client)}
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={async (e) => {
@@ -753,6 +1027,15 @@ export default function Clients() {
                             title="Retention risk"
                           >
                             At risk
+                          </span>
+                        )}
+                        {lifecycle?.key === 'joined_unset' && (
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                            style={{ background: 'rgba(245,158,11,0.18)', color: colors.warning }}
+                            title="Client joined but setup actions are still needed"
+                          >
+                            Setup incomplete
                           </span>
                         )}
                         <ChevronRight size={18} style={{ color: colors.muted, flexShrink: 0 }} aria-hidden />
@@ -788,24 +1071,58 @@ export default function Clients() {
         result={healthSheetClientId ? healthByClientId[healthSheetClientId] ?? null : null}
       />
 
-      {addClientOpen && (
+      {showManualAcquisition && addClientOpen && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.6)' }}
           role="dialog"
           aria-modal="true"
-          aria-label="Add client"
+          aria-label="Add client manually (dev or admin)"
         >
           <div
             className="rounded-2xl w-full max-w-sm overflow-hidden"
             style={{ background: colors.card, border: `1px solid ${colors.border}`, padding: spacing[24] }}
           >
-            <h3 className="text-[17px] font-semibold mb-4" style={{ color: colors.text }}>Add Client</h3>
+            <h3 className="text-[17px] font-semibold mb-1" style={{ color: colors.text }}>Add client (dev / admin)</h3>
+            <p className="text-[13px] mb-4" style={{ color: colors.muted, lineHeight: 1.45 }}>
+              Production coaches add clients only via invite link or coach code. This form is for demos, migration testing, or internal admin — not for real roster onboarding.
+            </p>
+            <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>Client journey</label>
+            <select
+              value={addClientForm.client_journey}
+              onChange={(e) => setAddClientForm((f) => ({ ...f, client_journey: e.target.value }))}
+              className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
+              style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, minHeight: 44 }}
+            >
+              <option value="transformation">Transformation / lifestyle</option>
+              <option value="competition">Competition prep</option>
+              {coachFocusRaw === 'integrated' ? (
+                <option value="integrated">Integrated (both lanes)</option>
+              ) : null}
+            </select>
             <input
               type="text"
               placeholder="Full name"
               value={addClientForm.full_name}
               onChange={(e) => setAddClientForm((f) => ({ ...f, full_name: e.target.value }))}
+              className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
+              style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, minHeight: 44 }}
+            />
+            <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>Email (optional)</label>
+            <input
+              type="email"
+              autoComplete="off"
+              placeholder="For your records; client can still join via invite link"
+              value={addClientForm.email}
+              onChange={(e) => setAddClientForm((f) => ({ ...f, email: e.target.value }))}
+              className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
+              style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, minHeight: 44 }}
+            />
+            <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>Coaching start date</label>
+            <input
+              type="date"
+              value={addClientForm.start_date}
+              onChange={(e) => setAddClientForm((f) => ({ ...f, start_date: e.target.value }))}
               className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
               style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text }}
             />
@@ -820,23 +1137,34 @@ export default function Clients() {
               <option value="cut">Cut</option>
               <option value="maintain">Maintain</option>
             </select>
-            <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>Show date (optional)</label>
-            <input
-              type="date"
-              value={addClientForm.show_date}
-              onChange={(e) => setAddClientForm((f) => ({ ...f, show_date: e.target.value }))}
-              className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
-              style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text }}
-            />
-            <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>Federation (optional)</label>
-            <input
-              type="text"
-              placeholder="e.g. NPC, IFBB, 2Bros"
-              value={addClientForm.federation}
-              onChange={(e) => setAddClientForm((f) => ({ ...f, federation: e.target.value }))}
-              className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
-              style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text }}
-            />
+            {(addClientForm.client_journey === 'competition' || addClientForm.client_journey === 'integrated') ? (
+              <>
+                <p className="text-[12px] mb-2" style={{ color: colors.muted, lineHeight: 1.45 }}>
+                  {addClientForm.client_journey === 'integrated'
+                    ? 'For integrated clients: add a show date when they are on a contest prep track — this enables prep timeline, contest prep row, and Prep filter.'
+                    : 'Show date unlocks prep timeline and contest prep tools. Federation and division are optional.'}
+                </p>
+                <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>
+                  Show date {addClientForm.client_journey === 'competition' ? '(recommended)' : '(when on prep)'}
+                </label>
+                <input
+                  type="date"
+                  value={addClientForm.show_date}
+                  onChange={(e) => setAddClientForm((f) => ({ ...f, show_date: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
+                  style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text }}
+                />
+                <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>Federation (optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. NPC, IFBB, 2Bros"
+                  value={addClientForm.federation}
+                  onChange={(e) => setAddClientForm((f) => ({ ...f, federation: e.target.value }))}
+                  className="w-full px-3 py-2.5 rounded-xl text-[15px] mb-3"
+                  style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text }}
+                />
+              </>
+            ) : null}
             <label className="block text-[13px] font-medium mb-1" style={{ color: colors.muted }}>Gym equipment (comma or space)</label>
             <input
               type="text"

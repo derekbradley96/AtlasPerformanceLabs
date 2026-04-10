@@ -20,6 +20,8 @@ export interface NutritionPlanRow {
   peak_week?: boolean | null;
   checkin_adjustment?: string | null;
   is_active?: boolean | null;
+  /** BMR calculator inputs + macro split (JSON). */
+  intake_metrics?: Record<string, unknown> | null;
   created_at: string;
   [key: string]: unknown;
 }
@@ -58,6 +60,7 @@ export type UpsertNutritionPlanPayload = {
   refeed_day?: boolean | null;
   peak_week?: boolean | null;
   checkin_adjustment?: string | null;
+  intake_metrics?: Record<string, unknown> | null;
 };
 
 export async function upsertNutritionPlan(
@@ -66,7 +69,7 @@ export async function upsertNutritionPlan(
   if (!hasSupabase || !supabase) throw new Error('Supabase not configured');
   const planId = payload.id;
   const { id: _id, ...rest } = payload;
-  const row = {
+  const row: Record<string, unknown> = {
     client_id: payload.client_id,
     trainer_id: payload.trainer_id,
     phase: payload.phase ?? null,
@@ -80,6 +83,12 @@ export async function upsertNutritionPlan(
     peak_week: payload.peak_week ?? false,
     checkin_adjustment: payload.checkin_adjustment ?? null,
   };
+  if (payload.intake_metrics !== undefined) {
+    row.intake_metrics =
+      payload.intake_metrics != null && typeof payload.intake_metrics === 'object'
+        ? payload.intake_metrics
+        : {};
+  }
   if (planId) {
     const { data, error } = await supabase
       .from('nutrition_plans')

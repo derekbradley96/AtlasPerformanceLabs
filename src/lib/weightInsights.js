@@ -8,6 +8,8 @@
  *   - level: 'positive' | 'info' | 'warning'
  */
 
+import { formatAbsWeightDeltaFromKg, formatWeightDeltaKg, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+
 function toNum(v) {
   if (v == null) return null;
   const n = Number(v);
@@ -25,6 +27,7 @@ function makeInsight(id, text, level = 'info') {
  * @returns {{ id: string, text: string, level: 'positive' | 'info' | 'warning' } | null}
  */
 export function detectRapidWeightLoss(trend = {}, options = {}) {
+  const wu = normalizeWeightUnit(options.viewerWeightUnit ?? 'kg');
   const latest = toNum(trend.latest_weight);
   const previous = toNum(trend.previous_weight);
   const change = toNum(trend.weekly_change != null ? trend.weekly_change : (latest != null && previous != null ? latest - previous : null));
@@ -33,8 +36,7 @@ export function detectRapidWeightLoss(trend = {}, options = {}) {
   if (latest == null || previous == null || change == null) return null;
   if (change >= -threshold) return null;
 
-  const delta = Math.abs(change).toFixed(1);
-  const text = `Rapid weight loss of ${delta} kg this week`;
+  const text = `Rapid weight loss of ${formatAbsWeightDeltaFromKg(Math.abs(change), wu)} this week`;
   return makeInsight('rapid_weight_loss', text, 'warning');
 }
 
@@ -64,6 +66,7 @@ export function detectPlateau(trend = {}, options = {}) {
  * @returns {{ id: string, text: string, level: 'positive' | 'info' | 'warning' } | null}
  */
 export function detectWeightGain(trend = {}, options = {}) {
+  const wu = normalizeWeightUnit(options.viewerWeightUnit ?? 'kg');
   const latest = toNum(trend.latest_weight);
   const previous = toNum(trend.previous_weight);
   const change = toNum(trend.weekly_change != null ? trend.weekly_change : (latest != null && previous != null ? latest - previous : null));
@@ -72,8 +75,7 @@ export function detectWeightGain(trend = {}, options = {}) {
   if (latest == null || previous == null || change == null) return null;
   if (change <= threshold) return null;
 
-  const delta = change.toFixed(1);
-  const text = `Weight up ${delta} kg since last check-in`;
+  const text = `Weight up ${formatWeightDeltaKg(change, wu).replace(/^\+/, '')} since last check-in`;
   return makeInsight('weight_gain', text, 'info');
 }
 

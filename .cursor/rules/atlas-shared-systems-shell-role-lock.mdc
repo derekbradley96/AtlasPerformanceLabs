@@ -1,0 +1,111 @@
+---
+description: Lock shared systems across web/app shells and Personal/Client wrappers
+alwaysApply: true
+---
+
+# Atlas Shared Systems Lock
+
+Treat this as architecture policy for all future shared features.
+
+## 1) Always handle both shells
+
+For shared features, explicitly implement both:
+- website shell version
+- app shell version
+
+Do not assume one presentation works for both.
+
+Website shell expectations:
+- desktop-appropriate layout
+- grid or split-panel structure where useful
+- stronger horizontal-space usage
+- web hierarchy, hover states, and denser information where appropriate
+
+App shell expectations:
+- mobile-first stacked flow
+- sticky CTA patterns where needed
+- safe-area awareness
+- thumb-friendly spacing
+- simplified hierarchy with fewer simultaneous decisions
+
+Same feature, different shell behavior. Do not let one shell inherit the wrong presentation from the other.
+
+## 2) Build shared systems once, wrap by role
+
+For Personal features that also apply to Client:
+- build one shared underlying engine/data model/rules layer
+- add separate role wrappers for Personal and Client
+
+Do not create separate core logic stacks when the human workflow is fundamentally the same.
+
+Common shared systems include:
+- nutrition targets
+- macro/calorie interpretation
+- workout logging
+- readiness/daily check-in
+- progress trends
+- adjustment rules
+- food logging
+- adherence summaries
+
+## 3) Role wrappers differ by permissions/copy, not core logic
+
+Personal wrapper:
+- self-directed language
+- self-edit controls
+- upgrade surfaces
+- Enhanced/AI layers only when entitled
+
+Client wrapper:
+- coach-directed context where relevant
+- coach-owned targets where appropriate
+- limited self-editing when coach should control the variable
+- messaging/coach feedback connections
+- same quality and shared interaction logic as Personal
+
+Client must not feel like a degraded clone.
+
+## 4) Nutrition interpretation expansion
+
+When building relevant nutrition feedback, interpret contextually:
+- calories
+- protein
+- carbs
+- fats
+
+Use target + actual + user goal + training context (when available).
+
+Examples:
+- build muscle + under protein => recovery/gain concern
+- lose fat + over calories => cut drift/tighten day guidance
+- hard training day + under carbs => under-fueled session risk
+- high fats + carbs massively over => macro distribution issue, not only calories
+
+## 5) Competition context expansion (conditional only)
+
+For competition-focused contexts, extend shared nutrition logic to support:
+- sodium/salt
+- hydration if tracked
+- tighter macro adherence
+- training-day fueling sensitivity
+
+Do not force prep-level complexity onto general users. Gate this by competition/prep context.
+
+## 6) Implementation checklist (required)
+
+For new Personal nutrition/workout/readiness/progress features:
+1. Check whether Client should inherit the same shared engine.
+2. Implement explicit role-wrapper differences.
+3. Implement explicit website-shell and app-shell versions.
+
+Do not leave Client behind.
+Do not let web look like stretched app.
+Do not let app inherit desktop interaction patterns.
+
+## 7) Reporting checklist (required in final response)
+
+Always report:
+- what is shared across Personal and Client
+- what differs by role wrapper
+- what differs between website shell and app shell
+- whether competition-only logic was conditionally added

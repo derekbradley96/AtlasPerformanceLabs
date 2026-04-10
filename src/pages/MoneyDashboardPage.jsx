@@ -9,6 +9,10 @@ import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import { colors, spacing } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import {
+  CoachProFeeComparisonBanner,
+  CoachMonthlyFeeSummaryModal,
+} from '@/components/coaching/CoachUpgradeMoments';
 import { MessageCircle, DollarSign, Users, AlertCircle } from 'lucide-react';
 
 const PAYMENT_REMINDER_MSG = 'Hi! This is a friendly reminder that your payment is overdue. Please settle at your earliest convenience. Thanks!';
@@ -51,6 +55,25 @@ async function getCoachMoneyDashboard() {
  * Fetch overdue clients for current coach (RLS restricts to coach's clients).
  * @returns {Promise<Array<{ id: string; name?: string; full_name?: string; monthly_fee?: number; next_due_date?: string }>>}
  */
+async function getCoachRevenueSummary() {
+  if (!hasSupabase) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.id) return null;
+    const { data, error } = await supabase
+      .from('v_coach_revenue_summary')
+      .select('total_revenue, revenue_last_30d')
+      .eq('coach_id', user.id)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 async function getOverdueClients() {
   if (!hasSupabase) return [];
   const supabase = getSupabase();
@@ -142,6 +165,25 @@ export default function MoneyDashboardPage() {
             <p className="text-xl font-semibold" style={{ color: overdueAmount > 0 ? '#E11D48' : colors.text }}>{formatCurrency(overdueAmount)}</p>
           </Card>
         </div>
+
+        {planTier === 'basic' && Number(revenueSummary?.revenue_last_30d) >= 50 && (
+          <div className="mb-6">
+            <CoachProFeeComparisonBanner
+              volumeLast30d={Number(revenueSummary?.revenue_last_30d) || 0}
+              planTier="basic"
+              onOpenSummary={openFeeSummary}
+            />
+          </div>
+        )}
+        {planTier === 'basic' && (
+          <CoachMonthlyFeeSummaryModal
+            open={feeSummaryOpen}
+            onClose={() => setFeeSummaryOpen(false)}
+            volumeLast30d={Number(revenueSummary?.revenue_last_30d) || 0}
+            totalRevenueAllTime={Number(revenueSummary?.total_revenue) || 0}
+            planTier="basic"
+          />
+        )}
 
         {next7DaysDue > 0 && (
           <p className="text-sm mb-4" style={{ color: colors.muted }}>

@@ -6,6 +6,7 @@
 
 import { safeGetJson, safeSetJson } from '@/lib/storageSafe';
 import { createDemoSeed } from './demoSeed';
+import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
 const DEMO_STORAGE_KEY = 'atlas_demo_dataset_v1';
 const DEMO_TRAINER_ID = 'demo-trainer';
@@ -319,7 +320,8 @@ export interface DemoReviewItem {
   [key: string]: unknown;
 }
 
-export function getDemoInboxItems(): { active: DemoReviewItem[]; waiting: DemoReviewItem[]; done: DemoReviewItem[] } {
+export function getDemoInboxItems(weightUnit: string = 'kg'): { active: DemoReviewItem[]; waiting: DemoReviewItem[]; done: DemoReviewItem[] } {
+  const wu = normalizeWeightUnit(weightUnit);
   const state = getDemoState();
   const active: DemoReviewItem[] = [];
   const done: DemoReviewItem[] = [];
@@ -334,7 +336,7 @@ export function getDemoInboxItems(): { active: DemoReviewItem[]; waiting: DemoRe
       type: 'CHECKIN_REVIEW',
       clientId: c.client_id,
       title: client?.full_name ?? 'Check-in',
-      subtitle: `Weight ${c.weight_kg ?? '—'} kg · Needs review`,
+      subtitle: `${c.weight_kg != null ? `${formatWeightForViewer(Number(c.weight_kg), wu)} · ` : ''}Needs review`,
       badge: { label: 'Review', tone: 'warning' },
       priorityScore: 75,
       primaryAction: { label: 'Review', type: 'review_checkin', checkinId: c.id },

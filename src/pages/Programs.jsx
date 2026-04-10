@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Plus, Search, Copy, Edit, Dumbbell, TrendingDown, Target, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { saveProgram, getAssignmentCount, getProgramById } from '@/lib/programsStore';
+import { saveProgram, getAssignmentCount, getProgramById, getPrograms as getLocalPrograms } from '@/lib/programsStore';
 import { logAuditEvent } from '@/lib/auditLogStore';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
@@ -14,6 +14,8 @@ import { ProgramsListSkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { captureUiError } from '@/services/errorLogger';
 import { colors, spacing } from '@/ui/tokens';
+import { usePresentationMode } from '@/lib/presentationMode';
+import { desktopRhythm, chipPadding, cardContentRhythm } from '@/ui/pageLayout';
 
 async function lightHaptic() {
   try {
@@ -39,6 +41,11 @@ const goalColors = {
 
 export default function Programs() {
   const navigate = useNavigate();
+  const { isDesktopWeb } = usePresentationMode();
+  const rhythm = desktopRhythm(isDesktopWeb);
+  const cardRhythm = cardContentRhythm(isDesktopWeb);
+  const cardPad = isDesktopWeb ? spacing[20] : spacing[16];
+  const goalChipPad = chipPadding({ desktop: isDesktopWeb, density: 'compact' });
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const data = useData();
@@ -64,12 +71,22 @@ export default function Programs() {
     setProgramsLoadError(false);
     data.listPrograms()
       .then((list) => {
-        if (!cancelled) setPrograms(Array.isArray(list) ? list : []);
+        if (cancelled) return;
+        const remote = Array.isArray(list) ? list : [];
+        // Keep local-builder programs visible even when remote list is empty/unavailable.
+        const local = getLocalPrograms();
+        const merged = [...remote];
+        const seen = new Set(remote.map((p) => p?.id).filter(Boolean));
+        for (const p of local) {
+          if (p?.id && !seen.has(p.id)) merged.push(p);
+        }
+        setPrograms(merged);
       })
       .catch((err) => {
         if (!cancelled) {
-          setPrograms([]);
-          setProgramsLoadError(true);
+          // Fall back to local programs for continuity in coach flow.
+          setPrograms(getLocalPrograms());
+          setProgramsLoadError(false);
           captureUiError('Programs', err);
         }
       })
@@ -101,12 +118,17 @@ export default function Programs() {
 
   const handleCreate = async () => {
     await lightHaptic();
-    navigate('/programbuilder');
+    navigate('/program-builder');
   };
 
-  const handleEdit = async (id) => {
+  const handleEdit = async (id, program) => {
     await lightHaptic();
-    navigate(`/programbuilder?id=${id}`);
+    const clientId = program?.client_id ?? null;
+    if (clientId) {
+      navigate(`/program-builder?clientId=${encodeURIComponent(clientId)}&blockId=${encodeURIComponent(id)}`);
+      return;
+    }
+    navigate('/program-builder');
   };
 
   const handleDuplicate = async (program) => {
@@ -116,9 +138,9 @@ export default function Programs() {
       id: undefined,
       exercises: (d.exercises || []).map((e) => ({ ...e, id: undefined })),
     })) };
-    const saved = saveProgram(copy);
+    saveProgram(copy);
     toast.success('Program duplicated!');
-    navigate(`/programbuilder?id=${saved.id}`, { replace: true });
+    navigate('/program-builder', { replace: true });
   };
 
   const handleAssignToClient = async (programId) => {
@@ -134,16 +156,26 @@ export default function Programs() {
   };
 
   return (
-    <div className="app-screen app-section min-w-0 max-w-full overflow-x-hidden">
+    <div
+      className="app-screen app-section min-w-0 max-w-full overflow-x-hidden"
+      style={{
+        maxWidth: isDesktopWeb ? 1240 : undefined,
+        margin: '0 auto',
+        width: '100%',
+        paddingTop: rhythm.top,
+        paddingLeft: isDesktopWeb ? spacing[20] : 0,
+        paddingRight: isDesktopWeb ? spacing[20] : 0,
+      }}
+    >
       {assignToClientId && clientForAssign && (
-        <Card style={{ marginBottom: spacing[16], padding: spacing[12] }}>
-          <p className="text-[13px] font-medium" style={{ color: colors.muted }}>Assigning to</p>
-          <p className="text-[15px] font-semibold" style={{ color: colors.text }}>{clientForAssign.full_name || 'Client'}</p>
-          <p className="text-[12px] mt-1" style={{ color: colors.muted }}>Tap a program below to assign it to this client.</p>
+        <Card style={{ marginBottom: spacing[16], padding: isDesktopWeb ? spacing[16] : spacing[12] }}>
+          <p className="text-[13px] font-medium" style={{ color: colors.muted, marginBottom: cardRhythm.titleBottom }}>Assigning to</p>
+          <p className="text-[15px] font-semibold" style={{ color: colors.text, marginBottom: cardRhythm.titleBottom }}>{clientForAssign.full_name || 'Client'}</p>
+          <p className="text-[12px] mt-1" style={{ color: colors.muted, marginTop: 0 }}>Tap a program below to assign it to this client.</p>
         </Card>
       )}
 
-      <div style={{ marginBottom: spacing[12] }}>
+      <div style={{ marginBottom: rhythm.gutter }}>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center">
             <Search size={18} style={{ color: colors.muted }} />
@@ -163,7 +195,7 @@ export default function Programs() {
         </div>
       </div>
 
-      <div style={{ marginBottom: spacing[16], minWidth: 0 }}>
+      <div style={{ marginBottom: rhythm.section, minWidth: 0 }}>
         <select
           value={goalFilter}
           onChange={(e) => setGoalFilter(e.target.value)}
@@ -189,7 +221,7 @@ export default function Programs() {
           onRetry={() => setRefreshKey((k) => k + 1)}
         />
       ) : !initialLoad && !dataLoading && filteredPrograms.length === 0 ? (
-        <Card style={{ padding: spacing[24], textAlign: 'center' }}>
+        <Card style={{ padding: isDesktopWeb ? spacing[28] : spacing[24], textAlign: 'center' }}>
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(255,255,255,0.08)' }}>
             <Dumbbell size={28} style={{ color: colors.muted }} />
           </div>
@@ -206,21 +238,21 @@ export default function Programs() {
           )}
         </Card>
       ) : !initialLoad && !dataLoading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[12] }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: rhythm.gutter }}>
           {(filteredPrograms || []).map((program) => {
             const GoalIcon = goalIcons[program.goal] || Dumbbell;
             const goalColor = goalColors[program.goal] || colors.muted;
             const assignedCount = getAssignmentCount(program.id);
             return (
-              <Card key={program.id} style={{ padding: spacing[16] }}>
-                <div className="flex items-start justify-between gap-3 mb-3">
+              <Card key={program.id} style={{ padding: cardPad }}>
+                <div className="flex items-start justify-between gap-3" style={{ marginBottom: spacing[12] }}>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-[15px] mb-2 truncate" style={{ color: colors.text }}>{program.name}</h3>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-[15px] truncate" style={{ color: colors.text, marginBottom: cardRhythm.titleBottom }}>{program.name}</h3>
+                    <div className="flex flex-wrap items-center gap-2" style={{ rowGap: isDesktopWeb ? spacing[8] : spacing[6] }}>
                       {program.goal && (
                         <span
-                          className="px-2 py-0.5 rounded-full text-[10px] font-medium inline-flex items-center gap-1"
-                          style={{ background: `${goalColor}22`, color: goalColor }}
+                          className="rounded-full text-[10px] font-medium inline-flex items-center gap-1"
+                          style={{ background: `${goalColor}22`, color: goalColor, ...goalChipPad }}
                         >
                           <GoalIcon size={12} />
                           {(program.goal || '').replace('_', ' ')}
@@ -233,13 +265,11 @@ export default function Programs() {
                       <span className="text-xs" style={{ color: colors.muted }}>{program.updated_date ? new Date(program.updated_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</span>
                       <span className="text-xs" style={{ color: colors.muted }}>{assignedCount} assigned</span>
                     </div>
-                    {program.description && (
-                      <p className="text-sm mt-2 line-clamp-2" style={{ color: colors.muted }}>{program.description}</p>
-                    )}
+                    {program.description && <p className="text-sm line-clamp-2" style={{ color: colors.muted, marginTop: cardRhythm.titleBottom }}>{program.description}</p>}
                   </div>
                 </div>
-                <div className="flex gap-2 flex-wrap">
-                  <Button variant="secondary" onClick={() => handleEdit(program.id)} style={{ flex: 1, minWidth: 0 }}>
+                <div className="flex gap-2 flex-wrap" style={{ marginTop: cardRhythm.actionsTop }}>
+                  <Button variant="secondary" onClick={() => handleEdit(program.id, program)} style={{ flex: 1, minWidth: 0 }}>
                     <Edit size={14} style={{ marginRight: 4 }} /> Edit
                   </Button>
                   <button

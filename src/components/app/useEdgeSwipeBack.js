@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '@/lib/AuthContext';
 import { isTabRoute } from '@/lib/routeMeta';
+import { DEFAULT_ROLE } from '@/lib/roles';
 
 const EDGE_THRESHOLD_PX = 24;
 const HORIZONTAL_THRESHOLD_PX = 70;
@@ -14,6 +16,8 @@ const VERTICAL_MAX_PX = 35;
 export function useEdgeSwipeBack(containerRef) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { effectiveRole, role } = useAuth();
+  const shellRole = effectiveRole ?? role ?? DEFAULT_ROLE;
   const startX = useRef(0);
   const startY = useRef(0);
   const tracking = useRef(false);
@@ -26,7 +30,7 @@ export function useEdgeSwipeBack(containerRef) {
     const el = containerRef?.current;
     if (!el) return;
 
-    if (isTabRoute(location.pathname)) return;
+    if (isTabRoute(location.pathname, shellRole)) return;
 
     const isInteractive = (node) => {
       if (!node || !node.tagName) return false;
@@ -82,5 +86,5 @@ export function useEdgeSwipeBack(containerRef) {
       el.removeEventListener('touchend', handleTouchEnd);
       el.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [containerRef, location.pathname, goBack]);
+  }, [containerRef, location.pathname, goBack, shellRole]);
 }

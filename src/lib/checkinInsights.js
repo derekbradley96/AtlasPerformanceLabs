@@ -4,6 +4,8 @@
  * No AI; uses thresholds and latest-vs-previous / last-2-vs-previous-2 comparisons.
  */
 
+import { formatAbsWeightDeltaFromKg, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+
 const WEIGHT_CHANGE_THRESHOLD_KG = 0.3;
 const COMPLIANCE_DROP_THRESHOLD = 10;
 const COMPLIANCE_IMPROVE_THRESHOLD = 10;
@@ -25,9 +27,11 @@ function toNum(v) {
 /**
  * Weight trend: compare latest vs previous check-in.
  * @param {Array<{ weight?: unknown; submitted_at?: unknown }>} trends - Ordered by submitted_at asc (oldest first).
+ * @param {unknown} [viewerWeightUnit]
  * @returns {{ level: 'positive' | 'neutral' | 'warning'; title: string; detail: string } | null}
  */
-export function getWeightTrendInsight(trends) {
+export function getWeightTrendInsight(trends, viewerWeightUnit = 'kg') {
+  const wu = normalizeWeightUnit(viewerWeightUnit);
   if (!Array.isArray(trends) || trends.length < 2) return null;
   const withWeight = trends.filter((t) => toNum(t.weight) != null);
   if (withWeight.length < 2) return null;
@@ -39,17 +43,17 @@ export function getWeightTrendInsight(trends) {
   if (absChange < WEIGHT_CHANGE_THRESHOLD_KG) {
     return { level: 'neutral', title: 'Weight is stable', detail: 'Little change from the previous check-in.' };
   }
-  const kg = Math.abs(change).toFixed(1);
+  const mag = formatAbsWeightDeltaFromKg(Math.abs(change), wu);
   if (change > 0) {
     return {
       level: 'warning',
-      title: `Weight is up ${kg} kg from the previous check-in`,
+      title: `Weight is up ${mag} from the previous check-in`,
       detail: 'Consider reviewing nutrition and adherence.',
     };
   }
   return {
     level: 'positive',
-    title: `Weight is down ${kg} kg from the previous check-in`,
+    title: `Weight is down ${mag} from the previous check-in`,
     detail: 'Trending in a lower direction.',
   };
 }
@@ -210,17 +214,51 @@ export function getPrepInsight(metrics) {
 }
 
 /**
+ * Nutrition adaptation suggestion from weight trend velocity.
+ * @param {Array<{ weight?: unknown }>} trends
+ * @returns {{ level: 'positive' | 'neutral' | 'warning'; title: string; detail: string } | null}
+ */
+export function getNutritionAdjustmentInsight(trends) {
+  if (!Array.isArray(trends) || trends.length < 3) return null;
+  const withWeight = trends.map((t) => toNum(t.weight)).filter((n) => n != null);
+  if (withWeight.length < 3) return null;
+  const latest = withWeight[withWeight.length - 1];
+  const twoAgo = withWeight[withWeight.length - 3];
+  const change = latest - twoAgo;
+  if (Math.abs(change) < 0.2) {
+    return {
+      level: 'warning',
+      title: 'Weight trend is flat',
+      detail: 'Consider a small macro adjustment (-100 to -150 kcal) if fat loss is the goal.',
+    };
+  }
+  if (change <= -1.0) {
+    return {
+      level: 'warning',
+      title: 'Weight is dropping quickly',
+      detail: 'Consider increasing calories slightly (+100 to +150 kcal) to protect performance.',
+    };
+  }
+  return {
+    level: 'neutral',
+    title: 'Weight trend is moving as expected',
+    detail: 'No nutrition change needed right now.',
+  };
+}
+
+/**
  * Collect all insights that apply given trends and metrics.
  * @param {Array<Record<string, unknown>>} trends - From v_client_progress_trends (ordered submitted_at asc).
  * @param {Record<string, unknown> | null | undefined} metrics - One row from v_client_progress_metrics.
  * @returns {{ weight: ReturnType<typeof getWeightTrendInsight>; compliance: ReturnType<typeof getComplianceInsight>; recovery: ReturnType<typeof getRecoveryInsight>; flags: ReturnType<typeof getFlagInsight>; prep: ReturnType<typeof getPrepInsight> }}
  */
-export function getCheckinInsights(trends, metrics) {
+export function getCheckinInsights(trends, metrics, viewerWeightUnit = 'kg') {
   return {
-    weight: getWeightTrendInsight(trends ?? []),
+    weight: getWeightTrendInsight(trends ?? [], viewerWeightUnit),
     compliance: getComplianceInsight(trends ?? []),
     recovery: getRecoveryInsight(trends ?? []),
     flags: getFlagInsight(metrics),
     prep: getPrepInsight(metrics),
+    nutritionAdjustment: getNutritionAdjustmentInsight(trends ?? []),
   };
 }

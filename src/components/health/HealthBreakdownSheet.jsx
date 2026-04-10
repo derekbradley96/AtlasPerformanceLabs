@@ -14,6 +14,8 @@ import {
 import Button from '@/ui/Button';
 import { colors, spacing, radii } from '@/ui/tokens';
 import { safeDate } from '@/lib/format';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 const BADGE_STYLE = {
   green: { bg: colors.successSubtle, color: colors.success },
@@ -116,6 +118,8 @@ export default function HealthBreakdownSheet({
   onRequestCheckIn,
   coachFocus = null,
 }) {
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const recentWeights = useMemo(() => getRecentWeights(checkIns), [checkIns]);
   const chartData = useMemo(() => recentWeights.slice(0, 4).map((w) => w.value).reverse(), [recentWeights]);
 
@@ -139,7 +143,7 @@ export default function HealthBreakdownSheet({
     return tb - ta;
   })[0];
 
-  const weightDisplay = weightCurrent != null ? `${Number(weightCurrent).toFixed(1)} kg` : '—';
+  const weightDisplay = weightCurrent != null ? formatWeightForViewer(weightCurrent, viewerWU) : '—';
   const stepsAvg = latestCheckIn?.steps ?? latestCheckIn?.steps_avg ?? null;
   const stepsDisplay = stepsAvg != null ? `${Number(stepsAvg).toLocaleString()}` : '—';
   const sleepAvg = latestCheckIn?.sleep_hours ?? latestCheckIn?.sleep_avg ?? null;

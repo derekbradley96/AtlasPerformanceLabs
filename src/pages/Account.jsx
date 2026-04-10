@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
@@ -12,6 +12,8 @@ import { pageContainer, standardCard } from '@/ui/pageLayout';
 import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
 import { COACH_FOCUS_OPTIONS, coachFocusLabel } from '@/lib/data/coachTypeHelpers';
+import { normalizeRole } from '@/lib/roles';
+import { atlasMigrationDataAttributes, deriveAccountHubRouteState } from '@/lib/atlasMigrationPhases';
 
 /**
  * Account hub: iOS list style. No in-page header (AppShell provides back + title).
@@ -22,9 +24,10 @@ export default function Account() {
   const navigate = useNavigate();
   const location = useLocation();
   const { openFeedback, openSupport } = useFeedbackModal();
-  const { user: authUser, role, profile, coachFocus, updateProfile, isDemoMode, isLoadingAuth, supabaseUser } = useAuth();
+  const { user: authUser, role, effectiveRole, profile, coachFocus, updateProfile, isDemoMode, isLoadingAuth, supabaseUser } = useAuth();
   const displayUser = authUser;
   const [updatingFocus, setUpdatingFocus] = useState(false);
+  const canonicalRole = normalizeRole(effectiveRole ?? role ?? null);
 
   const displayFocus = (profile?.coach_focus ?? coachFocus ?? 'transformation').toLowerCase();
   const effectiveFocus = ['transformation', 'competition', 'integrated'].includes(displayFocus) ? displayFocus : 'transformation';
@@ -46,10 +49,22 @@ export default function Account() {
     }
   };
 
-  if (!isDemoMode && isLoadingAuth) return <PageLoader />;
+  const accountHubMigrationAttrs = useMemo(() => {
+    const surface = !isDemoMode && isLoadingAuth ? 'loading' : 'active';
+    const s = deriveAccountHubRouteState({ roleView: canonicalRole, surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [isDemoMode, isLoadingAuth, canonicalRole]);
+
+  if (!isDemoMode && isLoadingAuth) {
+    return (
+      <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={pageContainer} {...accountHubMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
+  }
 
   return (
-    <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={pageContainer}>
+    <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={pageContainer} {...accountHubMigrationAttrs}>
       <div className="overflow-hidden" style={standardCard}>
         <Row
           left={<UserCircle size={20} style={{ color: colors.muted }} />}

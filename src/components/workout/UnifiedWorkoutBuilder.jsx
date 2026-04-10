@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import CustomExerciseForm from './CustomExerciseForm';
@@ -34,15 +35,27 @@ export default function UnifiedWorkoutBuilder({
   isLoadingCustom = false
 }) {
   const [showCustomForm, setShowCustomForm] = useState(false);
-  const [exerciseSearch, setExerciseSearch] = useState('');
+  const allExercises = useMemo(() => {
+    const list = [...(exercises || []), ...(customExercises || [])];
+    // Keep stable ordering but ensure unique ids.
+    const seen = new Set();
+    return list.filter((e) => {
+      if (!e?.id) return false;
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+  }, [exercises, customExercises]);
 
-  const filteredExercises = exercises.filter(e =>
-    e.name.toLowerCase().includes(exerciseSearch.toLowerCase())
-  );
+  const [selectedExerciseId, setSelectedExerciseId] = useState('');
 
-  const filteredCustom = customExercises.filter(e =>
-    e.name.toLowerCase().includes(exerciseSearch.toLowerCase())
-  );
+  useEffect(() => {
+    const first = allExercises[0]?.id ?? '';
+    setSelectedExerciseId(first);
+  }, [selectedMuscleGroup, allExercises]);
+
+  const selectedMuscleLabel = MUSCLE_GROUPS.find((g) => g.id === selectedMuscleGroup)?.label ?? '';
+  const selectedExercise = allExercises.find((e) => e?.id === selectedExerciseId) ?? null;
 
   const handleAddExercise = (exercise) => {
     if (workoutExercises.some(ex => ex.name.toLowerCase() === exercise.name.toLowerCase())) {
@@ -66,19 +79,24 @@ export default function UnifiedWorkoutBuilder({
   if (!selectedMuscleGroup) {
     return (
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-white mb-4">Pick muscle group(s)</h2>
-        <p className="text-slate-400 text-sm mb-4">Start with one, then add more exercises from different groups</p>
-        
-        <div className="grid grid-cols-2 gap-3">
-          {MUSCLE_GROUPS.map((group) => (
-            <button
-              key={group.id}
-              onClick={() => onMuscleGroupSelect(group.id)}
-              className="bg-slate-800/30 border border-slate-700 rounded-xl p-5 text-center hover:bg-slate-800 hover:border-slate-600 transition-all"
-            >
-              <p className="font-medium text-white text-sm uppercase tracking-wide">{group.label}</p>
-            </button>
-          ))}
+        <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-5">
+          <h2 className="text-xl font-semibold text-white mb-2">Pick a muscle group</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Choose the muscle group you want to build exercises for.
+          </p>
+
+          <Select onValueChange={(v) => onMuscleGroupSelect(v)}>
+            <SelectTrigger className="bg-slate-900/50 border-slate-700">
+              <SelectValue placeholder="Select muscle group..." />
+            </SelectTrigger>
+            <SelectContent>
+              {MUSCLE_GROUPS.map((group) => (
+                <SelectItem key={group.id} value={group.id}>
+                  {group.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
     );
@@ -87,16 +105,78 @@ export default function UnifiedWorkoutBuilder({
   // Step 2: Exercise Selection
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-white">
-          {MUSCLE_GROUPS.find(g => g.id === selectedMuscleGroup)?.label} Exercises
-        </h2>
-        <button
-          onClick={() => onMuscleGroupSelect(null)}
-          className="text-sm text-slate-400 hover:text-white transition-colors"
-        >
-          Change
-        </button>
+      <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-5">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-white">{selectedMuscleLabel} Exercises</h2>
+            <p className="text-slate-400 text-sm mt-1">Select an exercise below, then add it to your workout.</p>
+          </div>
+
+          <div className="min-w-[180px]">
+            <Select value={selectedMuscleGroup} onValueChange={(v) => onMuscleGroupSelect(v)}>
+              <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MUSCLE_GROUPS.map((group) => (
+                  <SelectItem key={group.id} value={group.id}>
+                    {group.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-slate-300 mb-2 block">Exercise</label>
+            <Select value={selectedExerciseId} onValueChange={setSelectedExerciseId} disabled={allExercises.length === 0}>
+              <SelectTrigger className="bg-slate-900/50 border-slate-700">
+                <SelectValue placeholder={allExercises.length ? 'Select exercise...' : 'No exercises available'} />
+              </SelectTrigger>
+              <SelectContent>
+                {allExercises.map((ex) => (
+                  <SelectItem key={ex.id} value={ex.id}>
+                    {ex.name}
+                    {ex.isCustom ? ' (Custom)' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {selectedExercise ? (
+            <div className="text-xs text-slate-400 leading-relaxed">
+              {selectedExercise.primaryMuscleGroup ? `${selectedExercise.primaryMuscleGroup}` : null}
+              {selectedExercise.movementPattern ? ` • ${selectedExercise.movementPattern}` : null}
+              {selectedExercise.equipment?.length ? ` • ${selectedExercise.equipment.join(', ')}` : null}
+            </div>
+          ) : null}
+
+          <div className="flex gap-3">
+            <Button
+              onClick={() => selectedExercise && handleAddExercise(selectedExercise)}
+              disabled={!selectedExercise}
+              className="flex-1 bg-blue-500 hover:bg-blue-600 text-white"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Exercise
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={() => setShowCustomForm(true)}
+              className="border-slate-700 text-slate-200 hover:bg-slate-800"
+            >
+              + Custom
+            </Button>
+          </div>
+
+          {allExercises.length === 0 && (
+            <p className="text-sm text-slate-400">No exercises available for this muscle group.</p>
+          )}
+        </div>
       </div>
 
       {/* Added Exercises */}
@@ -177,59 +257,12 @@ export default function UnifiedWorkoutBuilder({
           </div>
         </div>
       )}
-
-      {/* Exercise Library */}
-      <div>
-        <Input
-          value={exerciseSearch}
-          onChange={(e) => setExerciseSearch(e.target.value)}
-          placeholder="Search exercises..."
-          className="bg-slate-800/50 border-slate-700 mb-4"
-        />
-
-        <div className="space-y-2">
-          {/* Standard exercises */}
-          {filteredExercises.map((exercise) => (
-            <button
-              key={exercise.id}
-              onClick={() => handleAddExercise(exercise)}
-              className="w-full flex items-center justify-between p-3 bg-slate-800/50 border border-slate-700/50 rounded-lg hover:bg-slate-800 transition-colors text-left"
-            >
-              <span className="text-white font-medium">{exercise.name}</span>
-              <Plus className="w-4 h-4 text-slate-400" />
-            </button>
-          ))}
-
-          {/* Custom exercises */}
-          {filteredCustom.map((exercise) => (
-            <button
-              key={exercise.id}
-              onClick={() => handleAddExercise(exercise)}
-              className="w-full flex items-center justify-between p-3 bg-blue-500/10 border border-blue-500/50 rounded-lg hover:bg-blue-500/20 transition-colors text-left"
-            >
-              <div className="flex-1">
-                <span className="text-blue-300 font-medium block">{exercise.name}</span>
-                {exercise.muscle_focus && (
-                  <span className="text-xs text-blue-400">{exercise.muscle_focus}</span>
-                )}
-              </div>
-              <Plus className="w-4 h-4 text-blue-400 flex-shrink-0" />
-            </button>
-          ))}
-
-          {filteredExercises.length === 0 && filteredCustom.length === 0 && (
-            <p className="text-slate-400 text-sm p-3">No exercises found</p>
-          )}
+      {/* When no exercises have been added yet, keep a friendly hint */}
+      {workoutExercises.length === 0 && (
+        <div className="text-sm text-slate-400">
+          Add your first exercise using the dropdown above.
         </div>
-
-        <button
-          onClick={() => setShowCustomForm(true)}
-          className="w-full flex items-center justify-between p-3 bg-slate-700/30 border border-slate-600 rounded-lg hover:bg-slate-700/50 transition-colors text-left mt-3"
-        >
-          <span className="text-slate-300 font-medium">+ Add Custom Exercise</span>
-          <Plus className="w-4 h-4 text-slate-400" />
-        </button>
-      </div>
+      )}
 
       {/* Custom Exercise Modal */}
       <Dialog open={showCustomForm} onOpenChange={setShowCustomForm}>

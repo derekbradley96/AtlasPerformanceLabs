@@ -1,9 +1,18 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createPageUrl } from '@/utils';
+import { useAuth } from '@/lib/AuthContext';
+import { isPersonal } from '@/lib/roles';
+import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
+import { PERSONAL_MARKETPLACE_SOURCE } from '@/lib/personalMarketplaceEntry';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, TrendingUp, Zap, X, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+
+const TRIGGER_TO_SOURCE = {
+  plateau: PERSONAL_MARKETPLACE_SOURCE.FROM_PLATEAU,
+  nutrition_inconsistent: PERSONAL_MARKETPLACE_SOURCE.FROM_ACCOUNTABILITY,
+  frequent_rebuild: PERSONAL_MARKETPLACE_SOURCE.FROM_ADVANCED_REFINEMENT,
+};
 
 const triggerConfig = {
   plateau: {
@@ -28,7 +37,17 @@ const triggerConfig = {
 
 export default function CoachingUpgradeCard({ trigger, reason, variant = 'card' }) {
   const navigate = useNavigate();
+  const { effectiveRole } = useAuth();
   const [dismissed, setDismissed] = useState(false);
+
+  const goFindCoach = () => {
+    if (isPersonal(effectiveRole)) {
+      const source = TRIGGER_TO_SOURCE[trigger] || PERSONAL_MARKETPLACE_SOURCE.FROM_GENERAL_DISCOVERY;
+      navigate(buildPersonalCoachTierSelectionUrl({ source }));
+    } else {
+      navigate('/discover');
+    }
+  };
 
   if (!trigger || dismissed) return null;
 
@@ -52,9 +71,7 @@ export default function CoachingUpgradeCard({ trigger, reason, variant = 'card' 
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
-              onClick={() => {
-                navigate(createPageUrl('FindTrainer'));
-              }}
+              onClick={goFindCoach}
               className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors"
             >
               Learn More
@@ -118,7 +135,7 @@ export default function CoachingUpgradeCard({ trigger, reason, variant = 'card' 
 
           {/* CTA */}
           <Button
-            onClick={() => navigate(createPageUrl('FindTrainer'))}
+            onClick={goFindCoach}
             className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white font-semibold flex items-center justify-center gap-2"
           >
             {config.cta}

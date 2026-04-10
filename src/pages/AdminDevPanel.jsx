@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { ChevronLeft, User, Users, Dumbbell, Shield, RotateCcw, LogOut, Zap, UserPlus, Copy, Mail, Trash2, ListChecks } from 'lucide-react';
+import UpgradeTriggerSimulator from '@/components/dev/UpgradeTriggerSimulator';
 import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
 import { APP_MODE, SUPABASE_ENABLED } from '@/lib/config';
 import { stripeServiceUpsert, MOCK_SERVICES } from '@/lib/supabaseStripeApi';
@@ -547,6 +548,14 @@ VITE_SUPABASE_ANON_KEY=your_anon_key`;
             </p>
           </div>
         )}
+
+        <div style={{ marginTop: 24, padding: 16, background: CARD, borderRadius: 14 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 12, color: TEXT }}>Upgrade trigger simulator</h2>
+          <p style={{ fontSize: 13, color: MUTED, marginBottom: 12 }}>
+            Coach upgrade prompts — internal testing only (removed from Coach Home).
+          </p>
+          <UpgradeTriggerSimulator />
+        </div>
       </div>
     </div>
   );

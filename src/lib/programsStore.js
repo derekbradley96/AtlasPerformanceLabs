@@ -122,6 +122,27 @@ export function saveProgram(program) {
   return newProgram;
 }
 
+/**
+ * In-place update for existing program ID.
+ * Used for controlled auto-tuning flows where assignment should remain intact.
+ */
+export function updateProgramInPlace(programId, patch) {
+  if (!programId) return null;
+  const list = getPrograms();
+  const index = list.findIndex((p) => p.id === programId);
+  if (index < 0) return null;
+  const now = new Date().toISOString();
+  const next = {
+    ...list[index],
+    ...(patch || {}),
+    id: programId,
+    updated_date: now,
+  };
+  list[index] = next;
+  safeSet(PROGRAMS_KEY, list);
+  return next;
+}
+
 export function deleteProgram(id) {
   const list = getPrograms().filter((p) => p.id !== id);
   safeSet(PROGRAMS_KEY, list);

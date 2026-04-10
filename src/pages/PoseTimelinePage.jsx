@@ -116,7 +116,7 @@ export default function PoseTimelinePage() {
   const selectedLabel = poses.find((p) => p.pose_key === selectedPoseKey)?.pose_label || selectedPoseKey;
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 96 }}>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Pose Timeline" onBack={() => navigate(-1)} />
       <div className="p-4">
         {poses.length === 0 ? (

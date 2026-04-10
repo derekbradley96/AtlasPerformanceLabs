@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { colors, spacing } from '@/ui/tokens';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 import { parseProgressCSV, validateProgressRows, importBodyweightHistory } from '@/services/migration/progressImportService';
 import { toast } from 'sonner';
 import { trackFriction } from '@/services/frictionTracker';
@@ -19,7 +20,8 @@ import { FileSpreadsheet } from 'lucide-react';
 export default function ImportBodyweightPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const coachId = user?.id ?? null;
 
   const [csvText, setCsvText] = useState('');
@@ -174,7 +176,7 @@ export default function ImportBodyweightPage() {
                   >
                     <span className="text-sm" style={{ color: colors.text }}>{row.client_email}</span>
                     <span className="text-xs ml-2" style={{ color: colors.muted }}>
-                      {row.log_date ?? row.date} · {row.weight != null ? `${row.weight} kg` : '—'}
+                      {row.log_date ?? row.date} · {row.weight != null ? formatWeightForViewer(Number(row.weight), viewerWU) : '—'}
                       {row.bodyfat != null ? ` · ${row.bodyfat}% BF` : ''}
                     </span>
                   </div>

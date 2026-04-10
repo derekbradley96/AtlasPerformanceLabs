@@ -16,6 +16,7 @@ import { getOrCreateInviteCode, getPendingInvites } from '@/lib/inviteCodeStore'
 import { buildSegmentedInbox } from '@/lib/inboxService';
 import { getEarningsForPeriod } from '@/lib/earningsMock';
 import { getEarningsSummary } from '@/lib/earningsService';
+import { logError } from '@/services/errorLogger';
 
 /** @deprecated Use SUPABASE_ENABLED from @/lib/config */
 function isSupabaseConfigured(): boolean {
@@ -128,9 +129,49 @@ export async function getInviteCode(trainerId: string, isDemoMode: boolean): Pro
   if (isDemoMode) return getOrCreateInviteCode(trainerId);
   if (!isSupabaseConfigured()) return '';
   const { data, error } = await invokeSupabaseFunction('generateInviteCode', {});
-  if (error || !data) return '';
+  if (error) {
+    const errUnknown = error as unknown;
+    logError(errUnknown instanceof Error ? errUnknown : new Error(String((errUnknown as { message?: string })?.message || 'generateInviteCode failed')), {
+      action: 'getInviteCode',
+      trainerId,
+    });
+    return '';
+  }
+  if (!data) return '';
   const d = data as Record<string, unknown>;
-  return (d?.code ?? '') as string;
+  const code = (d?.code ?? '') as string;
+  return typeof code === 'string' ? code.trim() : '';
+}
+
+const ENSURE_INVITE_DEFAULT_RETRIES = 5;
+const ENSURE_INVITE_BASE_DELAY_MS = 350;
+
+/**
+ * Ensures a coach invite code exists (idempotent). Retries on transient failures / empty responses.
+ */
+export async function ensureCoachInviteCode(
+  trainerId: string,
+  isDemoMode: boolean,
+  options?: { retries?: number },
+): Promise<string> {
+  const retries = Math.max(1, options?.retries ?? ENSURE_INVITE_DEFAULT_RETRIES);
+  let last = '';
+  for (let i = 0; i < retries; i++) {
+    try {
+      const code = await getInviteCode(trainerId, isDemoMode);
+      last = (code ?? '').toString().trim();
+      if (last) return last;
+    } catch (e) {
+      logError(e, { action: 'ensureCoachInviteCode', trainerId, attempt: i + 1 });
+    }
+    if (i < retries - 1) {
+      await new Promise((r) => setTimeout(r, ENSURE_INVITE_BASE_DELAY_MS * (i + 1)));
+    }
+  }
+  if (last === '' && !isDemoMode && isSupabaseConfigured()) {
+    logError(new Error('ensureCoachInviteCode exhausted retries without code'), { action: 'ensureCoachInviteCode', trainerId, retries });
+  }
+  return last;
 }
 
 /** Pending invites for trainer. Demo: inviteCodeStore. Live: no list API; return empty. */

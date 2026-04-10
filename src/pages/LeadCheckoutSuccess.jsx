@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle } from 'lucide-react';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { createClientStub } from '@/lib/clientStubStore';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { atlasMigrationDataAttributes, deriveLeadCheckoutPostRouteState } from '@/lib/atlasMigrationPhases';
 
 const LEAD_CHECKOUT_PENDING_KEY = 'lead_checkout_pending';
 
@@ -45,10 +46,16 @@ export default function LeadCheckoutSuccess() {
     setConverted(true);
   }, [sessionId, converted]);
 
+  const leadPostAttrs = useMemo(() => {
+    const s = deriveLeadCheckoutPostRouteState({ surface: 'success' });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, []);
+
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center p-6"
       style={{ background: colors.bg, color: colors.text }}
+      {...leadPostAttrs}
     >
       <CheckCircle size={48} style={{ color: colors.success, marginBottom: spacing[16] }} />
       <h1 className="text-xl font-semibold mb-2">Payment successful</h1>

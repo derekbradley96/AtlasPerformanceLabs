@@ -45,7 +45,9 @@ export default defineConfig(({ mode }) => {
       environment: 'node',
       passWithNoTests: true,
     },
-    base: './',
+    // Use absolute asset URLs so deep links (/messages/123, /auth/callback, etc.)
+    // resolve JS/CSS correctly in production and Capacitor.
+    base: '/',
     logLevel: 'error',
     server: {
       port: 5174,

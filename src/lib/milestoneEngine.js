@@ -41,7 +41,7 @@ export function evaluateClientMilestones(clientId, options = {}) {
   const checkIns = getClientCheckIns(clientId);
   const lifts = options.lifts || [];
 
-  const { newMilestones } = evaluateMilestones(client, checkIns, lifts);
+  const { newMilestones } = evaluateMilestones(client, checkIns, lifts, options.viewerWeightUnit ?? 'kg');
   for (const m of newMilestones) {
     const record = unlockMilestone(m.milestoneId, {
       clientId,

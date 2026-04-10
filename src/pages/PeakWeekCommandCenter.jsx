@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { colors, spacing, radii, shadows } from '@/ui/tokens';
 import { Calendar, ImageIcon, MessageSquare, ClipboardList, FileCheck, Pencil } from 'lucide-react';
 import { hapticLight } from '@/lib/haptics';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 function getCoachFocus(profile, coachFocusFromAuth) {
   const raw = (coachFocusFromAuth ?? profile?.coach_focus ?? 'transformation').toString().trim().toLowerCase();
@@ -26,6 +27,7 @@ export default function PeakWeekCommandCenter() {
   const navigate = useNavigate();
   const { user, profile, coachFocus: coachFocusFromAuth } = useAuth();
   const coachFocus = getCoachFocus(profile, coachFocusFromAuth);
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const showPeakWeek = showPeakWeekByFocus(coachFocus);
 
   const [loading, setLoading] = useState(true);
@@ -142,7 +144,7 @@ export default function PeakWeekCommandCenter() {
                     <div>
                       <span className="text-xs" style={{ color: colors.muted }}>Weight trend</span>
                       <p className="font-medium" style={{ color: colors.text }}>
-                        {r.weight_latest != null ? `${Number(r.weight_latest)} kg` : '—'}
+                        {r.weight_latest != null ? formatWeightForViewer(Number(r.weight_latest), viewerWU) : '—'}
                         {r.weight_change_last_checkin != null && r.weight_change_last_checkin !== 0
                           ? ` (${r.weight_change_last_checkin > 0 ? '+' : ''}${Number(r.weight_change_last_checkin).toFixed(1)})`
                           : ''}

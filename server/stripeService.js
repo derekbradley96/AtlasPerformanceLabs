@@ -47,7 +47,7 @@ export function calculatePlatformFee(amountPaidCents, commissionRate) {
  * Create a subscription for a customer.
  * @param {string} customerId - Stripe customer ID
  * @param {string} priceId - Stripe price ID (e.g. price_xxx)
- * @param {object} [options] - { metadata?: object, trialPeriodDays?: number }
+ * @param {object} [options] - { metadata?: object }
  * @returns {Promise<Stripe.Subscription>}
  */
 export async function createSubscription(customerId, priceId, options = {}) {
@@ -56,7 +56,6 @@ export async function createSubscription(customerId, priceId, options = {}) {
     customer: customerId,
     items: [{ price: priceId }],
     ...(options.metadata && { metadata: options.metadata }),
-    ...(options.trialPeriodDays != null && { trial_period_days: options.trialPeriodDays }),
   };
   return stripe.subscriptions.create(params);
 }

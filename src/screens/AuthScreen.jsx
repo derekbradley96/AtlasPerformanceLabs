@@ -1,27 +1,29 @@
 /**
- * Auth screen: Atlas branding, Log in / Sign up, client code entry, role-aware signup.
- * Polished for native iOS feel (haptics, loading states, keyboard UX, micro-animations).
- * Production auth flow is unified through /auth. Legacy role-select pages are DEV/demo only.
+ * Auth entry: single screen — Log in | Sign up.
+ * Sign up is step-based (mobile-first): role → [coach code if Client] → email + password.
+ * Client signup requires a validated coach code before account creation (no dead ends).
+ * Coach focus defaults to transformation (set later in app); display name derived from email if omitted.
  */
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { User, Check } from 'lucide-react';
+import { User, ChevronLeft, Check } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
-import { COACH_FOCUS_OPTIONS } from '@/lib/data/coachTypeHelpers';
 import { hasSupabase } from '@/lib/supabaseClient';
+import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 import Card from '@/ui/Card';
 import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
 import { toast } from 'sonner';
 
 import AtlasLogo from '@/components/Brand/AtlasLogo';
-import { getPendingInvite } from '@/pages/ClientCode';
+import { getPendingInvite, clearPendingInvite, setPendingInvite } from '@/pages/ClientCode';
+import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
+import { deriveAuthScreenSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
+import { resolvePostSessionDestination } from '@/lib/auth/postAuthNavigation';
 
 const ATLAS_BLUE = colors.brand;
 
-/** Login errors: generic message to avoid leaking account existence. */
 function getAuthErrorMessage(authError) {
   if (!authError) return 'Invalid email or password';
   if (import.meta.env.DEV) {
@@ -32,11 +34,14 @@ function getAuthErrorMessage(authError) {
     });
   }
   const msg = (authError?.message ?? '').toString();
-  if (msg.toLowerCase().includes('email not confirmed')) return 'Email not confirmed';
+  const lower = msg.toLowerCase();
+  if (lower.includes('timed out') || lower.includes('failed to fetch')) {
+    return 'Sign in timed out. Check your connection and try again.';
+  }
+  if (lower.includes('email not confirmed')) return 'Email not confirmed';
   return 'Invalid email or password';
 }
 
-/** Signup errors: show real Supabase message (never "Invalid email or password"). */
 function getSignupErrorMessage(authError) {
   if (!authError) return 'Could not create account';
   if (import.meta.env.DEV) {
@@ -55,42 +60,136 @@ async function lightHaptic() {
 
 function isEmailValid(value) {
   const t = (value ?? '').trim();
-  return t.length > 0 && t.includes('@');
+  return t.length > 0 && t.includes('@') && !t.endsWith('@');
 }
+
+/** Signup sub-flow after user picks a role */
+const SIGNUP_STAGE = /** @type {const} */ ({
+  PICK_ROLE: 'pick_role',
+  CLIENT_CODE: 'client_code',
+  ACCOUNT: 'account',
+});
 
 export default function AuthScreen() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { signIn, signUp, isLoadingAuth, supabaseUser, profile } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { signIn, signUp, isLoadingAuth, supabaseUser, profile, role, isHydratingAppState, profileLoadError, logout } = useAuth();
   const paramMode = searchParams.get('mode');
   const paramAccount = searchParams.get('account');
+  /** From marketing links: keep user on email/password screen (do not auto-route to onboarding). */
+  const isPublicAuthEntry = searchParams.get('public') === '1';
+
   const [mode, setMode] = useState(() => (paramMode === 'signup' ? 'signup' : 'login'));
-  const [logoMounted, setLogoMounted] = useState(false);
-  const [cardMounted, setCardMounted] = useState(false);
+  const [signupStage, setSignupStage] = useState(() => SIGNUP_STAGE.PICK_ROLE);
   const [signupRole, setSignupRole] = useState(() => {
     if (paramAccount === 'client') return 'client';
     if (paramAccount === 'personal') return 'personal';
+    if (paramAccount === 'coach') return 'coach';
     return 'coach';
   });
-  const [signupCoachFocus, setSignupCoachFocus] = useState('transformation');
-  const [displayName, setDisplayName] = useState('');
+
+  const [logoMounted, setLogoMounted] = useState(false);
+  const [cardMounted, setCardMounted] = useState(false);
   const [pressing, setPressing] = useState(false);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
+  const codeInputRef = useRef(null);
 
   const referralCodeFromUrl = (searchParams.get('ref') ?? '').trim() || null;
+  const inviteCodeFromUrl = (searchParams.get('invite') ?? '').trim();
+
+  const [coachCode, setCoachCode] = useState('');
+  const [codeLoading, setCodeLoading] = useState(false);
+  const [codeError, setCodeError] = useState('');
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [errorVisible, setErrorVisible] = useState(false);
+  const [postAuthRouting, setPostAuthRouting] = useState(false);
+  const [accountSwitchBusy, setAccountSwitchBusy] = useState(false);
+
+  const isLogin = mode === 'login';
 
   useEffect(() => {
     if (paramMode === 'signup') setMode('signup');
     else if (paramMode === 'login') setMode('login');
   }, [paramMode]);
-  // When URL has account=client, ensure we're in signup mode and role is client (so client-only UI shows)
+
+  /** URL deep links: /auth?mode=signup&account=client — code first unless already validated */
   useEffect(() => {
-    if (paramAccount === 'coach' || paramAccount === 'personal' || paramAccount === 'client') {
-      setSignupRole(paramAccount);
-      if (paramAccount === 'client') setMode('signup');
+    if (mode !== 'signup') return;
+    const pending = getPendingInvite();
+    if (paramAccount === 'client') {
+      setSignupRole('client');
+      if (pending?.code) {
+        setSignupStage(SIGNUP_STAGE.ACCOUNT);
+      } else {
+        setSignupStage(SIGNUP_STAGE.CLIENT_CODE);
+      }
+      return;
     }
-  }, [paramAccount]);
+    if (paramAccount === 'coach' || paramAccount === 'personal') {
+      setSignupRole(paramAccount);
+      setSignupStage(SIGNUP_STAGE.ACCOUNT);
+    }
+  }, [mode, paramAccount]);
+
+  /** Deep link: /auth?mode=signup&account=client&invite=CODE — verify and skip code step */
+  useEffect(() => {
+    if (mode !== 'signup' || paramAccount !== 'client') return;
+    if (!inviteCodeFromUrl) return;
+    const pending = getPendingInvite();
+    if (pending?.code) return;
+
+    const normalized = normalizeInviteCode(inviteCodeFromUrl);
+    if (!normalized) return;
+
+    if (!hasSupabase) {
+      setCoachCode(normalized);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setCodeLoading(true);
+      setCodeError('');
+      try {
+        const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
+        if (cancelled) return;
+        if (result.error || !result.data?.valid) {
+          const msg = result.data?.error || result.error || 'Invalid invite link';
+          setCodeError(msg);
+          toast.error(msg);
+          return;
+        }
+        const trainerId = result.data.trainer_id ?? result.data.coach_id ?? '';
+        setPendingInvite(normalized, trainerId);
+        setCoachCode(normalized);
+        setSignupStage(SIGNUP_STAGE.ACCOUNT);
+        toast.success('Connected to your coach — create your login.');
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete('invite');
+            return next;
+          },
+          { replace: true }
+        );
+      } catch {
+        if (!cancelled) {
+          setCodeError('Could not verify link. Check your connection.');
+          toast.error('Could not verify link');
+        }
+      } finally {
+        if (!cancelled) setCodeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, paramAccount, inviteCodeFromUrl, hasSupabase, setSearchParams]);
 
   useEffect(() => {
     const t = requestAnimationFrame(() => setLogoMounted(true));
@@ -102,63 +201,173 @@ export default function AuthScreen() {
     return () => clearTimeout(t);
   }, []);
 
-  // Navigate to home when auth state is ready (after login/signup state has flushed).
-  // If user has a pending client invite (from coach code flow), send to client onboarding first.
   useEffect(() => {
     if (!supabaseUser) return;
-    const pending = getPendingInvite();
-    if (pending?.code) {
-      navigate('/clientonboarding', { replace: true });
-      return;
-    }
-    if (profile?.role) {
-      navigate('/home', { replace: true });
-      return;
-    }
-    if (!isLoadingAuth) navigate('/home', { replace: true });
-  }, [supabaseUser, profile?.role, isLoadingAuth, navigate]);
+    if (isLoadingAuth || isHydratingAppState) return;
 
-  useEffect(() => {
-    const el = emailRef.current;
-    if (el && typeof el.focus === 'function') {
-      const id = setTimeout(() => el.focus({ preventScroll: true }), 300);
-      return () => clearTimeout(id);
-    }
-  }, []);
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [errorVisible, setErrorVisible] = useState(false);
-
-  const isLogin = mode === 'login';
-  // Derive from URL so client flow shows correct UI as soon as they land with ?account=client
-  const isClientSignup = !isLogin && (paramAccount === 'client' || signupRole === 'client');
-  const emailTrim = (email ?? '').trim();
-  const passwordLen = (password ?? '').length;
-
-  const displayNameTrim = (displayName ?? '').trim();
-  const loginValid = emailTrim.length > 0 && passwordLen >= 6;
-  const signupValid =
-    isEmailValid(email) &&
-    passwordLen >= 8 &&
-    displayNameTrim.length > 0 &&
-    (signupRole !== 'coach' || (signupCoachFocus != null && signupCoachFocus !== ''));
-  const formValid = isLogin ? loginValid : signupValid;
-  const isDisabled = !formValid || loading || isLoadingAuth;
-
-  const showPasswordHelper = !isLogin && passwordLen > 0 && passwordLen < 8;
-  const showNameHint = !isLogin && displayName.length > 0 && displayNameTrim.length === 0;
-  const showNameRequired = !isLogin && displayNameTrim.length === 0;
+    const dest = resolvePostSessionDestination({
+      supabaseUser,
+      profile,
+      role,
+      profileLoadError,
+      isPublicAuthEntry: false,
+      getPendingInvite,
+    });
+    if (!dest) return;
+    if (dest === '/home') clearPendingInvite();
+    navigate(dest, { replace: true });
+  }, [
+    supabaseUser,
+    profile?.id,
+    profile?.role,
+    profile?.onboarding_complete,
+    role,
+    isLoadingAuth,
+    isHydratingAppState,
+    profileLoadError,
+    navigate,
+  ]);
 
   useEffect(() => {
     if (error) setErrorVisible(true);
     else setErrorVisible(false);
   }, [error]);
 
+  useEffect(() => {
+    if (isLogin && signupStage !== SIGNUP_STAGE.PICK_ROLE) {
+      setSignupStage(SIGNUP_STAGE.PICK_ROLE);
+    }
+  }, [isLogin, signupStage]);
+
+  /** Focus email when landing on account step */
+  useEffect(() => {
+    if (isLogin || signupStage !== SIGNUP_STAGE.ACCOUNT) return;
+    const id = setTimeout(() => emailRef.current?.focus({ preventScroll: true }), 200);
+    return () => clearTimeout(id);
+  }, [isLogin, signupStage]);
+
+  const signupStepMeta = useMemo(() => {
+    if (isLogin) return { current: 0, total: null, label: '' };
+    if (signupStage === SIGNUP_STAGE.PICK_ROLE) {
+      return { current: 1, total: null, label: 'Choose how you use Atlas' };
+    }
+    if (signupRole === 'client') {
+      if (signupStage === SIGNUP_STAGE.CLIENT_CODE) return { current: 2, total: 3, label: 'Coach code' };
+      return { current: 3, total: 3, label: 'Your account' };
+    }
+    return { current: 2, total: 2, label: 'Your account' };
+  }, [isLogin, signupRole, signupStage]);
+
+  const emailTrim = (email ?? '').trim();
+  const passwordLen = (password ?? '').length;
+
+  const pendingInvite = useMemo(() => getPendingInvite(), [signupStage, coachCode, mode]);
+  const clientHasValidatedCode = signupRole !== 'client' || Boolean(pendingInvite?.code);
+
+  const loginValid = emailTrim.length > 0 && passwordLen >= 6;
+  const accountStepValid =
+    isEmailValid(email) && passwordLen >= 8 && clientHasValidatedCode;
+  const formValid = isLogin ? loginValid : signupStage === SIGNUP_STAGE.ACCOUNT ? accountStepValid : false;
+  const isDisabled = !formValid || loading || isLoadingAuth;
+
+  const showPasswordHelper = !isLogin && signupStage === SIGNUP_STAGE.ACCOUNT && passwordLen > 0 && passwordLen < 8;
+
+  const handleTabLogin = async () => {
+    setMode('login');
+    setError('');
+    setSignupStage(SIGNUP_STAGE.PICK_ROLE);
+    await lightHaptic();
+  };
+
+  const handleTabSignup = async () => {
+    await lightHaptic();
+    if (supabaseUser && isPublicAuthEntry) {
+      setAccountSwitchBusy(true);
+      setError('');
+      try {
+        await logout(false);
+      } catch (_) {
+        /* ignore */
+      } finally {
+        setAccountSwitchBusy(false);
+      }
+    }
+    setMode('signup');
+    setError('');
+    setSignupStage(SIGNUP_STAGE.PICK_ROLE);
+    setSignupRole('coach');
+  };
+
+  const selectRole = async (role) => {
+    await lightHaptic();
+    setSignupRole(role);
+    setError('');
+    if (role === 'client') {
+      setSignupStage(SIGNUP_STAGE.CLIENT_CODE);
+      setCoachCode('');
+      setCodeError('');
+      setTimeout(() => codeInputRef.current?.focus(), 100);
+    } else {
+      setSignupStage(SIGNUP_STAGE.ACCOUNT);
+      setTimeout(() => emailRef.current?.focus(), 100);
+    }
+  };
+
+  const handleBackFromCode = async () => {
+    await lightHaptic();
+    setCoachCode('');
+    setCodeError('');
+    setSignupStage(SIGNUP_STAGE.PICK_ROLE);
+  };
+
+  const handleBackFromAccount = async () => {
+    await lightHaptic();
+    setError('');
+    if (signupRole === 'client') {
+      clearPendingInvite();
+      setCoachCode('');
+      setSignupStage(SIGNUP_STAGE.CLIENT_CODE);
+      setTimeout(() => codeInputRef.current?.focus(), 100);
+    } else {
+      setSignupStage(SIGNUP_STAGE.PICK_ROLE);
+    }
+  };
+
+  const handleValidateCoachCode = async (e) => {
+    e?.preventDefault();
+    setCodeError('');
+    const normalized = normalizeInviteCode(coachCode);
+    if (!normalized) {
+      setCodeError('Enter the code your coach gave you');
+      return;
+    }
+    await lightHaptic();
+    setCodeLoading(true);
+    try {
+      const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
+      if (result.error || !result.data?.valid) {
+        const msg = result.data?.error || result.error || 'Invalid coach code';
+        setCodeError(msg);
+        toast.error(msg);
+        return;
+      }
+      const trainerId = result.data.trainer_id ?? result.data.coach_id ?? '';
+      setPendingInvite(normalized, trainerId);
+      toast.success('Code verified — create your login below.');
+      setSignupStage(SIGNUP_STAGE.ACCOUNT);
+      setTimeout(() => emailRef.current?.focus(), 150);
+    } catch {
+      setCodeError('Could not verify code. Check your connection.');
+      toast.error('Could not verify code');
+    } finally {
+      setCodeLoading(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!isLogin && signupStage !== SIGNUP_STAGE.ACCOUNT) return;
+
     setError('');
     const eTrim = emailTrim;
     const pTrim = (password ?? '').trim();
@@ -170,66 +379,52 @@ export default function AuthScreen() {
       setError('Password is required');
       return;
     }
-    if (!isLogin && (displayName ?? '').trim().length === 0) {
-      setError('Name is required');
-      return;
-    }
     if (!isLogin && pTrim.length < 8) {
       setError('Password must be at least 8 characters');
       return;
     }
+    if (!isLogin && signupRole === 'client') {
+      const pend = getPendingInvite();
+      if (!pend?.code) {
+        setError('Verify your coach code first');
+        setSignupStage(SIGNUP_STAGE.CLIENT_CODE);
+        return;
+      }
+    }
+
     await lightHaptic();
-    if (document.activeElement?.blur) document.activeElement.blur();
+    document.activeElement?.blur?.();
     setLoading(true);
-    const coachFocus = signupRole === 'coach' && signupCoachFocus
-      ? (signupCoachFocus ?? '').toString().trim().toLowerCase() || 'transformation'
-      : null;
     if (import.meta.env.DEV) {
-      if (isLogin) console.log('[AUTH] login submit', { account: signupRole, email: eTrim });
-      else console.log('[AUTH] signup submit', { account: signupRole, coachFocus, display_name: (displayName ?? '').trim(), email: eTrim });
+      if (isLogin) console.log('[AUTH] login', { email: eTrim });
+      else console.log('[AUTH] signup', { role: signupRole, email: eTrim });
     }
     try {
       const result = isLogin
         ? await signIn(eTrim, pTrim)
         : await signUp(eTrim, pTrim, {
             role: signupRole,
-            display_name: (displayName ?? '').trim() || undefined,
-            ...(signupRole === 'coach' && coachFocus ? { coach_focus: coachFocus } : {}),
             ...(signupRole === 'coach' && referralCodeFromUrl ? { referral_code: referralCodeFromUrl } : {}),
           });
       if (result?.error) {
         const message = isLogin ? getAuthErrorMessage(result.error) : getSignupErrorMessage(result.error);
         setError(message);
-        if (!isLogin && import.meta.env.DEV) {
-          console.warn('[SIGNUP FAILED]', {
-            message: result.error?.message,
-            status: result.error?.status,
-            selectedRole: signupRole,
-          });
-        }
         return;
       }
       if (isLogin) {
         toast.success('Signed in');
-        // Don't navigate here: let the useEffect run when supabaseUser/profile update so protected routes see the new session.
         return;
       }
       if (result?.data?.session) {
+        setPostAuthRouting(true);
         toast.success('Account created');
-        // Same: let useEffect handle navigation once state has updated.
+        navigate('/onboarding', { replace: true });
         return;
       }
       if (result?.data?.user) {
         toast.success('Account created. Please confirm your email to continue.');
       }
     } catch (err) {
-      if (import.meta.env.DEV) {
-        console.warn('[AUTH ERROR]', {
-          message: err?.message,
-          status: err?.status,
-          name: err?.name,
-        });
-      }
       const msg = (err?.message ?? '').toString().trim();
       if (isLogin) {
         setError(msg.toLowerCase().includes('email not confirmed') ? 'Email not confirmed' : 'Invalid email or password');
@@ -241,22 +436,19 @@ export default function AuthScreen() {
     }
   };
 
-  const handleClientCode = async () => {
+  const goToClientSignup = useCallback(async () => {
     await lightHaptic();
-    navigate('/client-code', { replace: true });
-  };
-
-  const handleTabLogin = async () => {
-    setMode('login');
-    setError('');
-    await lightHaptic();
-  };
-
-  const handleTabSignup = async () => {
     setMode('signup');
     setError('');
-    await lightHaptic();
-  };
+    setSignupRole('client');
+    const pend = getPendingInvite();
+    setSignupStage(pend?.code ? SIGNUP_STAGE.ACCOUNT : SIGNUP_STAGE.CLIENT_CODE);
+  }, []);
+
+  const authMigration = useMemo(
+    () => deriveAuthScreenSurfaceState({ isLogin, signupStage }),
+    [isLogin, signupStage]
+  );
 
   const inputBaseStyle = {
     background: colors.surface1,
@@ -290,12 +482,117 @@ export default function AuthScreen() {
             Sign-in unavailable
           </p>
           <p className="text-center text-sm mb-2" style={{ color: colors.muted }}>
-            Supabase is not configured. The app was built without <code className="text-xs bg-white/10 px-1 rounded">VITE_SUPABASE_URL</code> and <code className="text-xs bg-white/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code>.
-          </p>
-          <p className="text-center text-sm" style={{ color: colors.muted }}>
-            Add them to a <code className="text-xs bg-white/10 px-1 rounded">.env</code> file (copy from <code className="text-xs bg-white/10 px-1 rounded">.env.example</code>), then run <code className="text-xs bg-white/10 px-1 rounded">npm run build</code> and <code className="text-xs bg-white/10 px-1 rounded">npm run cap:sync:all</code> (or <code className="text-xs bg-white/10 px-1 rounded">npx cap sync ios</code>).
+            Supabase is not configured. Add <code className="text-xs bg-white/10 px-1 rounded">VITE_SUPABASE_URL</code> and{' '}
+            <code className="text-xs bg-white/10 px-1 rounded">VITE_SUPABASE_ANON_KEY</code> to <code className="text-xs bg-white/10 px-1 rounded">.env</code>.
           </p>
         </div>
+      </div>
+    );
+  }
+
+  const titleForSignup = () => {
+    if (signupStage === SIGNUP_STAGE.PICK_ROLE) return 'Sign up';
+    if (signupStage === SIGNUP_STAGE.CLIENT_CODE) return 'Enter coach code';
+    return 'Create your login';
+  };
+
+  const subtitleForSignup = () => {
+    if (signupStage === SIGNUP_STAGE.PICK_ROLE) return 'Pick your role — only email and password on the last step.';
+    if (signupStage === SIGNUP_STAGE.CLIENT_CODE) return 'Your coach shares this with you. We verify it before you sign up.';
+    return 'Use a strong password. You can add your name in the app after.';
+  };
+
+  if (postAuthRouting) {
+    const m = deriveAuthScreenSurfaceState({ isLogin: false, signupStage: SIGNUP_STAGE.ACCOUNT });
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-6"
+        {...atlasMigrationDataAttributes(m.phase, m.primary)}
+        style={{
+          background: colors.bg,
+          paddingTop: 'max(env(safe-area-inset-top), 24px)',
+          paddingBottom: 'max(env(safe-area-inset-bottom), 24px)',
+        }}
+      >
+        <AtlasLogo variant="auth" />
+        <p className="mt-6 text-center text-base font-semibold" style={{ color: colors.text }}>
+          Setting up your account…
+        </p>
+        <p className="mt-2 text-center text-sm max-w-xs" style={{ color: colors.muted }}>
+          Taking you to onboarding.
+        </p>
+        <div
+          className="mt-6 rounded-full border-2 border-white/20 border-t-white"
+          style={{ width: 28, height: 28, animation: 'spin 0.7s linear infinite' }}
+          aria-hidden
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (isPublicAuthEntry && supabaseUser) {
+    if (isHydratingAppState || isLoadingAuth || accountSwitchBusy) {
+      const m = deriveAuthScreenSurfaceState({ isLogin, signupStage: SIGNUP_STAGE.PICK_ROLE });
+      return (
+        <div
+          className="min-h-screen flex flex-col items-center justify-center p-6"
+          {...atlasMigrationDataAttributes(m.phase, m.primary)}
+          style={{
+            background: colors.bg,
+            paddingTop: 'max(env(safe-area-inset-top), 24px)',
+            paddingBottom: 'max(env(safe-area-inset-bottom), 24px)',
+          }}
+        >
+          <AtlasLogo variant="auth" />
+          <p className="mt-6 text-sm font-medium" style={{ color: colors.muted }}>
+            {accountSwitchBusy ? 'Switching account…' : 'Loading session…'}
+          </p>
+          <div
+            className="mt-4 rounded-full border-2 border-white/20 border-t-white"
+            style={{ width: 24, height: 24, animation: 'spin 0.7s linear infinite' }}
+            aria-hidden
+          />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      );
+    }
+    const sm = deriveAuthScreenSurfaceState({ isLogin: true, signupStage: SIGNUP_STAGE.PICK_ROLE });
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-6"
+        {...atlasMigrationDataAttributes(sm.phase, sm.primary)}
+        style={{
+          background: colors.bg,
+          paddingTop: 'max(env(safe-area-inset-top), 24px)',
+          paddingBottom: 'max(env(safe-area-inset-bottom), 24px)',
+        }}
+      >
+        <AtlasLogo variant="auth" />
+        <p className="mt-6 text-center text-base font-semibold" style={{ color: colors.text }}>
+          Taking you in…
+        </p>
+        <p className="mt-2 text-center text-sm max-w-xs" style={{ color: colors.muted }}>
+          Redirecting to onboarding or your home screen.
+        </p>
+        <div
+          className="mt-6 rounded-full border-2 border-white/20 border-t-white"
+          style={{ width: 28, height: 28, animation: 'spin 0.7s linear infinite' }}
+          aria-hidden
+        />
+        <button
+          type="button"
+          className="mt-8 text-sm font-medium underline-offset-2"
+          style={{ color: colors.muted, background: 'none', border: 'none' }}
+          onClick={async () => {
+            await lightHaptic();
+            await logout(false);
+            navigate(LOGIN_PUBLIC_PATH, { replace: true });
+          }}
+        >
+          Use a different account
+        </button>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -303,6 +600,7 @@ export default function AuthScreen() {
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center p-4 overflow-x-hidden"
+      {...atlasMigrationDataAttributes(authMigration.phase, authMigration.primary)}
       style={{
         background: colors.bg,
         paddingTop: 'max(env(safe-area-inset-top), 24px)',
@@ -310,7 +608,6 @@ export default function AuthScreen() {
       }}
     >
       <div className="w-full max-w-sm min-w-0">
-        {/* Logo + welcome */}
         <div
           className="flex flex-col items-center mb-4"
           style={{
@@ -335,14 +632,22 @@ export default function AuthScreen() {
         </div>
 
         <h1 className="text-xl font-bold text-center mb-1" style={{ color: colors.text }}>
-          {isLogin ? 'Log in' : isClientSignup ? 'Complete your details' : 'Sign up'}
+          {isLogin ? 'Log in' : titleForSignup()}
         </h1>
-        <p className="text-sm text-center mb-5" style={{ color: colors.muted }}>
-          {isLogin ? 'Sign in to your Atlas account.' : isClientSignup ? "You're joining as a client. Enter your details to continue." : 'Create your Atlas account.'}
+        <p className="text-sm text-center mb-2 leading-relaxed px-1" style={{ color: colors.muted }}>
+          {isLogin ? 'Sign in with your email and password.' : subtitleForSignup()}
         </p>
 
-        {/* Tab bar: hide for client flow so they stay on "complete your details" */}
-        {!isClientSignup && (
+        {!isLogin && signupStepMeta.label && (
+          <p className="text-center text-xs font-semibold mb-4" style={{ color: colors.accent, letterSpacing: '0.02em' }}>
+            {signupStepMeta.total != null
+              ? `Step ${signupStepMeta.current} of ${signupStepMeta.total}`
+              : `Step ${signupStepMeta.current}`}
+            {' · '}
+            {signupStepMeta.label}
+          </p>
+        )}
+
         <div
           className="flex rounded-xl overflow-hidden mb-4"
           style={{
@@ -353,7 +658,7 @@ export default function AuthScreen() {
           <button
             type="button"
             aria-label="Log in"
-            aria-selected={isLogin}
+            aria-current={isLogin ? 'page' : undefined}
             onClick={handleTabLogin}
             className="flex-1 py-3 text-sm font-medium transition-colors duration-200 ease-out"
             style={{
@@ -367,7 +672,7 @@ export default function AuthScreen() {
           <button
             type="button"
             aria-label="Sign up"
-            aria-selected={!isLogin}
+            aria-current={!isLogin ? 'page' : undefined}
             onClick={handleTabSignup}
             className="flex-1 py-3 text-sm font-medium transition-colors duration-200 ease-out"
             style={{
@@ -379,9 +684,7 @@ export default function AuthScreen() {
             Sign up
           </button>
         </div>
-        )}
 
-        {/* Auth card: fade in + slide up */}
         <Card
           style={{
             padding: spacing[16],
@@ -390,357 +693,354 @@ export default function AuthScreen() {
             transition: 'opacity 200ms ease-out, transform 200ms ease-out',
           }}
         >
-          <form onSubmit={handleSubmit}>
-            {!isLogin && (
-              <>
-                {/* Section 1: Account type (hidden for client — they're joining via coach code) */}
-                {!isClientSignup && (
+          {isLogin && (
+            <form onSubmit={handleSubmit}>
+              <label htmlFor="auth-email-input" className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>
+                Email
+              </label>
+              <input
+                ref={emailRef}
+                id="auth-email-input"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    passwordRef.current?.focus();
+                  }
+                }}
+                className="w-full mb-4 focus:outline-none"
+                style={inputBaseStyle}
+                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onBlur={(e) => {
+                  e.target.style.borderColor = colors.border;
+                  e.target.style.boxShadow = 'none';
+                }}
+              />
+              <label htmlFor="auth-password-input" className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>
+                Password
+              </label>
+              <input
+                ref={passwordRef}
+                id="auth-password-input"
+                type="password"
+                autoComplete="current-password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && formValid && !isDisabled) handleSubmit(e);
+                }}
+                className="w-full focus:outline-none"
+                style={inputBaseStyle}
+                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onBlur={(e) => {
+                  e.target.style.borderColor = colors.border;
+                  e.target.style.boxShadow = 'none';
+                }}
+              />
+
+              {error && (
                 <div
-                  className="mb-3 rounded-xl overflow-hidden"
+                  className="mt-3"
                   style={{
-                    background: colors.surface1,
-                    border: `1px solid ${colors.border}`,
-                    padding: spacing[16],
-                    borderRadius: radii.sm,
+                    opacity: errorVisible ? 1 : 0,
+                    transform: errorVisible ? 'translateY(0)' : 'translateY(6px)',
+                    transition: 'opacity 180ms ease-out, transform 180ms ease-out',
                   }}
                 >
-                  <label id="auth-account-type" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
-                    Account type
-                  </label>
-                  <div
-                    className="flex overflow-hidden"
-                    style={{
-                      background: colors.surface2,
-                      border: `1px solid ${colors.border}`,
-                      borderRadius: radii.button,
-                      minHeight: touchTargetMin,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      aria-label="Trainer"
-                      onClick={async () => {
-                        setSignupRole('coach');
-                        if (signupCoachFocus == null || signupCoachFocus === '') setSignupCoachFocus('transformation');
-                        await lightHaptic();
-                      }}
-                      className="flex-1 py-3 text-sm font-medium transition-colors duration-200"
-                      style={{
-                        minHeight: touchTargetMin,
-                        background: signupRole === 'coach' ? colors.primarySubtle : 'transparent',
-                        color: signupRole === 'coach' ? colors.accent : colors.muted,
-                      }}
-                    >
-                      Trainer
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Personal"
-                      onClick={async () => {
-                        setSignupRole('personal');
-                        setSignupCoachFocus(null);
-                        await lightHaptic();
-                      }}
-                      className="flex-1 py-3 text-sm font-medium transition-colors duration-200"
-                      style={{
-                        minHeight: touchTargetMin,
-                        background: signupRole === 'personal' ? colors.primarySubtle : 'transparent',
-                        color: signupRole === 'personal' ? colors.accent : colors.muted,
-                      }}
-                    >
-                      Personal
-                    </button>
-                  </div>
+                  <p className="text-sm" style={{ color: colors.destructive }} role="alert">
+                    {error}
+                  </p>
                 </div>
-                )}
+              )}
 
-                {/* Section 2: Coaching Focus (Trainer only) – premium selection cards */}
-                {signupRole === 'coach' && (
-                  <div
-                    className="mb-3 rounded-xl overflow-hidden"
-                    style={{
-                      background: colors.surface1,
-                      border: `1px solid ${colors.border}`,
-                      padding: spacing[16],
-                      borderRadius: radii.sm,
-                    }}
-                  >
-                    <label id="auth-coach-focus" className="block text-xs font-medium mb-3" style={{ color: colors.muted }}>
-                      Coaching Focus
-                    </label>
-                    <div className="flex flex-col gap-2">
-                      {COACH_FOCUS_OPTIONS.map((opt) => {
-                        const selected = signupCoachFocus === opt.focus;
-                        return (
-                          <button
-                            key={opt.focus}
-                            type="button"
-                            aria-label={opt.label}
-                            aria-pressed={selected}
-                            onClick={async () => { setSignupCoachFocus(opt.focus); await lightHaptic(); }}
-                            className="flex items-start gap-3 rounded-xl text-left transition-all duration-200 ease-out border outline-none"
-                            style={{
-                              padding: spacing[16],
-                              background: selected ? colors.primarySubtle : colors.surface2,
-                              borderColor: selected ? colors.primary : colors.border,
-                              borderWidth: 1,
-                            }}
-                          >
-                            <div
-                              className="flex-shrink-0 flex items-center justify-center rounded-full w-6 h-6 border transition-colors duration-200"
-                              style={{
-                                borderColor: selected ? colors.primary : colors.border,
-                                background: selected ? colors.primary : 'transparent',
-                              }}
-                            >
-                              {selected && <Check size={14} strokeWidth={2.5} style={{ color: '#fff' }} />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-[15px] mb-0.5" style={{ color: selected ? colors.accent : colors.text }}>
-                                {opt.label}
-                              </p>
-                              <p className="text-[13px]" style={{ color: colors.muted }}>
-                                {opt.description}
-                              </p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Section 3: Your details / Account details */}
-                <div
-                  className="mb-3 rounded-xl overflow-hidden"
-                  style={{
-                    background: colors.surface1,
-                    border: `1px solid ${colors.border}`,
-                    padding: spacing[16],
-                    borderRadius: radii.sm,
-                  }}
-                >
-                  <label id="auth-details" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
-                    {isClientSignup ? 'Your details' : 'Account details'}
-                  </label>
-                  <label id="auth-display-name" className="sr-only">
-                    Display name
-                  </label>
-                  <input
-                    id="auth-display-name-input"
-                    type="text"
-                    autoComplete="name"
-                    aria-labelledby="auth-details auth-display-name"
-                    aria-invalid={showNameRequired}
-                    aria-describedby={showNameRequired ? 'auth-name-hint' : undefined}
-                    placeholder="Display name (required)"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full mb-1 focus:outline-none"
-                    style={{
-                      ...inputBaseStyle,
-                      ...(showNameRequired ? { borderColor: colors.danger } : {}),
-                    }}
-                    onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = showNameRequired ? colors.danger : colors.border;
-                      e.target.style.boxShadow = 'none';
-                    }}
-                  />
-                  {(showNameHint || showNameRequired) && (
-                    <p id="auth-name-hint" className="text-xs mb-3" style={{ color: colors.danger }}>
-                      {showNameHint ? 'Name cannot be only spaces' : 'Name is required'}
-                    </p>
-                  )}
-                  {!showNameHint && !showNameRequired && <div className="mb-3" />}
-                  <label id="auth-email" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
-                    Email
-                  </label>
-                  <input
-                    ref={emailRef}
-                    id="auth-email-input"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    aria-labelledby="auth-email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        passwordRef.current?.focus();
-                      }
-                    }}
-                    className="w-full mb-3 focus:outline-none"
-                    style={inputBaseStyle}
-                    onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = colors.border;
-                      e.target.style.boxShadow = 'none';
-                    }}
-                  />
-                  <label id="auth-password" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
-                    Password
-                  </label>
-                  <input
-                    ref={passwordRef}
-                    id="auth-password-input"
-                    type="password"
-                    inputMode="text"
-                    autoComplete="new-password"
-                    aria-labelledby="auth-password"
-                    placeholder="At least 8 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (formValid && !isDisabled) handleSubmit(e);
-                      }
-                    }}
-                    className="w-full focus:outline-none"
-                    style={inputBaseStyle}
-                    onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = colors.border;
-                      e.target.style.boxShadow = 'none';
-                    }}
-                  />
-                </div>
-              </>
-            )}
-
-            {isLogin && (
-              <>
-                <label id="auth-email" className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>
-                  Email
-                </label>
-                <input
-                  ref={emailRef}
-                  id="auth-email-input"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  aria-labelledby="auth-email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      passwordRef.current?.focus();
-                    }
-                  }}
-                  className="w-full mb-4 focus:outline-none"
-                  style={inputBaseStyle}
-                  onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = colors.border;
-                    e.target.style.boxShadow = 'none';
-                  }}
-                />
-                <label id="auth-password" className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>
-                  Password
-                </label>
-                <input
-                  ref={passwordRef}
-                  id="auth-password-input"
-                  type="password"
-                  inputMode="text"
-                  autoComplete="current-password"
-                  aria-labelledby="auth-password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (formValid && !isDisabled) handleSubmit(e);
-                    }
-                  }}
-                  className="w-full focus:outline-none"
-                  style={inputBaseStyle}
-                  onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = colors.border;
-                    e.target.style.boxShadow = 'none';
-                  }}
-                />
-              </>
-            )}
-
-            {showPasswordHelper && (
-              <p className="text-xs mt-1 mb-1" style={{ color: colors.muted }}>
-                Password must be at least 8 characters
-              </p>
-            )}
-
-            {/* Error: fade + slide up */}
-            {error && (
-              <div
-                className="mt-2"
+              <button
+                type="submit"
+                disabled={isDisabled}
+                aria-label="Log in"
+                onMouseDown={() => setPressing(true)}
+                onMouseLeave={() => setPressing(false)}
+                onMouseUp={() => setPressing(false)}
+                onTouchStart={() => setPressing(true)}
+                onTouchEnd={() => setPressing(false)}
+                className="w-full mt-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 transition-transform duration-75 ease-out"
                 style={{
-                  opacity: errorVisible ? 1 : 0,
-                  transform: errorVisible ? 'translateY(0)' : 'translateY(6px)',
-                  transition: 'opacity 180ms ease-out, transform 180ms ease-out',
+                  minHeight: touchTargetMin,
+                  background: colors.accent,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: radii.sm,
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: isDisabled ? 'not-allowed' : 'pointer',
+                  opacity: isDisabled ? 0.6 : 1,
+                  transform: pressing && !isDisabled ? 'scale(0.97)' : 'scale(1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
                 }}
               >
-                <p className="text-sm" style={{ color: colors.destructive }} role="alert">
-                  {error}
-                </p>
-              </div>
-            )}
+                {loading || isLoadingAuth ? (
+                  <>
+                    <span
+                      className="rounded-full border-2 border-white/30 border-t-white flex-shrink-0"
+                      style={{ width: 20, height: 20, animation: 'spin 0.7s linear infinite' }}
+                    />
+                    <span>Signing in…</span>
+                  </>
+                ) : (
+                  <span>Log in</span>
+                )}
+              </button>
+            </form>
+          )}
 
-            {/* Submit: loading spinner + text, scale on press */}
-            <button
-              type="submit"
-              disabled={isDisabled}
-              aria-label={isLogin ? 'Log in' : isClientSignup ? 'Continue' : 'Sign up'}
-              onMouseDown={() => setPressing(true)}
-              onMouseLeave={() => setPressing(false)}
-              onMouseUp={() => setPressing(false)}
-              onTouchStart={() => setPressing(true)}
-              onTouchEnd={() => setPressing(false)}
-              className="w-full mt-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 transition-transform duration-75 ease-out"
-              style={{
-                minHeight: touchTargetMin,
-                background: colors.accent,
-                color: '#fff',
-                border: 'none',
-                borderRadius: radii.sm,
-                fontWeight: 600,
-                fontSize: 15,
-                cursor: isDisabled ? 'not-allowed' : 'pointer',
-                opacity: isDisabled ? 0.6 : 1,
-                transform: pressing && !isDisabled ? 'scale(0.97)' : 'scale(1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              {loading || isLoadingAuth ? (
-                <>
-                  <span
-                    className="rounded-full border-2 border-white/30 border-t-white flex-shrink-0"
-                    style={{ width: 20, height: 20, animation: 'spin 0.7s linear infinite' }}
-                  />
-                  <span>{isLogin ? 'Signing in…' : isClientSignup ? 'Continuing…' : 'Creating account…'}</span>
-                </>
-              ) : (
-                <span>{isLogin ? 'Log in' : isClientSignup ? 'Continue' : 'Sign up'}</span>
+          {!isLogin && signupStage === SIGNUP_STAGE.PICK_ROLE && (
+            <div className="space-y-3" role="group" aria-label="Choose role">
+              <RoleChoiceCard
+                title="Coach"
+                description="Train clients on Atlas — programs, check-ins, prep tools."
+                selected={false}
+                onSelect={() => selectRole('coach')}
+              />
+              <RoleChoiceCard
+                title="Client"
+                description="Your coach invited you — we’ll ask for their code next."
+                selected={false}
+                onSelect={() => selectRole('client')}
+              />
+              <RoleChoiceCard
+                title="Personal"
+                description="Train solo — log workouts, habits, and progress."
+                selected={false}
+                onSelect={() => selectRole('personal')}
+              />
+            </div>
+          )}
+
+          {!isLogin && signupStage === SIGNUP_STAGE.CLIENT_CODE && (
+            <form onSubmit={handleValidateCoachCode}>
+              <button
+                type="button"
+                onClick={handleBackFromCode}
+                className="flex items-center gap-1 text-sm font-medium mb-4"
+                style={{ color: colors.muted, background: 'none', border: 'none', cursor: 'pointer', minHeight: touchTargetMin }}
+              >
+                <ChevronLeft size={18} /> Back
+              </button>
+              <label htmlFor="coach-code-input" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
+                Coach code
+              </label>
+              <input
+                ref={codeInputRef}
+                id="coach-code-input"
+                value={coachCode}
+                onChange={(e) => {
+                  setCoachCode(e.target.value.toUpperCase());
+                  setCodeError('');
+                }}
+                placeholder="e.g. ATLAS-XXXX"
+                maxLength={24}
+                autoComplete="off"
+                autoCapitalize="characters"
+                className="w-full mb-2 focus:outline-none font-mono tracking-wider text-center"
+                style={{
+                  ...inputBaseStyle,
+                  minHeight: touchTargetMin,
+                }}
+                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onBlur={(e) => {
+                  e.target.style.borderColor = colors.border;
+                  e.target.style.boxShadow = 'none';
+                }}
+              />
+              {codeError ? (
+                <p className="text-sm mb-3" style={{ color: colors.destructive }} role="alert">
+                  {codeError}
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                disabled={codeLoading || !normalizeInviteCode(coachCode)}
+                className="w-full focus:outline-none transition-transform active:scale-[0.98]"
+                style={{
+                  minHeight: touchTargetMin,
+                  background: colors.accent,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: radii.sm,
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: codeLoading || !normalizeInviteCode(coachCode) ? 'not-allowed' : 'pointer',
+                  opacity: codeLoading || !normalizeInviteCode(coachCode) ? 0.55 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                {codeLoading ? (
+                  <>
+                    <span
+                      className="rounded-full border-2 border-white/30 border-t-white flex-shrink-0"
+                      style={{ width: 20, height: 20, animation: 'spin 0.7s linear infinite' }}
+                    />
+                    <span>Verifying…</span>
+                  </>
+                ) : (
+                  <span>Verify code & continue</span>
+                )}
+              </button>
+            </form>
+          )}
+
+          {!isLogin && signupStage === SIGNUP_STAGE.ACCOUNT && (
+            <form onSubmit={handleSubmit}>
+              <button
+                type="button"
+                onClick={handleBackFromAccount}
+                className="flex items-center gap-1 text-sm font-medium mb-4"
+                style={{ color: colors.muted, background: 'none', border: 'none', cursor: 'pointer', minHeight: touchTargetMin }}
+              >
+                <ChevronLeft size={18} /> Back
+              </button>
+
+              {signupRole === 'client' && pendingInvite?.code && (
+                <div
+                  className="mb-4 flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+                  style={{ background: colors.successSubtle, color: colors.success }}
+                >
+                  <Check size={16} strokeWidth={2.5} aria-hidden />
+                  Coach code verified
+                </div>
               )}
-            </button>
-          </form>
+
+              <label htmlFor="signup-email" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
+                Email
+              </label>
+              <input
+                ref={emailRef}
+                id="signup-email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    passwordRef.current?.focus();
+                  }
+                }}
+                className="w-full mb-3 focus:outline-none"
+                style={inputBaseStyle}
+                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onBlur={(e) => {
+                  e.target.style.borderColor = colors.border;
+                  e.target.style.boxShadow = 'none';
+                }}
+              />
+
+              <label htmlFor="signup-password" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
+                Password
+              </label>
+              <input
+                ref={passwordRef}
+                id="signup-password"
+                type="password"
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && formValid && !isDisabled) handleSubmit(e);
+                }}
+                className="w-full focus:outline-none"
+                style={inputBaseStyle}
+                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onBlur={(e) => {
+                  e.target.style.borderColor = colors.border;
+                  e.target.style.boxShadow = 'none';
+                }}
+              />
+
+              {showPasswordHelper && (
+                <p className="text-xs mt-2 mb-0" style={{ color: colors.muted }}>
+                  Use at least 8 characters
+                </p>
+              )}
+
+              {error && (
+                <div
+                  className="mt-3"
+                  style={{
+                    opacity: errorVisible ? 1 : 0,
+                    transform: errorVisible ? 'translateY(0)' : 'translateY(6px)',
+                    transition: 'opacity 180ms ease-out, transform 180ms ease-out',
+                  }}
+                >
+                  <p className="text-sm" style={{ color: colors.destructive }} role="alert">
+                    {error}
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isDisabled}
+                aria-label="Create account"
+                onMouseDown={() => setPressing(true)}
+                onMouseLeave={() => setPressing(false)}
+                onMouseUp={() => setPressing(false)}
+                onTouchStart={() => setPressing(true)}
+                onTouchEnd={() => setPressing(false)}
+                className="w-full mt-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 transition-transform duration-75 ease-out"
+                style={{
+                  minHeight: touchTargetMin,
+                  background: colors.accent,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: radii.sm,
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: isDisabled ? 'not-allowed' : 'pointer',
+                  opacity: isDisabled ? 0.6 : 1,
+                  transform: pressing && !isDisabled ? 'scale(0.97)' : 'scale(1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                {loading || isLoadingAuth ? (
+                  <>
+                    <span
+                      className="rounded-full border-2 border-white/30 border-t-white flex-shrink-0"
+                      style={{ width: 20, height: 20, animation: 'spin 0.7s linear infinite' }}
+                    />
+                    <span>Creating account…</span>
+                  </>
+                ) : (
+                  <span>Create account</span>
+                )}
+              </button>
+            </form>
+          )}
         </Card>
 
         {isLogin && (
           <>
             <button
               type="button"
-              aria-label="I'm a client - Enter your coach code"
-              onClick={handleClientCode}
+              aria-label="New client — sign up with coach code"
+              onClick={goToClientSignup}
               className="w-full flex items-center gap-3 rounded-xl mt-4 text-left transition-transform duration-75 active:scale-[0.98]"
               style={{
                 minHeight: touchTargetMin,
@@ -757,17 +1057,17 @@ export default function AuthScreen() {
                 <User size={20} style={{ color: colors.accent }} />
               </div>
               <div className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">I&apos;m a client</span>
+                <span className="block text-sm font-medium">New here with a coach code?</span>
                 <span className="block text-xs mt-0.5" style={{ color: colors.muted }}>
-                  Enter your coach code
+                  Sign up — we&apos;ll verify your code first
                 </span>
               </div>
             </button>
             <p className="text-center mt-4">
               <Link
                 to="/forgot"
-                className="text-sm inline-block"
-                style={{ color: colors.accent, minHeight: 44, lineHeight: '44px' }}
+                className="text-sm inline-flex items-center justify-center"
+                style={{ color: colors.accent, minHeight: touchTargetMin }}
               >
                 Forgot password?
               </Link>
@@ -780,5 +1080,30 @@ export default function AuthScreen() {
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </div>
+  );
+}
+
+function RoleChoiceCard({ title, description, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="w-full text-left rounded-xl border transition-all active:scale-[0.99]"
+      style={{
+        padding: spacing[16],
+        background: colors.surface1,
+        borderColor: colors.border,
+        borderWidth: 1,
+        minHeight: touchTargetMin + 36,
+        WebkitTapHighlightColor: 'transparent',
+      }}
+    >
+      <p className="font-semibold text-[15px] mb-1" style={{ color: colors.text }}>
+        {title}
+      </p>
+      <p className="text-[13px] leading-snug" style={{ color: colors.muted }}>
+        {description}
+      </p>
+    </button>
   );
 }

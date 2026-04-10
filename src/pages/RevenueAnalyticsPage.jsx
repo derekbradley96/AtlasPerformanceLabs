@@ -12,6 +12,7 @@ import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
+import { usePresentationMode } from '@/lib/presentationMode';
 import { toCSV, downloadCSV } from '@/lib/csvExport';
 import { TrendingUp, AlertCircle, Percent, ChevronRight, Download, Loader2 } from 'lucide-react';
 import EmptyState from '@/components/ui/EmptyState';
@@ -43,6 +44,7 @@ function paymentStatusBadge(status) {
 
 export default function RevenueAnalyticsPage() {
   const navigate = useNavigate();
+  const { isDesktopWeb } = usePresentationMode();
   const { user } = useAuth();
   const coachId = user?.id ?? null;
   const supabase = hasSupabase ? getSupabase() : null;
@@ -215,7 +217,7 @@ export default function RevenueAnalyticsPage() {
   return (
     <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Revenue analytics" onBack={() => navigate(-1)} />
-      <div style={{ ...pageContainer, paddingTop: spacing[16], paddingBottom: spacing[32] }}>
+      <div style={{ ...pageContainer, maxWidth: isDesktopWeb ? 1240 : undefined, margin: '0 auto', paddingTop: spacing[16], paddingBottom: spacing[32] }}>
 
         {/* Export */}
         <div className="flex justify-end" style={{ marginBottom: spacing[12] }}>

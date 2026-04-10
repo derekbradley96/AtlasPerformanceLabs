@@ -90,3 +90,23 @@ export function formatMoney(number, options = {}) {
     maximumFractionDigits: 0,
   }).format(value);
 }
+
+/**
+ * Format numeric counts for read-only UI surfaces.
+ * @param {number|string|null|undefined} value
+ * @returns {string}
+ */
+export function formatNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 }).format(n);
+}
+
+/**
+ * Format kcal with consistent thousand separators.
+ * @param {number|string|null|undefined} value
+ * @returns {string}
+ */
+export function formatCalories(value) {
+  return `${formatNumber(value)} kcal`;
+}

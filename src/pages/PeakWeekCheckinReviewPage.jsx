@@ -19,6 +19,7 @@ import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/page
 import { MessageSquare, ClipboardList, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { hapticLight } from '@/lib/haptics';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 const RATING_MIN = 1;
 const RATING_MAX = 10;
@@ -27,7 +28,8 @@ export default function PeakWeekCheckinReviewPage() {
   const navigate = useNavigate();
   const { checkinId } = useParams();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const supabase = hasSupabase ? getSupabase() : null;
   const coachId = user?.id ?? null;
 
@@ -105,19 +107,20 @@ export default function PeakWeekCheckinReviewPage() {
       const weekClientIds = [...new Set(weeks.map((w) => w.client_id))];
       const { data: checkins } = await supabase
         .from('peak_week_checkins')
-        .select('id, client_id, peak_week_id, weight, pump_rating, flat_full_rating, created_at')
+        .select('id, client_id, peak_week_id, weight, pump_rating, flat_full_rating, checkin_period, created_at')
         .in('peak_week_id', peakWeekIds)
         .order('created_at', { ascending: false });
       const { data: clients } = await supabase.from('clients').select('id, name, full_name').in('id', weekClientIds);
       const nameBy = {};
       (clients || []).forEach((c) => { nameBy[c.id] = c.name || c.full_name || 'Client'; });
-      const byClient = {};
+      const byClientPeriod = {};
       (checkins || []).forEach((c) => {
-        if (!byClient[c.client_id]) byClient[c.client_id] = c;
+        const key = `${c.client_id}:${c.checkin_period || 'evening'}`;
+        if (!byClientPeriod[key]) byClientPeriod[key] = c;
       });
-      return Object.entries(byClient).map(([cid, c]) => ({
+      return Object.values(byClientPeriod).map((c) => ({
         ...c,
-        client_name: nameBy[cid] || 'Client',
+        client_name: nameBy[c.client_id] || 'Client',
       }));
     },
     enabled: !!supabase && !!coachId && !isDetail,
@@ -208,6 +211,10 @@ export default function PeakWeekCheckinReviewPage() {
                 <div>
                   <p className="text-xs mb-0.5" style={{ color: colors.muted }}>Weight (kg)</p>
                   <p className="font-medium" style={{ color: colors.text }}>{checkin.weight != null ? Number(checkin.weight) : '—'}</p>
+                </div>
+                <div>
+                  <p className="text-xs mb-0.5" style={{ color: colors.muted }}>Period</p>
+                  <p className="font-medium capitalize" style={{ color: colors.text }}>{checkin.checkin_period || 'evening'}</p>
                 </div>
                 <div>
                   <p className="text-xs mb-0.5" style={{ color: colors.muted }}>Pump rating</p>
@@ -336,8 +343,10 @@ export default function PeakWeekCheckinReviewPage() {
                     <div>
                       <p className="font-semibold" style={{ color: colors.text }}>{row.client_name}</p>
                       <p className="text-xs mt-0.5" style={{ color: colors.muted }}>
+                        {(row.checkin_period || 'evening').toUpperCase()}
+                        {' · '}
                         {row.created_at ? new Date(row.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
-                        {row.weight != null && ` · ${Number(row.weight)} kg`}
+                        {row.weight != null && ` · ${formatWeightForViewer(Number(row.weight), viewerWU)}`}
                         {(row.pump_rating != null || row.flat_full_rating != null) && ` · P${row.pump_rating ?? '—'}/F${row.flat_full_rating ?? '—'}`}
                       </p>
                     </div>

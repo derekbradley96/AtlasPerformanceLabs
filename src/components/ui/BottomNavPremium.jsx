@@ -1,14 +1,15 @@
 import React, { useCallback } from 'react';
-import { colors, spacing, shell } from '@/ui/tokens';
+import { colors, spacing, shell, touchTargetMin } from '@/ui/tokens';
 import { isNative } from '@/lib/platform';
 import { impactLight } from '@/lib/haptics';
 
-const NAV_BAR_HEIGHT = 76;
+/** Visual + safe-area; keep in sync with paddingTop/paddingBottom below */
+const NAV_BAR_HEIGHT = 94;
 const ICON_SIZE = 24;
 
 /**
- * Premium bottom nav: icon-only, active = filled pill behind icon, no glow.
- * Labels are sr-only for a11y. Safe-area aware. Haptics on native.
+ * Premium bottom nav: icon-only action bar.
+ * Safe-area aware. Haptics on native.
  *
  * @param {Object} props
  * @param {{ key: string, label: string, icon: React.ComponentType, to: string, badge?: number }[]} props.items
@@ -32,12 +33,13 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate }) 
       style={{
         bottom: 0,
         minHeight: NAV_BAR_HEIGHT,
-        paddingTop: spacing[12],
-        paddingBottom: `calc(${spacing[12]}px + env(safe-area-inset-bottom, 0px))`,
+        paddingTop: spacing[8],
+        paddingBottom: `calc(${spacing[10]}px + env(safe-area-inset-bottom, 0px))`,
         paddingLeft: `env(safe-area-inset-left, 0)`,
         paddingRight: `env(safe-area-inset-right, 0)`,
         background: colors.bg,
         borderColor: shell.headerBorder,
+        touchAction: 'manipulation',
       }}
     >
       {items.map((item) => {
@@ -50,15 +52,17 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate }) 
             aria-label={item.label}
             aria-current={active ? 'page' : undefined}
             onClick={() => handleTap(item.key, item.to)}
-            className="flex flex-col items-center justify-center gap-0 transition-colors active:opacity-90"
+            className="flex items-center justify-center transition-colors active:opacity-90"
             style={{
-              minHeight: 44,
-              minWidth: 44,
+              minHeight: Math.max(48, touchTargetMin),
+              minWidth: Math.max(48, touchTargetMin),
               padding: spacing[8],
               background: 'transparent',
               border: 'none',
               color: 'inherit',
               cursor: 'pointer',
+              touchAction: 'manipulation',
+              WebkitTapHighlightColor: 'transparent',
             }}
           >
             <span
@@ -67,7 +71,7 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate }) 
                 width: shell.iconContainerSize,
                 height: shell.iconContainerSize,
                 borderRadius: shell.iconContainerRadius,
-                background: active ? colors.primarySubtle : 'rgba(255,255,255,0.06)',
+                background: 'transparent',
                 color: active ? colors.primary : colors.muted,
               }}
             >
@@ -84,7 +88,6 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate }) 
                 </span>
               )}
             </span>
-            <span className="sr-only">{item.label}</span>
           </button>
         );
       })}

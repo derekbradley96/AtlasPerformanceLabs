@@ -1,72 +1,86 @@
 /**
- * Coach-side check-in detail: metrics, notes, photos; Atlas Insights; Mark Reviewed, Message Client.
+ * Coach-side check-in review — decision workspace (desktop 3-column vs app shell).
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import TopBar from '@/components/ui/TopBar';
-import Card from '@/ui/Card';
+import CheckInReviewDecisionWorkspace from '@/components/checkin-review/CheckInReviewDecisionWorkspace';
+import { PageLoader } from '@/components/ui/LoadingState';
 import { Button } from '@/components/ui/button';
-import { colors, spacing, shell } from '@/ui/tokens';
-import { pageContainer, standardCard, sectionLabel } from '@/ui/pageLayout';
+import { colors, spacing } from '@/ui/tokens';
 import {
   getCheckinById,
   markCheckinReviewed,
   createCheckinPhotoSignedUrl,
 } from '@/lib/checkins';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
-import { getActiveProgramAssignmentForClient } from '@/lib/programAssignments';
-import { getCheckinInsights } from '@/lib/checkinInsights';
-import { generateCheckinSummary } from '@/lib/atlasInsights';
-import ReviewActionTray from '@/components/review/ReviewActionTray';
-import InsightCard from '@/components/review/InsightCard';
-import { MessageCircle, Check, Flag, ClipboardList } from 'lucide-react';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
+import { usePresentationMode } from '@/lib/presentationMode';
+import {
+  resolveCheckinReviewContext,
+  buildWhatChangedStrip,
+  computeWaterSodiumStability,
+  buildSmartSignals,
+  deriveUrgencyBadge,
+  deriveOnTrackLabel,
+  deriveReviewStateLabel,
+  trendSeriesForMiniCharts,
+} from '@/lib/checkinReviewWorkspaceModel';
+import {
+  fetchClientPrepPrecision,
+  fetchClientPrepPrecisionDailyRange,
+  todayLocalDateString,
+  daysAgoDateString,
+} from '@/data/prepPrecisionService';
+import { deriveCheckInReviewRouteState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
+import { ensureThreadForClient, sendMessage } from '@/data/messagingService';
 
-const METRIC_KEYS = [
-  { key: 'weight', label: 'Weight' },
-  { key: 'steps_avg', label: 'Steps (avg)' },
-  { key: 'sleep_score', label: 'Sleep score' },
-  { key: 'energy_level', label: 'Energy level' },
-  { key: 'training_completion', label: 'Training completion %' },
-  { key: 'nutrition_adherence', label: 'Nutrition adherence %' },
-  { key: 'cardio_completion', label: 'Cardio completion %' },
-  { key: 'posing_minutes', label: 'Posing (min)' },
-  { key: 'pump_quality', label: 'Pump quality' },
-  { key: 'digestion_score', label: 'Digestion score' },
-];
+const DRAFT_PREFIX = 'atlas_checkin_review_draft_';
+const FLAG_PREFIX = 'atlas_checkin_review_flag_';
 
 export default function CheckInReviewPage() {
   const navigate = useNavigate();
   const { checkinId } = useParams();
-  const [checkin, setCheckin] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [marking, setMarking] = useState(false);
-  const [photoUrls, setPhotoUrls] = useState([]);
+  const queryClient = useQueryClient();
+  const { profile, user, isDemoMode } = useAuth();
+  const coachId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
+  const viewerWU = resolveViewerBodyweightUnit(profile);
+  const { isDesktopWeb } = usePresentationMode();
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!checkinId) {
-        setLoading(false);
-        return;
-      }
-      const row = await getCheckinById(checkinId);
-      if (cancelled) return;
-      setCheckin(row);
-      if (row?.photos && Array.isArray(row.photos) && row.photos.length > 0) {
-        const urls = await Promise.all(
-          row.photos.map((path) => createCheckinPhotoSignedUrl(path))
-        );
-        if (!cancelled) setPhotoUrls(urls.filter(Boolean));
-      }
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [checkinId]);
+  const [photoUrls, setPhotoUrls] = useState([]);
+  const [prevPhotoUrls, setPrevPhotoUrls] = useState([]);
+  const [marking, setMarking] = useState(false);
+  const [selectedAdjustment, setSelectedAdjustment] = useState('keep_same');
+  const [adjustmentComposer, setAdjustmentComposer] = useState('');
+  const [responseText, setResponseText] = useState('');
+  const [sessionFlag, setSessionFlagState] = useState('none');
+  const [replyBusy, setReplyBusy] = useState(false);
+
+  const { data: checkin, isLoading: checkinLoading } = useQuery({
+    queryKey: ['checkin-review', checkinId],
+    queryFn: () => getCheckinById(checkinId),
+    enabled: !!checkinId,
+  });
 
   const clientId = checkin?.client_id ?? null;
   const supabase = hasSupabase ? getSupabase() : null;
+
+  const { data: clientRow } = useQuery({
+    queryKey: ['client-row-checkin-review', clientId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name, full_name, client_type, delivery_context')
+        .eq('id', clientId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    enabled: !!supabase && !!clientId,
+  });
+
   const { data: trends = [] } = useQuery({
     queryKey: ['v_client_progress_trends', clientId],
     queryFn: async () => {
@@ -80,6 +94,7 @@ export default function CheckInReviewPage() {
     },
     enabled: !!supabase && !!clientId,
   });
+
   const { data: metrics } = useQuery({
     queryKey: ['v_client_progress_metrics', clientId],
     queryFn: async () => {
@@ -94,241 +109,499 @@ export default function CheckInReviewPage() {
     enabled: !!supabase && !!clientId,
   });
 
-  const insightCards = useMemo(() => {
-    const all = getCheckinInsights(trends, metrics ?? null);
-    const list = [
-      all.weight && { key: 'weight', ...all.weight },
-      all.compliance && { key: 'compliance', ...all.compliance },
-      all.recovery && { key: 'recovery', ...all.recovery },
-      all.flags && { key: 'flags', ...all.flags },
-    ].filter(Boolean);
-    return list.slice(0, 4);
-  }, [trends, metrics]);
+  const { data: checkinList = [] } = useQuery({
+    queryKey: ['checkins-by-client-review', clientId],
+    queryFn: async () => {
+      if (!supabase || !clientId) return [];
+      const { data, error } = await supabase
+        .from('checkins')
+        .select('id, submitted_at, created_at, week_start, weight, weight_kg, adherence_pct, training_completion, cardio_completion, steps_avg')
+        .eq('client_id', clientId)
+        .order('submitted_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false });
+      return error ? [] : (Array.isArray(data) ? data : []);
+    },
+    enabled: !!supabase && !!clientId,
+  });
 
-  const atlasSummaryCards = useMemo(() => {
+  const { data: dashboardData } = useQuery({
+    queryKey: ['v_client_master_dashboard_review', clientId],
+    queryFn: async () => {
+      if (!supabase || !clientId) return null;
+      const { data, error } = await supabase
+        .from('v_client_master_dashboard')
+        .select('phase,current_week,total_weeks')
+        .eq('client_id', clientId)
+        .maybeSingle();
+      return error ? null : data;
+    },
+    enabled: !!supabase && !!clientId,
+  });
+
+  const reviewContext = useMemo(
+    () => resolveCheckinReviewContext(clientRow, checkin, dashboardData),
+    [clientRow, checkin, dashboardData]
+  );
+
+  const { data: prepPrecision } = useQuery({
+    queryKey: ['prep-precision-checkin-review', clientId],
+    queryFn: async () => {
+      try {
+        return await fetchClientPrepPrecision(clientId);
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!clientId && reviewContext.showPrepHygiene,
+  });
+
+  const prepFrom = daysAgoDateString(13);
+  const prepTo = todayLocalDateString();
+  const { data: prepDailies = [] } = useQuery({
+    queryKey: ['prep-dailies-checkin-review', clientId, prepFrom, prepTo],
+    queryFn: async () => {
+      try {
+        return await fetchClientPrepPrecisionDailyRange(clientId, prepFrom, prepTo);
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!clientId && reviewContext.showPrepHygiene,
+  });
+
+  const orderedCheckins = useMemo(
+    () => (Array.isArray(checkinList) ? checkinList : []).filter((c) => c?.id),
+    [checkinList]
+  );
+  const currentIndex = useMemo(
+    () => orderedCheckins.findIndex((c) => String(c.id) === String(checkinId)),
+    [orderedCheckins, checkinId]
+  );
+  const previousForDelta = currentIndex >= 0 && currentIndex < orderedCheckins.length - 1 ? orderedCheckins[currentIndex + 1] : null;
+  const previousCheckin = previousForDelta;
+  const nextCheckin = currentIndex > 0 ? orderedCheckins[currentIndex - 1] : null;
+
+  const { data: previousCheckinFull } = useQuery({
+    queryKey: ['checkin-prev-full', previousForDelta?.id],
+    queryFn: () => getCheckinById(previousForDelta.id),
+    enabled: !!previousForDelta?.id,
+  });
+
+  const currentWeight = checkin?.weight_kg ?? checkin?.weight ?? null;
+  const prevWeight = previousCheckin?.weight_kg ?? previousCheckin?.weight ?? null;
+  const weightDeltaKg =
+    currentWeight != null && prevWeight != null ? Number(currentWeight) - Number(prevWeight) : null;
+  const adherencePct = checkin?.adherence_pct ?? checkin?.training_completion ?? metrics?.training_adherence ?? null;
+  const sessionsCompleted = checkin?.sessions_completed ?? checkin?.training_sessions_completed ?? metrics?.training_sessions_completed ?? null;
+  const cardioOrSteps = checkin?.cardio_completion ?? checkin?.steps_avg ?? metrics?.cardio_completion ?? metrics?.steps_avg ?? null;
+
+  const prepStability = useMemo(() => computeWaterSodiumStability(prepDailies), [prepDailies]);
+
+  const whatChanged = useMemo(() => {
     if (!checkin) return [];
-    const previousTrends = Array.isArray(trends)
-      ? trends.filter((t) => t.submitted_at && checkin.submitted_at && new Date(t.submitted_at) < new Date(checkin.submitted_at))
-      : [];
-    const result = generateCheckinSummary(checkin, previousTrends.length > 0 ? previousTrends : null);
-    const weightTrend = result.details.filter((d) => /weight/i.test(d));
-    const complianceTrend = result.details.filter((d) => /training|nutrition|adherence|completion/i.test(d));
-    const recoveryMarkers = result.details.filter((d) => /sleep|energy/i.test(d));
-    const alreadyShown = new Set([...weightTrend, ...complianceTrend, ...recoveryMarkers]);
-    const riskWarnings = result.level === 'warning' ? result.details.filter((d) => !alreadyShown.has(d)) : [];
-    const cards = [
-      weightTrend.length > 0 && { key: 'weight', label: 'Weight trend', items: weightTrend, level: result.level },
-      complianceTrend.length > 0 && { key: 'compliance', label: 'Compliance trend', items: complianceTrend, level: result.level },
-      recoveryMarkers.length > 0 && { key: 'recovery', label: 'Recovery markers', items: recoveryMarkers, level: result.level },
-      (riskWarnings.length > 0 || (result.level === 'warning' && result.details.length > 0)) && {
-        key: 'risk',
-        label: 'Risk warnings',
-        items: riskWarnings.length > 0 ? riskWarnings : ['Review weight, compliance, and recovery above.'],
-        level: 'warning',
-      },
-    ].filter(Boolean);
-    return cards;
-  }, [checkin, trends]);
+    const prep =
+      reviewContext.showPrepHygiene && prepStability
+        ? { waterStability: prepStability.waterStability, sodiumStability: prepStability.sodiumStability }
+        : {};
+    return buildWhatChangedStrip(checkin, previousCheckinFull || previousCheckin, prep, viewerWU);
+  }, [checkin, previousCheckin, previousCheckinFull, reviewContext.showPrepHygiene, prepStability, viewerWU]);
 
-  const handleMarkReviewed = async () => {
-    if (!checkinId || marking) return;
+  const smartSignals = useMemo(
+    () =>
+      buildSmartSignals({
+        checkin,
+        previousCheckin: previousCheckinFull || previousCheckin,
+        weightDeltaKg,
+        adherencePct: adherencePct != null ? Number(adherencePct) : null,
+        prepStability,
+        trends,
+        emphasis: reviewContext.emphasis,
+      }),
+    [checkin, previousCheckin, previousCheckinFull, weightDeltaKg, adherencePct, prepStability, trends, reviewContext.emphasis]
+  );
+
+  const trackStatus = useMemo(() => deriveOnTrackLabel(adherencePct, weightDeltaKg), [adherencePct, weightDeltaKg]);
+  const urgencyBadge = useMemo(() => deriveUrgencyBadge(adherencePct, weightDeltaKg), [adherencePct, weightDeltaKg]);
+
+  const miniSeries = useMemo(
+    () => trendSeriesForMiniCharts(trends, checkin?.submitted_at || checkin?.created_at),
+    [trends, checkin]
+  );
+
+  const prepWaterSeries = useMemo(
+    () => (Array.isArray(prepDailies) ? prepDailies.map((d) => Number(d.water_actual_ml)).filter((n) => Number.isFinite(n)) : []),
+    [prepDailies]
+  );
+  const prepSodiumSeries = useMemo(
+    () => (Array.isArray(prepDailies) ? prepDailies.map((d) => Number(d.sodium_actual_mg)).filter((n) => Number.isFinite(n)) : []),
+    [prepDailies]
+  );
+
+  const phaseWeekText = useMemo(() => {
+    if (dashboardData?.current_week != null && dashboardData?.total_weeks != null) {
+      return `Week ${dashboardData.current_week} of ${dashboardData.total_weeks} · ${dashboardData?.phase ?? checkin?.focus_type ?? 'Phase'}`;
+    }
+    return `${dashboardData?.phase ?? checkin?.focus_type ?? 'Phase'}`;
+  }, [dashboardData, checkin]);
+
+  const draftKey = `${DRAFT_PREFIX}${checkinId}`;
+  const flagKey = `${FLAG_PREFIX}${checkinId}`;
+
+  useEffect(() => {
+    if (!checkinId) return;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const j = JSON.parse(raw);
+        if (typeof j.response === 'string') setResponseText(j.response);
+        if (typeof j.adjustment === 'string') setAdjustmentComposer(j.adjustment);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [checkinId, draftKey]);
+
+  useEffect(() => {
+    if (!checkinId) return;
+    try {
+      const v = sessionStorage.getItem(flagKey);
+      if (v === 'follow_up' || v === 'urgent') setSessionFlagState(v);
+      else setSessionFlagState('none');
+    } catch {
+      setSessionFlagState('none');
+    }
+  }, [checkinId, flagKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!checkin?.photos || !Array.isArray(checkin.photos) || checkin.photos.length === 0) {
+        if (!cancelled) setPhotoUrls([]);
+        return;
+      }
+      const urls = await Promise.all(checkin.photos.map((path) => createCheckinPhotoSignedUrl(path)));
+      if (!cancelled) setPhotoUrls(urls.filter(Boolean));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkin?.photos, checkin?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const prev = previousCheckinFull;
+      if (!prev?.photos || !Array.isArray(prev.photos) || prev.photos.length === 0) {
+        if (!cancelled) setPrevPhotoUrls([]);
+        return;
+      }
+      const urls = await Promise.all(prev.photos.map((path) => createCheckinPhotoSignedUrl(path)));
+      if (!cancelled) setPrevPhotoUrls(urls.filter(Boolean));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [previousCheckinFull]);
+
+  const onSetSessionFlag = useCallback(
+    (f) => {
+      setSessionFlagState(f);
+      try {
+        if (f === 'none') sessionStorage.removeItem(flagKey);
+        else sessionStorage.setItem(flagKey, f);
+      } catch {
+        /* ignore */
+      }
+      if (f === 'follow_up') toast.message('Flagged for follow-up (this device session)');
+      if (f === 'urgent') toast.message('Marked urgent for your workflow (this device session)');
+    },
+    [flagKey]
+  );
+
+  const onSaveDraft = useCallback(() => {
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ response: responseText, adjustment: adjustmentComposer }));
+      toast.success('Draft saved');
+    } catch {
+      toast.error('Could not save draft');
+    }
+  }, [draftKey, responseText, adjustmentComposer]);
+
+  const onAppendAdjustmentSnippet = useCallback((snippet) => {
+    setAdjustmentComposer((prev) => (prev ? `${prev}\n${snippet}` : snippet));
+  }, []);
+
+  const onApplyTemplate = useCallback((body) => {
+    setResponseText((prev) => (prev?.trim() ? `${prev.trim()}\n\n${body}` : body));
+  }, []);
+
+  const navigateToReview = useCallback(
+    (id) => {
+      if (!id) return;
+      const qs = clientId ? `?clientId=${encodeURIComponent(clientId)}` : '';
+      navigate(`/review-center/checkins/${id}${qs}`);
+    },
+    [navigate, clientId]
+  );
+
+  const appendComposerLine = useCallback((line) => {
+    setAdjustmentComposer((prev) => (prev?.trim() ? `${prev.trim()}\n${line}` : line));
+  }, []);
+
+  const handleMarkReviewed = useCallback(async () => {
+    if (!checkinId || marking) return false;
     setMarking(true);
     try {
       const ok = await markCheckinReviewed(checkinId);
       if (ok) {
         toast.success('Marked as reviewed');
-        setCheckin((c) => (c ? { ...c, reviewed_at: new Date().toISOString(), reviewed_by: true } : c));
+        queryClient.invalidateQueries({ queryKey: ['checkin-review', checkinId] });
+        queryClient.invalidateQueries({ queryKey: ['checkins-by-client-review', clientId] });
       } else {
         toast.error('Could not mark as reviewed');
       }
+      return ok;
     } finally {
       setMarking(false);
     }
-  };
+  }, [checkinId, marking, queryClient, clientId]);
 
-  const handleMessageClient = () => {
-    const clientId = checkin?.client_id;
-    if (clientId) navigate(`/messages/${clientId}`);
-    else toast.error('Client not found');
-  };
+  const buildOutboundMessage = useCallback(() => {
+    const parts = [responseText.trim(), adjustmentComposer.trim()].filter(Boolean);
+    const adj = selectedAdjustment && selectedAdjustment !== 'keep_same' ? `Adjustment intent: ${String(selectedAdjustment).replace(/_/g, ' ')}` : '';
+    const tail = [adj, sessionFlag === 'follow_up' ? '[Follow-up flagged]' : '', sessionFlag === 'urgent' ? '[Urgent]' : ''].filter(Boolean).join(' ');
+    const base = parts.join('\n\n') || 'Thanks for the check-in — I’ve reviewed it and we’re aligned for the week ahead.';
+    return tail ? `${base}\n\n${tail}`.trim() : base;
+  }, [responseText, adjustmentComposer, selectedAdjustment, sessionFlag]);
 
-  const handleAddFlag = () => {
-    const clientId = checkin?.client_id;
-    if (clientId) {
-      navigate(`/clients/${clientId}`);
-      toast.info('Add flag from client profile');
-    } else toast.error('Client not found');
-  };
-
-  const handleAdjustProgram = async () => {
-    const clientId = checkin?.client_id;
-    if (!clientId) {
-      toast.error('Client not found');
+  const onApproveAndMessage = useCallback(async () => {
+    if (!clientId || !coachId) {
+      toast.error('Sign in as coach to send');
       return;
     }
-    const supabase = hasSupabase ? getSupabase() : null;
-    const active = supabase ? await getActiveProgramAssignmentForClient(supabase, clientId) : null;
-    const params = new URLSearchParams({ clientId });
-    params.set('source', 'checkin');
-    if (checkinId) params.set('review_id', checkinId);
-    const note = checkin?.struggles?.trim() || checkin?.questions?.trim();
-    if (note) params.set('note', note.slice(0, 120));
-    if (active?.block?.id) {
-      params.set('blockId', active.block.id);
-      navigate(`/program-builder?${params.toString()}`);
-    } else {
-      navigate(`/program-assignments?${params.toString()}`);
+    setReplyBusy(true);
+    try {
+      const body = buildOutboundMessage();
+      const thread = await ensureThreadForClient(clientId, coachId);
+      if (!thread?.id) {
+        toast.error('Could not open conversation');
+        return;
+      }
+      const sent = await sendMessage(thread.id, body, coachId);
+      if (!sent) {
+        toast.error('Message not sent');
+        return;
+      }
+      const ok = await markCheckinReviewed(checkinId);
+      if (ok) {
+        toast.success('Sent and marked reviewed');
+        queryClient.invalidateQueries({ queryKey: ['checkin-review', checkinId] });
+        queryClient.invalidateQueries({ queryKey: ['checkins-by-client-review', clientId] });
+        if (nextCheckin?.id) navigateToReview(nextCheckin.id);
+        else navigate('/review-center');
+      } else {
+        toast.message('Message sent — could not mark reviewed in app');
+      }
+    } finally {
+      setReplyBusy(false);
     }
-  };
+  }, [
+    clientId,
+    coachId,
+    buildOutboundMessage,
+    checkinId,
+    queryClient,
+    nextCheckin?.id,
+    navigateToReview,
+    navigate,
+  ]);
 
-  if (loading) {
+  const onRequestUpdate = useCallback(async () => {
+    if (!clientId || !coachId) {
+      toast.error('Sign in as coach to send');
+      return;
+    }
+    const note =
+      responseText.trim() ||
+      'Thanks for the update. Please send another check-in in a few days with weight, adherence, and a short note on recovery.';
+    setReplyBusy(true);
+    try {
+      const thread = await ensureThreadForClient(clientId, coachId);
+      if (!thread?.id) {
+        toast.error('Could not open conversation');
+        return;
+      }
+      const sent = await sendMessage(thread.id, note, coachId);
+      if (sent) toast.success('Update request sent');
+      else toast.error('Message not sent');
+    } finally {
+      setReplyBusy(false);
+    }
+  }, [clientId, coachId, responseText]);
+
+  const quickHandlers = useMemo(
+    () => ({
+      onKeepPlan: () => {
+        setSelectedAdjustment('keep_same');
+        toast.message('Intent: keep plan');
+      },
+      onAdjustMacros: () => {
+        appendComposerLine('[Macros] Review calorie/macro targets — specify direction and magnitude below.');
+        toast.message('Added to adjustment notes');
+      },
+      onAdjustTraining: () => {
+        appendComposerLine('[Training] Adjust load, volume, or exercise selection — specify below.');
+        toast.message('Added to adjustment notes');
+      },
+      onAdjustCardio: () => {
+        appendComposerLine('[Cardio] Adjust cardio (frequency, duration, intensity, or modality).');
+        toast.message('Added to adjustment notes');
+      },
+      onAdjustWater: () => {
+        appendComposerLine('[Water] Adjust daily water target / timing for prep.');
+        toast.message('Added to adjustment notes');
+      },
+      onAdjustSodium: () => {
+        appendComposerLine('[Sodium] Adjust sodium target / timing for prep.');
+        toast.message('Added to adjustment notes');
+      },
+    }),
+    [appendComposerLine]
+  );
+
+  const isReviewed = !!(checkin?.reviewed_at || checkin?.reviewed_by);
+  const reviewStateLabel = useMemo(
+    () => deriveReviewStateLabel(checkin, { sessionFlag }),
+    [checkin, sessionFlag]
+  );
+
+  useEffect(() => {
+    const desktop = typeof window !== 'undefined' ? window.matchMedia('(min-width: 1024px)').matches : false;
+    if (!desktop) return undefined;
+    const onKeyDown = (event) => {
+      const tag = String(event.target?.tagName || '').toLowerCase();
+      const isTypingTarget = tag === 'input' || tag === 'textarea' || event.target?.isContentEditable;
+      if (isTypingTarget || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (replyBusy) return;
+      if (event.key === 'ArrowLeft' && previousCheckin?.id) {
+        event.preventDefault();
+        navigateToReview(previousCheckin.id);
+        return;
+      }
+      if (event.key === 'ArrowRight' && nextCheckin?.id) {
+        event.preventDefault();
+        navigateToReview(nextCheckin.id);
+        return;
+      }
+      if (isReviewed || marking) return;
+      if (event.key === '1') {
+        event.preventDefault();
+        handleMarkReviewed();
+      } else if (event.key === '2') {
+        event.preventDefault();
+        onApproveAndMessage();
+      } else if (event.key === '3') {
+        event.preventDefault();
+        onRequestUpdate();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    previousCheckin?.id,
+    nextCheckin?.id,
+    navigateToReview,
+    handleMarkReviewed,
+    onApproveAndMessage,
+    onRequestUpdate,
+    isReviewed,
+    marking,
+    replyBusy,
+  ]);
+
+  if (checkinLoading) {
+    const m = deriveCheckInReviewRouteState({ view: 'loading' });
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Check-in" onBack={() => navigate(-1)} />
-        <div style={{ ...pageContainer, paddingTop: spacing[24] }}>
-          <div className="animate-pulse rounded-xl" style={{ ...standardCard, padding: spacing[24], minHeight: 220 }}>
-            <div style={{ height: 14, width: '50%', background: colors.surface2, borderRadius: 6, marginBottom: spacing[16] }} />
-            <div style={{ height: 12, width: '90%', background: colors.surface2, borderRadius: 6, marginBottom: spacing[8] }} />
-            <div style={{ height: 12, width: '70%', background: colors.surface2, borderRadius: 6, marginBottom: spacing[16] }} />
-            <div style={{ height: 48, width: '100%', background: colors.surface2, borderRadius: shell.cardRadius }} />
-          </div>
-        </div>
+      <div
+        className="min-h-screen"
+        {...atlasMigrationDataAttributes(m.phase, m.primary)}
+        style={{ background: colors.bg, color: colors.text, padding: spacing[20] }}
+      >
+        <PageLoader message="Loading check-in…" />
       </div>
     );
   }
 
   if (!checkin) {
+    const m = deriveCheckInReviewRouteState({ view: 'not_found' });
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Check-in" onBack={() => navigate(-1)} />
+      <div
+        className="min-h-screen"
+        {...atlasMigrationDataAttributes(m.phase, m.primary)}
+        style={{ background: colors.bg, color: colors.text }}
+      >
         <div className="p-6 text-center">
           <p style={{ color: colors.muted }}>Check-in not found.</p>
-          <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>Go back</Button>
+          <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>
+            Go back
+          </Button>
         </div>
       </div>
     );
   }
 
-  const isReviewed = !!(checkin.reviewed_at || checkin.reviewed_by);
+  const submissionAt = checkin.submitted_at || checkin.created_at || checkin.week_start;
+  const shell = isDesktopWeb ? 'desktop_web' : 'mobile_app';
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-      <TopBar title="Check-in" onBack={() => navigate(-1)} />
-      <div style={{ ...pageContainer, paddingBottom: spacing[32] }}>
-        <p className="atlas-meta" style={{ marginBottom: spacing[16] }}>
-          Week of {checkin.week_start} · {checkin.focus_type ?? '—'}
-        </p>
-
-        {atlasSummaryCards.length > 0 && (
-          <section style={{ marginBottom: spacing[16] }}>
-            <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>
-              Atlas Summary
-            </p>
-            <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              {atlasSummaryCards.map(({ key, label, items, level }) => (
-                <Card
-                  key={key}
-                  style={{
-                    padding: spacing[12],
-                    borderLeft: `3px solid ${level === 'warning' ? colors.warning : colors.primary}`,
-                    background: colors.surface1,
-                  }}
-                >
-                  <p className="text-xs font-medium mb-1" style={{ color: colors.muted }}>{label}</p>
-                  <ul className="text-xs m-0 pl-4" style={{ color: colors.text, lineHeight: 1.4 }}>
-                    {items.map((item, i) => (
-                      <li key={i}>{item}</li>
-                    ))}
-                  </ul>
-                </Card>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <Card style={{ ...standardCard, marginBottom: spacing[16], padding: spacing[16] }}>
-          <p className="atlas-meta" style={{ marginBottom: spacing[8] }}>Metrics</p>
-          <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            {METRIC_KEYS.map(({ key, label }) => {
-              const v = checkin[key];
-              if (v == null || v === '') return null;
-              return (
-                <div key={key}>
-                  <span className="text-xs" style={{ color: colors.muted }}>{label}</span>
-                  <p className="font-medium" style={{ color: colors.text }}>{String(v)}</p>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        {insightCards.length > 0 && (
-          <section style={{ marginBottom: spacing[16] }}>
-            <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Atlas Insights</p>
-            {insightCards.map(({ key, level, title, detail }) => (
-              <InsightCard
-                key={key}
-                level={key === 'flags' && level === 'warning' ? 'danger' : level}
-                title={title}
-                detail={detail}
-              />
-            ))}
-          </section>
-        )}
-
-        {(checkin.wins || checkin.struggles || checkin.questions) && (
-          <Card style={{ ...standardCard, marginBottom: spacing[16], padding: spacing[16] }}>
-            <p className="atlas-meta" style={{ marginBottom: spacing[8] }}>Notes</p>
-            {checkin.wins && (
-              <div className="mb-3">
-                <span className="text-xs" style={{ color: colors.muted }}>Wins</span>
-                <p className="text-sm mt-0.5" style={{ color: colors.text }}>{checkin.wins}</p>
-              </div>
-            )}
-            {checkin.struggles && (
-              <div className="mb-3">
-                <span className="text-xs" style={{ color: colors.muted }}>Struggles</span>
-                <p className="text-sm mt-0.5" style={{ color: colors.text }}>{checkin.struggles}</p>
-              </div>
-            )}
-            {checkin.questions && (
-              <div>
-                <span className="text-xs" style={{ color: colors.muted }}>Questions</span>
-                <p className="text-sm mt-0.5" style={{ color: colors.text }}>{checkin.questions}</p>
-              </div>
-            )}
-          </Card>
-        )}
-
-        {photoUrls.length > 0 && (
-          <Card style={{ ...standardCard, marginBottom: spacing[16], padding: spacing[16] }}>
-            <p className="atlas-meta" style={{ marginBottom: spacing[8] }}>Photos</p>
-            <div className="flex flex-wrap gap-2">
-              {photoUrls.map((url, i) => (
-                <a
-                  key={i}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block rounded-lg overflow-hidden"
-                  style={{ width: 100, height: 100 }}
-                >
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                </a>
-              ))}
-            </div>
-          </Card>
-        )}
-
-        <ReviewActionTray
-          actions={[
-            { label: 'Message Client', onClick: handleMessageClient, icon: <MessageCircle size={16} /> },
-            { label: 'Add Flag', onClick: handleAddFlag, icon: <Flag size={16} /> },
-            { label: 'Adjust Program', onClick: handleAdjustProgram, icon: <ClipboardList size={16} /> },
-            ...(!isReviewed ? [{ label: marking ? 'Saving…' : 'Mark Reviewed', onClick: handleMarkReviewed, primary: true, disabled: marking, icon: <Check size={16} /> }] : []),
-          ]}
-        />
-      </div>
-    </div>
+    <CheckInReviewDecisionWorkspace
+      shell={shell}
+      checkin={checkin}
+      clientRow={clientRow}
+      dashboardData={dashboardData}
+      reviewContext={reviewContext}
+      whatChanged={whatChanged}
+      smartSignals={smartSignals}
+      trackStatus={trackStatus}
+      urgencyBadge={urgencyBadge}
+      reviewStateLabel={reviewStateLabel}
+      phaseWeekText={phaseWeekText}
+      submissionAt={submissionAt}
+      photoUrls={photoUrls}
+      prevPhotoUrls={prevPhotoUrls}
+      miniSeries={miniSeries}
+      prepWaterSeries={prepWaterSeries}
+      prepSodiumSeries={prepSodiumSeries}
+      prepPrecision={prepPrecision}
+      viewerWU={viewerWU}
+      weightDeltaKg={weightDeltaKg}
+      adherencePct={adherencePct}
+      sessionsCompleted={sessionsCompleted}
+      cardioOrSteps={cardioOrSteps}
+      nav={{
+        prevId: previousCheckin?.id,
+        nextId: nextCheckin?.id,
+        onPrev: () => navigateToReview(previousCheckin?.id),
+        onNext: () => navigateToReview(nextCheckin?.id),
+      }}
+      selectedAdjustment={selectedAdjustment}
+      onSelectAdjustment={setSelectedAdjustment}
+      adjustmentComposer={adjustmentComposer}
+      onAdjustmentComposerChange={setAdjustmentComposer}
+      onAppendAdjustmentSnippet={onAppendAdjustmentSnippet}
+      responseText={responseText}
+      onResponseChange={setResponseText}
+      onApplyTemplate={onApplyTemplate}
+      onSaveDraft={onSaveDraft}
+      quickHandlers={quickHandlers}
+      sessionFlag={sessionFlag}
+      onSetSessionFlag={onSetSessionFlag}
+      onMarkReviewed={handleMarkReviewed}
+      onApproveAndMessage={onApproveAndMessage}
+      onRequestUpdate={onRequestUpdate}
+      marking={marking}
+      replyBusy={replyBusy}
+      isReviewed={isReviewed}
+    />
   );
 }

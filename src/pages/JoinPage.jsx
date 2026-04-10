@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { createLead } from '@/lib/leadsStore';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { toast } from 'sonner';
+import { atlasMigrationDataAttributes, deriveJoinLeadPageRouteState } from '@/lib/atlasMigrationPhases';
 
 export default function JoinPage() {
   const { slug } = useParams();
@@ -39,9 +40,21 @@ export default function JoinPage() {
     toast.success("We've received your info!");
   };
 
+  const joinLeadMigrationAttrs = useMemo(() => {
+    let surface = 'form';
+    if (!slug) surface = 'invalid';
+    else if (submitted) surface = 'thanks';
+    const s = deriveJoinLeadPageRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [slug, submitted]);
+
   if (!slug) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4" style={{ background: colors.bg, color: colors.muted }}>
+      <div
+        className="min-h-screen flex items-center justify-center p-4"
+        style={{ background: colors.bg, color: colors.muted }}
+        {...joinLeadMigrationAttrs}
+      >
         <p>Invalid link.</p>
       </div>
     );
@@ -56,6 +69,7 @@ export default function JoinPage() {
           paddingTop: 'env(safe-area-inset-top)',
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
+        {...joinLeadMigrationAttrs}
       >
         <Card style={{ padding: spacing[24], textAlign: 'center', maxWidth: 360 }}>
           <h1 className="text-xl font-bold mb-2" style={{ color: colors.text }}>You’re on the list</h1>
@@ -75,6 +89,7 @@ export default function JoinPage() {
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
+      {...joinLeadMigrationAttrs}
     >
       <div className="max-w-sm mx-auto w-full">
         <h1 className="text-xl font-bold text-center mb-1" style={{ color: colors.text }}>

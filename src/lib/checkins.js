@@ -152,6 +152,11 @@ export async function submitCheckin(payload) {
     };
     const { data, error } = await supabase.from('checkins').insert(row).select().single();
     if (error) return null;
+    try {
+      await supabase.rpc('evaluate_client_state', { p_client_id: client_id });
+    } catch {
+      // non-blocking: check-in should still succeed if intelligence rpc fails
+    }
     return data;
   } catch {
     return null;

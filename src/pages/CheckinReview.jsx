@@ -11,6 +11,7 @@ import { getClientRiskEvaluation } from '@/lib/riskService';
 import { normalizePhase } from '@/lib/intelligence/clientRisk';
 import { ReviewEngine } from '@/features/reviewEngine';
 import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { colors } from '@/ui/tokens';
 
@@ -55,7 +56,8 @@ async function successHaptic() {
 export default function CheckinReview() {
   const { id: clientId, checkinId } = useParams();
   const navigate = useNavigate();
-  const { user, isDemoMode } = useAuth();
+  const { user, isDemoMode, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? 'trainer-1';
   const [coachResponse, setCoachResponse] = useState('');
 
@@ -127,7 +129,7 @@ export default function CheckinReview() {
         metrics: [
           {
             label: 'Weight (avg)',
-            value: tw.weight_kg != null ? `${tw.weight_kg} kg` : null,
+            value: tw.weight_kg != null ? formatWeightForViewer(tw.weight_kg, viewerWU) : null,
             delta: weightDelta,
             deltaWarning: deltas.weightNote,
             trend: weightTrend,
@@ -147,7 +149,7 @@ export default function CheckinReview() {
       right: lw ? {
         title: 'Last week',
         metrics: [
-          { label: 'Weight (avg)', value: lw.weight_kg != null ? `${lw.weight_kg} kg` : null },
+          { label: 'Weight (avg)', value: lw.weight_kg != null ? formatWeightForViewer(lw.weight_kg, viewerWU) : null },
           { label: 'Adherence', value: lw.adherence_pct != null ? `${lw.adherence_pct}%` : null },
           { label: 'Steps', value: lw.steps != null ? lw.steps.toLocaleString() : null },
           { label: 'Sleep', value: getSleepLabel(lw) },
@@ -162,7 +164,7 @@ export default function CheckinReview() {
           label: 'Weight',
           curr: tw.weight_kg,
           prev: lw.weight_kg,
-          format: (v) => (v != null ? `${v} kg` : '—'),
+          format: (v) => (v != null ? formatWeightForViewer(v, viewerWU) : '—'),
           delta: tw.weight_kg != null && lw.weight_kg != null && lw.weight_kg > 0 ? ((tw.weight_kg - lw.weight_kg) / lw.weight_kg) * 100 : null,
         },
         {
@@ -189,7 +191,7 @@ export default function CheckinReview() {
       ] : undefined,
       warnings: warnings.length ? warnings : undefined,
     };
-  }, [client, thisWeek, lastWeek, phase, phaseLabel, riskEvaluation, suggestedAction, deltas, clientId]);
+  }, [client, thisWeek, lastWeek, phase, phaseLabel, riskEvaluation, suggestedAction, deltas, clientId, viewerWU]);
 
   const [showSendFeedbackConfirm, setShowSendFeedbackConfirm] = useState(false);
   const [pendingSendFeedback, setPendingSendFeedback] = useState(null);

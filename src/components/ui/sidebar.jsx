@@ -7,8 +7,8 @@ import {
 import { cn } from '@/lib/utils';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
-import AtlasLogo from '@/components/Brand/AtlasLogo';
-
+import { isPersonal } from '@/lib/roles';
+import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
 export default function Sidebar({ userRole }) {
   const location = useLocation();
   const { logout } = useAuth();
@@ -23,13 +23,17 @@ export default function Sidebar({ userRole }) {
     { path: createPageUrl('Earnings'), page: 'Earnings', icon: DollarSign, label: 'Earnings' },
   ];
 
+  const discoverNavPath = isPersonal(userRole)
+    ? buildPersonalCoachTierSelectionUrl({ source: 'from_general_discovery' })
+    : '/discover';
+
   // Client/Solo navigation
   const clientNavItems = [
     { path: createPageUrl('Home'), page: 'Home', icon: Home, label: 'Home' },
     { path: createPageUrl('MyProgram'), page: 'MyProgram', icon: ClipboardCheck, label: 'My Program', roles: ['client'] },
-    { path: createPageUrl('Workout'), page: 'Workout', icon: Dumbbell, label: 'Workouts' },
+    { path: '/today', page: 'Today', icon: Dumbbell, label: 'Workouts' },
     { path: createPageUrl('Progress'), page: 'Progress', icon: TrendingUp, label: 'Progress' },
-    { path: createPageUrl('FindTrainer'), page: 'FindTrainer', icon: Users, label: 'Find Trainer' },
+    { path: discoverNavPath, page: 'Discover', icon: Users, label: 'Find a coach' },
     { path: createPageUrl('Messages'), page: 'Messages', icon: MessageSquare, label: 'Messages', roles: ['client'] },
     { path: createPageUrl('Profile'), page: 'Profile', icon: User, label: 'Profile' },
   ].filter(item => !item.roles || item.roles.includes(userRole));
@@ -37,19 +41,29 @@ export default function Sidebar({ userRole }) {
   const navItems = userRole === 'trainer' ? trainerNavItems : clientNavItems;
   const filteredItems = navItems;
 
+  const discoverNavActive =
+    location.pathname === '/discover' ||
+    location.pathname.startsWith('/marketplace/coach') ||
+    location.pathname === '/personal/coach-tier-selection';
+
   return (
     <aside className="hidden md:flex flex-col w-64 bg-atlas-primary border-r border-atlas-border h-screen fixed left-0 top-0">
       <div className="p-6">
         <Link to={createPageUrl('Home')} className="flex items-center gap-3">
-          <AtlasLogo variant="header" className="shrink-0" />
           <span className="text-xl font-bold text-white tracking-tight">Atlas Performance</span>
         </Link>
       </div>
       
       <nav className="flex-1 px-4 py-2 space-y-1">
         {filteredItems.map((item) => {
-          const isActive = location.pathname === item.path || 
-            (item.path !== '/app' && location.pathname.startsWith(item.path));
+          const isActive =
+            (item.page === 'Discover' && discoverNavActive) ||
+            (item.page !== 'Discover' &&
+              (location.pathname === item.path ||
+                (item.path !== '/app' &&
+                  item.path !== '/discover' &&
+                  item.path !== '/personal/coach-tier-selection' &&
+                  location.pathname.startsWith(item.path))));
           const Icon = item.icon;
           
           return (

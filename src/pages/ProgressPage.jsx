@@ -2,7 +2,7 @@
  * Progress page: coaching trends for client, coach (viewing a client), and personal.
  * Uses v_client_progress_metrics and v_client_progress_trends. Atlas shell, recharts for trends.
  */
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -13,12 +13,16 @@ import {
   Flag,
   CheckCircle2,
   Calendar,
+  ArrowRight,
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/lib/AuthContext';
-import { isCoach, isPersonal } from '@/lib/roles';
+import { isClient, isCoach, isPersonal } from '@/lib/roles';
+
+
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import TopBar from '@/components/ui/TopBar';
+import { PersonalCanvas, PersonalColumn } from '@/components/personal/PersonalSurface';
 import Card from '@/ui/Card';
 import EmptyState from '@/components/ui/EmptyState';
 import { ProgressSummarySkeleton, TrendSectionSkeleton } from '@/components/ui/LoadingState';
@@ -28,12 +32,85 @@ import PoseCheckTimeline from '@/components/prep/PoseCheckTimeline';
 import PrepInsightsBlock from '@/components/prep/PrepInsightsBlock';
 import HabitProgressCard from '@/components/habits/HabitProgressCard';
 import TimeframeFilter, { filterTrendsByRange, DEFAULT_TIMEFRAME, TIMEFRAME_OPTIONS } from '@/components/ui/TimeframeFilter';
+import { coachFocusAllowsPrepFeatures } from '@/lib/coachFocus';
 import { generateProgressInsight } from '@/lib/atlasInsights';
-import { colors, spacing, shell } from '@/ui/tokens';
+import {
+  fetchMergedPersonalNutritionTargets,
+  formatPersonalNutritionTargetsSummary,
+  hasPersonalNutritionTargets,
+  personalNutritionTargetsQueryKey,
+} from '@/lib/personalNutritionProfile';
+import { colors, spacing, shell, radii, touchTargetMin } from '@/ui/tokens';
+import { desktopRhythm } from '@/ui/pageLayout';
+import { usePresentationMode } from '@/lib/presentationMode';
+import { resolvePersonalPlanTier } from '@/config/plans';
+import {
+  EMPTY_PERSONAL_PROGRESS_DASHBOARD,
+  fetchPersonalProgressDashboard,
+} from '@/lib/personalProgressDashboard';
+import { deriveCoachBridgeMoment, COACH_BRIDGE_VARIANTS } from '@/lib/coachBridge';
+import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
+import {
+  derivePersonalProgressRouteState,
+  deriveProgressRouteSignedOutState,
+  deriveClientProgressRouteState,
+  deriveCoachClientProgressRouteState,
+  atlasMigrationDataAttributes,
+} from '@/lib/atlasMigrationPhases';
+import CoachBridgeCard from '@/components/coaching/CoachBridgeCard';
+import { getPersonalAdjustmentLogCount } from '@/lib/personalFeedbackLoop';
+import { ANALYTICS_EVENTS, track } from '@/services/analyticsService';
+import { resolveViewerBodyweightUnit,
+  weightKgToChartValue,
+  formatWeightForViewer,
+  formatWeightDeltaKg,
+  weightChartAxisLabel, } from '@/lib/bodyMeasurementUnits';
+import {
+  resolvePersonalUXContext,
+  getPersonalProgressEmptySurfaceCopy,
+  getPersonalScreenFeatures,
+} from '@/lib/personalScreenMatrix';
 
 const PAGE_PADDING = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
 
-/** Resolve client_id for current user (client/personal): clients.id where user_id = auth.uid(). */
+const PROGRESS_SURFACE_FALLBACK = {
+  heroHeadline: 'Your progress',
+  heroSub: 'Log training, check-ins, and nutrition to see trends.',
+  buildEyebrow: 'Build data',
+  weightTitle: 'Weight',
+  weightHint: 'Optional from check-ins.',
+  nutritionTitle: 'Nutrition',
+  nutritionHint: 'Targets and logging build your chart.',
+};
+
+function buildPersonalCoreInsightLines(dash, weightChartPersonal) {
+  const lines = [];
+  const w = weightChartPersonal.map((d) => d.weight).filter((x) => Number.isFinite(Number(x)));
+  if (w.length >= 2) {
+    const first = Number(w[0]);
+    const last = Number(w[w.length - 1]);
+    const delta = last - first;
+    if (delta < -0.35) lines.push('Weight: trending down in this window.');
+    else if (delta > 0.35) lines.push('Weight: trending up in this window.');
+    else lines.push('Weight: flat — normal week-to-week noise.');
+  } else {
+    lines.push('Weight: add bodyweight on check-ins to see direction.');
+  }
+  const c28 = Number(dash.completedLast28d || 0);
+  if (c28 >= 8) lines.push(`Consistency: ${c28} workouts in 28 days — strong.`);
+  else if (c28 >= 1) lines.push(`Consistency: ${c28} workouts in 28d — room for one more per week.`);
+  else lines.push('Consistency: log sessions from Today to build your streak.');
+  const range = w.length >= 2 ? Math.max(...w) - Math.min(...w) : 0;
+  const plateauGuess = w.length >= 4 && range < 0.6 && c28 >= 4;
+  lines.push(
+    plateauGuess
+      ? 'Plateau: weight and volume look steady — a small progression may help.'
+      : 'Plateau: watch for flat weight with unchanged training for weeks.',
+  );
+  return lines;
+}
+
+/** Resolve `clients.id` for the signed-in user when they are a coached client (`clients.user_id` = auth uid). */
 async function resolveClientIdForUser(supabase, userId) {
   if (!supabase || !userId) return null;
   const { data } = await supabase
@@ -80,26 +157,77 @@ function formatShortDate(d) {
   return date.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
 }
 
-function showPrepByFocus(coachFocus) {
-  const f = (coachFocus ?? '').toString().trim().toLowerCase();
-  return f === 'competition' || f === 'integrated';
-}
-
 function parseTimeframeFromSearchParams(searchParams) {
   const q = searchParams.get('range') ?? searchParams.get('tf') ?? '';
   const key = TIMEFRAME_OPTIONS.some((o) => o.key === q) ? q : DEFAULT_TIMEFRAME;
   return key;
 }
 
+function getClientStatusState({ activeFlags = 0, avgCompliance = null, checkinCount = 0 }) {
+  if (activeFlags >= 2 || (avgCompliance != null && avgCompliance < 55)) {
+    return {
+      title: 'At risk this week',
+      subtitle: 'Compliance and recovery patterns need a quick intervention.',
+      tone: colors.warning,
+    };
+  }
+  if (checkinCount >= 3 && avgCompliance != null && avgCompliance >= 70 && activeFlags === 0) {
+    return {
+      title: 'On track',
+      subtitle: 'Execution is stable. Keep the current plan tight.',
+      tone: colors.success,
+    };
+  }
+  return {
+    title: 'Building momentum',
+    subtitle: 'A few more consistent logs will improve confidence in the trend.',
+    tone: colors.primary,
+  };
+}
+
+function getClientNextMove({ activeFlags = 0, avgCompliance = null, isCoachView = false, clientId = null }) {
+  if (activeFlags > 0) {
+    return isCoachView
+      ? { title: 'Review active flags and adjust this week', cta: 'Open client profile', path: clientId ? `/clients/${clientId}` : '/clients' }
+      : { title: 'Complete a check-in today to clear risk signals', cta: 'Open check-in', path: '/readiness-checkin' };
+  }
+  if (avgCompliance != null && avgCompliance < 65) {
+    return isCoachView
+      ? { title: 'Coach cue: simplify adherence targets', cta: 'Message client', path: clientId ? `/chat/${clientId}` : '/messages' }
+      : { title: 'Lift consistency above 65%', cta: 'Go to Today', path: '/today' };
+  }
+  return isCoachView
+    ? { title: 'Reinforce momentum in chat', cta: 'Send quick recap', path: clientId ? `/chat/${clientId}` : '/messages' }
+    : { title: 'Stay on plan and log your next check-in', cta: 'Go to Today', path: '/today' };
+}
+
 export default function ProgressPage() {
   const { id: clientIdParam } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, effectiveRole, coachFocus } = useAuth();
+  const { user, profile, effectiveRole, coachFocus } = useAuth();
+  const { isWideWeb } = usePresentationMode();
+  const rhythm = desktopRhythm(isWideWeb);
   const supabase = hasSupabase ? getSupabase() : null;
   const isCoachView = isCoach(effectiveRole) && clientIdParam != null;
   const isPersonalView = !isCoachView && isPersonal(effectiveRole);
-  const showPrepSection = isCoachView && showPrepByFocus(coachFocus);
+  const showPrepSection = isCoachView && coachFocusAllowsPrepFeatures(coachFocus);
+
+  const personalProgressUx = useMemo(
+    () => (isPersonalView ? resolvePersonalUXContext({ profile, user }) : null),
+    [isPersonalView, profile, user],
+  );
+  const progressSurfaceCopy = useMemo(
+    () => (personalProgressUx ? getPersonalProgressEmptySurfaceCopy(personalProgressUx) : PROGRESS_SURFACE_FALLBACK),
+    [personalProgressUx],
+  );
+  const personalProgressFeatures = useMemo(
+    () =>
+      personalProgressUx
+        ? getPersonalScreenFeatures(personalProgressUx)
+        : { showProgressWeightInterpretation: false },
+    [personalProgressUx],
+  );
 
   const timeframe = useMemo(() => parseTimeframeFromSearchParams(searchParams), [searchParams]);
   const setTimeframe = (key) => {
@@ -114,10 +242,22 @@ export default function ProgressPage() {
   const clientIdFromUser = useQuery({
     queryKey: ['progress-client-id', user?.id],
     queryFn: () => resolveClientIdForUser(supabase, user?.id),
-    enabled: !!supabase && !!user?.id && !isCoachView,
+    enabled: !!supabase && !!user?.id && !isCoachView && isClient(effectiveRole),
   });
 
   const clientId = isCoachView ? clientIdParam : clientIdFromUser.data ?? null;
+
+  const { data: personalNutritionMerged } = useQuery({
+    queryKey: personalNutritionTargetsQueryKey(user?.id),
+    queryFn: () => fetchMergedPersonalNutritionTargets(user?.id),
+    enabled: Boolean(user?.id && isPersonalView),
+  });
+
+  const { data: personalDash, isLoading: personalDashLoading } = useQuery({
+    queryKey: ['personal-progress-dashboard', user?.id],
+    queryFn: () => fetchPersonalProgressDashboard(user.id),
+    enabled: Boolean(supabase && user?.id && isPersonalView),
+  });
 
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ['v_client_progress_metrics', clientId],
@@ -132,19 +272,126 @@ export default function ProgressPage() {
   });
 
   const filteredTrends = useMemo(() => filterTrendsByRange(trends, timeframe), [trends, timeframe]);
+  const viewerWeightUnit = resolveViewerBodyweightUnit(profile);
 
-  const loading = (isCoachView ? false : clientIdFromUser.isLoading) || metricsLoading || trendsLoading;
+  const loading =
+    isPersonalView
+      ? personalDashLoading
+      : (isCoachView ? false : clientIdFromUser.isLoading) || metricsLoading || trendsLoading;
   const hasData = metrics != null || trends.length > 0;
+  const [progressBridgeDismissed, setProgressBridgeDismissed] = useState(false);
+  const progressBridgeSeenRef = useRef(new Set());
+  const progressBridgeMoment = useMemo(() => {
+    if (!isPersonalView || !personalDash) return null;
+    const nutAvg =
+      personalDash?.nutrition7d?.proteinAdherence7dAvg != null && personalDash?.nutrition7d?.calorieAdherence7dAvg != null
+        ? Math.round((personalDash.nutrition7d.proteinAdherence7dAvg + personalDash.nutrition7d.calorieAdherence7dAvg) / 2)
+        : personalDash?.nutrition7d?.proteinAdherence7dAvg ?? personalDash?.nutrition7d?.calorieAdherence7dAvg;
+    return deriveCoachBridgeMoment({
+      surface: 'progress',
+      tier: resolvePersonalPlanTier(profile, user),
+      goalId: profile?.goal || profile?.personal_goal || '',
+      weeklyWorkoutDone: personalDash.weeklyWorkoutDone,
+      weeklyWorkoutTarget: personalDash.weeklyWorkoutTarget,
+      workoutStreak: personalDash.workoutStreak,
+      completedLast28d: personalDash.completedLast28d,
+      nutritionAdherenceAvg: nutAvg,
+      weightSeries: personalDash.weightSeries,
+      currentWeightKg: Number(profile?.weight_kg ?? profile?.personal_weight_kg ?? 0),
+      targetWeightKg: Number(profile?.target_weight_kg ?? profile?.personal_target_weight_kg ?? 0),
+      personalAdjustmentCount: getPersonalAdjustmentLogCount(user?.id),
+    });
+  }, [isPersonalView, personalDash, profile, user]);
+  useEffect(() => {
+    if (!progressBridgeMoment || progressBridgeDismissed) return;
+    const key = `progress:${progressBridgeMoment.variant}:${progressBridgeMoment.reasonKey}`;
+    if (progressBridgeSeenRef.current.has(key)) return;
+    progressBridgeSeenRef.current.add(key);
+    track(ANALYTICS_EVENTS.COACH_BRIDGE_SEEN, { location: 'progress', variant: progressBridgeMoment.variant, reason: progressBridgeMoment.reasonKey });
+    if (progressBridgeMoment.eventSeen === 'prep_user_coach_prompt_seen') track(ANALYTICS_EVENTS.PREP_USER_COACH_PROMPT_SEEN, { location: 'progress' });
+    if (progressBridgeMoment.eventSeen === 'plateau_coach_prompt_seen') track(ANALYTICS_EVENTS.PLATEAU_COACH_PROMPT_SEEN, { location: 'progress' });
+  }, [progressBridgeMoment, progressBridgeDismissed]);
+
+  const personalProgressMigration = useMemo(() => {
+    if (!isPersonalView) {
+      return derivePersonalProgressRouteState({ showEmptyProgressState: false });
+    }
+    if (personalDashLoading) {
+      return derivePersonalProgressRouteState({ loading: true });
+    }
+    const dash = personalDash ?? EMPTY_PERSONAL_PROGRESS_DASHBOARD;
+    const hasNt = hasPersonalNutritionTargets(personalNutritionMerged);
+    const nut7Avg =
+      dash.nutrition7d?.proteinAdherence7dAvg != null && dash.nutrition7d?.calorieAdherence7dAvg != null
+        ? Math.round((dash.nutrition7d.proteinAdherence7dAvg + dash.nutrition7d.calorieAdherence7dAvg) / 2)
+        : dash.nutrition7d?.proteinAdherence7dAvg ?? dash.nutrition7d?.calorieAdherence7dAvg;
+    const personalViewerWU = resolveViewerBodyweightUnit(profile);
+    const weightChartPersonal = dash.weightSeries.map((p) => {
+      const kg = Number(p.weight);
+      return {
+        date: p.dateLabel,
+        weight: weightKgToChartValue(kg, personalViewerWU),
+        weightKg: kg,
+      };
+    });
+    const nutritionLineData = dash.nutritionDailySeries.filter((d) => d.pct != null).map((d) => ({ date: d.dateLabel, pct: d.pct }));
+    const hasNutritionLine = nutritionLineData.length >= 2;
+    const noWorkouts = Number(dash.completedLast28d || 0) < 1;
+    const noCheckins = Number(dash.personalCheckinsCount || 0) < 1;
+    const noNutritionData = !hasNt && nut7Avg == null && !hasNutritionLine;
+    const showEmptyProgressState = noWorkouts && noCheckins && noNutritionData;
+    let emphasis = '';
+    if (!showEmptyProgressState) {
+      const v = progressBridgeMoment?.variant;
+      if (
+        v === COACH_BRIDGE_VARIANTS.PLATEAU ||
+        v === COACH_BRIDGE_VARIANTS.ACCOUNTABILITY ||
+        v === COACH_BRIDGE_VARIANTS.SOLO_LIMIT
+      ) {
+        emphasis = 'risk';
+      } else if (Number(dash.workoutStreak || 0) >= 3) {
+        emphasis = 'momentum';
+      }
+    }
+    return derivePersonalProgressRouteState({ showEmptyProgressState, emphasis });
+  }, [isPersonalView, personalDashLoading, personalDash, personalNutritionMerged, profile, progressBridgeMoment]);
+
+  const nonPersonalProgressMigration = useMemo(() => {
+    if (isPersonalView) return null;
+    if (!hasSupabase || !user) {
+      return deriveProgressRouteSignedOutState();
+    }
+    if (loading && !hasData) {
+      return isCoachView
+        ? deriveCoachClientProgressRouteState({ surface: 'loading' })
+        : deriveClientProgressRouteState({ surface: 'loading' });
+    }
+    if (!clientId && !isCoachView) {
+      return deriveClientProgressRouteState({ surface: 'not_linked' });
+    }
+    if (!hasData) {
+      return isCoachView
+        ? deriveCoachClientProgressRouteState({ surface: 'empty' })
+        : deriveClientProgressRouteState({ surface: 'empty_checkins' });
+    }
+    return isCoachView
+      ? deriveCoachClientProgressRouteState({ surface: 'dashboard' })
+      : deriveClientProgressRouteState({ surface: 'dashboard' });
+  }, [isPersonalView, hasSupabase, user, loading, hasData, clientId, isCoachView]);
 
   const weightChartData = useMemo(
     () =>
       filteredTrends
         .filter((t) => t.weight != null)
-        .map((t) => ({
-          date: formatShortDate(t.submitted_at),
-          weight: Number(t.weight),
-        })),
-    [filteredTrends]
+        .map((t) => {
+          const kg = Number(t.weight);
+          return {
+            date: formatShortDate(t.submitted_at),
+            weight: weightKgToChartValue(kg, viewerWeightUnit),
+            weightKg: kg,
+          };
+        }),
+    [filteredTrends, viewerWeightUnit]
   );
 
   const complianceChartData = useMemo(
@@ -171,7 +418,7 @@ export default function ProgressPage() {
   const recentCheckins = useMemo(() => filteredTrends.slice(-10).reverse(), [filteredTrends]);
 
   const progressInsight = useMemo(
-    () => (metrics != null ? generateProgressInsight(metrics) : null),
+    () => (metrics != null ? generateProgressInsight(metrics, viewerWeightUnit) : null),
     [metrics]
   );
 
@@ -203,8 +450,12 @@ export default function ProgressPage() {
   const title = isCoachView ? 'Client progress' : 'Progress';
 
   if (!hasSupabase || !user) {
+    const m = deriveProgressRouteSignedOutState();
     return (
-      <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}>
+      <div
+        {...atlasMigrationDataAttributes(m.phase, m.primary)}
+        style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}
+      >
         <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
         <div style={{ ...PAGE_PADDING, paddingTop: spacing[24] }}>
           <EmptyState
@@ -217,9 +468,37 @@ export default function ProgressPage() {
     );
   }
 
-  if (loading && !hasData) {
+  if (isPersonalView && personalDashLoading) {
     return (
-      <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text, paddingBottom: 96 }}>
+      <PersonalCanvas>
+        <div
+          {...atlasMigrationDataAttributes(personalProgressMigration.phase, personalProgressMigration.primary)}
+          style={{ minHeight: '100vh', color: colors.text }}
+        >
+          <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
+          <PersonalColumn variant={isWideWeb ? 'home' : 'wide'}>
+            <section style={{ marginBottom: spacing[24] }}>
+              <ProgressSummarySkeleton />
+            </section>
+            <section style={{ marginBottom: spacing[24] }}>
+              <TrendSectionSkeleton height={180} />
+            </section>
+            <section style={{ marginBottom: spacing[24] }}>
+              <TrendSectionSkeleton height={160} />
+            </section>
+          </PersonalColumn>
+        </div>
+      </PersonalCanvas>
+    );
+  }
+
+  if (!isPersonalView && loading && !hasData) {
+    const m = nonPersonalProgressMigration;
+    return (
+      <div
+        {...(m ? atlasMigrationDataAttributes(m.phase, m.primary) : {})}
+        style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}
+      >
         <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
         <div style={{ ...PAGE_PADDING, paddingTop: spacing[16] }}>
           <div style={{ marginBottom: spacing[16] }}>
@@ -239,9 +518,13 @@ export default function ProgressPage() {
     );
   }
 
-  if (!clientId && !isCoachView) {
+  if (!clientId && !isCoachView && !isPersonalView) {
+    const m = nonPersonalProgressMigration;
     return (
-      <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}>
+      <div
+        {...(m ? atlasMigrationDataAttributes(m.phase, m.primary) : {})}
+        style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}
+      >
         <TopBar title={title} showBack={false} />
         <div style={{ ...PAGE_PADDING, paddingTop: spacing[24] }}>
           <EmptyState
@@ -254,14 +537,22 @@ export default function ProgressPage() {
     );
   }
 
-  if (!hasData) {
+  if (!hasData && !isPersonalView) {
+    const m = nonPersonalProgressMigration;
     return (
-      <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}>
+      <div
+        {...(m ? atlasMigrationDataAttributes(m.phase, m.primary) : {})}
+        style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}
+      >
         <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
         <div style={{ ...PAGE_PADDING, paddingTop: spacing[24] }}>
           <EmptyState
             title={isCoachView ? "This client hasn't submitted any check-ins yet" : 'No check-ins yet'}
-            description={isCoachView ? 'Trends and metrics will appear here once they start checking in.' : 'Your first check-in will kick off your progress. Submit a check-in to see trends here.'}
+            description={
+              isCoachView
+                ? 'Trends and metrics will appear here once they start checking in.'
+                : 'Your first check-in will kick off your progress. Submit a check-in to see trends here.'
+            }
             icon={Calendar}
             action={!isCoachView ? (
               <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.muted, fontSize: 13, cursor: 'pointer', textDecoration: 'underline' }}>
@@ -274,17 +565,451 @@ export default function ProgressPage() {
     );
   }
 
+  if (isPersonalView) {
+    const dash = personalDash ?? EMPTY_PERSONAL_PROGRESS_DASHBOARD;
+    const isEnhancedTier = resolvePersonalPlanTier(profile, user) === 'enhanced';
+    const hasNt = hasPersonalNutritionTargets(personalNutritionMerged);
+    const ntSummary = formatPersonalNutritionTargetsSummary(personalNutritionMerged);
+    const nut7Avg =
+      dash.nutrition7d?.proteinAdherence7dAvg != null && dash.nutrition7d?.calorieAdherence7dAvg != null
+        ? Math.round((dash.nutrition7d.proteinAdherence7dAvg + dash.nutrition7d.calorieAdherence7dAvg) / 2)
+        : dash.nutrition7d?.proteinAdherence7dAvg ?? dash.nutrition7d?.calorieAdherence7dAvg;
+    const personalViewerWU = resolveViewerBodyweightUnit(profile);
+    const weightChartPersonal = dash.weightSeries.map((p) => {
+      const kg = Number(p.weight);
+      return {
+        date: p.dateLabel,
+        weight: weightKgToChartValue(kg, personalViewerWU),
+        weightKg: kg,
+      };
+    });
+    const hasWeightChart = weightChartPersonal.length >= 2;
+    const nutritionLineData = dash.nutritionDailySeries.filter((d) => d.pct != null).map((d) => ({ date: d.dateLabel, pct: d.pct }));
+    const hasNutritionLine = nutritionLineData.length >= 2;
+    const noWorkouts = Number(dash.completedLast28d || 0) < 1;
+    const noCheckins = Number(dash.personalCheckinsCount || 0) < 1;
+    const noNutritionData = !hasNt && nut7Avg == null && !hasNutritionLine;
+    const showEmptyProgressState = noWorkouts && noCheckins && noNutritionData;
+    const supportCardShadow = '0 4px 24px rgba(0,0,0,0.22)';
+    const personalCoreInsights = buildPersonalCoreInsightLines(dash, weightChartPersonal);
+
+    return (
+      <PersonalCanvas>
+        <div
+          {...atlasMigrationDataAttributes(personalProgressMigration.phase, personalProgressMigration.primary)}
+          style={{ minHeight: '100vh', color: colors.text }}
+        >
+          <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
+          <PersonalColumn variant={isWideWeb ? 'home' : 'wide'}>
+          <section style={{ marginBottom: rhythm.section }}>
+            <Card
+              style={{
+                padding: 0,
+                border: `1px solid ${colors.primary}`,
+                background: `linear-gradient(145deg, rgba(59,130,246,0.14) 0%, ${colors.surface1} 55%, ${colors.card} 100%)`,
+                boxShadow: '0 12px 48px rgba(0,0,0,0.38)',
+              }}
+            >
+              <div style={{ padding: isWideWeb ? '40px' : '32px' }}>
+                <p style={{ margin: `0 0 ${spacing[12]}px`, fontSize: 12, color: colors.muted, letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
+                  Your next step
+                </p>
+                <h1
+                  style={{
+                    margin: 0,
+                    fontSize: isWideWeb ? 36 : 30,
+                    fontWeight: 800,
+                    letterSpacing: '-0.02em',
+                    color: colors.text,
+                    lineHeight: 1.1,
+                    maxWidth: 620,
+                    textWrap: 'balance',
+                  }}
+                >
+                  {progressSurfaceCopy.heroHeadline}
+                </h1>
+                <p style={{ margin: `${spacing[12]}px 0 0`, fontSize: 14, color: colors.muted, lineHeight: 1.5, maxWidth: 560 }}>
+                  {progressSurfaceCopy.heroSub}
+                </p>
+                <div style={{ marginTop: spacing[20] }}>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/today')}
+                    style={{
+                      width: '100%',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: spacing[8],
+                      minHeight: 56,
+                      borderRadius: 16,
+                      border: 'none',
+                      background: colors.primary,
+                      color: '#fff',
+                      fontSize: 16,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      boxShadow: '0 0 30px rgba(37,99,235,0.35)',
+                    }}
+                  >
+                    Open Today <ArrowRight size={18} strokeWidth={2} aria-hidden />
+                  </button>
+                </div>
+              </div>
+            </Card>
+          </section>
+
+          <section style={{ marginBottom: rhythm.section }}>
+            <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
+              <p
+                style={{
+                  margin: `0 0 ${spacing[10]}px`,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  color: colors.muted,
+                }}
+              >
+                At a glance
+              </p>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: colors.text, lineHeight: 1.55 }}>
+                {personalCoreInsights.map((line, idx) => (
+                  <li key={`${idx}-${line.slice(0, 32)}`}>{line}</li>
+                ))}
+              </ul>
+            </Card>
+          </section>
+
+          {progressBridgeMoment && !progressBridgeDismissed ? (
+            <section style={{ marginBottom: rhythm.section }}>
+              <CoachBridgeCard
+                variant={progressBridgeMoment.variant}
+                eyebrow={progressBridgeMoment.eyebrow}
+                headline={progressBridgeMoment.headline}
+                body={progressBridgeMoment.body}
+                bullets={progressBridgeMoment.bullets}
+                whyText={progressBridgeMoment.whyText}
+                primaryAction={{
+                  label: progressBridgeMoment.primaryLabel || 'Find a coach',
+                  onClick: () => {
+                    track(ANALYTICS_EVENTS.COACH_BRIDGE_CLICKED, { location: 'progress', variant: progressBridgeMoment.variant });
+                    navigate(
+                      buildPersonalCoachTierSelectionUrl({
+                        source: progressBridgeMoment.bridgeSource || 'from_plateau',
+                        tier: isEnhancedTier ? 'enhanced' : 'basic',
+                      })
+                    );
+                  },
+                }}
+                secondaryAction={{
+                  label: 'Keep training solo',
+                  onClick: () => {
+                    setProgressBridgeDismissed(true);
+                    track(ANALYTICS_EVENTS.COACH_BRIDGE_DISMISSED, { location: 'progress', variant: progressBridgeMoment.variant });
+                  },
+                }}
+              />
+            </section>
+          ) : null}
+
+          <section style={{ marginBottom: rhythm.section }}>
+            <p style={{ margin: `0 0 ${spacing[10]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+              {progressSurfaceCopy.buildEyebrow}
+            </p>
+            <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isWideWeb ? 'repeat(2, minmax(0, 1fr))' : '1fr', gap: spacing[14] }}>
+                <div>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.text }}>{progressSurfaceCopy.weightTitle}</p>
+                  <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>{progressSurfaceCopy.weightHint}</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/readiness-checkin')}
+                    style={{
+                      marginTop: spacing[10],
+                      border: 'none',
+                      background: 'none',
+                      padding: 0,
+                      color: colors.primary,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: 3,
+                    }}
+                  >
+                    Log on check-in →
+                  </button>
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.text }}>{progressSurfaceCopy.nutritionTitle}</p>
+                  <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>{progressSurfaceCopy.nutritionHint}</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate(hasNt ? '/nutrition' : '/nutrition-targets')}
+                    style={{
+                      marginTop: spacing[10],
+                      border: 'none',
+                      background: 'none',
+                      padding: 0,
+                      color: colors.primary,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: 3,
+                    }}
+                  >
+                    {hasNt ? 'Open nutrition →' : 'Set targets →'}
+                  </button>
+                </div>
+              </div>
+            </Card>
+          </section>
+
+          <section style={{ marginBottom: rhythm.section }}>
+            <p style={{ margin: `0 0 ${spacing[10]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+              Stats
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: isWideWeb ? 'repeat(4, minmax(0, 1fr))' : '1fr 1fr', gap: spacing[12] }}>
+              <Card style={{ padding: spacing[12], boxShadow: supportCardShadow }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Workouts (28d)</p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 18, fontWeight: 700, color: colors.text }}>{dash.completedLast28d}</p>
+              </Card>
+              <Card style={{ padding: spacing[12], boxShadow: supportCardShadow }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>This week</p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 18, fontWeight: 700, color: colors.text }}>
+                  {dash.weeklyWorkoutDone}/{dash.weeklyWorkoutTarget}
+                </p>
+              </Card>
+              <Card style={{ padding: spacing[12], boxShadow: supportCardShadow }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Streak</p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 18, fontWeight: 700, color: colors.text }}>{dash.workoutStreak}d</p>
+              </Card>
+              <Card style={{ padding: spacing[12], boxShadow: supportCardShadow }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Nutrition</p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 18, fontWeight: 700, color: colors.text }}>{nut7Avg != null ? `${Math.round(nut7Avg)}%` : '—'}</p>
+              </Card>
+            </div>
+          </section>
+
+          <section style={{ marginBottom: rhythm.section }}>
+            <p style={{ margin: `0 0 ${spacing[10]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+              Trends
+            </p>
+            {showEmptyProgressState ? (
+              <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
+                <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.text }}>
+                  Your progress will appear once you start logging
+                </p>
+                <div style={{ marginTop: spacing[10], display: 'grid', gap: spacing[6] }}>
+                  <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>Workout logged ❌</p>
+                  <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>Check-in logged ❌</p>
+                  <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>Nutrition set ❌</p>
+                </div>
+              </Card>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isWideWeb ? 'minmax(0, 1.12fr) minmax(0, 1fr)' : '1fr',
+                  gap: rhythm.section,
+                  alignItems: 'stretch',
+                }}
+              >
+            <section>
+              <p style={{ margin: `0 0 ${spacing[8]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+                Weight trend
+              </p>
+              {hasWeightChart ? (
+                <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow, height: '100%' }}>
+                  <div style={{ height: isWideWeb ? 220 : 180 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={weightChartPersonal}>
+                        <defs>
+                          <linearGradient id="pDashWeight" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={colors.primary} stopOpacity={0.35} />
+                            <stop offset="95%" stopColor={colors.primary} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} width={40} />
+                        <Tooltip
+                          contentStyle={{ background: colors.surface2, border: `1px solid ${shell.cardBorder}`, borderRadius: 8, color: colors.text, fontSize: 12 }}
+                          formatter={(v, _k, item) => [formatWeightForViewer(item?.payload?.weightKg, personalViewerWU), 'Weight']}
+                        />
+                        <Area type="monotone" dataKey="weight" stroke={colors.primary} strokeWidth={2} fill="url(#pDashWeight)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {!personalProgressFeatures.showProgressWeightInterpretation ? (
+                    <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>
+                      From check-in weights — more logs clarify the trend.
+                    </p>
+                  ) : null}
+                </Card>
+              ) : (
+                <Card style={{ padding: rhythm.cardPadding, border: `1px dashed ${colors.border}`, background: 'linear-gradient(165deg, rgba(59,130,246,0.06) 0%, rgba(15,23,42,0.85) 100%)', boxShadow: supportCardShadow, minHeight: isWideWeb ? 220 : undefined }}>
+                  <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.text, lineHeight: 1.35 }}>
+                    Log your first check-in to see your trend
+                  </p>
+                  <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+                    {dash.personalCheckinsCount === 0
+                      ? 'Weight is optional — add it when you want a line on the chart.'
+                      : 'Add weight on one more check-in to draw a line (two points minimum).'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/readiness-checkin')}
+                    style={{
+                      marginTop: spacing[14],
+                      border: 'none',
+                      background: colors.primary,
+                      color: '#fff',
+                      borderRadius: radii.button,
+                      padding: '10px 16px',
+                      fontSize: 14,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      minHeight: touchTargetMin,
+                    }}
+                  >
+                    Open check-in
+                  </button>
+                </Card>
+              )}
+            </section>
+
+            <section>
+              <p style={{ margin: `0 0 ${spacing[8]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+                Nutrition adherence
+              </p>
+              {dash.hasNutritionTargets ? (
+                hasNutritionLine ? (
+                  <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow, height: '100%' }}>
+                    <p style={{ margin: 0, fontSize: 13, color: colors.muted, marginBottom: spacing[8] }}>Last ~2 weeks (avg protein + calorie % of target per day)</p>
+                    <div style={{ height: isWideWeb ? 180 : 160 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={nutritionLineData}>
+                          <defs>
+                            <linearGradient id="pDashNut" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={colors.accent} stopOpacity={0.25} />
+                              <stop offset="95%" stopColor={colors.accent} stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} />
+                          <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} width={32} />
+                          <Tooltip contentStyle={{ background: colors.surface2, border: `1px solid ${shell.cardBorder}`, borderRadius: 8, color: colors.text, fontSize: 12 }} formatter={(v) => [`${v}%`, 'Adherence']} />
+                          <Area type="monotone" dataKey="pct" stroke={colors.accent} strokeWidth={2} fill="url(#pDashNut)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {dash.checkinAdherenceSeries.length > 0 ? (
+                      <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                        Check-ins ({dash.checkinAdherenceSeries.length}) pair with meals to show tough weeks.
+                      </p>
+                    ) : null}
+                  </Card>
+                ) : (
+                  <Card style={{ padding: rhythm.cardPadding, border: `1px dashed ${colors.border}`, background: 'linear-gradient(165deg, rgba(59,130,246,0.06) 0%, rgba(15,23,42,0.85) 100%)', boxShadow: supportCardShadow, minHeight: isWideWeb ? 220 : undefined }}>
+                    <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.text, lineHeight: 1.35 }}>
+                      Log meals to unlock your chart
+                    </p>
+                    <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+                      A few days of logging turns targets into a trend line you can trust.
+                    </p>
+                    <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.textSecondary }}>Targets: {ntSummary || 'Set in Nutrition targets.'}</p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/nutrition')}
+                      style={{
+                        marginTop: spacing[14],
+                        border: 'none',
+                        background: colors.primary,
+                        color: '#fff',
+                        borderRadius: radii.button,
+                        padding: '10px 16px',
+                        fontSize: 14,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        minHeight: touchTargetMin,
+                      }}
+                    >
+                      Log meals
+                    </button>
+                  </Card>
+                )
+              ) : (
+                <Card style={{ padding: rhythm.cardPadding, border: `1px dashed ${colors.border}`, background: 'linear-gradient(165deg, rgba(59,130,246,0.06) 0%, rgba(15,23,42,0.85) 100%)', boxShadow: supportCardShadow, minHeight: isWideWeb ? 220 : undefined }}>
+                  <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.text, lineHeight: 1.35 }}>
+                    Set targets and log meals to track adherence
+                  </p>
+                  <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+                    Add daily calories and protein first — then every meal you log builds this chart.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/nutrition-targets')}
+                    style={{
+                      marginTop: spacing[14],
+                      border: 'none',
+                      background: colors.primary,
+                      color: '#fff',
+                      borderRadius: radii.button,
+                      padding: '10px 16px',
+                      fontSize: 14,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      minHeight: touchTargetMin,
+                    }}
+                  >
+                    Set targets
+                  </button>
+                </Card>
+              )}
+            </section>
+          </div>
+            )}
+          </section>
+
+          <section style={{ marginBottom: rhythm.section, textAlign: 'center' }}>
+            <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>
+              Want a coach later?{' '}
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    buildPersonalCoachTierSelectionUrl({
+                      source: 'from_general_discovery',
+                    })
+                  )
+                }
+                style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                Discover coaches
+              </button>
+            </p>
+          </section>
+          </PersonalColumn>
+        </div>
+      </PersonalCanvas>
+    );
+  }
+
   const summaryCards = [
     {
       label: 'Latest weight',
-      value: metrics?.latest_weight != null ? `${Number(metrics.latest_weight)} kg` : '—',
+      value:
+        metrics?.latest_weight != null
+          ? formatWeightForViewer(Number(metrics.latest_weight), viewerWeightUnit)
+          : '—',
       icon: Scale,
     },
     {
       label: 'Weight change',
       value:
         metrics?.weight_change != null
-          ? `${metrics.weight_change > 0 ? '+' : ''}${Number(metrics.weight_change).toFixed(1)} kg`
+          ? formatWeightDeltaKg(Number(metrics.weight_change), viewerWeightUnit)
           : '—',
       icon: metrics?.weight_change != null && Number(metrics.weight_change) < 0 ? TrendingDown : TrendingUp,
     },
@@ -301,14 +1026,55 @@ export default function ProgressPage() {
     },
   ];
 
+  const coachStatus = getClientStatusState({
+    activeFlags: Number(metrics?.active_flags_count || 0),
+    avgCompliance: metrics?.avg_compliance_last_4w != null ? Number(metrics.avg_compliance_last_4w) : null,
+    checkinCount: recentCheckins.length,
+  });
+  const coachNextMove = getClientNextMove({
+    activeFlags: Number(metrics?.active_flags_count || 0),
+    avgCompliance: metrics?.avg_compliance_last_4w != null ? Number(metrics.avg_compliance_last_4w) : null,
+    isCoachView,
+    clientId,
+  });
+
   return (
-    <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text, paddingBottom: 96 }}>
+    <div
+      {...(nonPersonalProgressMigration
+        ? atlasMigrationDataAttributes(nonPersonalProgressMigration.phase, nonPersonalProgressMigration.primary)
+        : {})}
+      style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}
+    >
       <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
       <div style={{ ...PAGE_PADDING, paddingTop: spacing[16] }}>
         {/* Timeframe filter */}
         <div style={{ marginBottom: spacing[16] }}>
           <TimeframeFilter value={timeframe} onChange={setTimeframe} />
         </div>
+
+        <section style={{ marginBottom: spacing[16] }}>
+          <Card
+            style={{
+              padding: spacing[16],
+              border: `1px solid ${coachStatus.tone}`,
+              background: `linear-gradient(160deg, ${colors.primarySubtle} 0%, ${colors.surface1} 70%)`,
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 18, fontWeight: 700, color: colors.text }}>{coachStatus.title}</p>
+            <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.muted }}>{coachStatus.subtitle}</p>
+            <div style={{ marginTop: spacing[10], display: 'flex', gap: spacing[8], flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: colors.muted }}>
+                Avg compliance: {metrics?.avg_compliance_last_4w != null ? `${Math.round(Number(metrics.avg_compliance_last_4w))}%` : '—'}
+              </span>
+              <span style={{ fontSize: 12, color: colors.muted }}>
+                Active flags: {Number(metrics?.active_flags_count || 0)}
+              </span>
+              <span style={{ fontSize: 12, color: colors.muted }}>
+                Check-ins: {recentCheckins.length}
+              </span>
+            </div>
+          </Card>
+        </section>
 
         {/* Summary cards */}
         <section style={{ marginBottom: spacing[24] }}>
@@ -359,14 +1125,6 @@ export default function ProgressPage() {
                   ))}
                 </ul>
               )}
-              {progressInsight.level === 'warning' && isPersonalView && (
-                <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginTop: spacing[12], paddingTop: spacing[12], borderTop: `1px solid ${colors.border}` }}>
-                  Want support?{' '}
-                  <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
-                    Find a coach
-                  </button>
-                </p>
-              )}
             </Card>
           </section>
         )}
@@ -405,10 +1163,16 @@ export default function ProgressPage() {
                       </linearGradient>
                     </defs>
                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} width={36} />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: colors.muted, fontSize: 10 }}
+                      width={44}
+                      label={{ value: weightChartAxisLabel(viewerWeightUnit), angle: -90, position: 'insideLeft', fill: colors.muted, fontSize: 10 }}
+                    />
                     <Tooltip
                       contentStyle={{ background: colors.surface2, border: `1px solid ${shell.cardBorder}`, borderRadius: 8, color: colors.text, fontSize: 12 }}
-                      formatter={(value) => [`${value} kg`, 'Weight']}
+                      formatter={(value, _name, item) => [formatWeightForViewer(item?.payload?.weightKg, viewerWeightUnit), 'Weight']}
                       labelFormatter={formatShortDate}
                     />
                     <Area type="monotone" dataKey="weight" stroke={colors.primary} strokeWidth={2} fill="url(#progressWeightGrad)" />
@@ -513,7 +1277,7 @@ export default function ProgressPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                     <span style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>{formatDate(row.submitted_at)}</span>
                     <span style={{ fontSize: 12, color: colors.muted }}>
-                      {row.weight != null && `${Number(row.weight)} kg`}
+                      {row.weight != null && formatWeightForViewer(Number(row.weight), viewerWeightUnit)}
                       {row.weight != null && row.compliance != null && ' · '}
                       {row.compliance != null && `${Math.round(Number(row.compliance))}% compliance`}
                     </span>
@@ -554,17 +1318,32 @@ export default function ProgressPage() {
           </section>
         )}
 
-        {/* Optional Find a Coach for personal users (secondary, not spammy) */}
-        {isPersonalView && hasData && (
-          <section style={{ marginBottom: spacing[24], textAlign: 'center' }}>
-            <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>
-              Looking for a coach?{' '}
-              <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
-                Find a coach
-              </button>
+        <section style={{ marginBottom: spacing[24] }}>
+          <Card style={{ padding: spacing[14], border: `1px solid ${colors.border}` }}>
+            <p style={{ margin: 0, fontSize: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
+              What this means
             </p>
-          </section>
-        )}
+            <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 14, color: colors.text, lineHeight: 1.45 }}>
+              {progressInsight?.summary || 'Recent check-ins show where consistency is strongest and where support should focus next.'}
+            </p>
+          </Card>
+        </section>
+
+        <section style={{ marginBottom: spacing[24] }}>
+          <Card style={{ padding: spacing[14], border: `1px solid ${colors.border}` }}>
+            <p style={{ margin: 0, fontSize: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
+              Next move
+            </p>
+            <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 15, fontWeight: 700, color: colors.text }}>{coachNextMove.title}</p>
+            <button
+              type="button"
+              onClick={() => navigate(coachNextMove.path)}
+              style={{ marginTop: spacing[10], border: 'none', background: colors.primary, color: '#fff', borderRadius: 8, padding: '8px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+            >
+              {coachNextMove.cta}
+            </button>
+          </Card>
+        </section>
       </div>
     </div>
   );

@@ -1,10 +1,13 @@
 import React, { useRef, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { getRouteTitle, isTabRoute } from '@/lib/routeMeta';
+import { DEFAULT_ROLE } from '@/lib/roles';
 import { useSwipeBack } from '@/hooks/useSwipeBack';
 import { ChevronLeft, Home, Users, MessageSquare, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { shell } from '@/ui/tokens';
 
 const TOP_BAR_HEIGHT = 56;
 const BOTTOM_TABS_HEIGHT = 64;
@@ -18,13 +21,14 @@ const TAB_ROUTES = [
 export default function MobileShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { isDemoMode, disableDemoMode } = useAuth();
+  const { isDemoMode, disableDemoMode, effectiveRole, role } = useAuth();
+  const shellRole = effectiveRole ?? role ?? DEFAULT_ROLE;
   const contentRef = useRef(null);
 
   useSwipeBack(contentRef);
 
   const pathname = location.pathname?.toLowerCase() ?? '';
-  const showBack = !isTabRoute(pathname);
+  const showBack = !isTabRoute(pathname, shellRole);
   const title = getRouteTitle(location.pathname);
 
   const handleBack = useCallback(() => {
@@ -51,7 +55,7 @@ export default function MobileShell({ children }) {
 
   const handleExitDemo = useCallback(() => {
     disableDemoMode();
-    navigate('/login', { replace: true });
+    navigate(LOGIN_PUBLIC_PATH, { replace: true });
   }, [disableDemoMode, navigate]);
 
   return (
@@ -110,7 +114,10 @@ export default function MobileShell({ children }) {
           paddingRight: 'env(safe-area-inset-right, 0)',
         }}
       >
-        <div className="min-h-full min-w-0 max-w-full px-4 py-3">
+        <div
+          className="min-h-full min-w-0 max-w-full px-4 pt-3"
+          style={{ paddingBottom: shell.scrollContentInsetBottom }}
+        >
           {children}
         </div>
       </main>

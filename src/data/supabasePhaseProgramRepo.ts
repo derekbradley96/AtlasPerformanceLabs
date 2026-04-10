@@ -88,6 +88,15 @@ function requireSupabase() {
   return supabase;
 }
 
+async function getSessionUserId(): Promise<string> {
+  const db = requireSupabase();
+  const {
+    data: { user },
+  } = await db.auth.getUser();
+  if (!user?.id) throw new Error('Not signed in');
+  return user.id;
+}
+
 /**
  * Fetch master dashboard row for a client (single call to v_client_master_dashboard).
  */
@@ -141,11 +150,13 @@ export async function createProgramBlock(
 ): Promise<ProgramBlockRow> {
   const db = requireSupabase();
   const totalWeeks = Math.max(1, Math.min(52, payload.total_weeks));
+  const coachId = await getSessionUserId();
 
   const { data: block, error: blockErr } = await db
     .from('program_blocks')
     .insert({
       client_id: clientId,
+      coach_id: coachId,
       phase_id: payload.phase_id ?? null,
       title: payload.title,
       total_weeks: totalWeeks,

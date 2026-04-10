@@ -2,8 +2,8 @@
  * Focus-aware Client Check-In submission screen.
  * Uses public.checkins (Check-In Engine); focus from profile / coach.
  */
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
@@ -22,6 +22,7 @@ import {
 import { notifyCoachCheckinSubmitted } from '@/services/notificationTriggers';
 import { trackFriction, trackRecoverableError } from '@/services/frictionTracker';
 import { ChevronDown, ChevronRight, ImagePlus } from 'lucide-react';
+import { atlasMigrationDataAttributes, deriveCheckInEnginePageRouteState } from '@/lib/atlasMigrationPhases';
 
 function Field({ label, name, value, onChange, type = 'number', min, max, placeholder }) {
   const v = value ?? '';
@@ -43,7 +44,10 @@ function Field({ label, name, value, onChange, type = 'number', min, max, placeh
           type={type}
           name={name}
           value={v}
-          onChange={(e) => onChange(name, type === 'number' ? (e.target.value === '' ? null : Number(e.target.value)) : e.target.value)}
+          onChange={(e) => onChange(name, e.target.value)}
+          onFocus={(e) => {
+            if (type === 'number') e.target.select();
+          }}
           min={min}
           max={max}
           placeholder={placeholder}
@@ -75,6 +79,7 @@ function Section({ title, children, defaultOpen = true }) {
 
 export default function CheckInPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [clientId, setClientId] = useState(null);
@@ -83,10 +88,17 @@ export default function CheckInPage() {
   const [existing, setExisting] = useState(null);
   const [form, setForm] = useState({});
   const [photoFiles, setPhotoFiles] = useState([]);
+  const shouldFocusPhotos = searchParams.get('focus') === 'photos';
 
   const setField = useCallback((name, value) => {
     setForm((f) => ({ ...f, [name]: value }));
   }, []);
+
+  const numberOrNull = (value) => {
+    if (value === '' || value == null) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +120,15 @@ export default function CheckInPage() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    if (!shouldFocusPhotos || loading) return;
+    const id = window.setTimeout(() => {
+      const el = document.getElementById('checkin-photos-card');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+    return () => window.clearTimeout(id);
+  }, [shouldFocusPhotos, loading]);
+
   const handlePhotoChange = (e) => {
     const files = Array.from(e.target.files || []);
     setPhotoFiles((prev) => [...prev, ...files]);
@@ -122,16 +143,16 @@ export default function CheckInPage() {
         client_id: clientId,
         week_start: weekStart,
         focus_type: focusType,
-        weight: form.weight ?? null,
-        steps_avg: form.steps_avg ?? null,
-        sleep_score: form.sleep_score ?? null,
-        energy_level: form.energy_level ?? null,
-        training_completion: form.training_completion ?? null,
-        nutrition_adherence: form.nutrition_adherence ?? null,
-        cardio_completion: form.cardio_completion ?? null,
-        posing_minutes: form.posing_minutes ?? null,
-        pump_quality: form.pump_quality ?? null,
-        digestion_score: form.digestion_score ?? null,
+        weight: numberOrNull(form.weight),
+        steps_avg: numberOrNull(form.steps_avg),
+        sleep_score: numberOrNull(form.sleep_score),
+        energy_level: numberOrNull(form.energy_level),
+        training_completion: numberOrNull(form.training_completion),
+        nutrition_adherence: numberOrNull(form.nutrition_adherence),
+        cardio_completion: numberOrNull(form.cardio_completion),
+        posing_minutes: numberOrNull(form.posing_minutes),
+        pump_quality: numberOrNull(form.pump_quality),
+        digestion_score: numberOrNull(form.digestion_score),
         condition_notes: form.condition_notes ?? null,
         wins: form.wins ?? null,
         struggles: form.struggles ?? null,
@@ -165,9 +186,18 @@ export default function CheckInPage() {
     }
   };
 
+  const checkInEngineMigrationAttrs = useMemo(() => {
+    let state;
+    if (loading) state = deriveCheckInEnginePageRouteState({ surface: 'loading' });
+    else if (!clientId) state = deriveCheckInEnginePageRouteState({ surface: 'no_client' });
+    else if (existing) state = deriveCheckInEnginePageRouteState({ surface: 'submitted' });
+    else state = deriveCheckInEnginePageRouteState({ surface: 'form', focusType });
+    return atlasMigrationDataAttributes(state.phase, state.primary);
+  }, [loading, clientId, existing, focusType]);
+
   if (loading) {
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
+      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }} {...checkInEngineMigrationAttrs}>
         <TopBar title="Check-in" onBack={() => navigate(-1)} />
         <div className="p-4 flex items-center justify-center" style={{ minHeight: 200 }}>
           <p style={{ color: colors.muted }}>Loading…</p>
@@ -178,7 +208,7 @@ export default function CheckInPage() {
 
   if (!clientId) {
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
+      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }} {...checkInEngineMigrationAttrs}>
         <TopBar title="Check-in" onBack={() => navigate(-1)} />
         <div className="p-6 text-center">
           <p style={{ color: colors.muted, marginBottom: spacing[16] }}>
@@ -192,7 +222,7 @@ export default function CheckInPage() {
 
   if (existing) {
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
+      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }} {...checkInEngineMigrationAttrs}>
         <TopBar title="Check-in" onBack={() => navigate(-1)} />
         <div className="p-6 text-center">
           <p style={{ color: colors.text, fontWeight: 600, marginBottom: spacing[8] }}>Already submitted</p>
@@ -210,7 +240,7 @@ export default function CheckInPage() {
   const isIntegrated = focusType === 'integrated';
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }} {...checkInEngineMigrationAttrs}>
       <TopBar title="Check-in" onBack={() => navigate(-1)} />
       <form onSubmit={handleSubmit} className="p-4 pb-8" style={{ paddingBottom: spacing[32] }}>
         <p className="text-sm mb-4" style={{ color: colors.muted }}>
@@ -276,8 +306,20 @@ export default function CheckInPage() {
           </>
         )}
 
-        <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
+        <Card
+          id="checkin-photos-card"
+          style={{
+            marginBottom: spacing[16],
+            padding: spacing[16],
+            border: shouldFocusPhotos ? `1px solid ${colors.primary}` : undefined,
+          }}
+        >
           <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Photos</label>
+          {shouldFocusPhotos && (
+            <p style={{ margin: `0 0 ${spacing[8]}px`, color: colors.text, fontSize: 12 }}>
+              Add a few clear photos to track visual progress over time.
+            </p>
+          )}
           <input
             type="file"
             multiple

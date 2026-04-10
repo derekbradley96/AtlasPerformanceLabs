@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
@@ -7,6 +7,7 @@ import { Dumbbell, Users, User, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import AtlasLogo from '@/components/Brand/AtlasLogo';
+import { atlasMigrationDataAttributes, deriveRoleSelectionSurfaceState } from '@/lib/atlasMigrationPhases';
 
 import { colors as tokenColors } from '@/ui/tokens';
 const colors = {
@@ -79,6 +80,11 @@ export default function RoleSelection() {
   const { isDemoMode, setRole, exitDemo } = useAuth();
   const [loading, setLoading] = useState(false);
 
+  const roleSelectionMigration = useMemo(
+    () => deriveRoleSelectionSurfaceState({ saving: loading }),
+    [loading],
+  );
+
   const handleExitDemo = useCallback(() => {
     exitDemo();
     navigate(createPageUrl('Login'), { replace: true });
@@ -121,6 +127,7 @@ export default function RoleSelection() {
 
   return (
     <div
+      {...atlasMigrationDataAttributes(roleSelectionMigration.phase, roleSelectionMigration.primary)}
       className="min-h-screen flex flex-col"
       style={{
         background: colors.background,

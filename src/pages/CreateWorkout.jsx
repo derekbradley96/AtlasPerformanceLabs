@@ -1,48 +1,61 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { isPersonal } from '@/lib/roles';
+import { PERSONAL_PROGRAM_BUILDER } from '@/lib/personalBuilderNav';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { createPageUrl } from '@/utils';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import UnifiedWorkoutBuilder from '@/components/workout/UnifiedWorkoutBuilder';
+import { Button } from '@/components/ui/button';
+import {
+  getAllExercises,
+  saveCustomExercise,
+} from '@/data/exerciseLibrary';
 
+const MUSCLE_GROUP_ID_TO_LIBRARY_MUSCLES = {
+  chest: ['Chest'],
+  back: ['Back'],
+  shoulders: ['Shoulders'],
+  arms: ['Biceps', 'Triceps'],
+  legs: ['Quads', 'Hamstrings', 'Glutes', 'Calves'],
+  core: ['Core'],
+  full_body: ['Chest', 'Back', 'Shoulders', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Biceps', 'Triceps', 'Core'],
+};
+
+/**
+ * Legacy workout creation wizard.
+ * Canonical creation/planning flow is Program Builder.
+ */
 export default function CreateWorkout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
 
   const [step, setStep] = useState(1);
   const [workoutName, setWorkoutName] = useState('');
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState(null);
   const [workoutExercises, setWorkoutExercises] = useState([]);
+  const [customNonce, setCustomNonce] = useState(0);
 
-  const { data: exercises = [] } = useQuery({
-    queryKey: ['exercises', selectedMuscleGroup],
-    queryFn: () => Promise.resolve([]),
-    enabled: !!selectedMuscleGroup
-  });
+  const allExercises = useMemo(() => {
+    // Default exercises are static; custom exercises are stored per "coach" in localStorage.
+    // We reuse `user.id` as the coachId to get custom exercises scoped to the signed-in user.
+    return getAllExercises(user?.id ?? 'default');
+  }, [user?.id, customNonce]);
 
-  const { data: customExercises = [] } = useQuery({
-    queryKey: ['custom-exercises', user?.id, selectedMuscleGroup],
-    queryFn: () => Promise.resolve([]),
-    enabled: !!user?.id && !!selectedMuscleGroup
-  });
+  const filteredExercises = useMemo(() => {
+    if (!selectedMuscleGroup) return [];
+    const allowed = MUSCLE_GROUP_ID_TO_LIBRARY_MUSCLES[selectedMuscleGroup] ?? [];
+    return allExercises.filter((e) => allowed.includes(e.primaryMuscleGroup));
+  }, [allExercises, selectedMuscleGroup]);
 
-  const createCustomExerciseMutation = useMutation({
-    mutationFn: async (exerciseData) => {
-      const { data } = await invokeSupabaseFunction('custom-exercise-create', { user_id: user?.id, ...exerciseData });
-      return data ?? { id: `ce-${Date.now()}`, ...exerciseData };
-    },
-    onSuccess: (newExercise) => {
-      queryClient.invalidateQueries(['custom-exercises']);
-      handleAddExercise(newExercise);
-    }
-  });
+  const exercises = useMemo(() => filteredExercises.filter((e) => !e.isCustom), [filteredExercises]);
+  const customExercises = useMemo(() => filteredExercises.filter((e) => e.isCustom), [filteredExercises]);
 
   const saveWorkoutMutation = useMutation({
     mutationFn: async () => {
@@ -57,13 +70,18 @@ export default function CreateWorkout() {
     onSuccess: () => {
       queryClient.invalidateQueries(['workout-templates']);
       toast.success('Workout saved!');
-      navigate(createPageUrl('Workout'));
+      navigate('/today');
     },
     onError: (err) => {
       toast.error('Failed to save workout');
       console.error(err);
     }
   });
+
+  /** Personal uses Program Builder only — no separate workout wizard (after hooks). */
+  if (isPersonal(effectiveRole)) {
+    return <Navigate to={PERSONAL_PROGRAM_BUILDER} replace />;
+  }
 
   if (!user) return <PageLoader />;
 
@@ -90,7 +108,44 @@ export default function CreateWorkout() {
   };
 
   const handleCreateCustomExercise = (data) => {
-    return createCustomExerciseMutation.mutateAsync(data);
+    const muscleGroup = data?.muscle_group;
+    const muscleFocus = (data?.muscle_focus || '').toString();
+
+    const primary =
+      muscleGroup === 'chest' ? 'Chest' :
+      muscleGroup === 'back' ? 'Back' :
+      muscleGroup === 'shoulders' ? 'Shoulders' :
+      muscleGroup === 'core' ? 'Core' :
+      muscleGroup === 'legs' ? (
+        muscleFocus.includes('Quads') ? 'Quads' :
+        muscleFocus.includes('Hamstrings') ? 'Hamstrings' :
+        muscleFocus.includes('Glutes') ? 'Glutes' :
+        muscleFocus.includes('Calves') ? 'Calves' :
+        'Quads'
+      ) :
+      muscleGroup === 'arms' ? (
+        muscleFocus.includes('Triceps') ? 'Triceps' :
+        muscleFocus.includes('Biceps') ? 'Biceps' :
+        'Biceps'
+      ) :
+      'Core';
+
+    const created = saveCustomExercise(user?.id ?? 'default', {
+      name: (data?.name || '').trim(),
+      primaryMuscleGroup: primary,
+      secondaryMuscles: [],
+      movementPattern: 'Other',
+      equipment: ['Other'],
+      difficulty: 'intermediate',
+      tags: [],
+      substitutions: [],
+    });
+
+    // Refresh local exercise library view + auto-add to the workout.
+    setCustomNonce((n) => n + 1);
+    handleAddExercise(created);
+
+    return Promise.resolve(created);
   };
 
   const handleSaveWorkout = () => {
@@ -132,19 +187,20 @@ export default function CreateWorkout() {
               autoFocus
             />
             <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => navigate(createPageUrl('Workout'))}
-                className="flex-1 px-4 py-3 border border-slate-700 rounded-lg text-white hover:bg-slate-800 transition-colors"
+              <Button
+                onClick={() => navigate('/today')}
+                variant="outline"
+                className="flex-1 px-4 py-3 border-slate-700 text-white hover:bg-slate-800 transition-colors"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => setStep(2)}
                 disabled={!workoutName.trim()}
                 className="flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         </motion.div>
@@ -171,19 +227,20 @@ export default function CreateWorkout() {
             />
 
             <div className="flex gap-3 mt-6">
-              <button
+              <Button
                 onClick={() => setStep(1)}
-                className="flex-1 px-4 py-3 border border-slate-700 rounded-lg text-white hover:bg-slate-800 transition-colors"
+                variant="outline"
+                className="flex-1 px-4 py-3 border-slate-700 text-white hover:bg-slate-800 transition-colors"
               >
                 Back
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => setStep(3)}
                 disabled={workoutExercises.length === 0}
                 className="flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
               >
                 Review
-              </button>
+              </Button>
             </div>
           </div>
         </motion.div>
@@ -220,13 +277,14 @@ export default function CreateWorkout() {
             </div>
 
             <div className="flex gap-3">
-              <button
+              <Button
                 onClick={() => setStep(2)}
-                className="flex-1 px-4 py-3 border border-slate-700 rounded-lg text-white hover:bg-slate-800 transition-colors"
+                variant="outline"
+                className="flex-1 px-4 py-3 border-slate-700 text-white hover:bg-slate-800 transition-colors"
               >
                 Edit
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleSaveWorkout}
                 disabled={saveWorkoutMutation.isPending}
                 className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
@@ -239,7 +297,7 @@ export default function CreateWorkout() {
                     Save Workout
                   </>
                 )}
-              </button>
+              </Button>
             </div>
           </div>
         </motion.div>

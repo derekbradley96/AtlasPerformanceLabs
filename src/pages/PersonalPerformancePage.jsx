@@ -2,6 +2,7 @@ import React from 'react';
 import Card from '@/ui/Card';
 import EmptyState from '@/components/ui/EmptyState';
 import SkeletonCard from '@/components/ui/SkeletonCard';
+import PersonalSurface from '@/components/personal/PersonalSurface';
 import { colors, spacing, shell } from '@/ui/tokens';
 
 export default function PersonalPerformancePage() {
@@ -39,16 +40,9 @@ export default function PersonalPerformancePage() {
   };
 
   return (
-    <div
-      className="min-h-screen"
-      style={{
-        background: colors.bgPrimary,
-        padding: spacing[16],
-        paddingTop: `calc(${spacing[20]} + env(safe-area-inset-top, 0px))`,
-        paddingBottom: `calc(${spacing[24]} + env(safe-area-inset-bottom, 0px))`,
-      }}
-    >
-      <div className="max-w-xl mx-auto space-y-4">
+    <PersonalSurface>
+    <div className="min-h-screen max-w-full overflow-x-hidden" style={{ color: colors.text }}>
+      <div className="max-w-xl mx-auto w-full space-y-4">
         <header>
           <h1 className="text-2xl font-semibold mb-1" style={{ color: colors.text }}>
             Performance overview
@@ -204,6 +198,7 @@ export default function PersonalPerformancePage() {
         </Card>
       </div>
     </div>
+    </PersonalSurface>
   );
 }
 

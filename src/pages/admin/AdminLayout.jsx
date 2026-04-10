@@ -2,12 +2,14 @@
  * Admin layout: nav links + outlet. Matches main app shell (safe area, header height, padding).
  * Only rendered when user is admin (profile.is_admin).
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { colors, shell } from '@/ui/tokens';
+import { getStandaloneScrollablePagePaddingBottom } from '@/ui/pageLayout';
 import { LayoutDashboard, Users, UserCheck, MessageSquare, BarChart3, Search } from 'lucide-react';
+import { deriveAdminShellSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 
 const HEADER_HEIGHT = shell.headerHeight;
 
@@ -23,11 +25,16 @@ const NAV = [
 export default function AdminLayout() {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const adminMigration = useMemo(
+    () => deriveAdminShellSurfaceState({ allowed: !!profile?.is_admin }),
+    [profile?.is_admin]
+  );
 
   if (!profile?.is_admin) {
     return (
       <div
         className="min-h-screen flex items-center justify-center p-6"
+        {...atlasMigrationDataAttributes(adminMigration.phase, adminMigration.primary)}
         style={{
           background: colors.bg,
           paddingTop: 'env(safe-area-inset-top)',
@@ -52,12 +59,12 @@ export default function AdminLayout() {
   return (
     <div
       className="min-h-screen flex flex-col w-full max-w-full min-w-0"
+      {...atlasMigrationDataAttributes(adminMigration.phase, adminMigration.primary)}
       style={{
         background: colors.bg,
         color: colors.text,
         paddingLeft: 'env(safe-area-inset-left, 0)',
         paddingRight: 'env(safe-area-inset-right, 0)',
-        paddingBottom: 'env(safe-area-inset-bottom, 0)',
       }}
     >
       {/* Header: same safe-area + height as AppShell so back button is below status bar */}
@@ -138,7 +145,7 @@ export default function AdminLayout() {
         className="flex-1 overflow-y-auto"
         style={{
           paddingTop: shell.topSpacing,
-          paddingBottom: 24,
+          paddingBottom: getStandaloneScrollablePagePaddingBottom(),
           paddingLeft: shell.pagePaddingH,
           paddingRight: shell.pagePaddingH,
         }}

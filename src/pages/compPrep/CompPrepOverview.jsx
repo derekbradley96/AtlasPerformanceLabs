@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { atlasMigrationDataAttributes, deriveCompPrepOverviewRouteState } from '@/lib/atlasMigrationPhases';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Trophy, AlertTriangle } from 'lucide-react';
 import { getPrepClients, getClientCheckIns } from '@/data/selectors';
@@ -61,6 +62,12 @@ function ScoreRing({ score, size = 44 }) {
 export default function CompPrepOverview() {
   const navigate = useNavigate();
   const prepClients = useMemo(() => getPrepClients(), []);
+  const compPrepMigrationAttrs = useMemo(() => {
+    const s = deriveCompPrepOverviewRouteState({
+      surface: prepClients.length === 0 ? 'empty' : 'list',
+    });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [prepClients.length]);
 
   return (
     <div
@@ -73,6 +80,7 @@ export default function CompPrepOverview() {
         paddingRight: spacing[16],
         paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
       }}
+      {...compPrepMigrationAttrs}
     >
       <p className="text-sm mb-4" style={{ color: colors.muted }}>
         Clients in competition prep. Tap for profile, photos & posing.

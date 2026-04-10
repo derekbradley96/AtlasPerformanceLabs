@@ -6,7 +6,8 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
+import { isInternalAdmin } from '@/lib/internalAccess';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard } from '@/ui/pageLayout';
 import { Bug, Lightbulb, HelpCircle, MessageCircle, Check, CheckCircle, Loader2, Inbox } from 'lucide-react';
@@ -56,8 +57,8 @@ function messagePreview(msg) {
 }
 
 export default function BetaFeedbackInboxPage() {
-  const { user } = useAuth();
-  const isAdmin = user?.email === ADMIN_EMAIL || import.meta.env.DEV;
+  const { supabaseUser } = useAuth();
+  const isAdmin = isInternalAdmin(supabaseUser);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

@@ -474,7 +474,7 @@ export default function TrainerSetup() {
                 min={15}
                 max={240}
                 value={capacity.dailyAdminLimitMinutes ?? ''}
-                onChange={(e) => setCapacityState((c) => ({ ...c, dailyAdminLimitMinutes: e.target.value ? parseInt(e.target.value, 10) : 60 }))}
+                onChange={(e) => setCapacityState((c) => ({ ...c, dailyAdminLimitMinutes: e.target.value ? parseInt(e.target.value, 10) : undefined }))}
                 style={{
                   width: '100%',
                   maxWidth: 120,

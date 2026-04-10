@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { hasSupabase } from '@/lib/supabaseClient';
+import { uploadCheckinPhoto } from '@/lib/checkins';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
@@ -12,13 +14,20 @@ import { PageLoader } from '@/components/ui/LoadingState';
 import { toast } from 'sonner';
 import { trackCheckinSubmitted, trackProgressPhotoUploaded } from '@/services/engagementTracker';
 import { notifyCoachCheckinSubmitted } from '@/services/notificationTriggers';
+import { trackFirstCheckinOpened } from '@/services/firstSessionTracker';
+import MeasurementUnitSegments, { WEIGHT_SEGMENT_OPTIONS } from '@/components/measurements/MeasurementUnitSegments';
+import { resolveViewerBodyweightUnit, normalizeWeightUnit, parseWeightInputsToKg, weightUnitShortLabel } from '@/lib/bodyMeasurementUnits';
+import { atlasMigrationDataAttributes, deriveClientCheckInLegacyRouteState } from '@/lib/atlasMigrationPhases';
 
 export default function ClientCheckIn() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, updateProfile } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [weightUnitLocal, setWeightUnitLocal] = useState(() => resolveViewerBodyweightUnit(null));
+  const [weightSt, setWeightSt] = useState('');
+  const [weightLbRem, setWeightLbRem] = useState('');
   const [formData, setFormData] = useState({
     weight_kg: '',
     energy_level: '',
@@ -39,20 +48,22 @@ export default function ClientCheckIn() {
     enabled: !!user?.id
   });
 
-  const { data: template } = useQuery({
-    queryKey: ['client-template', clientProfile?.trainer_id],
+  const coachIdForTemplate = clientProfile?.trainer_id ?? clientProfile?.coach_id;
+
+  const { data: template, isLoading: templateLoading } = useQuery({
+    queryKey: ['client-template', coachIdForTemplate],
     queryFn: async () => {
       const { data } = await invokeSupabaseFunction('checkin-template-list', {
-        trainer_id: clientProfile?.trainer_id,
+        trainer_id: coachIdForTemplate,
         is_active: true
       });
       const list = Array.isArray(data) ? data : (data ? [data] : []);
       return list[0] ?? null;
     },
-    enabled: !!clientProfile?.trainer_id
+    enabled: !!coachIdForTemplate
   });
 
-  const { data: pendingCheckin } = useQuery({
+  const { data: pendingCheckin, isLoading: pendingLoading } = useQuery({
     queryKey: ['pending-checkin', clientProfile?.id],
     queryFn: async () => {
       const { data } = await invokeSupabaseFunction('checkin-list', {
@@ -62,17 +73,53 @@ export default function ClientCheckIn() {
       const list = Array.isArray(data) ? data : [];
       return list[0] ?? null;
     },
-    enabled: !!clientProfile?.id
+    enabled: !!clientProfile?.id && !!template
   });
+
+  const legacyCheckinMigrationAttrs = useMemo(() => {
+    let surface = 'loading';
+    if (user && clientProfile) {
+      if (!coachIdForTemplate) surface = 'no_trainer';
+      else if (templateLoading) surface = 'template_loading';
+      else if (!template) surface = 'no_template';
+      else if (pendingLoading) surface = 'pending_loading';
+      else if (!pendingCheckin) surface = 'no_pending';
+      else surface = 'form';
+    }
+    const s = deriveClientCheckInLegacyRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [
+    user,
+    clientProfile,
+    coachIdForTemplate,
+    templateLoading,
+    template,
+    pendingLoading,
+    pendingCheckin,
+  ]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    trackFirstCheckinOpened(user.id, {});
+  }, [user?.id]);
 
   const submitMutation = useMutation({
     mutationFn: async (data) => {
       if (pendingCheckin?.id) {
+        const photos = Array.isArray(data.photo_urls) ? data.photo_urls : [];
         const { data: updated } = await invokeSupabaseFunction('checkin-update', {
           id: pendingCheckin.id,
-          ...data,
+          weight_kg: data.weight_kg,
+          energy_level: data.energy_level,
+          mood_level: data.mood_level,
+          sleep_quality: data.sleep_quality,
+          notes: data.notes,
+          ...(Array.isArray(data.answers) && data.answers.length > 0
+            ? { answers: data.answers }
+            : {}),
+          photos,
           status: 'submitted',
-          submitted_at: new Date().toISOString()
+          submitted_at: new Date().toISOString(),
         });
         return updated;
       }
@@ -86,8 +133,9 @@ export default function ClientCheckIn() {
         if (coachId) {
           notifyCoachCheckinSubmitted(coachId, clientProfile.id, pendingCheckin?.id).catch(() => {});
         }
-        if (payload?.photo_urls?.length) {
-          trackProgressPhotoUploaded(clientProfile.id, coachId, { checkin_id: pendingCheckin?.id, photo_count: payload.photo_urls.length }).catch(() => {});
+        const photoCount = Array.isArray(payload?.photo_urls) ? payload.photo_urls.length : 0;
+        if (photoCount) {
+          trackProgressPhotoUploaded(clientProfile.id, coachId, { checkin_id: pendingCheckin?.id, photo_count: photoCount }).catch(() => {});
         }
       }
       toast.success('Check-in submitted!');
@@ -98,17 +146,33 @@ export default function ClientCheckIn() {
   const handlePhotoUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
+    if (!pendingCheckin?.id || !clientProfile?.id) {
+      toast.error('Check-in must be loaded before adding photos');
+      return;
+    }
+    if (!hasSupabase) {
+      toast.error('Sign in to upload photos');
+      return;
+    }
 
     setUploading(true);
     try {
-      const urls = [];
+      const paths = [];
       for (const file of files) {
-        const { file_url } = await base44.integrations.Core.UploadFile({ file });
-        urls.push(file_url);
+        const path = await uploadCheckinPhoto({
+          clientId: clientProfile.id,
+          checkinId: pendingCheckin.id,
+          file,
+        });
+        if (path) paths.push(path);
+      }
+      if (paths.length === 0) {
+        toast.error('Failed to upload photos');
+        return;
       }
       setFormData({
         ...formData,
-        photo_urls: [...formData.photo_urls, ...urls]
+        photo_urls: [...formData.photo_urls, ...paths],
       });
       toast.success('Photos uploaded!');
     } catch (error) {
@@ -127,8 +191,16 @@ export default function ClientCheckIn() {
       answer: formData.answers[q.id] || ''
     })) || [];
 
+    const wU = normalizeWeightUnit(weightUnitLocal);
+    const resolvedKg =
+      wU === 'st_lb'
+        ? parseWeightInputsToKg({ weightUnit: wU, stoneText: weightSt, poundText: weightLbRem })
+        : wU === 'lb'
+          ? parseWeightInputsToKg({ weightUnit: wU, lbText: formData.weight_kg })
+          : parseWeightInputsToKg({ weightUnit: wU, kgText: formData.weight_kg });
+
     await submitMutation.mutateAsync({
-      weight_kg: parseFloat(formData.weight_kg) || null,
+      weight_kg: resolvedKg != null ? Number(resolvedKg.toFixed(3)) : null,
       energy_level: parseInt(formData.energy_level) || null,
       mood_level: parseInt(formData.mood_level) || null,
       sleep_quality: parseInt(formData.sleep_quality) || null,
@@ -138,15 +210,26 @@ export default function ClientCheckIn() {
     });
   };
 
-  if (!user || !clientProfile) return <PageLoader />;
-
-  if (!template) {
+  if (!user || !clientProfile) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" {...legacyCheckinMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
+  }
+
+  if (!coachIdForTemplate) {
+    return (
+      <div
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center"
+        {...legacyCheckinMigrationAttrs}
+      >
         <div className="text-center max-w-md">
           <Calendar className="w-16 h-16 text-slate-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-white mb-2">No Check-In Template</h2>
-          <p className="text-slate-400 mb-6">Your trainer hasn't set up check-ins yet. They'll notify you when it's time.</p>
+          <h2 className="text-xl font-bold text-white mb-2">No coach linked</h2>
+          <p className="text-slate-400 mb-6">
+            Connect with your coach first so check-ins can load. Use your invite code or ask them to link your account.
+          </p>
           <Button onClick={() => navigate(createPageUrl('Home'))}>
             Back to Home
           </Button>
@@ -155,9 +238,46 @@ export default function ClientCheckIn() {
     );
   }
 
+  if (templateLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" {...legacyCheckinMigrationAttrs}>
+        <PageLoader message="Loading check-in…" />
+      </div>
+    );
+  }
+
+  if (!template) {
+    return (
+      <div
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center"
+        {...legacyCheckinMigrationAttrs}
+      >
+        <div className="text-center max-w-md">
+          <Calendar className="w-16 h-16 text-slate-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-white mb-2">No Check-In Template</h2>
+          <p className="text-slate-400 mb-6">Your trainer hasn&apos;t set up check-ins yet. They&apos;ll notify you when it&apos;s time.</p>
+          <Button onClick={() => navigate(createPageUrl('Home'))}>
+            Back to Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (pendingLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" {...legacyCheckinMigrationAttrs}>
+        <PageLoader message="Loading your check-in…" />
+      </div>
+    );
+  }
+
   if (!pendingCheckin) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center">
+      <div
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center"
+        {...legacyCheckinMigrationAttrs}
+      >
         <div className="text-center max-w-md">
           <CheckCircle2 className="w-16 h-16 text-green-400 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-white mb-2">You're All Caught Up</h2>
@@ -183,7 +303,10 @@ export default function ClientCheckIn() {
   const progressPercent = (currentStep / totalSteps) * 100;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24">
+    <div
+      className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24"
+      {...legacyCheckinMigrationAttrs}
+    >
       {/* Header - Minimal */}
       <div className="p-4 md:p-6 border-b border-slate-800">
         <div className="flex items-center justify-between mb-4">
@@ -233,20 +356,67 @@ export default function ClientCheckIn() {
         {/* Step 2: Weight */}
         {template.include_bodyweight && currentStep === (template.include_photos ? 2 : 1) && (
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">What's the scale say?</h2>
-            <Input
-              type="text"
-              inputMode="decimal"
-              value={formData.weight_kg}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (/^\d*\.?\d*$/.test(val)) setFormData({ ...formData, weight_kg: val });
-              }}
-              placeholder="75.5"
-              className="bg-slate-900/50 border-slate-700 text-lg py-6"
-              autoFocus
-            />
-            <p className="text-xs text-slate-500 mt-2">kg</p>
+            <h2 className="text-lg font-semibold text-white mb-4">What&apos;s the scale say?</h2>
+            <div className="mb-4">
+              <MeasurementUnitSegments
+                label="Weight unit"
+                options={WEIGHT_SEGMENT_OPTIONS}
+                value={normalizeWeightUnit(weightUnitLocal)}
+                onChange={async (id) => {
+                  const w = normalizeWeightUnit(id);
+                  setWeightUnitLocal(w);
+                  if (user?.id && typeof updateProfile === 'function') {
+                    await updateProfile({ bodyweight_unit: w, units: w === 'lb' ? 'lb' : 'kg' });
+                  }
+                }}
+              />
+            </div>
+            {normalizeWeightUnit(weightUnitLocal) === 'st_lb' ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Stone</label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={weightSt}
+                    onChange={(e) => setWeightSt(e.target.value.replace(/[^\d]/g, ''))}
+                    placeholder="11"
+                    className="bg-slate-900/50 border-slate-700 text-lg py-4"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Pounds</label>
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={weightLbRem}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (/^\d*\.?\d*$/.test(val)) setWeightLbRem(val);
+                    }}
+                    placeholder="4"
+                    className="bg-slate-900/50 border-slate-700 text-lg py-4"
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  value={formData.weight_kg}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^\d*\.?\d*$/.test(val)) setFormData({ ...formData, weight_kg: val });
+                  }}
+                  placeholder={normalizeWeightUnit(weightUnitLocal) === 'lb' ? '175' : '75.5'}
+                  className="bg-slate-900/50 border-slate-700 text-lg py-6"
+                  autoFocus
+                />
+                <p className="text-xs text-slate-500 mt-2">{weightUnitShortLabel(weightUnitLocal)}</p>
+              </>
+            )}
           </div>
         )}
 

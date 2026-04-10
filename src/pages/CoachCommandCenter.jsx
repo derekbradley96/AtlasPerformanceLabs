@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
-import { colors, spacing } from '@/ui/tokens';
+import { colors, spacing, touchTargetMin } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { listThreads } from '@/lib/messaging/supabaseMessaging';
 import {
@@ -56,6 +56,16 @@ async function fetchCommandCenterData() {
       .order('session_date', { ascending: true }),
     listThreads({ supabase, coachId }).catch(() => []),
   ]);
+  const [retentionSignalsRes, momentumRes] = await Promise.all([
+    supabase
+      .from('v_client_retention_signals')
+      .select('client_id, low_habit_adherence, habit_streak_broken')
+      .eq('coach_id', coachId),
+    supabase
+      .from('v_client_momentum')
+      .select('client_id, total_score')
+      .eq('coach_id', coachId),
+  ]);
 
   const queueRows = queueRes.data ?? [];
   const unresolved = queueRows.filter((r) => !r.resolved_at);
@@ -70,6 +80,10 @@ async function fetchCommandCenterData() {
 
   const todaySessions = (sessionsRes.data ?? []).filter((s) => s.status !== 'cancelled');
   const messageCount = Array.isArray(threads) ? threads.length : 0;
+  const retentionSignals = Array.isArray(retentionSignalsRes.data) ? retentionSignalsRes.data : [];
+  const momentumRows = Array.isArray(momentumRes.data) ? momentumRes.data : [];
+  const atRiskStreakCount = retentionSignals.filter((r) => r?.low_habit_adherence || r?.habit_streak_broken).length;
+  const buildingMomentumCount = momentumRows.filter((r) => Number(r?.total_score) >= 70).length;
 
   return {
     reviewQueueCount,
@@ -77,6 +91,8 @@ async function fetchCommandCenterData() {
     prepAlertsCount,
     todaySessions,
     messageCount,
+    atRiskStreakCount,
+    buildingMomentumCount,
   };
 }
 
@@ -173,7 +189,7 @@ export default function CoachCommandCenter() {
               title="Review queue"
               subtitle="Check-ins, pose checks, retention"
               count={data.reviewQueueCount}
-              href="/review-center/queue"
+              href="/review-center"
               navigate={navigate}
             />
 
@@ -191,7 +207,15 @@ export default function CoachCommandCenter() {
               title="Client alerts"
               subtitle="Flags, retention risk, billing"
               count={data.clientAlertsCount}
-              href="/review-center/queue"
+              href="/review-center"
+              navigate={navigate}
+            />
+            <SectionCard
+              icon={Activity}
+              title="Momentum signals"
+              subtitle={`${data.atRiskStreakCount} at risk · ${data.buildingMomentumCount} building momentum`}
+              count={data.atRiskStreakCount}
+              href="/review-center"
               navigate={navigate}
             />
 
@@ -200,7 +224,7 @@ export default function CoachCommandCenter() {
               title="Prep alerts"
               subtitle="Pose checks, peak week due"
               count={data.prepAlertsCount}
-              href="/review-center/queue?filter=pose_check"
+              href="/review-center?filter=posing"
               navigate={navigate}
             />
 
@@ -216,9 +240,9 @@ export default function CoachCommandCenter() {
                   type="button"
                   onClick={() => navigate('/calendar')}
                   className="text-xs font-medium"
-                  style={{ color: colors.primary }}
+                  style={{ color: colors.primary, minHeight: touchTargetMin }}
                 >
-                  View calendar
+                  Open calendar
                 </button>
               </div>
               {data.todaySessions.length === 0 ? (

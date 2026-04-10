@@ -89,7 +89,7 @@ export default function MyTrainer() {
           action={
             <div className="flex flex-col sm:flex-row gap-3">
               <Button
-                onClick={() => navigate(createPageUrl('FindTrainer'))}
+                onClick={() => navigate('/discover')}
                 className="bg-blue-500 hover:bg-blue-600"
               >
                 <Search className="w-4 h-4 mr-2" />
@@ -121,7 +121,7 @@ export default function MyTrainer() {
           title="Trainer not found"
           description="There was an issue loading your trainer's profile"
           action={
-            <Button onClick={() => navigate(createPageUrl('FindTrainer'))} className="bg-blue-500 hover:bg-blue-600">
+            <Button onClick={() => navigate('/discover')} className="bg-blue-500 hover:bg-blue-600">
               Find a New Trainer
             </Button>
           }

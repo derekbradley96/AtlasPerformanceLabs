@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { PageLoader } from '@/components/ui/LoadingState';
 import SkeletonCard from '@/components/ui/SkeletonCard';
-import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
+import { isInternalAdmin } from '@/lib/internalAccess';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { Button } from '@/components/ui/button';
 import { Edit2, LogOut, Mail, Shield } from 'lucide-react';
@@ -12,7 +13,7 @@ import { toast } from 'sonner';
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { user: authUser, profile, isDemoMode, logout, isLoadingAuth, coachFocus } = useAuth();
+  const { user: authUser, supabaseUser, profile, isDemoMode, logout, isLoadingAuth, coachFocus } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
 
   const displayUser = authUser;
@@ -21,9 +22,10 @@ export default function Profile() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      logout();
+      await logout(true);
     } catch (error) {
       setLoggingOut(false);
+      toast.error('Could not log out. Try again.');
     }
   };
 
@@ -163,13 +165,13 @@ export default function Profile() {
         </div>
 
         {/* Admin / Dev Panel: always visible for admin email, plus dev tools in dev */}
-        {(isDev || displayUser?.email === ADMIN_EMAIL) && (
+        {isInternalAdmin(supabaseUser || displayUser) && (
           <div className="app-card p-6 border-purple-500/30 bg-purple-500/10">
             <h3 className="text-sm font-semibold text-purple-400 uppercase tracking-wide mb-4 flex items-center gap-2">
               <Shield className="w-4 h-4" />
-              {displayUser?.email === ADMIN_EMAIL ? 'Admin' : 'Dev Tools'}
+              {isInternalAdmin(supabaseUser || displayUser) ? 'Admin' : 'Dev Tools'}
             </h3>
-            {displayUser?.email === ADMIN_EMAIL && (
+            {isInternalAdmin(supabaseUser || displayUser) && (
               <Button
                 onClick={() => navigate('/admin')}
                 className="w-full bg-purple-500 hover:bg-purple-600 text-white mb-3"
@@ -185,7 +187,7 @@ export default function Profile() {
               <Shield className="w-4 h-4 mr-2" />
               Open Admin Panel
             </Button>
-            {isDev && (
+            {isInternalAdmin(supabaseUser || displayUser) && (
               <Button
                 onClick={handleRoleSwitch}
                 variant="outline"

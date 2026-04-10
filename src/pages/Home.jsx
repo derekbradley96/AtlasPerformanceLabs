@@ -1,12 +1,11 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import TrainerDashboard from '@/components/dashboards/TrainerDashboard';
+import CoachHomePage from './CoachHomePage';
 import ClientDashboard from '@/components/dashboards/ClientDashboard';
 import GeneralDashboard from '@/components/dashboards/GeneralDashboard';
 import { PageLoader } from '@/components/ui/LoadingState';
-
-const isDev = import.meta.env.DEV;
+import { atlasMigrationDataAttributes, deriveHomeRouterRouteState } from '@/lib/atlasMigrationPhases';
 
 const LOCAL_USER_FALLBACK = { id: 'local-solo', full_name: 'Guest', user_type: 'solo', role: 'solo', email: 'local@atlas' };
 
@@ -15,23 +14,61 @@ export default function Home() {
   const { user: authUser, isAuthenticated, isLoadingAuth, navigateToLogin } = useAuth();
   const displayUser = authUser || LOCAL_USER_FALLBACK;
 
+  const userType = displayUser?.user_type ?? displayUser?.role;
+  const homeMigrationAttrs = useMemo(() => {
+    let surface = 'loading';
+    if (!isAuthenticated && !isLoadingAuth) surface = 'redirect_login';
+    else if (isLoadingAuth && !authUser) surface = 'loading';
+    else if (!userType) surface = 'redirect_auth';
+    else if (userType === 'coach' || userType === 'trainer') surface = 'coach';
+    else if (userType === 'client') surface = 'client';
+    else surface = 'personal';
+    const s = deriveHomeRouterRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [isAuthenticated, isLoadingAuth, authUser, userType]);
+
   if (!isAuthenticated && !isLoadingAuth) {
     navigateToLogin();
-    return <PageLoader />;
+    return (
+      <div className="min-h-screen" {...homeMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
   }
-  if (isLoadingAuth && !authUser) return <PageLoader />;
+  if (isLoadingAuth && !authUser) {
+    return (
+      <div className="min-h-screen" {...homeMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
+  }
 
-  const userType = displayUser?.user_type ?? displayUser?.role;
   if (!userType) {
     // No role yet – send into canonical auth flow instead of legacy RoleSelection.
     navigate('/auth', { replace: true });
-    return <PageLoader />;
+    return (
+      <div className="min-h-screen" {...homeMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
   }
   if (userType === 'coach' || userType === 'trainer') {
-    return <TrainerDashboard user={displayUser} />;
+    return (
+      <div className="min-h-0 w-full flex-1 flex flex-col" {...homeMigrationAttrs}>
+        <CoachHomePage />
+      </div>
+    );
   }
   if (userType === 'client') {
-    return <ClientDashboard user={displayUser} />;
+    return (
+      <div className="min-h-0 w-full flex-1 flex flex-col" {...homeMigrationAttrs}>
+        <ClientDashboard user={displayUser} />
+      </div>
+    );
   }
-  return <GeneralDashboard user={displayUser} />;
+  return (
+    <div className="min-h-0 w-full flex-1 flex flex-col" {...homeMigrationAttrs}>
+      <GeneralDashboard user={displayUser} />
+    </div>
+  );
 }

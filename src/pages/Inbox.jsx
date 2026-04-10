@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useLongPress } from '@/components/app/useLongPress';
 import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
 import {
@@ -16,6 +16,8 @@ import {
   Bell,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
+import { normalizeRole } from '@/lib/roles';
+import { atlasMigrationDataAttributes, deriveCoachInboxRouteState } from '@/lib/atlasMigrationPhases';
 import { useData } from '@/data/useData';
 import { wasCloseoutDoneToday } from '@/lib/closeoutStore';
 import {
@@ -31,7 +33,7 @@ import SegmentedControl from '@/ui/SegmentedControl';
 import InboxRowCard from '@/ui/InboxRowCard';
 import EmptyState from '@/ui/EmptyState';
 import { SkeletonInboxCard } from '@/ui/Skeleton';
-import { colors, spacing } from '@/ui/tokens';
+import { colors, spacing, shell, touchTargetMin } from '@/ui/tokens';
 import { safeDate } from '@/lib/format';
 import { useAppRefresh } from '@/lib/useAppRefresh';
 import { toast } from 'sonner';
@@ -92,6 +94,7 @@ export default function Inbox() {
   const { registerRefresh } = outletContext;
   const typeFilter = searchParams.get('type') || null;
   const { role, user } = useAuth();
+  const isCoachInbox = normalizeRole(role) === 'coach';
   const data = useData();
   const trainerId = user?.id ?? 'local-trainer';
 
@@ -133,7 +136,19 @@ export default function Inbox() {
   else if (typeFilter) list = list.filter((item) => item.type === typeFilter);
   const isEmpty = list.length === 0;
 
-  const showCloseoutBanner = role === 'coach' && !wasCloseoutDoneToday() && new Date().getHours() >= 19;
+  const showCloseoutBanner = isCoachInbox && !wasCloseoutDoneToday() && new Date().getHours() >= 19;
+
+  const inboxMigrationAttrs = useMemo(() => {
+    if (!isCoachInbox) {
+      const s = deriveCoachInboxRouteState({ surface: 'denied' });
+      return atlasMigrationDataAttributes(s.phase, s.primary);
+    }
+    let surface = 'list';
+    if (initialLoad || refreshing) surface = 'loading';
+    else if (isEmpty) surface = `empty_${segment}`;
+    const s = deriveCoachInboxRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [isCoachInbox, initialLoad, refreshing, isEmpty, segment]);
 
 
   const handlePrimary = useCallback(
@@ -274,10 +289,10 @@ export default function Inbox() {
     [createTaskFromItem]
   );
 
-  if (role !== 'trainer') {
+  if (!isCoachInbox) {
     return (
-      <div className="app-screen p-4" style={{ color: colors.muted }}>
-        <p>Inbox is for trainers only.</p>
+      <div className="app-screen p-4" style={{ color: colors.muted }} {...inboxMigrationAttrs}>
+        <p>Inbox is for coaches only.</p>
       </div>
     );
   }
@@ -288,6 +303,7 @@ export default function Inbox() {
       style={{
         paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
       }}
+      {...inboxMigrationAttrs}
     >
       {showCloseoutBanner && (
         <CloseoutReminderBanner onComplete={() => navigate('/closeout')} />
@@ -310,6 +326,7 @@ export default function Inbox() {
               style={{
                 background: active ? colors.accent : 'rgba(255,255,255,0.08)',
                 color: active ? '#fff' : colors.muted,
+                minHeight: touchTargetMin,
               }}
             >
               {label}
@@ -320,7 +337,7 @@ export default function Inbox() {
           type="button"
           onClick={async () => { await impactLight(); navigate('/review-center'); }}
           className="rounded-full px-3 py-1.5 text-[13px] font-medium border-none"
-          style={{ background: 'rgba(255,255,255,0.08)', color: colors.accent }}
+          style={{ background: 'rgba(255,255,255,0.08)', color: colors.accent, minHeight: touchTargetMin }}
         >
           Review Center
         </button>
@@ -591,7 +608,7 @@ function ActionSheet({ item, onClose, onSnooze, onMarkDone, onPin, onOpenClient,
           type="button"
           onClick={onClose}
           className="w-full py-4 text-center font-semibold"
-          style={{ color: colors.muted, borderTop: `1px solid ${colors.border}` }}
+          style={{ color: colors.muted, borderTop: `1px solid ${colors.border}`, minHeight: touchTargetMin }}
         >
           Cancel
         </button>
@@ -605,8 +622,8 @@ function SnoozeRow({ label, onPress }) {
     <button
       type="button"
       onClick={onPress}
-      className="w-full flex items-center gap-3 px-4 py-3 text-left active:opacity-80"
-      style={{ color: colors.text }}
+      className="w-full flex items-center gap-3 py-3 text-left active:opacity-80"
+      style={{ color: colors.text, paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH, minHeight: touchTargetMin }}
     >
       <Clock size={20} style={{ color: colors.muted }} />
       <span className="text-[15px]">{label}</span>
@@ -619,8 +636,8 @@ function ActionRow({ icon: Icon, label, onPress }) {
     <button
       type="button"
       onClick={onPress}
-      className="w-full flex items-center gap-3 px-4 py-3 text-left active:opacity-80"
-      style={{ color: colors.text }}
+      className="w-full flex items-center gap-3 py-3 text-left active:opacity-80"
+      style={{ color: colors.text, paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH, minHeight: touchTargetMin }}
     >
       <Icon size={20} style={{ color: colors.muted }} />
       <span className="text-[15px]">{label}</span>
@@ -639,7 +656,7 @@ function CloseoutReminderBanner({ onComplete }) {
         type="button"
         onClick={onComplete}
         className="text-sm font-semibold"
-        style={{ color: colors.accent }}
+        style={{ color: colors.accent, minHeight: touchTargetMin }}
       >
         Review now
       </button>
@@ -664,7 +681,7 @@ function LeadDetailModal({ item, onClose }) {
       >
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: colors.border }}>
           <h2 className="text-lg font-semibold" style={{ color: colors.text }}>{isConsult ? 'Consultation request' : 'Lead'}</h2>
-          <button type="button" onClick={onClose} className="text-sm font-medium" style={{ color: colors.accent }}>Close</button>
+          <button type="button" onClick={onClose} className="text-sm font-medium" style={{ color: colors.accent, minHeight: touchTargetMin }}>Close</button>
         </div>
         <div style={{ padding: spacing[16] }}>
           <p className="text-[15px] font-semibold" style={{ color: colors.text }}>{raw.userName || raw.name || '—'}</p>

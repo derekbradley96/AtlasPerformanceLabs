@@ -1,7 +1,6 @@
 /**
- * Coach focus onboarding: required when role === trainer and coach_focus is null/empty.
- * Coaching Focus (Transformation / Competition / Integrated) – premium selection cards.
- * Saves coach_focus only to Supabase profiles (and local cache when no Supabase). No boot loop: on save failure show retry UI.
+ * Coach focus selection UI (Transformation / Competition / Integrated).
+ * App routes for /coach-type redirect to the canonical coach onboarding flow; this module remains for reuse or deep links if mounted elsewhere.
  */
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -12,6 +11,7 @@ import { COACH_FOCUS_OPTIONS, coachFocusToCoachType } from '@/lib/data/coachType
 import { impactLight } from '@/lib/haptics';
 import Button from '@/ui/Button';
 import { colors, spacing, radii } from '@/ui/tokens';
+import { CANONICAL_COACH_ONBOARDING_PATH } from '@/lib/coachOnboardingRoutes';
 
 export default function CoachTypeOnboarding() {
   const navigate = useNavigate();
@@ -42,7 +42,7 @@ export default function CoachTypeOnboarding() {
         }
         if (typeof setCoachType === 'function') setCoachType(coachFocusToCoachType(focus));
         if (typeof window !== 'undefined' && window.navigator?.vibrate) window.navigator.vibrate(10);
-        navigate(useSupabase ? '/coach-onboarding' : '/setup', { replace: true });
+        navigate(CANONICAL_COACH_ONBOARDING_PATH, { replace: true });
       } catch (err) {
         setSaveError(err?.message || 'Something went wrong. Please try again.');
       } finally {

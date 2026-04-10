@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
@@ -19,10 +19,14 @@ import ExerciseProgressList from '@/components/progress/ExerciseProgressList';
 import CoachFeedback from '@/components/progress/CoachFeedback';
 import CoachingUpgradeCard from '@/components/coaching/CoachingUpgradeCard';
 import { useCoachingUpgradeTriggers } from '@/components/hooks/useCoachingUpgradeTriggers';
+import { resolveViewerBodyweightUnit, formatWeightForViewer,
+  weightChartAxisLabel,
+  weightKgToChartValue, } from '@/lib/bodyMeasurementUnits';
 
 export default function Progress() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [period, setPeriod] = useState('week');
 
   const { data: workouts = [], isLoading } = useQuery({
@@ -84,6 +88,16 @@ export default function Progress() {
   });
 
   const { trigger, reason } = useCoachingUpgradeTriggers(user?.id, user?.user_type);
+
+  const weightChartRows = useMemo(
+    () =>
+      weightCheckins.slice(-30).map((c) => ({
+        date: new Date(c.created_date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
+        weight: weightKgToChartValue(Number(c.weight_kg), viewerWU),
+        weightKg: Number(c.weight_kg),
+      })),
+    [weightCheckins, viewerWU]
+  );
 
   if (!user || isLoading) return <PageLoader />;
 
@@ -182,7 +196,7 @@ export default function Progress() {
   ];
 
   return (
-    <div style={{ minHeight: '100vh', background: colors.bg, paddingBottom: 96, paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH, paddingTop: spacing[16] }}>
+    <div style={{ minHeight: '100vh', background: colors.bg, paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH, paddingTop: spacing[16] }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: shell.sectionSpacing }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -284,10 +298,7 @@ export default function Progress() {
             <h3 style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0, marginBottom: spacing[16] }}>Weight Trend</h3>
             <div style={{ height: 192 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={weightCheckins.slice(-30).map(c => ({
-                  date: new Date(c.created_date).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }),
-                  weight: c.weight_kg
-                }))}>
+                <AreaChart data={weightChartRows}>
                   <defs>
                     <linearGradient id="weightGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor={colors.primary} stopOpacity={0.3}/>
@@ -304,7 +315,8 @@ export default function Progress() {
                     axisLine={false}
                     tickLine={false}
                     tick={{ fill: colors.muted, fontSize: 10 }}
-                    width={40}
+                    width={44}
+                    label={{ value: weightChartAxisLabel(viewerWU), angle: -90, position: 'insideLeft', fill: colors.muted, fontSize: 10 }}
                   />
                   <Tooltip
                     contentStyle={{
@@ -313,7 +325,7 @@ export default function Progress() {
                       borderRadius: 8,
                       color: colors.text
                     }}
-                    formatter={(value) => [`${value} kg`, 'Weight']}
+                    formatter={(value, _name, item) => [formatWeightForViewer(item?.payload?.weightKg, viewerWU), 'Weight']}
                   />
                   <Area
                     type="monotone"

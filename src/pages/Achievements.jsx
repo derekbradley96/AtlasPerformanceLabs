@@ -2,6 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { isPersonal } from '@/lib/roles';
+import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
+import { PERSONAL_MARKETPLACE_SOURCE } from '@/lib/personalMarketplaceEntry';
 import { getClientByUserId } from '@/data/selectors';
 import { getAchievementsList } from '@/lib/milestonesStore';
 import Card from '@/ui/Card';
@@ -39,7 +41,17 @@ export default function Achievements() {
           {showFindCoach && (
             <p className="text-sm mt-4" style={{ color: colors.muted }}>
               Want a program built for you?{' '}
-              <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    buildPersonalCoachTierSelectionUrl({
+                      source: PERSONAL_MARKETPLACE_SOURCE.FROM_GENERAL_DISCOVERY,
+                    })
+                  )
+                }
+                style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
+              >
                 Find a coach
               </button>
             </p>
@@ -69,7 +81,17 @@ export default function Achievements() {
           {showFindCoach && (
             <p className="text-sm text-center mt-4" style={{ color: colors.muted }}>
               Want to level up with a coach?{' '}
-              <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    buildPersonalCoachTierSelectionUrl({
+                      source: PERSONAL_MARKETPLACE_SOURCE.FROM_GENERAL_DISCOVERY,
+                    })
+                  )
+                }
+                style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
+              >
                 Find a coach
               </button>
             </p>

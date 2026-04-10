@@ -19,11 +19,11 @@ async function fetchCoachClients(supabase, userId) {
   if (!supabase || !userId) return [];
   const { data, error } = await supabase
     .from('clients')
-    .select('id, full_name, name')
+    .select('id, name')
     .or(`coach_id.eq.${userId},trainer_id.eq.${userId}`)
-    .order('full_name');
+    .order('name');
   if (error) return [];
-  return (data || []).map((c) => ({ id: c.id, name: c.full_name || c.name || 'Client' }));
+  return (data || []).map((c) => ({ id: c.id, name: c.name || 'Client' }));
 }
 
 async function fetchBlock(supabase, blockId) {

@@ -7,6 +7,8 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getPrepInsightSummaries } from '@/lib/prepInsights';
 import InsightCard from '@/components/review/InsightCard';
 import { colors, spacing } from '@/ui/tokens';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 
 async function fetchPrepInsightsData(clientId) {
   if (!hasSupabase || !clientId) return { header: null, metrics: null, poseChecksLast4w: 0 };
@@ -32,6 +34,8 @@ async function fetchPrepInsightsData(clientId) {
 }
 
 export default function PrepInsightsBlock({ clientId }) {
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [data, setData] = useState({ header: null, metrics: null, poseChecksLast4w: 0 });
 
   useEffect(() => {
@@ -49,6 +53,7 @@ export default function PrepInsightsBlock({ clientId }) {
   const summaries = getPrepInsightSummaries(data.header, data.metrics, {
     poseChecksLast4w: data.poseChecksLast4w,
     poseSubmittedThisWeek: data.header?.pose_check_submitted_this_week === true,
+    viewerWeightUnit: viewerWU,
   });
 
   if (summaries.length === 0) return null;

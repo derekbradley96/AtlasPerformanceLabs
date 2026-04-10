@@ -1,3 +1,7 @@
+/**
+ * @deprecated Not mounted on any route. Global triage is `ReviewCenterQueuePage` at `/review-center`.
+ * Kept for reference / gradual removal; do not add new links here.
+ */
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { Check, ChevronRight, User } from 'lucide-react';
@@ -18,6 +22,8 @@ import { useAppRefresh } from '@/lib/useAppRefresh';
 import { getDaysOut } from '@/lib/intelligence/daysOut';
 import HealthBreakdownSheet from '@/components/health/HealthBreakdownSheet';
 import { useHealthScore } from '@/components/health/useHealthScore';
+import { deriveReviewCenterGlobalSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
+import { buildCoachCheckinReviewUrl } from '@/lib/coachReviewRoutes';
 
 const SEGMENTS = [
   { key: 'active', label: 'Active' },
@@ -28,6 +34,7 @@ const SEGMENTS = [
 const FILTER_CHIPS = [
   { key: 'all', label: 'All' },
   { key: 'critical', label: 'Critical' },
+  { key: 'checkins', label: 'Check-ins' },
   { key: 'reviews', label: 'Reviews' },
   { key: 'comp_prep', label: 'Comp Prep' },
   { key: 'payments', label: 'Payments' },
@@ -41,6 +48,7 @@ const STATUS_MAP = { active: 'ACTIVE', waiting: 'WAITING', done: 'DONE' };
 const FILTER_TYPES = {
   all: null,
   critical: null,
+  checkins: ['CHECKIN_REVIEW'],
   reviews: ['CHECKIN_REVIEW', 'POSING_REVIEW'],
   comp_prep: ['POSING_REVIEW', 'PEAK_WEEK_DUE', 'MISSING_MANDATORY_POSES'],
   payments: ['PAYMENT_OVERDUE'],
@@ -170,7 +178,6 @@ function GlobalReviewCard({ item, onReview, onOpenClient, onMarkReviewed, onOpen
               variant="secondary"
               onClick={async () => {
                 await impactLight();
-                if (item.dedupeKey) setQueueItemState(item.dedupeKey, { status: 'DONE' });
                 onMarkReviewed?.(item);
               }}
               style={{ flex: 1, minWidth: 0 }}
@@ -185,7 +192,7 @@ function GlobalReviewCard({ item, onReview, onOpenClient, onMarkReviewed, onOpen
 }
 
 const VALID_TABS = ['active', 'waiting', 'done'];
-const VALID_FILTERS = ['all', 'critical', 'reviews', 'comp_prep', 'payments', 'messages', 'leads', 'retention'];
+const VALID_FILTERS = ['all', 'critical', 'checkins', 'reviews', 'comp_prep', 'payments', 'messages', 'leads', 'retention'];
 
 export default function ReviewCenterGlobal() {
   const navigate = useNavigate();
@@ -250,20 +257,45 @@ export default function ReviewCenterGlobal() {
   const statusFilter = STATUS_MAP[segment] ?? 'ACTIVE';
   const typeSet = FILTER_TYPES[filterType];
   const now = new Date();
-  const context = { now };
-  const feed = (queue || []).filter((item) => {
-    if (item.status !== statusFilter) return false;
-    if (filterType === 'critical') {
-      if (!isCriticalQueueItem(item, context)) return false;
-    } else if (typeSet && !typeSet.includes(item.type)) return false;
-    return true;
-  });
+  const activeForStrip = React.useMemo(
+    () => (queue || []).filter((item) => item.status === 'ACTIVE'),
+    [queue]
+  );
+  const stripCounts = React.useMemo(() => {
+    const context = { now };
+    let needsAttention = 0;
+    let checkins = 0;
+    let messages = 0;
+    for (const item of activeForStrip) {
+      if (isCriticalQueueItem(item, context)) needsAttention += 1;
+      if (item.type === 'CHECKIN_REVIEW') checkins += 1;
+      if (item.type === 'UNREAD_MESSAGES') messages += 1;
+    }
+    return { needsAttention, checkins, messages };
+  }, [activeForStrip, now]);
+
+  const feed = React.useMemo(() => {
+    const context = { now };
+    const rows = (queue || []).filter((item) => {
+      if (item.status !== statusFilter) return false;
+      if (filterType === 'critical') {
+        if (!isCriticalQueueItem(item, context)) return false;
+      } else if (typeSet && !typeSet.includes(item.type)) return false;
+      return true;
+    });
+    return [...rows].sort((a, b) => (b.priorityScore ?? 0) - (a.priorityScore ?? 0));
+  }, [queue, statusFilter, filterType, typeSet, now]);
   const isEmpty = !loading && feed.length === 0;
+
+  const reviewCenterGlobalMigration = React.useMemo(
+    () => deriveReviewCenterGlobalSurfaceState({ loading, isEmpty, segment, filterKey: filterType }),
+    [loading, isEmpty, segment, filterType]
+  );
 
   const handleReview = useCallback(
     (item) => {
       if (item.route) navigate(item.route);
-      else if (item.type === 'CHECKIN_REVIEW') navigate(`/review/checkin/${encodeURIComponent(item.id)}?clientId=${encodeURIComponent(item.clientId ?? '')}`);
+      else if (item.type === 'CHECKIN_REVIEW') navigate(buildCoachCheckinReviewUrl(item.id, item.clientId));
       else if (item.type === 'POSING_REVIEW') navigate(`/comp-prep/review/${encodeURIComponent(item.id)}?clientId=${encodeURIComponent(item.clientId ?? '')}`);
       else if (item.clientId) navigate(`/clients/${item.clientId}`);
     },
@@ -280,16 +312,16 @@ export default function ReviewCenterGlobal() {
     (item) => {
       if (item.dedupeKey) setQueueItemState(item.dedupeKey, { status: 'DONE' });
       refresh();
-      if (item.type === 'CHECKIN_REVIEW') navigate(`/review/checkin/${encodeURIComponent(item.id)}?clientId=${encodeURIComponent(item.clientId ?? '')}`);
-      else if (item.type === 'POSING_REVIEW') navigate(`/comp-prep/review/${encodeURIComponent(item.id)}?clientId=${encodeURIComponent(item.clientId ?? '')}`);
+      toast.success('Marked done');
     },
-    [navigate, refresh]
+    [refresh]
   );
   const handleOpenHealth = useCallback((clientId) => setHealthSheetClientId(clientId), []);
 
   return (
     <div
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
+      {...atlasMigrationDataAttributes(reviewCenterGlobalMigration.phase, reviewCenterGlobalMigration.primary)}
       style={{
         minHeight: '100%',
         background: colors.bg,
@@ -333,6 +365,61 @@ export default function ReviewCenterGlobal() {
         value={segment}
         onChange={async (k) => { await impactLight(); setSegment(k); }}
       />
+
+      {segment === 'active' && !loading && (
+        <div
+          className="flex flex-wrap gap-2"
+          style={{ marginTop: spacing[12] }}
+          role="toolbar"
+          aria-label="Review priorities"
+        >
+          {[
+            {
+              key: 'strip-critical',
+              label: 'Needs attention',
+              count: stripCounts.needsAttention,
+              onSelect: () => setFilterType('critical'),
+              active: filterType === 'critical',
+            },
+            {
+              key: 'strip-checkins',
+              label: 'Check-ins',
+              count: stripCounts.checkins,
+              onSelect: () => setFilterType('checkins'),
+              active: filterType === 'checkins',
+            },
+            {
+              key: 'strip-messages',
+              label: 'Messages',
+              count: stripCounts.messages,
+              onSelect: () => setFilterType('messages'),
+              active: filterType === 'messages',
+            },
+          ].map((pill) => (
+            <button
+              key={pill.key}
+              type="button"
+              onClick={async () => {
+                await impactLight();
+                pill.onSelect();
+              }}
+              className="rounded-xl px-3 py-2 text-left border-none min-w-0"
+              style={{
+                background: pill.active ? colors.accent : 'rgba(255,255,255,0.06)',
+                color: pill.active ? '#fff' : colors.text,
+                border: `1px solid ${pill.active ? colors.accent : colors.border}`,
+                flex: '1 1 140px',
+                maxWidth: 220,
+              }}
+            >
+              <span className="text-[11px] font-semibold uppercase tracking-wide block" style={{ color: pill.active ? 'rgba(255,255,255,0.9)' : colors.muted }}>
+                {pill.label}
+              </span>
+              <span className="text-[20px] font-bold leading-tight">{pill.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2" style={{ marginTop: spacing[12] }}>
         {filterChips.map(({ key, label }) => {

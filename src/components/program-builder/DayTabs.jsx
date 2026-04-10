@@ -27,6 +27,8 @@ export default function DayTabs({
   onAddDay,
   onDuplicateDay,
   addDayDisabled,
+  /** Personal Basic: hide duplicate (available from toolbar if needed). */
+  hideDuplicate = false,
 }) {
   const atMax = days.length >= MAX_DAYS;
   const hasSelection = selectedDayIndex >= 0 && selectedDayIndex < days.length;
@@ -35,7 +37,7 @@ export default function DayTabs({
     <div style={{ marginBottom: spacing[16] }}>
       <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: spacing[10] }}>
         <p style={{ ...sectionLabel, marginBottom: 0 }}>Day</p>
-        {hasSelection && onDuplicateDay && (
+        {hasSelection && onDuplicateDay && !hideDuplicate && (
           <button
             type="button"
             onClick={onDuplicateDay}

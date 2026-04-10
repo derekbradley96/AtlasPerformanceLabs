@@ -8,8 +8,8 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Calendar, Dumbbell, Play, ChevronRight, Target, CheckCircle2,
-  ChevronDown, ChevronUp, Clock, ListOrdered, ClipboardList, Utensils, MessageSquare,
+  Calendar, Dumbbell, Target,
+  ChevronDown, ChevronUp, Utensils, MessageSquare,
   UserPlus,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
@@ -18,35 +18,88 @@ import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { getMyClientProfile } from '@/lib/clientProfiles';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import {
+  fetchTodayPersonalCheckinInputs,
   fetchTodayReadinessCheckin,
   fetchRecentReadinessScores,
   getLocalDateKey,
+  getLocalDayBoundsISO,
   getReadinessSkipStorageKey,
 } from '@/lib/readinessCheckinApi';
-import { generateTrainingAdjustmentRecommendation, getAdjustmentSummary } from '@/lib/adaptiveTrainingEngine';
+import { getLatestPersonalAdjustmentSummary, undoLatestPersonalAdjustment } from '@/lib/personalFeedbackLoop';
+import { generateTrainingAdjustmentRecommendation } from '@/lib/adaptiveTrainingEngine';
 import {
   getInProgressSession,
   getSetsForSession,
 } from '@/lib/workoutSessionApi';
 import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
 import { getClientNutritionSnapshot } from '@/lib/clientNutritionPlan';
+import {
+  fetchMergedPersonalNutritionTargets,
+  formatPersonalNutritionTargetsSummary,
+  getPersonalProteinProgressPercent,
+  personalNutritionTargetsQueryKey,
+} from '@/lib/personalNutritionProfile';
 import { coachFocusAllowsPrepFeatures } from '@/lib/coachFocus';
 import { colors, shell, spacing, radii, touchTargetMin } from '@/ui/tokens';
-import { standardCard } from '@/ui/pageLayout';
+import { desktopRhythm } from '@/ui/pageLayout';
+import { resolvePersonalPlanTier } from '@/config/plans';
+import { usePresentationMode } from '@/lib/presentationMode';
+import PersonalSurface from '@/components/personal/PersonalSurface';
+import { formatReadinessAsOutOfTen } from '@/lib/progressMetricsValidation';
 import Card from '@/ui/Card';
-import { createPageUrl } from '@/utils';
+import { PERSONAL_PROGRAM_BUILDER_FROM_TODAY } from '@/lib/personalBuilderNav';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { trackAppOpened } from '@/services/engagementTracker';
 import { trackFirstWorkoutOpened } from '@/services/firstSessionTracker';
+import {
+  canShowPersonalUpgradePrompt,
+  canUsePersonalFeature,
+  getPersonalUpgradeCopy,
+  markPersonalUpgradePromptShown,
+  PERSONAL_FEATURES,
+  PERSONAL_UPGRADE_PROMPT_TYPES,
+} from '@/lib/personalPlanAccess';
+import { getRetentionStreaks } from '@/lib/retentionHabitService';
+import {
+  derivePersonalTodayStatus,
+  getPersonalCalorieProgressPercent,
+  nutritionTrainingLinkLine,
+} from '@/lib/personalAdaptationLayer';
+import { deriveSessionModeState } from '@/lib/sessionMode';
+import {
+  resolvePersonalUXContext,
+  getPersonalTodaySurfaceCopy,
+  personalTodayFuelSignalTitle,
+  personalTodayFuelInsightFallback,
+  getPersonalScreenFeatures,
+} from '@/lib/personalScreenMatrix';
+import ContextScreenHeader from '@/components/daily-command-center/ContextScreenHeader';
+import { SectionGroup } from '@/components/atlas-ui';
+import {
+  buildAtlasUiContext,
+  derivePersonalTrainingSurfaceStates,
+  filterStatesForPersonalIntegrity,
+  pickPrimaryScreenState,
+} from '@/lib/atlasScreenState';
+import {
+  atlasMigrationDataAttributes,
+  deriveClientTodayRouteState,
+  derivePersonalTodayRouteState,
+} from '@/lib/atlasMigrationPhases';
+import AdjustmentSummaryCard from '@/components/daily-command-center/AdjustmentSummaryCard';
+import StreakOrMomentumCard from '@/components/daily-command-center/StreakOrMomentumCard';
+import TodaySessionCard from '@/components/daily-command-center/TodaySessionCard';
+import InsightRow from '@/components/daily-command-center/InsightRow';
+import CoachBridgeCard from '@/components/coaching/CoachBridgeCard';
+import { deriveCoachBridgeMoment } from '@/lib/coachBridge';
+import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
+import { ANALYTICS_EVENTS, track } from '@/services/analyticsService';
 
 const pagePadding = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
 const sectionGap = shell.sectionSpacing;
 
 const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const PERSONAL_DECISION_KEY_PREFIX = 'atlas_personal_adjustment_decision_';
-const PERSONAL_ADJUSTMENT_KEY_PREFIX = 'atlas_personal_adjustment_';
-
 function formatClock(totalSeconds) {
   const safe = Math.max(0, Number(totalSeconds) || 0);
   const mins = Math.floor(safe / 60);
@@ -68,14 +121,35 @@ function normaliseExercise(ex) {
   return { ...ex, name: ex.name ?? ex.exercise_name ?? '' };
 }
 
-function getPersonalDecisionStorageKey(userId, dateKey) {
-  if (!userId || !dateKey) return null;
-  return `${PERSONAL_DECISION_KEY_PREFIX}${userId}_${dateKey}`;
+function describeCoachAdjustment(payload = {}, suggestionType = '', reason = '') {
+  const setsDelta = Number(payload?.sets_delta ?? payload?.set_adjustment?.delta ?? 0);
+  const repsDelta = Number(payload?.reps_delta ?? 0);
+  const restDelta = Number(payload?.rest_delta_seconds ?? payload?.rest_adjustment_seconds ?? 0);
+  const caloriesDelta = Number(payload?.calories_delta ?? 0);
+  const changes = [];
+  if (Number.isFinite(setsDelta) && setsDelta !== 0) changes.push(`Sets ${setsDelta > 0 ? '+' : ''}${setsDelta}`);
+  if (Number.isFinite(repsDelta) && repsDelta !== 0) changes.push(`Reps ${repsDelta > 0 ? '+' : ''}${repsDelta}`);
+  if (Number.isFinite(restDelta) && restDelta !== 0) changes.push(`Rest ${restDelta > 0 ? '+' : ''}${restDelta}s`);
+  if (Number.isFinite(caloriesDelta) && caloriesDelta !== 0) changes.push(`Calories ${caloriesDelta > 0 ? '+' : ''}${caloriesDelta}`);
+  if (changes.length > 0) return changes.join(' · ');
+  if (reason) return reason;
+  if (suggestionType === 'deload') return 'Deload-focused update for recovery and performance quality.';
+  if (suggestionType === 'rest') return 'Rest and intensity were tuned for today.';
+  if (suggestionType === 'nutrition') return 'Nutrition targets were updated by your coach.';
+  return 'Your coach adjusted today\'s plan.';
 }
 
-function getPersonalAdjustmentStorageKey(userId, dateKey) {
-  if (!userId || !dateKey) return null;
-  return `${PERSONAL_ADJUSTMENT_KEY_PREFIX}${userId}_${dateKey}`;
+function formatRelativeUpdateTime(iso) {
+  if (!iso) return '';
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return '';
+  const mins = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (mins < 1) return 'Updated just now';
+  if (mins < 60) return `Updated ${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `Updated ${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `Updated ${days}d ago`;
 }
 
 function ClientTodayContent() {
@@ -196,24 +270,20 @@ function ClientTodayContent() {
     queryKey: ['peak_week_today', profile?.id, todayStr],
     queryFn: async () => {
       if (!supabase || !profile?.id || !todayStr) return null;
-      const { data: plans } = await supabase
-        .from('peak_week_plans')
-        .select('id, week_start')
-        .eq('client_id', profile.id);
-      if (!plans?.length) return null;
-      const today = new Date(todayStr);
-      const plan = plans.find((p) => {
-        const start = new Date(p.week_start + 'T12:00:00');
-        const end = new Date(start);
-        end.setDate(end.getDate() + 6);
-        return today >= start && today <= end;
-      });
-      if (!plan) return null;
+      const { data: week } = await supabase
+        .from('peak_weeks')
+        .select('id')
+        .eq('client_id', profile.id)
+        .eq('is_active', true)
+        .order('show_date', { ascending: false })
+        .limit(1);
+      const activeWeek = (week || [])[0];
+      if (!activeWeek?.id) return null;
       const { data: days } = await supabase
-        .from('peak_week_plan_days')
+        .from('peak_week_days')
         .select('*')
-        .eq('plan_id', plan.id)
-        .eq('day_date', todayStr)
+        .eq('peak_week_id', activeWeek.id)
+        .eq('target_date', todayStr)
         .maybeSingle();
       return days ?? null;
     },
@@ -221,6 +291,28 @@ function ClientTodayContent() {
   });
 
   const inExecution = !!workoutSession?.id;
+  const clientTodayMigration = useMemo(() => {
+    if (!user) return deriveClientTodayRouteState({ surface: 'loading' });
+    if (profileLoading || (profile?.id && assignedWorkoutLoading)) {
+      return deriveClientTodayRouteState({ surface: 'loading' });
+    }
+    if (!hasSessionToday) {
+      return deriveClientTodayRouteState({ surface: 'idle', idleScenario: clientTodayIdleScenario });
+    }
+    if (activeWorkout || inExecution) {
+      return deriveClientTodayRouteState({ surface: 'session_active' });
+    }
+    return deriveClientTodayRouteState({ surface: 'session_ready' });
+  }, [
+    user,
+    profileLoading,
+    profile?.id,
+    assignedWorkoutLoading,
+    hasSessionToday,
+    clientTodayIdleScenario,
+    activeWorkout,
+    inExecution,
+  ]);
   const totalSets = useMemo(
     () => exercises.reduce((acc, ex) => acc + Math.max(1, Number(ex.sets) || 1), 0),
     [exercises]
@@ -243,6 +335,28 @@ function ClientTodayContent() {
   const { data: todayReadiness } = useQuery({
     queryKey: ['today-readiness-checkin-client', profile?.id, readinessDayKey],
     queryFn: () => fetchTodayReadinessCheckin({ clientId: profile?.id }),
+    enabled: Boolean(hasSupabase && profile?.id),
+  });
+  const { data: coachAppliedAdjustment } = useQuery({
+    queryKey: ['today-client-coach-adjustment', profile?.id, readinessDayKey],
+    queryFn: async () => {
+      if (!hasSupabase || !profile?.id) return null;
+      const supabaseClient = getSupabase();
+      if (!supabaseClient) return null;
+      const { startISO, endISO } = getLocalDayBoundsISO();
+      const { data, error } = await supabaseClient
+        .from('adjustment_suggestions')
+        .select('id, suggestion_type, payload, reason, status, created_at')
+        .eq('client_id', profile.id)
+        .in('status', ['applied', 'modified'])
+        .gte('created_at', startISO)
+        .lte('created_at', endISO)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) return null;
+      return data ?? null;
+    },
     enabled: Boolean(hasSupabase && profile?.id),
   });
   const [readinessSkipped, setReadinessSkipped] = useState(false);
@@ -276,382 +390,130 @@ function ClientTodayContent() {
     navigate('/workout-player?resume=1');
   }, [user?.id, navigate]);
 
-  if (!user) return <PageLoader message="Loading…" hint="Getting your plan ready." />;
+  if (!user) {
+    return (
+      <div {...atlasMigrationDataAttributes(clientTodayMigration.phase, clientTodayMigration.primary)}>
+        <PageLoader message="Loading…" hint="Getting your plan ready." />
+      </div>
+    );
+  }
   if (profileLoading || (profile?.id && assignedWorkoutLoading)) {
-    return <PageLoader message="Loading today…" hint="Fetching your workout and nutrition." />;
+    return (
+      <div {...atlasMigrationDataAttributes(clientTodayMigration.phase, clientTodayMigration.primary)}>
+        <PageLoader message="Loading today…" hint="Fetching your workout and nutrition." />
+      </div>
+    );
   }
 
   const estimatedMinutes = exercises.length ? Math.max(30, exercises.length * 5) : null;
+  const clientRecType =
+    coachAppliedAdjustment?.suggestion_type === 'rest'
+      ? 'reduce_intensity'
+      : coachAppliedAdjustment?.suggestion_type === 'deload'
+        ? 'recovery_session'
+        : coachAppliedAdjustment?.suggestion_type === 'volume'
+          ? 'reduce_volume'
+          : null;
+  const clientModeState = deriveSessionModeState({
+    role: 'client',
+    readinessLogged: todayReadiness?.readiness_score != null && todayReadiness?.readiness_score !== '',
+    recommendation: clientRecType ? { recommendation_type: clientRecType } : null,
+  });
+  const clientBanner = clientModeState?.mode === 'light'
+    ? {
+        mode: 'light',
+        title: 'Light day',
+        reason: 'Recovery is lower today, keep effort controlled.',
+        whatChanged: ['reduced push on top sets', 'quality reps first'],
+      }
+    : clientModeState?.mode === 'heavy'
+      ? {
+          mode: 'heavy',
+          title: 'Push day',
+          reason: 'You are ready to perform today.',
+          whatChanged: ['coach progression is active'],
+        }
+      : {
+          mode: clientModeState?.mode || null,
+          title: clientModeState?.mode ? 'Normal session' : 'Personalise today',
+          reason: clientModeState?.mode ? 'Train as planned and push clean reps.' : 'Log your check-in so your session can be shaped for today.',
+          whatChanged: clientModeState?.mode ? ['run the session as planned'] : [],
+        };
+  const clientInsightItems = [
+    {
+      id: 'fuel',
+      eyebrow: 'Fuel',
+      title: nutritionPlan?.calorie_target ? `${Math.round(Number(nutritionPlan.calorie_target))} kcal target` : 'Nutrition targets pending',
+      body: nutritionPlan?.protein_g ? `${Math.round(Number(nutritionPlan.protein_g))}g protein planned` : 'Ask your coach to set nutrition targets.',
+      action: { label: 'Open nutrition', onClick: () => navigate('/nutrition') },
+    },
+    {
+      id: 'readiness',
+      eyebrow: 'Readiness',
+      title: todayReadiness?.readiness_score != null ? `Logged • ${formatReadinessAsOutOfTen(todayReadiness.readiness_score)}` : 'Not logged',
+      body: clientBanner.reason,
+      action: { label: todayReadiness?.readiness_score != null ? 'Update check-in' : 'Log check-in', onClick: () => navigate('/readiness-checkin?return=/workout-player') },
+      emphasis: 'high',
+    },
+    {
+      id: 'adjustments',
+      eyebrow: 'Adjustments',
+      title: coachAppliedAdjustment ? 'Coach update applied' : 'No adjustments',
+      body: coachAppliedAdjustment
+        ? describeCoachAdjustment(
+            coachAppliedAdjustment.payload || {},
+            String(coachAppliedAdjustment.suggestion_type || ''),
+            String(coachAppliedAdjustment.reason || '')
+          )
+        : 'Train as planned today.',
+    },
+  ];
+  const clientSessionCard = {
+    title: hasSessionToday ? "Today's session" : 'No session scheduled',
+    body: hasSessionToday ? subtitle : 'Your coach has not assigned a session for today yet.',
+    primaryAction: {
+      label: hasSessionToday ? (activeWorkout ? 'Continue session' : 'Start session') : 'Message coach',
+      onClick: hasSessionToday ? (activeWorkout ? handleOpenActiveWorkout : handleStartWorkout) : () => navigate('/messages'),
+    },
+    secondaryAction: hasSessionToday
+      ? { label: 'View program', onClick: () => navigate(`/program-viewer?clientId=${profile?.id ?? ''}&blockId=${assignedWorkout?.block?.id ?? ''}`) }
+      : null,
+    icon: Dumbbell,
+  };
 
   return (
-    <div style={{ paddingTop: spacing[12], paddingBottom: spacing[28], ...pagePadding }}>
-      {/* A) Hero card */}
+    <div
+      {...atlasMigrationDataAttributes(clientTodayMigration.phase, clientTodayMigration.primary)}
+      style={{ paddingTop: spacing[12], paddingBottom: spacing[28], ...pagePadding }}
+    >
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: sectionGap }}>
-        <Card style={{ ...standardCard, padding: spacing[18] }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[16], marginBottom: spacing[16] }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <h1 style={{ fontSize: 20, fontWeight: 600, color: colors.text, margin: 0, marginBottom: 4 }}>
-                {inExecution ? 'Your workout' : activeWorkout ? 'Resume Workout' : "Today's Workout"}
-              </h1>
-              <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>{subtitle}</p>
-            </div>
-            <span
-              style={{
-                width: shell.iconContainerSize,
-                height: shell.iconContainerSize,
-                borderRadius: shell.iconContainerRadius,
-                background: colors.primarySubtle,
-                color: colors.primary,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <Dumbbell size={22} strokeWidth={2} aria-hidden />
-            </span>
-          </div>
-          {!inExecution && (
-            <button
-              type="button"
-              onClick={activeWorkout ? handleOpenActiveWorkout : handleStartWorkout}
-              aria-label={activeWorkout ? 'Resume workout' : 'Start workout'}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: spacing[8],
-                minHeight: touchTargetMin + 4,
-                padding: `${spacing[16]}px ${spacing[16]}px`,
-                borderRadius: radii.button,
-                background: colors.primary,
-                color: '#fff',
-                border: 'none',
-                fontSize: 16,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              {activeWorkout ? (
-                <>Resume Workout <ChevronRight size={18} strokeWidth={2} /></>
-              ) : (
-                <><Play size={18} strokeWidth={2} /> Start Workout</>
-              )}
-            </button>
-          )}
-          {hasSessionToday && !inExecution && hasSupabase && (
-            <button
-              type="button"
-              onClick={() => navigate('/readiness-checkin?return=/workout-player')}
-              style={{
-                width: '100%',
-                marginTop: spacing[10],
-                minHeight: touchTargetMin,
-                padding: `${spacing[10]}px ${spacing[12]}px`,
-                borderRadius: radii.button,
-                background: 'transparent',
-                color: colors.primary,
-                border: `1px solid ${colors.border}`,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Quick readiness check (optional, ~30s)
-            </button>
-          )}
-        </Card>
+        <ContextScreenHeader title="Today" subtitle="Your coach plan, readiness, and next action." />
+        <div style={{ marginTop: spacing[12] }}>
+          <TodaySessionCard
+            title={clientSessionCard.title}
+            body={clientSessionCard.body}
+            primaryAction={clientSessionCard.primaryAction}
+            secondaryAction={clientSessionCard.secondaryAction}
+            icon={clientSessionCard.icon}
+          />
+        </div>
       </motion.div>
-
-      {showPeakWeekClientCard && peakWeekToday && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }} style={{ marginBottom: sectionGap }}>
-          <Card style={{ ...standardCard, padding: spacing[16] }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[16], marginBottom: spacing[12] }}>
-              <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>Peak week instructions</h2>
-              <span
-                style={{
-                  width: shell.iconContainerSize,
-                  height: shell.iconContainerSize,
-                  borderRadius: shell.iconContainerRadius,
-                  background: colors.primarySubtle,
-                  color: colors.primary,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <ClipboardList size={20} strokeWidth={2} aria-hidden />
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing[12] }}>
-              <div>
-                <p style={{ fontSize: 12, color: colors.muted, margin: 0, marginBottom: 2 }}>Carbs</p>
-                <p style={{ fontSize: 15, fontWeight: 500, color: colors.text, margin: 0 }}>{peakWeekToday.carbs_g ?? '—'} g</p>
-              </div>
-              <div>
-                <p style={{ fontSize: 12, color: colors.muted, margin: 0, marginBottom: 2 }}>Water</p>
-                <p style={{ fontSize: 15, fontWeight: 500, color: colors.text, margin: 0 }}>{peakWeekToday.water_l ?? '—'} L</p>
-              </div>
-              <div>
-                <p style={{ fontSize: 12, color: colors.muted, margin: 0, marginBottom: 2 }}>Sodium</p>
-                <p style={{ fontSize: 15, fontWeight: 500, color: colors.text, margin: 0 }}>{peakWeekToday.sodium_mg ?? '—'} mg</p>
-              </div>
-              <div>
-                <p style={{ fontSize: 12, color: colors.muted, margin: 0, marginBottom: 2 }}>Cardio</p>
-                <p style={{ fontSize: 15, fontWeight: 500, color: colors.text, margin: 0 }}>{peakWeekToday.cardio_notes || '—'}</p>
-              </div>
-            </div>
-            {peakWeekToday.training_notes && (
-              <div style={{ marginTop: spacing[12], paddingTop: spacing[12], borderTop: `1px solid ${colors.border}` }}>
-                <p style={{ fontSize: 12, color: colors.muted, margin: 0, marginBottom: 4 }}>Training notes</p>
-                <p style={{ fontSize: 14, color: colors.text, margin: 0 }}>{peakWeekToday.training_notes}</p>
-              </div>
-            )}
-          </Card>
-        </motion.div>
-      )}
-
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} style={{ marginBottom: sectionGap }}>
-        <Card style={{ ...standardCard, padding: spacing[16] }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing[12], marginBottom: spacing[8] }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: spacing[8] }}>
-              <Utensils size={18} style={{ color: colors.primary }} aria-hidden />
-              <h2 style={{ fontSize: 16, fontWeight: 600, color: colors.text, margin: 0 }}>Today's Nutrition</h2>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate('/nutrition')}
-              aria-label="Open full nutrition plan"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: colors.primary,
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 600,
-                minHeight: touchTargetMin,
-                minWidth: touchTargetMin,
-                padding: `0 ${spacing[8]}px`,
-                borderRadius: radii.sm,
-              }}
-            >
-              Open
-            </button>
-          </div>
-          {nutritionLoading ? (
-            <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>Loading your targets…</p>
-          ) : nutritionPlan ? (
-            <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>
-              {nutritionPlan.calorie_target ? `${Math.round(Number(nutritionPlan.calorie_target))} kcal` : 'Calories set'}
-              {nutritionPlan.protein_g ? ` · ${Math.round(Number(nutritionPlan.protein_g))}g protein` : ''}
-            </p>
-          ) : (
-            <div
-              style={{
-                padding: spacing[12],
-                borderRadius: radii.card,
-                background: hasSessionToday ? colors.primarySubtle : colors.surface2,
-                border: `1px solid ${hasSessionToday ? `${colors.primary}44` : shell.cardBorder}`,
-              }}
-            >
-              <p style={{ fontSize: 14, fontWeight: 600, color: colors.text, margin: 0 }}>
-                {hasSessionToday ? 'Macros not linked yet' : 'Nutrition targets pending'}
-              </p>
-              <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginTop: spacing[6], lineHeight: 1.45 }}>
-                {hasSessionToday
-                  ? 'Your workout is ready. Ask your coach to publish a nutrition plan so today’s fuel matches your training.'
-                  : 'When your coach adds a plan, calories and protein will show here. Message them anytime.'}
-              </p>
-              <button
-                type="button"
-                onClick={() => navigate('/messages')}
-                style={{
-                  marginTop: spacing[12],
-                  width: '100%',
-                  minHeight: touchTargetMin,
-                  padding: `${spacing[12]}px ${spacing[14]}px`,
-                  borderRadius: radii.button,
-                  background: colors.primary,
-                  color: '#fff',
-                  border: 'none',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Message coach
-              </button>
-            </div>
-          )}
-        </Card>
-      </motion.div>
-
-      {inExecution && (
-        <>
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} style={{ marginBottom: sectionGap }}>
-            <Card style={{ padding: spacing[12], border: `1px solid ${colors.border}` }}>
-              <p style={{ fontSize: 12, color: colors.muted, margin: 0 }}>
-                One exercise at a time — open the guided player to log sets and rest.
-              </p>
-            </Card>
-          </motion.div>
-          {/* B) Progress summary */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} style={{ marginBottom: sectionGap }}>
-            <Card style={{ padding: spacing[16] }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing[16], flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: spacing[8] }}>
-                  <span style={{ width: 36, height: 36, borderRadius: shell.iconContainerRadius, background: colors.primarySubtle, color: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <CheckCircle2 size={18} strokeWidth={2} />
-                  </span>
-                  <span style={{ fontSize: 14, color: colors.muted }}>Progress</span>
-                </div>
-                <span style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>
-                  {completedSets} / {totalSets} sets
-                </span>
-                <span style={{ fontSize: 13, color: colors.muted }}>{progressPct}% complete</span>
-              </div>
-              <div style={{ marginTop: spacing[12], height: 6, borderRadius: 3, background: colors.surface2, overflow: 'hidden' }}>
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${progressPct}%`,
-                    background: colors.primary,
-                    borderRadius: 3,
-                    transition: 'width 0.2s ease',
-                  }}
-                />
-              </div>
-            </Card>
-          </motion.div>
-
-          {/* C) Guided player CTA */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} style={{ display: 'flex', flexDirection: 'column', gap: spacing[12] }}>
-            <button
-              type="button"
-              onClick={() => navigate('/workout-player?resume=1')}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: spacing[8],
-                padding: `${spacing[16]}px ${spacing[16]}px`,
-                borderRadius: radii.button,
-                background: colors.primary,
-                color: '#fff',
-                border: 'none',
-                fontSize: 16,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              <Play size={18} strokeWidth={2} /> Continue guided workout
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate(`/program-viewer?clientId=${profile?.id ?? ''}&blockId=${assignedWorkout?.block?.id ?? ''}`)}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: spacing[8],
-                padding: `${spacing[12]}px ${spacing[16]}px`,
-                borderRadius: radii.button,
-                background: 'transparent',
-                color: colors.primary,
-                border: `1px solid ${colors.primary}`,
-                fontSize: 14,
-                fontWeight: 500,
-                cursor: 'pointer',
-              }}
-            >
-              <Target size={16} strokeWidth={2} /> View full program
-            </button>
-          </motion.div>
-        </>
-      )}
-
-      {!inExecution && hasSessionToday && !workoutSession && (
-        <>
-          {/* Plan preview when not yet started */}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} style={{ marginBottom: sectionGap }}>
-            <Card style={{ padding: spacing[16] }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: spacing[16], flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: spacing[8] }}>
-                  <span style={{ width: 36, height: 36, borderRadius: shell.iconContainerRadius, background: colors.primarySubtle, color: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <ListOrdered size={18} strokeWidth={2} />
-                  </span>
-                  <span style={{ fontSize: 14, color: colors.muted }}>Exercises</span>
-                </div>
-                <span style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{exercises.length || '—'}</span>
-                {estimatedMinutes != null && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: spacing[8] }}>
-                    <Clock size={16} style={{ color: colors.muted }} />
-                    <span style={{ fontSize: 14, color: colors.muted }}>~{estimatedMinutes} min</span>
-                  </div>
-                )}
-              </div>
-              {todayDay?.notes && (
-                <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginTop: spacing[12] }}>{todayDay.notes}</p>
-              )}
-            </Card>
-          </motion.div>
-          {exercises.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} style={{ marginBottom: sectionGap }}>
-              <div style={{ fontSize: shell.sectionLabelFontSize, fontWeight: 500, color: colors.muted, textTransform: 'uppercase', letterSpacing: shell.sectionLabelLetterSpacing, marginBottom: shell.sectionLabelMarginBottom }}>
-                Exercises
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[8] }}>
-                {exercises.map((ex, idx) => (
-                  <ExerciseRow key={ex.id || idx} exercise={ex} />
-                ))}
-              </div>
-            </motion.div>
-          )}
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-            <button
-              type="button"
-              onClick={() => navigate(`/program-viewer?clientId=${profile?.id ?? ''}&blockId=${assignedWorkout?.block?.id ?? ''}`)}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: spacing[8],
-                padding: `${spacing[12]}px ${spacing[16]}px`,
-                borderRadius: radii.button,
-                background: 'transparent',
-                color: colors.primary,
-                border: `1px solid ${colors.primary}`,
-                fontSize: 14,
-                fontWeight: 500,
-                cursor: 'pointer',
-              }}
-            >
-              <Target size={16} strokeWidth={2} /> View full program
-            </button>
-          </motion.div>
-        </>
-      )}
-
-      {!inExecution && !hasSessionToday && clientTodayIdleScenario && (
-        <TodayClientIdlePanel
-          scenario={clientTodayIdleScenario}
-          hasCoachLinked={hasCoachLinked}
-          onStartWorkout={() => navigate('/workout-player')}
-          onViewProgram={
-            hasAssignment && assignedWorkout?.block?.id
-              ? () => navigate(`/program-viewer?clientId=${profile?.id ?? ''}&blockId=${assignedWorkout.block.id}`)
-              : null
-          }
-          onOpenNutrition={() => navigate('/nutrition')}
-          onMessageCoach={() => navigate('/messages')}
-          onFindCoach={() => navigate('/discover')}
+      <InsightRow items={clientInsightItems} columns="1fr" gap={spacing[10]} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: spacing[10], marginTop: spacing[10] }}>
+        <StreakOrMomentumCard
+          streakLabel={hasSessionToday ? 'Session assigned' : 'No session assigned'}
+          momentumLabel={hasSessionToday ? 'Complete today to maintain momentum.' : 'Message coach or start a quick workout.'}
+          action={{ label: 'Open messages', onClick: () => navigate('/messages') }}
         />
-      )}
+        <AdjustmentSummaryCard
+          summary={coachAppliedAdjustment ? describeCoachAdjustment(
+            coachAppliedAdjustment.payload || {},
+            String(coachAppliedAdjustment.suggestion_type || ''),
+            String(coachAppliedAdjustment.reason || '')
+          ) : null}
+          action={coachAppliedAdjustment ? { label: 'View changes in workout', onClick: () => (activeWorkout ? handleOpenActiveWorkout() : handleStartWorkout()) } : null}
+        />
+      </div>
     </div>
   );
 }
@@ -742,12 +604,12 @@ function TodayClientIdlePanel({
     },
     program_rest_no_nutrition: {
       title: 'Recovery day',
-      body: 'Nothing is scheduled on your program for today. Nutrition targets are not set — ask your coach when you are ready to dial in macros.',
+      body: 'Nothing is scheduled on your program for today. Missed your last lift? Use a recovery session now, then ask your coach when you are ready to dial in macros.',
       primary: { label: 'Message coach', onClick: onMessageCoach, icon: MessageSquare },
     },
     program_rest_with_nutrition: {
       title: 'Recovery day',
-      body: 'No lift on your program today. Stay consistent with your nutrition plan — you will be fresh for the next session.',
+      body: 'No lift on your program today. Missed your last lift? Use a recovery session now or stay consistent with nutrition for the next session.',
       primary: { label: 'Open nutrition targets', onClick: onOpenNutrition, icon: Utensils },
     },
   };
@@ -764,12 +626,12 @@ function TodayClientIdlePanel({
     },
     program_rest_no_nutrition: {
       title: 'Recovery day',
-      body: 'Nothing is scheduled for today and nutrition targets are not set yet. Log a session if you still want to move, or find a coach for a structured plan.',
+      body: 'Nothing is scheduled for today and nutrition targets are not set yet. Missed your last lift? Use a recovery session now, or find a coach for a structured plan.',
       primary: { label: 'Log a workout', onClick: onStartWorkout, icon: Dumbbell },
     },
     program_rest_with_nutrition: {
       title: 'Recovery day',
-      body: 'No lift on your program today. Stay consistent with your nutrition plan — you will be fresh for the next session.',
+      body: 'No lift on your program today. Missed your last lift? Use a recovery session now, or stay consistent with nutrition for the next session.',
       primary: { label: 'Open nutrition targets', onClick: onOpenNutrition, icon: Utensils },
     },
   };
@@ -924,13 +786,26 @@ function TodayClientIdlePanel({
 
 function PersonalTodayContent() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const presentationMode = usePresentationMode();
+  const { isWideWeb, width: viewportWidth } = presentationMode;
+  const rhythm = desktopRhythm(isWideWeb);
+  const isEnhancedTier = resolvePersonalPlanTier(profile, user) === 'enhanced';
+  const personalUx = useMemo(() => resolvePersonalUXContext({ profile, user }), [profile, user]);
+  const todaySurfaceCopy = useMemo(() => getPersonalTodaySurfaceCopy(personalUx), [personalUx]);
+  const screenFeatures = useMemo(() => getPersonalScreenFeatures(personalUx), [personalUx]);
 
   const { data: assignedWorkoutPersonal } = useQuery({
     queryKey: ['assigned-workout-today', user?.id, 'personal'],
     queryFn: () => getAssignedWorkoutForToday({ role: 'personal', profileId: user?.id }),
     enabled: !!user?.id,
   });
+  const personalExercises = useMemo(
+    () => (assignedWorkoutPersonal?.exercises ?? []).map(normaliseExercise),
+    [assignedWorkoutPersonal?.exercises]
+  );
+  const hasPersonalSessionToday = !!assignedWorkoutPersonal?.day;
+  const personalEstimatedMinutes = personalExercises.length ? Math.max(25, personalExercises.length * 5) : null;
 
   const { data: activeWorkout } = useQuery({
     queryKey: ['active-workout', user?.id],
@@ -949,7 +824,7 @@ function PersonalTodayContent() {
   });
 
   const inExecution = !!workoutSession?.id;
-  const [personalAdaptiveDismissed, setPersonalAdaptiveDismissed] = useState(false);
+  const [personalAdjustmentToast, setPersonalAdjustmentToast] = useState('');
   const readinessDayKey = useMemo(() => getLocalDateKey(), []);
   const weekLabel =
     assignedWorkoutPersonal?.week && assignedWorkoutPersonal?.block
@@ -961,6 +836,11 @@ function PersonalTodayContent() {
     queryFn: () => fetchTodayReadinessCheckin({ profileId: user?.id }),
     enabled: Boolean(hasSupabase && user?.id),
   });
+  const { data: todayCheckinInputs } = useQuery({
+    queryKey: ['today-checkin-inputs-personal', user?.id, readinessDayKey],
+    queryFn: () => fetchTodayPersonalCheckinInputs({ profileId: user?.id }),
+    enabled: Boolean(hasSupabase && user?.id),
+  });
 
   const { data: readinessHistory = [] } = useQuery({
     queryKey: ['recent-readiness-personal', user?.id],
@@ -968,13 +848,99 @@ function PersonalTodayContent() {
     enabled: Boolean(hasSupabase && user?.id),
   });
 
+  const { data: retentionStreaks } = useQuery({
+    queryKey: ['today-personal-retention-streaks', user?.id],
+    queryFn: () => getRetentionStreaks({ profileId: user?.id }),
+    enabled: Boolean(hasSupabase && user?.id),
+  });
+
+  const { data: mergedPersonalNutrition } = useQuery({
+    queryKey: personalNutritionTargetsQueryKey(user?.id),
+    queryFn: () => fetchMergedPersonalNutritionTargets(user?.id),
+    enabled: !!user?.id,
+  });
+  const { personalNutritionSummary, proteinProgressPercentToday, calorieProgressPercentToday } = useMemo(() => ({
+    personalNutritionSummary: formatPersonalNutritionTargetsSummary(mergedPersonalNutrition),
+    proteinProgressPercentToday: getPersonalProteinProgressPercent(
+      user?.id,
+      readinessDayKey,
+      mergedPersonalNutrition
+    ),
+    calorieProgressPercentToday: getPersonalCalorieProgressPercent(
+      user?.id,
+      readinessDayKey,
+      mergedPersonalNutrition
+    ),
+  }), [user?.id, readinessDayKey, mergedPersonalNutrition]);
+
+  const weeklyWorkoutAdherencePct = useMemo(() => {
+    const w = retentionStreaks?.weeklyProgress?.workout;
+    if (!w?.target) return null;
+    return Math.min(100, Math.round((Number(w.done) / Math.max(1, Number(w.target))) * 100));
+  }, [retentionStreaks?.weeklyProgress?.workout]);
+
+  const canUseEnhancedGuidance = canUsePersonalFeature({
+    profile,
+    user,
+    feature: PERSONAL_FEATURES.ADAPTIVE_TRAINING_SUGGESTIONS,
+  });
+
+  const personalAdaptationToday = useMemo(
+    () =>
+      derivePersonalTodayStatus({
+        proteinPct: proteinProgressPercentToday,
+        caloriePct: calorieProgressPercentToday,
+        readinessScore:
+          todayReadiness?.readiness_score != null && todayReadiness.readiness_score !== ''
+            ? Number(todayReadiness.readiness_score)
+            : null,
+        weeklyWorkoutAdherencePct,
+        tier: isEnhancedTier ? 'enhanced' : 'basic',
+      }),
+    [
+      proteinProgressPercentToday,
+      calorieProgressPercentToday,
+      todayReadiness?.readiness_score,
+      weeklyWorkoutAdherencePct,
+      isEnhancedTier,
+    ]
+  );
+
+  const weeklyUsageCopy = getPersonalUpgradeCopy('weekly_usage');
+  const milestoneCopy = getPersonalUpgradeCopy('progress_milestone');
+  const workoutStreakN = Number(retentionStreaks?.workoutStreak ?? 0);
+  const shouldShowWeeklyUsagePrompt = !canUseEnhancedGuidance
+    && canShowPersonalUpgradePrompt(PERSONAL_UPGRADE_PROMPT_TYPES.WEEKLY_USAGE, Date.now(), profile)
+    && workoutStreakN >= 2;
+  const shouldShowMilestonePrompt = !canUseEnhancedGuidance
+    && canShowPersonalUpgradePrompt(PERSONAL_UPGRADE_PROMPT_TYPES.PROGRESS_MILESTONE, Date.now(), profile)
+    && (
+      (proteinProgressPercentToday != null
+        && proteinProgressPercentToday >= 80
+        && proteinProgressPercentToday <= 140)
+      || workoutStreakN >= 5
+    );
+  const showPersonalUpgradeCard = shouldShowMilestonePrompt || shouldShowWeeklyUsagePrompt;
+
+  useEffect(() => {
+    if (!showPersonalUpgradeCard) return;
+    if (shouldShowMilestonePrompt) {
+      markPersonalUpgradePromptShown(PERSONAL_UPGRADE_PROMPT_TYPES.PROGRESS_MILESTONE);
+      return;
+    }
+    if (shouldShowWeeklyUsagePrompt) {
+      markPersonalUpgradePromptShown(PERSONAL_UPGRADE_PROMPT_TYPES.WEEKLY_USAGE);
+    }
+  }, [showPersonalUpgradeCard, shouldShowMilestonePrompt, shouldShowWeeklyUsagePrompt]);
+
   const personalAdaptiveRecommendation = useMemo(() => {
-    if (!todayReadiness?.readiness_score) return null;
-    const readinessScore = Number(todayReadiness.readiness_score);
+    const rawToday = todayReadiness?.readiness_score;
+    if (rawToday === undefined || rawToday === null || rawToday === '') return null;
+    const readinessScore = Number(rawToday);
     if (!Number.isFinite(readinessScore)) return null;
     const history = readinessHistory
-      .map((r) => Number(r?.readiness_score))
-      .filter((n) => Number.isFinite(n));
+      .map((r) => r?.readiness_score)
+      .filter((raw) => raw !== undefined && raw !== null && raw !== '');
     const rec = generateTrainingAdjustmentRecommendation(
       null,
       {},
@@ -994,18 +960,104 @@ function PersonalTodayContent() {
     return 'Adjusting today can help you stay consistent long-term.';
   }, [personalAdaptiveRecommendation?.recommendation_type]);
 
-  const handleStartPersonal = useCallback(() => {
-    const shouldRouteToReadiness =
-      hasSupabase &&
-      !!user?.id &&
-      !todayReadiness;
-    if (shouldRouteToReadiness) {
-      navigate('/readiness-checkin?return=/workout-player');
+  const enhancedGuidanceBody = useMemo(() => {
+    const fuel = nutritionTrainingLinkLine({
+      proteinPct: proteinProgressPercentToday,
+      caloriePct: calorieProgressPercentToday,
+    });
+    const parts = [personalAdaptationToday.detail, fuel].filter(Boolean);
+    if (canUseEnhancedGuidance && personalAdaptiveMessage) parts.push(personalAdaptiveMessage);
+    return parts.join(' · ');
+  }, [
+    personalAdaptationToday.detail,
+    proteinProgressPercentToday,
+    calorieProgressPercentToday,
+    canUseEnhancedGuidance,
+    personalAdaptiveMessage,
+  ]);
+
+  const basicNextHint = useMemo(
+    () => retentionStreaks?.nextWeeklyFocus || personalAdaptationToday.detail,
+    [retentionStreaks?.nextWeeklyFocus, personalAdaptationToday.detail]
+  );
+  const latestPersonalAdjustment = useMemo(
+    () => getLatestPersonalAdjustmentSummary(user?.id),
+    [user?.id, todayReadiness?.id]
+  );
+
+  const readinessLogged = todayReadiness?.readiness_score != null && todayReadiness.readiness_score !== '';
+  const sessionModeState = useMemo(
+    () =>
+      deriveSessionModeState({
+        role: 'personal',
+        readinessLogged,
+        checkinInputs: {
+          energy: todayCheckinInputs?.energy,
+          recovery: todayCheckinInputs?.recovery,
+          sleep_quality: todayCheckinInputs?.sleep,
+          stress: todayCheckinInputs?.stress,
+          appetite: todayCheckinInputs?.hunger,
+        },
+        caloriePct: calorieProgressPercentToday,
+        proteinPct: proteinProgressPercentToday,
+        recommendation: personalAdaptiveRecommendation,
+        adherencePct: todayCheckinInputs?.adherence,
+        enhanced: canUseEnhancedGuidance,
+        latestAdjustmentSummary: latestPersonalAdjustment,
+      }),
+    [
+      readinessLogged,
+      todayCheckinInputs?.energy,
+      todayCheckinInputs?.recovery,
+      todayCheckinInputs?.sleep,
+      todayCheckinInputs?.stress,
+      todayCheckinInputs?.hunger,
+      todayCheckinInputs?.adherence,
+      calorieProgressPercentToday,
+      proteinProgressPercentToday,
+      personalAdaptiveRecommendation,
+      canUseEnhancedGuidance,
+      latestPersonalAdjustment,
+    ]
+  );
+  /** One primary training action — readiness is optional (separate row). */
+  const handlePrimaryTrainingPersonal = useCallback(() => {
+    if (!hasPersonalSessionToday) {
+      navigate(PERSONAL_PROGRAM_BUILDER_FROM_TODAY);
       return;
     }
     if (user?.id) trackFirstWorkoutOpened(user.id, { source: 'today_personal_start_session' });
     navigate('/workout-player');
-  }, [user?.id, navigate, todayReadiness]);
+  }, [user?.id, navigate, hasPersonalSessionToday]);
+  const personalPrimaryCard = useMemo(() => {
+    if (!hasPersonalSessionToday) {
+      if (!isEnhancedTier) {
+        return {
+          title: 'No session scheduled',
+          body: 'Create your plan in My Program — you can still train ad hoc from the workout player anytime.',
+          helperText: null,
+          primaryAction: { label: 'Create or edit plan', onClick: () => navigate(PERSONAL_PROGRAM_BUILDER_FROM_TODAY) },
+          secondaryAction: null,
+          icon: Calendar,
+        };
+      }
+      return {
+        title: 'Nothing scheduled today',
+        body: 'Set up today’s session in your program — about a minute.',
+        helperText: null,
+        primaryAction: { label: "Build today's workout", onClick: () => navigate(PERSONAL_PROGRAM_BUILDER_FROM_TODAY) },
+        secondaryAction: null,
+        icon: Calendar,
+      };
+    }
+    return {
+      title: "Today’s session",
+      body: weekLabel ? `${assignedWorkoutPersonal?.day?.title || 'Session'} • ${weekLabel}` : assignedWorkoutPersonal?.day?.title || 'Ready to train',
+      primaryAction: { label: 'Start workout', onClick: handlePrimaryTrainingPersonal },
+      secondaryAction: null,
+      icon: Dumbbell,
+    };
+  }, [hasPersonalSessionToday, isEnhancedTier, weekLabel, assignedWorkoutPersonal?.day?.title, handlePrimaryTrainingPersonal, navigate]);
 
   const handleContinuePlayer = useCallback(() => {
     if (user?.id) trackFirstWorkoutOpened(user.id, { source: 'today_personal_resume_player' });
@@ -1014,321 +1066,231 @@ function PersonalTodayContent() {
 
   const handleOpenActiveWorkoutPersonal = useCallback(() => {
     if (user?.id) trackFirstWorkoutOpened(user.id, { source: 'today_personal_resume_active' });
-    navigate('/activeworkout');
+    navigate('/workout-player?resume=1');
   }, [user?.id, navigate]);
 
-  if (!user) return <PageLoader />;
+  const [bridgeDismissed, setBridgeDismissed] = useState(false);
+  const coachBridgeMoment = useMemo(
+    () => deriveCoachBridgeMoment({
+      surface: 'today',
+      tier: isEnhancedTier ? 'enhanced' : 'basic',
+      goalId: profile?.goal || profile?.personal_goal || '',
+      weeklyWorkoutDone: Number(retentionStreaks?.weeklyProgress?.workout?.done ?? 0),
+      weeklyWorkoutTarget: Number(retentionStreaks?.weeklyProgress?.workout?.target ?? 4),
+      workoutStreak: Number(retentionStreaks?.workoutStreak ?? 0),
+      completedLast28d: Number(retentionStreaks?.workoutLogsLast28d ?? 0),
+      nutritionAdherenceAvg: proteinProgressPercentToday,
+      readinessScore: todayReadiness?.readiness_score != null ? Number(todayReadiness.readiness_score) : null,
+      readinessHistory,
+      hasSessionToday: hasPersonalSessionToday,
+    }),
+    [
+      isEnhancedTier,
+      profile?.goal,
+      profile?.personal_goal,
+      retentionStreaks?.weeklyProgress?.workout?.done,
+      retentionStreaks?.weeklyProgress?.workout?.target,
+      retentionStreaks?.workoutStreak,
+      retentionStreaks?.workoutLogsLast28d,
+      proteinProgressPercentToday,
+      todayReadiness?.readiness_score,
+      readinessHistory,
+      hasPersonalSessionToday,
+    ]
+  );
+  useEffect(() => {
+    if (!coachBridgeMoment || bridgeDismissed) return;
+    track(ANALYTICS_EVENTS.COACH_BRIDGE_SEEN, { location: 'today', variant: coachBridgeMoment.variant, reason: coachBridgeMoment.reasonKey });
+  }, [coachBridgeMoment, bridgeDismissed]);
+
+  const atlasUi = useMemo(
+    () => buildAtlasUiContext({ role: 'personal', auth: { profile, user }, presentation: presentationMode }),
+    [profile, user, presentationMode],
+  );
+  const atlasSurfaceStates = useMemo(() => {
+    const hasProgramData = assignedWorkoutPersonal != null;
+    const raw = derivePersonalTrainingSurfaceStates(atlasUi, {
+      hasProgram: hasProgramData
+        ? Boolean(assignedWorkoutPersonal.block || assignedWorkoutPersonal.day || assignedWorkoutPersonal.program)
+        : true,
+      hasSessionToday: hasPersonalSessionToday,
+      sessionCompleted: false,
+      hasNutritionTargets: mergedPersonalNutrition != null,
+      coachBridgeVariant: coachBridgeMoment?.variant ?? null,
+      prepPrecisionMode: atlasUi.prepPrecisionMode,
+    });
+    return filterStatesForPersonalIntegrity(atlasUi, raw);
+  }, [
+    atlasUi,
+    assignedWorkoutPersonal,
+    hasPersonalSessionToday,
+    mergedPersonalNutrition,
+    coachBridgeMoment?.variant,
+  ]);
+  const primaryAtlasSurfaceState = useMemo(
+    () => pickPrimaryScreenState(atlasSurfaceStates),
+    [atlasSurfaceStates],
+  );
+  const personalTodayMigration = useMemo(() => {
+    if (!user) return derivePersonalTodayRouteState({ surface: 'loading' });
+    return derivePersonalTodayRouteState({ surface: 'dashboard', atlasPrimaryKey: primaryAtlasSurfaceState?.key });
+  }, [user, primaryAtlasSurfaceState?.key]);
+
+  if (!user) {
+    return (
+      <div {...atlasMigrationDataAttributes(personalTodayMigration.phase, personalTodayMigration.primary)}>
+        <PageLoader />
+      </div>
+    );
+  }
+
+  const insightColumns = isWideWeb && viewportWidth >= 1100 ? 'repeat(3, minmax(0, 1fr))' : '1fr';
+  const momentumColumns = isWideWeb && viewportWidth >= 1100 ? 'repeat(2, minmax(0, 1fr))' : '1fr';
+
+  const sessionCard = (() => {
+    if (activeWorkout || inExecution) {
+      return {
+        title: 'Session in progress',
+        body: activeWorkout?.name || assignedWorkoutPersonal?.day?.title || 'Continue where you left off.',
+        primaryAction: { label: 'Continue session', onClick: handleOpenActiveWorkoutPersonal },
+        secondaryAction: null,
+        icon: Dumbbell,
+      };
+    }
+    return personalPrimaryCard;
+  })();
+  const fuelSignalTitle = personalTodayFuelSignalTitle({
+    proteinPct: proteinProgressPercentToday,
+    caloriePct: calorieProgressPercentToday,
+    goalAxis: personalUx.goalAxis,
+  });
+  const sessionGuidanceTitle = !isEnhancedTier
+    ? 'Train your way'
+    : sessionModeState?.mode === 'light'
+      ? 'Ease off today'
+      : sessionModeState?.mode === 'heavy'
+        ? 'Push day today'
+        : 'Train as written';
+  const personalInsightItems = [
+    {
+      id: 'readiness',
+      eyebrow: '1. Check-in & readiness',
+      title: readinessLogged ? `Logged • ${formatReadinessAsOutOfTen(todayReadiness?.readiness_score)}` : 'Not logged yet',
+      body: todaySurfaceCopy.readinessInsightBody,
+      action: { label: readinessLogged ? 'Update check-in' : 'Log check-in', onClick: () => navigate('/readiness-checkin') },
+      emphasis: 'high',
+    },
+    {
+      id: 'fuel',
+      eyebrow: '2. Fuel for today',
+      title: fuelSignalTitle,
+      body:
+        nutritionTrainingLinkLine({ proteinPct: proteinProgressPercentToday, caloriePct: calorieProgressPercentToday })
+        || personalTodayFuelInsightFallback(personalUx.goalAxis),
+      action: { label: 'Open nutrition', onClick: () => navigate('/nutrition') },
+    },
+    {
+      id: 'adjustments',
+      eyebrow: '3. Training guidance',
+      title: sessionGuidanceTitle,
+      body: isEnhancedTier
+        ? sessionModeState?.tweakPreview || sessionModeState?.explanation || 'Train as written.'
+        : 'Log check-ins for clearer weekly context on Basic.',
+    },
+  ];
 
   return (
-    <div style={{ paddingTop: spacing[16], paddingBottom: spacing[24], ...pagePadding }}>
-      {activeWorkout ? (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-          <Card style={{ padding: spacing[20], marginBottom: sectionGap }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[16], marginBottom: spacing[16] }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <h1 style={{ fontSize: 20, fontWeight: 600, color: colors.text, margin: 0, marginBottom: 4 }}>Resume Workout</h1>
-                <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>{activeWorkout.name || 'Workout'} in progress</p>
-              </div>
-              <span
-                style={{
-                  width: shell.iconContainerSize,
-                  height: shell.iconContainerSize,
-                  borderRadius: shell.iconContainerRadius,
-                  background: colors.primarySubtle,
-                  color: colors.primary,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <Dumbbell size={22} strokeWidth={2} aria-hidden />
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleOpenActiveWorkoutPersonal}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: spacing[8],
-                minHeight: touchTargetMin + 4,
-                padding: `${spacing[16]}px ${spacing[16]}px`,
-                borderRadius: radii.button,
-                background: colors.primary,
-                color: '#fff',
-                border: 'none',
-                fontSize: 16,
-                fontWeight: 700,
-                cursor: 'pointer',
+    <PersonalSurface variant="home">
+      <motion.div
+        {...atlasMigrationDataAttributes(personalTodayMigration.phase, personalTodayMigration.primary)}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <ContextScreenHeader title="Today" subtitle={todaySurfaceCopy.pageSubtitle} />
+        <SectionGroup
+          heading="Today's focus"
+          marginBottom={sectionGap}
+          style={{ marginTop: spacing[12] }}
+        >
+          <TodaySessionCard
+            title={sessionCard.title}
+            body={sessionCard.body}
+            primaryAction={sessionCard.primaryAction}
+            secondaryAction={sessionCard.secondaryAction}
+            icon={sessionCard.icon}
+            helperText={sessionCard.helperText}
+          />
+        </SectionGroup>
+
+        <InsightRow items={personalInsightItems} columns={insightColumns} gap={spacing[12]} style={{ marginTop: spacing[12] }} />
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: screenFeatures.showTodayAdjustmentColumn ? momentumColumns : '1fr',
+            gap: spacing[12],
+            marginTop: spacing[12],
+          }}
+        >
+          <StreakOrMomentumCard
+            streakLabel={`${Number(retentionStreaks?.workoutStreak ?? 0)} day streak`}
+            momentumLabel={basicNextHint}
+            action={{ label: 'See progress', onClick: () => navigate('/progress') }}
+          />
+          {screenFeatures.showTodayAdjustmentColumn ? (
+            <AdjustmentSummaryCard
+              summary={latestPersonalAdjustment?.summary || null}
+              action={
+                latestPersonalAdjustment?.summary
+                  ? {
+                      label: 'Undo latest adjustment',
+                      onClick: () => {
+                        const ok = undoLatestPersonalAdjustment(user?.id);
+                        setPersonalAdjustmentToast(ok ? 'Latest adjustment undone' : 'Nothing to undo');
+                      },
+                    }
+                  : null
+              }
+            />
+          ) : null}
+        </div>
+
+        {personalAdjustmentToast ? (
+          <p style={{ marginTop: spacing[8], fontSize: 12, color: colors.muted }}>{personalAdjustmentToast}</p>
+        ) : null}
+        {coachBridgeMoment && !bridgeDismissed ? (
+          <div style={{ marginTop: spacing[12] }}>
+            <CoachBridgeCard
+              variant={coachBridgeMoment.variant}
+              eyebrow={coachBridgeMoment.eyebrow}
+              headline={coachBridgeMoment.headline}
+              body={coachBridgeMoment.body}
+              bullets={coachBridgeMoment.bullets}
+              whyText={coachBridgeMoment.whyText}
+              primaryAction={{
+                label: coachBridgeMoment.primaryLabel || 'Find a coach',
+                onClick: () => {
+                  track(ANALYTICS_EVENTS.COACH_BRIDGE_CLICKED, { location: 'today', variant: coachBridgeMoment.variant });
+                  navigate(
+                    buildPersonalCoachTierSelectionUrl({
+                      source: coachBridgeMoment.bridgeSource || 'from_low_readiness',
+                      tier: isEnhancedTier ? 'enhanced' : 'basic',
+                    })
+                  );
+                },
               }}
-            >
-              Resume Workout <ChevronRight size={18} strokeWidth={2} />
-            </button>
-          </Card>
-        </motion.div>
-      ) : inExecution ? (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-          <Card style={{ ...standardCard, padding: spacing[20], marginBottom: sectionGap }}>
-            {weekLabel && (
-              <p style={{ fontSize: 13, color: colors.primary, fontWeight: 600, margin: '0 0 8px' }}>{weekLabel}</p>
-            )}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[16], marginBottom: spacing[16] }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <h1 style={{ fontSize: 20, fontWeight: 600, color: colors.text, margin: 0, marginBottom: 4 }}>Your workout</h1>
-                <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>Continue in the guided player</p>
-              </div>
-              <span
-                style={{
-                  width: shell.iconContainerSize,
-                  height: shell.iconContainerSize,
-                  borderRadius: shell.iconContainerRadius,
-                  background: colors.primarySubtle,
-                  color: colors.primary,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <Dumbbell size={22} strokeWidth={2} aria-hidden />
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleContinuePlayer}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: spacing[8],
-                minHeight: touchTargetMin + 4,
-                padding: `${spacing[16]}px ${spacing[16]}px`,
-                borderRadius: radii.button,
-                background: colors.primary,
-                color: '#fff',
-                border: 'none',
-                fontSize: 16,
-                fontWeight: 700,
-                cursor: 'pointer',
+              secondaryAction={{
+                label: 'Keep training solo',
+                onClick: () => {
+                  setBridgeDismissed(true);
+                  track(ANALYTICS_EVENTS.COACH_BRIDGE_DISMISSED, { location: 'today', variant: coachBridgeMoment.variant });
+                },
               }}
-            >
-              <Play size={18} strokeWidth={2} /> Continue guided workout
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('/program-builder')}
-              style={{
-                width: '100%',
-                marginTop: spacing[12],
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: spacing[8],
-                minHeight: touchTargetMin + 2,
-                padding: `${spacing[14]}px ${spacing[16]}px`,
-                borderRadius: radii.button,
-                background: 'transparent',
-                color: colors.primary,
-                border: `1px solid ${colors.primary}`,
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              <Target size={16} strokeWidth={2} /> Edit program
-            </button>
-          </Card>
-        </motion.div>
-      ) : (
-        <>
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-            <Card style={{ padding: spacing[20], marginBottom: sectionGap }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[16], marginBottom: spacing[16] }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {weekLabel && (
-                    <p style={{ fontSize: 13, color: colors.primary, fontWeight: 600, margin: '0 0 6px' }}>{weekLabel}</p>
-                  )}
-                  <h1 style={{ fontSize: 20, fontWeight: 600, color: colors.text, margin: 0, marginBottom: 4 }}>Today&apos;s Workout</h1>
-                  <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>No workout scheduled today</p>
-                </div>
-                <span
-                  style={{
-                    width: shell.iconContainerSize,
-                    height: shell.iconContainerSize,
-                    borderRadius: shell.iconContainerRadius,
-                    background: colors.primarySubtle,
-                    color: colors.primary,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <Dumbbell size={22} strokeWidth={2} aria-hidden />
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={handleStartPersonal}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: spacing[8],
-                  minHeight: touchTargetMin + 4,
-                  padding: `${spacing[16]}px ${spacing[16]}px`,
-                  borderRadius: radii.button,
-                  background: colors.primary,
-                  color: '#fff',
-                  border: 'none',
-                  fontSize: 16,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                <Play size={18} strokeWidth={2} /> Start Workout
-              </button>
-              {!personalAdaptiveDismissed && personalAdaptiveRecommendation && (
-                <div
-                  style={{
-                    marginTop: spacing[12],
-                    borderRadius: radii.card,
-                    border: `1px solid ${colors.border}`,
-                    background: colors.surface2,
-                    padding: spacing[12],
-                  }}
-                >
-                  <p style={{ fontSize: 14, fontWeight: 600, color: colors.text, margin: '0 0 6px' }}>
-                    {personalAdaptiveMessage}
-                  </p>
-                  <p style={{ fontSize: 12, color: colors.muted, margin: 0 }}>
-                    {getAdjustmentSummary(personalAdaptiveRecommendation)}
-                  </p>
-                  <div style={{ display: 'flex', gap: spacing[8], marginTop: spacing[10] }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const dayKey = readinessDayKey || toISODate(new Date());
-                        const adjustmentKey = getPersonalAdjustmentStorageKey(user?.id, dayKey);
-                        const decisionKey = getPersonalDecisionStorageKey(user?.id, dayKey);
-                        if (adjustmentKey) {
-                          sessionStorage.setItem(
-                            adjustmentKey,
-                            JSON.stringify({
-                              recommendation_type: personalAdaptiveRecommendation.recommendation_type,
-                              adjustment_payload: personalAdaptiveRecommendation.adjustment_payload ?? {},
-                              applied: true,
-                              created_at: new Date().toISOString(),
-                            })
-                          );
-                        }
-                        if (decisionKey) sessionStorage.setItem(decisionKey, 'use');
-                        navigate('/workout-player');
-                      }}
-                      style={{
-                        flex: 1,
-                        minHeight: touchTargetMin,
-                        padding: `${spacing[10]}px ${spacing[12]}px`,
-                        borderRadius: radii.button,
-                        background: colors.primary,
-                        color: '#fff',
-                        border: 'none',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Use recommended adjustment
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const dayKey = readinessDayKey || toISODate(new Date());
-                        const adjustmentKey = getPersonalAdjustmentStorageKey(user?.id, dayKey);
-                        const decisionKey = getPersonalDecisionStorageKey(user?.id, dayKey);
-                        if (adjustmentKey) sessionStorage.removeItem(adjustmentKey);
-                        if (decisionKey) sessionStorage.setItem(decisionKey, 'continue');
-                        setPersonalAdaptiveDismissed(true);
-                        navigate('/workout-player');
-                      }}
-                      style={{
-                        flex: 1,
-                        minHeight: touchTargetMin,
-                        padding: `${spacing[10]}px ${spacing[12]}px`,
-                        borderRadius: radii.button,
-                        background: 'transparent',
-                        color: colors.text,
-                        border: `1px solid ${colors.border}`,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Continue as planned
-                    </button>
-                  </div>
-                </div>
-              )}
-              {hasSupabase && (
-                <button
-                  type="button"
-                  onClick={() => navigate('/readiness-checkin?return=/workout-player')}
-                  style={{
-                    width: '100%',
-                    marginTop: spacing[10],
-                    minHeight: touchTargetMin,
-                    padding: `${spacing[10]}px ${spacing[12]}px`,
-                    borderRadius: radii.button,
-                    background: 'transparent',
-                    color: colors.primary,
-                    border: `1px solid ${colors.border}`,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Quick readiness check (optional, ~30s)
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => navigate(createPageUrl('CreateWorkout'))}
-                style={{
-                  width: '100%',
-                  marginTop: spacing[12],
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: spacing[8],
-                  minHeight: touchTargetMin + 2,
-                  padding: `${spacing[14]}px ${spacing[16]}px`,
-                  borderRadius: radii.button,
-                  background: 'transparent',
-                  color: colors.primary,
-                  border: `1px solid ${colors.primary}`,
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                <Target size={16} strokeWidth={2} /> Create a workout
-              </button>
-              <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginTop: spacing[16], textAlign: 'center' }}>
-                Looking for a coach?{' '}
-                <button type="button" onClick={() => navigate('/discover')} style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}>
-                  Find a coach
-                </button>
-              </p>
-            </Card>
-          </motion.div>
-        </>
-      )}
-    </div>
+            />
+          </div>
+        ) : null}
+      </motion.div>
+    </PersonalSurface>
   );
 }
 

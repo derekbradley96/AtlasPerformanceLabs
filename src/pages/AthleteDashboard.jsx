@@ -25,6 +25,7 @@ import { colors, spacing } from '@/ui/tokens';
 import { PageLoader, MomentumCardSkeleton } from '@/components/ui/LoadingState';
 import { getAthleteProgressInsights } from '@/lib/athleteProgressInsights';
 import { calculateMomentumScore, MOMENTUM_STATUS } from '@/lib/momentumEngine';
+import { formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 const MOMENTUM_KEYS = [
   { key: 'training_score', label: 'Training', icon: Dumbbell },
@@ -405,7 +406,7 @@ export default function AthleteDashboard() {
                 <p className="text-xs font-medium" style={{ color: colors.muted }}>Weight (recent check-ins)</p>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm" style={{ color: colors.text }}>
                   {weightPoints.slice(-5).map((p, i) => (
-                    <span key={i}>{p.date}: <strong>{p.weight} kg</strong></span>
+                    <span key={i}>{p.date}: <strong>{formatWeightForViewer(Number(p.weight), viewerWU)}</strong></span>
                   ))}
                 </div>
               </div>

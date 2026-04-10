@@ -6,9 +6,12 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { useAuth } from '@/lib/AuthContext';
+import { resolvePrepPrecisionTierForCoachView } from '@/lib/prepPrecisionAccess';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { useData, getEffectiveTrainerId } from '@/data/useData';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
@@ -78,6 +81,25 @@ export default function ClientNutritionTiles() {
     loadPlan();
   }, [loadPlan]);
 
+  const { data: clientMeta } = useQuery({
+    queryKey: ['client-nutrition-tiles-meta', clientId],
+    enabled: Boolean(clientId && hasSupabase),
+    queryFn: async () => {
+      const sb = getSupabase();
+      if (!sb) return null;
+      const { data, error } = await sb
+        .from('clients')
+        .select('id, delivery_context, client_type')
+        .eq('id', clientId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+  });
+
+  const showPrepPrecisionTile =
+    resolvePrepPrecisionTierForCoachView({ coachFocus, clientRow: clientMeta }) === 'full';
+
   const savePlan = useCallback(
     async (patch) => {
       if (!clientId || !trainerId || !data.upsertNutritionPlan) return;
@@ -141,6 +163,7 @@ export default function ClientNutritionTiles() {
     background: colors.surface1,
     boxShadow: active ? shadows.glow : undefined,
   });
+  const hasAssignedPlan = !!plan || localPlan.calories != null || localPlan.protein != null || localPlan.carbs != null || localPlan.fats != null || !!localPlan.phase;
 
   return (
     <div
@@ -172,11 +195,34 @@ export default function ClientNutritionTiles() {
           gap: spacing[12],
         }}
       >
+        {/* Prep precision (gated — separate from standard nutrition tiles) */}
+        {showPrepPrecisionTile ? (
+          <Card style={{ ...tileStyle(false), gridColumn: '1 / -1' }}>
+            <p className="text-xs font-medium" style={{ color: colors.textMuted }}>Prep precision</p>
+            <p className="text-[13px] mt-1" style={{ color: colors.textSecondary }}>
+              Sodium, water, timing, day types, and peak-week overrides — separate layer from macros.
+            </p>
+            <Button variant="secondary" onClick={() => { lightHaptic(); navigate(`/clients/${clientId}/prep-precision`); }} style={{ marginTop: spacing[12] }}>
+              Open prep precision
+            </Button>
+          </Card>
+        ) : null}
+
         {/* 1) Current Plan */}
         <Card style={{ ...tileStyle(!!(localPlan.calories ?? localPlan.phase)), gridColumn: '1 / -1' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
             <div>
-              <p className="text-xs font-medium" style={{ color: colors.textMuted }}>Current Plan</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <p className="text-xs font-medium" style={{ color: colors.textMuted, margin: 0 }}>Current Plan</p>
+                {hasAssignedPlan && (
+                  <span
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                    style={{ background: 'rgba(34,197,94,0.18)', color: '#4ADE80' }}
+                  >
+                    Active
+                  </span>
+                )}
+              </div>
               <p className="text-[15px] mt-1" style={{ color: colors.textPrimary }}>
                 {localPlan.calories != null && <span>{localPlan.calories} cal</span>}
                 {localPlan.protein != null && <span> · P: {localPlan.protein}g</span>}
@@ -186,9 +232,11 @@ export default function ClientNutritionTiles() {
               </p>
               {localPlan.phase && <p className="text-xs mt-0.5" style={{ color: colors.textMuted }}>{localPlan.phase}</p>}
             </div>
-            <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: colors.surface2, color: colors.textSecondary }}>
-              {localPlan.phase || '—'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: colors.surface2, color: colors.textSecondary }}>
+                {localPlan.phase || '—'}
+              </span>
+            </div>
           </div>
           <Button variant="secondary" onClick={() => navigate(`/trainer/nutrition/${clientId}`)} style={{ marginTop: spacing[12] }}>
             Edit plan

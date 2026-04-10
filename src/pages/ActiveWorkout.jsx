@@ -19,6 +19,11 @@ import OfflineSyncBanner from '@/components/OfflineSyncBanner.jsx';
 import SetLogRow from '@/components/SetLogRow.jsx';
 import ExerciseDemoModal from '@/components/workout/ExerciseDemoModal';
 
+/**
+ * Legacy active-workout experience.
+ * Canonical execution flow is Workout Player (/workout-player).
+ * Retained temporarily for backward compatibility with old data/links.
+ */
 export default function ActiveWorkout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -566,7 +571,7 @@ export default function ActiveWorkout() {
 function ExerciseCard({ group, gymMode, exercise, onAddSet, onDeleteSet, onViewDemo, onRequestHelp, showHelp, refetchSets }) {
   const [expanded, setExpanded] = useState(true);
   const [editingSetId, setEditingSetId] = useState(null);
-  const [editValues, setEditValues] = useState({ weight: 0, reps: 0 });
+  const [editValues, setEditValues] = useState({ weight: '0', reps: '0' });
   const lastSet = group.sets[group.sets.length - 1];
   const [weight, setWeight] = useState(lastSet?.weight || 0);
   const [reps, setReps] = useState(lastSet?.reps || 0);
@@ -585,7 +590,7 @@ function ExerciseCard({ group, gymMode, exercise, onAddSet, onDeleteSet, onViewD
 
   const startEditingSet = (set) => {
     setEditingSetId(set.id);
-    setEditValues({ weight: set.weight, reps: set.reps });
+    setEditValues({ weight: String(set.weight ?? ''), reps: String(set.reps ?? '') });
   };
 
   const updateWorkoutStats = async () => {
@@ -685,18 +690,23 @@ function ExerciseCard({ group, gymMode, exercise, onAddSet, onDeleteSet, onViewD
                       <Input
                         type="number"
                         value={editValues.weight}
-                        onChange={(e) => setEditValues({ ...editValues, weight: parseFloat(e.target.value) || 0 })}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => setEditValues({ ...editValues, weight: e.target.value })}
                         className="col-span-4 h-8 text-center bg-slate-800 border-slate-600 text-sm"
                       />
                       <Input
                         type="number"
                         value={editValues.reps}
-                        onChange={(e) => setEditValues({ ...editValues, reps: parseInt(e.target.value) || 0 })}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => setEditValues({ ...editValues, reps: e.target.value })}
                         className="col-span-4 h-8 text-center bg-slate-800 border-slate-600 text-sm"
                       />
                       <button
                         onClick={async () => {
-                          await base44.entities.WorkoutSet.update(set.id, editValues);
+                          await base44.entities.WorkoutSet.update(set.id, {
+                            weight: Number(editValues.weight) || 0,
+                            reps: Number(editValues.reps) || 0,
+                          });
                           setEditingSetId(null);
                           refetchSets();
                           updateWorkoutStats();

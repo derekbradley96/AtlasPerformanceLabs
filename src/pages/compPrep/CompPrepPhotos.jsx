@@ -140,7 +140,7 @@ export default function CompPrepPhotos() {
             min={0}
             max={Math.max(0, byWeek.weeks.length - 1)}
             value={sliderWeekIndex}
-            onChange={(e) => setSliderWeekIndex(Number(e.target.value))}
+            onChange={(e) => setSliderWeekIndex(e.target.valueAsNumber)}
             className="w-full h-2 rounded-full appearance-none bg-slate-700 accent-blue-500"
           />
           <p className="text-xs mt-1" style={{ color: colors.muted }}>

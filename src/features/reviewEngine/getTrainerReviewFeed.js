@@ -11,6 +11,7 @@ import { getAllPoses, getPoseById } from '@/lib/repos/poseLibraryRepo';
 import { buildCompPrepInboxItems } from '@/lib/inbox/compPrepInbox';
 import { getClientRiskScore } from '@/lib/riskService';
 import { getClientHealthScore } from '@/lib/healthScoreService';
+import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
 /** @typedef {'active' | 'waiting' | 'done'} SegmentStatus */
 /** @typedef {'checkin' | 'posing' | 'photo' | 'missing_poses' | 'peak_week_due'} FeedItemType */
@@ -47,7 +48,8 @@ const BASE_SCORE = { checkin_review: 75, posing_review: 78 };
  * Build raw trainer feed items (active only for reviewables; comp prep items from inbox builder).
  * Consolidation: missing_poses one per client; peak_week_due one per client per date.
  */
-function buildRawTrainerFeedItems(trainerId) {
+function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
+  const wu = normalizeWeightUnit(weightUnit);
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const rawClients = getClients();
@@ -69,7 +71,7 @@ function buildRawTrainerFeedItems(trainerId) {
     const submittedAt = c.submitted_at || c.created_date;
     const score = BASE_SCORE.checkin_review + ageBoost(hoursSince(submittedAt));
     const summaryLines = [];
-    if (c.weight_kg != null) summaryLines.push(`${c.weight_kg} kg`);
+    if (c.weight_kg != null) summaryLines.push(formatWeightForViewer(c.weight_kg, wu));
     if (c.adherence_pct != null) summaryLines.push(`${c.adherence_pct}% adherence`);
     if (c.steps != null) summaryLines.push(`${c.steps.toLocaleString()} steps`);
     if (summaryLines.length === 0) summaryLines.push('Submitted');
@@ -163,7 +165,8 @@ function buildRawTrainerFeedItems(trainerId) {
 }
 
 /** Recently reviewed items (last 14 days) for Done segment. */
-function buildDoneTrainerFeedItems(trainerId) {
+function buildDoneTrainerFeedItems(trainerId, weightUnit = 'kg') {
+  const wu = normalizeWeightUnit(weightUnit);
   const clients = getClients().filter((c) => c.trainer_id === trainerId);
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 14);
@@ -182,7 +185,7 @@ function buildDoneTrainerFeedItems(trainerId) {
         status: 'reviewed',
         title: client.full_name || 'Client',
         subtitle: createdAt ? new Date(createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : undefined,
-        summaryLines: [c.weight_kg != null ? `${c.weight_kg} kg` : '', c.adherence_pct != null ? `${c.adherence_pct}%` : ''].filter(Boolean),
+        summaryLines: [c.weight_kg != null ? formatWeightForViewer(c.weight_kg, wu) : '', c.adherence_pct != null ? `${c.adherence_pct}%` : ''].filter(Boolean),
         priorityScore: 0,
       });
     }
@@ -210,11 +213,11 @@ function buildDoneTrainerFeedItems(trainerId) {
  * Consolidation: missing_poses one per client; peak_week_due one per client per date (not completed today).
  */
 export function getTrainerReviewFeed(trainerId, options = {}) {
-  const { status = 'active', filterType = null, sort = 'priority', query = '' } = options;
+  const { status = 'active', filterType = null, sort = 'priority', query = '', weightUnit = 'kg' } = options;
   let list =
     status === 'done'
-      ? buildDoneTrainerFeedItems(trainerId)
-      : buildRawTrainerFeedItems(trainerId).filter((item) => {
+      ? buildDoneTrainerFeedItems(trainerId, weightUnit)
+      : buildRawTrainerFeedItems(trainerId, weightUnit).filter((item) => {
           if (status === 'active' && item.status !== 'needs_review') return false;
           if (status === 'waiting') return false; // MVP: no waiting segment items
           return true;

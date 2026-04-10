@@ -75,10 +75,12 @@ export default function ClientProgramPanel({
                 {clientPlanForDetail.notes && <p className="text-sm mt-1" style={{ color: colors.muted }}>{clientPlanForDetail.notes}</p>}
               </>
             ) : (
-              <p className="text-sm" style={{ color: colors.muted }}>No plan yet.</p>
+              <p className="text-sm leading-relaxed" style={{ color: colors.muted }}>
+                No versioned plan on file. Use <strong style={{ color: colors.text }}>Assign program</strong> below to link a block — that is what powers the client&apos;s Today tab.
+              </p>
             )}
             <Button variant="secondary" onClick={async () => { await lightHaptic?.(); onCreateProgram?.(); }} style={{ marginTop: spacing[12] }}>
-              Create plan for this client
+              Create versioned plan
             </Button>
           </Card>
 
@@ -95,11 +97,19 @@ export default function ClientProgramPanel({
 
           {programsList.length === 0 ? (
             <EmptyState
-              title="No program assigned"
-              description="Assign a program block for this client or create one in Program Builder."
+              title="Training not linked yet"
+              description="This athlete will not see sessions on Today until a program block is assigned. Start from your library, or build a block in Program Builder."
               icon={Dumbbell}
-              actionLabel="Assign Program"
-              onAction={async () => { await lightHaptic?.(); onAssignProgram?.(); }}
+              action={(
+                <div className="flex flex-col gap-3 w-full max-w-[300px]">
+                  <Button variant="primary" className="w-full" onClick={async () => { await lightHaptic?.(); onAssignProgram?.(); }}>
+                    Assign program
+                  </Button>
+                  <Button variant="secondary" className="w-full" onClick={async () => { await lightHaptic?.(); navigate('/program-builder'); }}>
+                    Open Program Builder
+                  </Button>
+                </div>
+              )}
             />
           ) : (
             <>

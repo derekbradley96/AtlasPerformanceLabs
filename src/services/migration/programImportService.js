@@ -217,9 +217,23 @@ export async function createProgramFromRows({
   const weeks = Math.max(1, Math.min(52, totalWeeks || 1));
   const title = (blockTitle || 'Imported program').trim() || 'Imported program';
 
+  const {
+    data: { user: importUser },
+  } = await supabase.auth.getUser();
+  const coachId = importUser?.id;
+  if (!coachId) {
+    return {
+      blockId: '',
+      weekId: '',
+      dayId: '',
+      exercisesCreated: 0,
+      errors: [{ rowIndex: 0, message: 'You must be signed in to import a program.' }],
+    };
+  }
+
   const { data: block, error: blockErr } = await supabase
     .from('program_blocks')
-    .insert({ client_id: clientId, title, total_weeks: weeks })
+    .insert({ client_id: clientId, coach_id: coachId, title, total_weeks: weeks })
     .select('id')
     .single();
 

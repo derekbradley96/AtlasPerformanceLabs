@@ -2,8 +2,12 @@ import React from 'react';
 import { Trophy } from 'lucide-react';
 import { colors, spacing } from '@/ui/tokens';
 import Button from '@/ui/Button';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightDeltaKg } from '@/lib/bodyMeasurementUnits';
 
 export default function LoyaltyAwardModal({ months, trainerName, stats, onClose, isTrainerView, onSendMilestoneMessage }) {
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
@@ -46,7 +50,7 @@ export default function LoyaltyAwardModal({ months, trainerName, stats, onClose,
             <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Your progress</p>
             <div className="grid grid-cols-2 gap-2 text-sm">
               {stats.weightChange != null && (
-                <span style={{ color: colors.text }}>Weight change: {stats.weightChange > 0 ? '+' : ''}{stats.weightChange} kg</span>
+                <span style={{ color: colors.text }}>Weight change: {formatWeightDeltaKg(Number(stats.weightChange), viewerWU)}</span>
               )}
               {stats.checkInsCompleted != null && (
                 <span style={{ color: colors.text }}>Check-ins: {stats.checkInsCompleted}</span>

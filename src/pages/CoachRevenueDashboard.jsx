@@ -12,6 +12,7 @@ import { colors, spacing, shell } from '@/ui/tokens';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import { DollarSign, Users, UserMinus, TrendingUp } from 'lucide-react';
+import { usePresentationMode } from '@/lib/presentationMode';
 
 function formatCurrency(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
@@ -52,6 +53,7 @@ function MetricCard({ icon: Icon, label, value, formatter }) {
 
 export default function CoachRevenueDashboard() {
   const navigate = useNavigate();
+  const { isDesktopWeb } = usePresentationMode();
   const { user } = useAuth();
   const supabase = hasSupabase ? getSupabase() : null;
 
@@ -62,9 +64,9 @@ export default function CoachRevenueDashboard() {
   });
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 96 }}>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Revenue" onBack={() => navigate(-1)} />
-      <div className="p-4 max-w-lg mx-auto">
+      <div className={`p-4 ${isDesktopWeb ? 'max-w-6xl' : 'max-w-lg'} mx-auto`}>
         <p className="text-sm mb-4" style={{ color: colors.muted }}>
           Coaching revenue and client metrics.
         </p>
@@ -74,7 +76,7 @@ export default function CoachRevenueDashboard() {
             <div className="w-8 h-8 border-2 border-white/20 rounded-full animate-spin" style={{ borderTopColor: colors.primary }} />
           </div>
         ) : metrics ? (
-          <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: isDesktopWeb ? 'repeat(4, minmax(0, 1fr))' : '1fr 1fr' }}>
             <MetricCard icon={DollarSign} label="Monthly revenue" value={metrics.monthlyRevenue} formatter={formatCurrency} />
             <MetricCard icon={Users} label="Active clients" value={metrics.activeClients} />
             <MetricCard icon={UserMinus} label="Client churn" value={metrics.clientChurn} />

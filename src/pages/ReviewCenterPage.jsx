@@ -10,6 +10,7 @@ import { colors, spacing } from '@/ui/tokens';
 import { getCoachClients, getLatestCheckinsForCoach, getWeekStartISO } from '@/lib/checkins';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { ChevronRight } from 'lucide-react';
+import { deriveReviewCenterCheckinsClientsState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 
 const STATUS_NEW = 'new';
 const STATUS_MISSED = 'missed';
@@ -100,6 +101,16 @@ export default function ReviewCenterPage() {
     return base;
   }, [clients, latestMap, currentWeekStart, showInsightsOnly, insightClientIds]);
 
+  const checkinsClientsMigration = useMemo(
+    () =>
+      deriveReviewCenterCheckinsClientsState({
+        loading,
+        isEmpty: rows.length === 0,
+        insightsOnly: showInsightsOnly,
+      }),
+    [loading, rows.length, showInsightsOnly]
+  );
+
   const statusLabel = (status) => {
     if (status === STATUS_NEW) return 'New check-in';
     if (status === STATUS_MISSED) return 'Missed';
@@ -114,7 +125,11 @@ export default function ReviewCenterPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
+      <div
+        className="min-h-screen"
+        {...atlasMigrationDataAttributes(checkinsClientsMigration.phase, checkinsClientsMigration.primary)}
+        style={{ background: colors.bg, color: colors.text }}
+      >
         <TopBar title="Review Center" onBack={() => navigate(-1)} />
         <div className="p-4 flex items-center justify-center" style={{ minHeight: 200 }}>
           <p style={{ color: colors.muted }}>Loading…</p>
@@ -124,7 +139,11 @@ export default function ReviewCenterPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
+    <div
+      className="min-h-screen"
+      {...atlasMigrationDataAttributes(checkinsClientsMigration.phase, checkinsClientsMigration.primary)}
+      style={{ background: colors.bg, color: colors.text }}
+    >
       <TopBar title="Review Center" onBack={() => navigate(-1)} />
       <div className="p-4 pb-8">
         <div className="flex items-center justify-between mb-4 gap-3">

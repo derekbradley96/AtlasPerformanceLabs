@@ -4,78 +4,28 @@ import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calen
 import NotificationBell from '@/components/ui/NotificationBell';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
-import { getRouteTitle } from '@/lib/routeMeta';
+import { isInternalAdmin } from '@/lib/internalAccess';
+import { getRouteTitle, getShellNavState } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { isBetaUser } from '@/lib/betaAccess';
-import AtlasLogo from '@/components/Brand/AtlasLogo';
 import BottomNavPremium, { BOTTOM_NAV_HEIGHT } from '@/components/ui/BottomNavPremium';
 import { getTabRoutesForRole } from '@/lib/routeMeta';
-import { DEFAULT_ROLE, normalizeRole } from '@/lib/roles';
+import { DEFAULT_ROLE, normalizeRole, isCoach, getLandingPathForRole, Roles } from '@/lib/roles';
+import { impactLight } from '@/lib/haptics';
+import { isNative } from '@/lib/platform';
 import { useData } from '@/data/useData';
+import { useMessagingInboxRealtimeBump } from '@/hooks/useMessagingInboxRealtimeBump';
 import { useEdgeSwipeBack } from '@/components/app/useEdgeSwipeBack';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import NetworkBanner from '@/components/system/NetworkBanner';
+import { usePresentationMode } from '@/lib/presentationMode';
 
 import { colors, shell } from '@/ui/tokens';
+import { getAppShellOutletScrollPaddingBottom } from '@/ui/pageLayout';
 const HEADER_HEIGHT = shell.headerHeight;
 const BG = colors.bg;
 const ADMIN_TAPS = 5;
 const isDev = import.meta.env.DEV;
-
-/** Tab bar is shown only on these exact routes. All other routes (pushed) hide the tab bar. */
-const TAB_ROUTES = new Set([
-  '/home', '/clients', '/messages', '/more',
-  '/client-dashboard', '/solo-dashboard', '/today', '/progress', '/nutrition',
-]);
-
-/** Routes where tab bar is hidden: clients/:id, messages/:id, editprofile, programbuilder, inviteclient, review/*, comp-prep/review/*, etc. */
-const PUSHED_ROUTE_PATTERNS = [
-  /^\/setup$/,
-  /^\/trainer-setup$/,
-  /^\/inbox$/,
-  /^\/closeout$/,
-  /^\/briefing$/,
-  /^\/clients\/[^/]+$/,
-  /^\/clients\/[^/]+\/nutrition$/,
-  /^\/clients\/[^/]+\/progress$/,
-  /^\/clients\/[^/]+\/checkins\/[^/]+$/,
-  /^\/messages\/[^/]+$/,
-  /^\/programbuilder$/,
-  /^\/program-builder$/,
-  /^\/program-assignments$/,
-  /^\/program-viewer$/,
-  /^\/inviteclient$/,
-  /^\/earnings$/,
-  /^\/programs$/,
-  /^\/settings\/[^/]+$/,
-  /^\/account$/,
-  /^\/editprofile$/,
-  /^\/consultations$/,
-  /^\/leads$/,
-  /^\/onboarding-link$/,
-  /^\/public-link$/,
-  /^\/services$/,
-  /^\/achievements$/,
-  /^\/comp-prep$/,
-  /^\/comp-prep\/pose-library$/,
-  /^\/comp-prep\/poses\/[^/]+$/,
-  /^\/comp-prep\/media$/,
-  /^\/comp-prep\/media\/upload$/,
-  /^\/comp-prep\/photo-guide$/,
-  /^\/comp-prep\/client\/[^/]+$/,
-  /^\/comp-prep\/review\/[^/]+$/,
-  /^\/review-center$/,
-  /^\/clients\/[^/]+\/review-center$/,
-  /^\/clients\/[^/]+\/intervention$/,
-  /^\/review\/[^/]+\/[^/]+$/,
-  /^\/intake-templates$/,
-  /^\/intake-templates\/[^/]+$/,
-  /^\/clients\/[^/]+\/intake$/,
-  /^\/plan$/,
-  /^\/team$/,
-  /^\/trainer\/nutrition$/,
-  /^\/trainer\/nutrition\/[^/]+$/,
-];
 
 export default function AppShell() {
   const contentRef = useRef(null);
@@ -84,7 +34,8 @@ export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const pathname = (location.pathname || '').replace(/\/$/, '').toLowerCase();
-  const { role, user, profile, effectiveRole } = useAuth();
+  const { role, user, profile, effectiveRole, supabaseUser } = useAuth();
+  const { isDesktopWeb } = usePresentationMode();
   const { openFeedback } = useFeedbackModal();
   const trainerId = user?.id ?? null;
   const { getUnreadMessageCountTotal } = useData();
@@ -104,17 +55,28 @@ export default function AppShell() {
 
   const navActiveKey = useMemo(() => {
     if (pathname === '/trainer/home' || pathname === '/trainer-dashboard') return '/home';
+    if (pathname === '/solo-dashboard') {
+      const r = normalizeRole(effectiveRole ?? role ?? DEFAULT_ROLE);
+      if (r === 'personal' || r === 'solo') return '/home';
+    }
     if (pathname === '/home') {
       const r = normalizeRole(effectiveRole ?? role ?? DEFAULT_ROLE);
       if (r === 'client') return '/client-dashboard';
-      if (r === 'solo') return '/solo-dashboard';
       return '/home';
     }
     return pathname;
   }, [pathname, effectiveRole, role]);
 
+  const shellNormalizedRole = normalizeRole(effectiveRole ?? role ?? DEFAULT_ROLE);
+  const messagingBadgeRole = shellNormalizedRole === Roles.COACH || shellNormalizedRole === Roles.CLIENT;
+
+  useMessagingInboxRealtimeBump({
+    userId: trainerId,
+    role: effectiveRole ?? role ?? DEFAULT_ROLE,
+  });
+
   useEffect(() => {
-    if (normalizeRole(role) !== 'trainer' || !trainerId) {
+    if (!messagingBadgeRole || !trainerId) {
       setMessagesUnreadCount(0);
       return;
     }
@@ -123,27 +85,43 @@ export default function AppShell() {
       if (!cancelled && typeof total === 'number') setMessagesUnreadCount(total);
     }).catch(() => { if (!cancelled) setMessagesUnreadCount(0); });
     return () => { cancelled = true; };
-  }, [role, trainerId, pathname, getUnreadMessageCountTotal]);
+  }, [messagingBadgeRole, trainerId, pathname, getUnreadMessageCountTotal]);
+
+  /** Poll unread while on Home (or any tab): realtime INSERT does not run when ChatThread is unmounted. */
+  useEffect(() => {
+    if (!messagingBadgeRole || !trainerId) return undefined;
+    const tick = () => {
+      getUnreadMessageCountTotal()
+        .then((total) => {
+          if (typeof total === 'number') setMessagesUnreadCount(total);
+        })
+        .catch(() => {});
+    };
+    const id = window.setInterval(tick, 25000);
+    return () => window.clearInterval(id);
+  }, [messagingBadgeRole, trainerId, getUnreadMessageCountTotal]);
 
   useEffect(() => {
     const onUpdate = () => {
-      if (normalizeRole(role) !== 'trainer' || !trainerId) return;
+      if (!messagingBadgeRole || !trainerId) return;
       getUnreadMessageCountTotal().then((total) => {
         if (typeof total === 'number') setMessagesUnreadCount(total);
       }).catch(() => {});
     };
     window.addEventListener('atlas-sandbox-updated', onUpdate);
     window.addEventListener('atlas-deleted-threads-changed', onUpdate);
+    window.addEventListener('atlas-messaging-updated', onUpdate);
     return () => {
       window.removeEventListener('atlas-sandbox-updated', onUpdate);
       window.removeEventListener('atlas-deleted-threads-changed', onUpdate);
+      window.removeEventListener('atlas-messaging-updated', onUpdate);
     };
-  }, [role, trainerId, getUnreadMessageCountTotal]);
+  }, [messagingBadgeRole, trainerId, getUnreadMessageCountTotal]);
 
-  const isPushedRoute = useMemo(
-    () => PUSHED_ROUTE_PATTERNS.some((re) => re.test(pathname)),
-    [pathname]
-  );
+  const shellRole = effectiveRole ?? role ?? DEFAULT_ROLE;
+  const shellNav = useMemo(() => getShellNavState(pathname, shellRole), [pathname, shellRole]);
+  const isTabRoot = shellNav.isTabRoot;
+  const isPushedRoute = shellNav.isPushed;
 
   useEffect(() => {
     if (isDev) console.log('[DEV] AppShell role:', role);
@@ -181,8 +159,9 @@ export default function AppShell() {
     };
   }, [navigate]);
 
-  const showTabBar = TAB_ROUTES.has(pathname) && !isPushedRoute;
-  const showBack = !TAB_ROUTES.has(pathname);
+  const showTabBar = !isDesktopWeb && isTabRoot;
+  const showTopSegmentedNav = isTabRoot;
+  const showBack = !isTabRoot;
   const isChatThread = /^\/messages\/[^/]+$/.test(pathname);
   const isMessagesList = pathname === '/messages';
   const isCheckinReview = /^\/clients\/[^/]+\/checkins\/[^/]+$/.test(pathname);
@@ -239,9 +218,38 @@ export default function AppShell() {
     setHeaderRight(null);
   }, [pathname]);
   const title = titleOverride ?? getRouteTitle(location.pathname);
+  const topNavTitle = navItems.find((i) => i.key === navActiveKey)?.label || title;
+  const topNavContext = useMemo(() => {
+    if (pathname === '/home' || pathname === '/client-dashboard' || pathname === '/solo-dashboard') {
+      return 'Your daily overview';
+    }
+    if (pathname === '/today') return 'Today’s plan and next actions';
+    if (pathname === '/progress') return 'Consistency and trend signals';
+    if (pathname === '/nutrition') return 'Targets, logging, and daily fuel status';
+    if (pathname === '/messages') {
+      return isCoach(shellRole) ? 'Coach and client conversations' : 'Messages with your coach';
+    }
+    if (pathname === '/more') {
+      const r = normalizeRole(shellRole);
+      if (r === 'coach') return 'Growth, coaching tools, and business';
+      if (r === 'client') return 'Training, account, and support';
+      return 'Training, nutrition, and account';
+    }
+    return 'Your workflow, tailored to this section';
+  }, [pathname, shellRole]);
+  const activeSegmentIdx = Math.max(0, navItems.findIndex((i) => i.key === navActiveKey));
+
+  const handleSegmentNavigate = useCallback(
+    async (item) => {
+      if (!item?.to) return;
+      if (isNative()) await impactLight();
+      navigate(item.to);
+    },
+    [navigate]
+  );
 
   const handleLogoClick = useCallback(() => {
-    if (!isDev) return;
+    if (!isDev || !isInternalAdmin(supabaseUser)) return;
     logoTapCount.current += 1;
     if (logoTapTimer.current) clearTimeout(logoTapTimer.current);
     if (logoTapCount.current >= ADMIN_TAPS) {
@@ -252,7 +260,7 @@ export default function AppShell() {
         logoTapCount.current = 0;
       }, 2000);
     }
-  }, [navigate]);
+  }, [navigate, supabaseUser]);
 
   const handleBack = useCallback(() => {
     const from = location.state?.from;
@@ -264,15 +272,18 @@ export default function AppShell() {
       navigate('/messages', { replace: true });
       return;
     }
-    if (pathname.startsWith('/clients/') || pathname.startsWith('/client/')) {
+    if (isCoach(shellRole) && (pathname.startsWith('/clients/') || pathname.startsWith('/client/'))) {
       navigate('/clients', { replace: true });
       return;
     }
     navigate(-1);
     setTimeout(() => {
-      if (window.location.pathname === pathname) navigate('/home', { replace: true });
+      if (window.location.pathname === pathname) navigate(getLandingPathForRole(shellRole), { replace: true });
     }, 80);
-  }, [navigate, pathname, location.state]);
+  }, [navigate, pathname, location.state, shellRole]);
+
+  const shellPaddingH = isDesktopWeb ? 24 : shell.pagePaddingH;
+  const contentMaxWidth = isDesktopWeb ? 1240 : '100%';
 
   return (
     <div
@@ -308,8 +319,11 @@ export default function AppShell() {
           style={{
             height: HEADER_HEIGHT,
             minHeight: HEADER_HEIGHT,
-            paddingLeft: shell.pagePaddingH,
-            paddingRight: shell.pagePaddingH,
+            paddingLeft: shellPaddingH,
+            paddingRight: shellPaddingH,
+            maxWidth: contentMaxWidth,
+            marginLeft: 'auto',
+            marginRight: 'auto',
           }}
         >
           <div className="flex items-center" style={{ minWidth: 88, minHeight: 44 }}>
@@ -330,22 +344,25 @@ export default function AppShell() {
                 <ChevronLeft className="w-6 h-6" />
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={isDev ? handleLogoClick : undefined}
-                className="flex items-center justify-center rounded-lg active:opacity-80"
+              <div
+                className="relative flex items-center justify-center rounded-lg"
                 style={{
                   minWidth: 48,
                   minHeight: 44,
                   marginLeft: 12,
-                  background: 'transparent',
-                  border: 'none',
-                  padding: 0,
                 }}
-                aria-label="Atlas"
+                aria-hidden={!isDev}
               >
-                <AtlasLogo variant="header" />
-              </button>
+                {isDev ? (
+                  <button
+                    type="button"
+                    onClick={handleLogoClick}
+                    className="absolute inset-0 opacity-0 cursor-default"
+                    aria-label="Developer menu"
+                    tabIndex={-1}
+                  />
+                ) : null}
+              </div>
             )}
           </div>
           <h1
@@ -361,6 +378,106 @@ export default function AppShell() {
         </div>
       </header>
 
+      {showTopSegmentedNav && (
+        <div
+          className="w-full border-b"
+          style={{
+            borderColor: colors.border,
+            background: isDesktopWeb ? 'rgba(17,24,39,0.92)' : 'rgba(17,24,39,0.76)',
+            backdropFilter: isDesktopWeb ? 'none' : 'blur(14px)',
+          }}
+        >
+          <div
+            className="py-2"
+            style={{
+              maxWidth: contentMaxWidth,
+              marginLeft: 'auto',
+              marginRight: 'auto',
+              paddingLeft: shellPaddingH,
+              paddingRight: shellPaddingH,
+            }}
+          >
+            <div style={{ marginBottom: 8 }}>
+              <h2 style={{ margin: 0, fontSize: isDesktopWeb ? 18 : 16, fontWeight: 700, color: colors.text }}>
+                {topNavTitle}
+              </h2>
+              <p style={{ margin: '2px 0 0', fontSize: 12, color: colors.muted }}>
+                {topNavContext}
+              </p>
+            </div>
+            <div
+              style={{
+                position: 'relative',
+                width: '100%',
+                borderRadius: 24,
+                border: `1px solid ${colors.border}`,
+                background: isDesktopWeb ? 'rgba(15,23,42,0.72)' : 'rgba(15,23,42,0.62)',
+                padding: isDesktopWeb ? 6 : 5,
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  top: isDesktopWeb ? 6 : 5,
+                  bottom: isDesktopWeb ? 6 : 5,
+                  left: isDesktopWeb ? 6 : 5,
+                  width: `calc((100% - ${(isDesktopWeb ? 12 : 10)}px) / ${Math.max(1, navItems.length)})`,
+                  borderRadius: 20,
+                  background: colors.primary,
+                  boxShadow: '0 0 0 1px rgba(255,255,255,0.08) inset, 0 8px 18px rgba(37,99,235,0.35)',
+                  transform: `translateX(${activeSegmentIdx * 100}%)`,
+                  transition: 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
+                }}
+              />
+              <div
+                style={{
+                  position: 'relative',
+                  zIndex: 1,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${Math.max(1, navItems.length)}, minmax(0, 1fr))`,
+                  gap: isDesktopWeb ? 6 : 4,
+                }}
+              >
+                {navItems.map((item) => {
+                  const active = navActiveKey === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => handleSegmentNavigate(item)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-2xl"
+                      style={{
+                        minHeight: isDesktopWeb ? 38 : 36,
+                        border: 'none',
+                        background: 'transparent',
+                        color: active ? '#fff' : colors.muted,
+                        fontSize: isDesktopWeb ? 13 : 12,
+                        fontWeight: active ? 700 : 600,
+                        cursor: 'pointer',
+                        transition: 'color 180ms ease, transform 180ms ease',
+                        transform: active ? 'scale(1.01)' : 'scale(1)',
+                      }}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                      {item.badge > 0 ? (
+                        <span
+                          className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full text-[10px] px-1"
+                          style={{ background: active ? 'rgba(255,255,255,0.22)' : colors.danger, color: '#fff' }}
+                        >
+                          {item.badge > 99 ? '99+' : item.badge}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <NetworkBanner />
 
       {/* Main content: tab bar padding only when showTabBar so pushed routes have no blank bottom gap. */}
@@ -372,8 +489,8 @@ export default function AppShell() {
           paddingBottom: showTabBar
             ? BOTTOM_NAV_HEIGHT
             : 'env(safe-area-inset-bottom, 0px)',
-          paddingLeft: isChatThread ? 0 : shell.pagePaddingH,
-          paddingRight: isChatThread ? 0 : shell.pagePaddingH,
+          paddingLeft: isChatThread ? 0 : shellPaddingH,
+          paddingRight: isChatThread ? 0 : shellPaddingH,
           background: BG,
         }}
       >
@@ -414,7 +531,17 @@ export default function AppShell() {
               </div>
             )}
             <ErrorBoundary>
-              <Outlet context={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh }} />
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: contentMaxWidth,
+                  marginLeft: 'auto',
+                  marginRight: 'auto',
+                  paddingBottom: noOuterScroll ? 0 : getAppShellOutletScrollPaddingBottom(showTabBar),
+                }}
+              >
+                <Outlet context={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh }} />
+              </div>
             </ErrorBoundary>
           </div>
         </div>

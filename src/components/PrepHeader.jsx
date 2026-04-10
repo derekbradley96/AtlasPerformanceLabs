@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import { isCoach } from '@/lib/roles';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
@@ -108,7 +109,8 @@ async function fetchPrepHeaderWithInsights(clientId) {
 
 export default function PrepHeader({ clientId, showPrepInsights = false }) {
   const navigate = useNavigate();
-  const { effectiveRole } = useAuth();
+  const { effectiveRole, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [prep, setPrep] = useState(null);
   const [insightsData, setInsightsData] = useState(null);
   const [peakWeekStatus, setPeakWeekStatus] = useState({ peakWeek: null, checkInDueToday: false });
@@ -147,7 +149,25 @@ export default function PrepHeader({ clientId, showPrepInsights = false }) {
     return () => { cancelled = true; };
   }, [clientId, showPrepInsights]);
 
-  if (loading || !prep) return null;
+  if (!clientId) return null;
+
+  if (loading) {
+    return (
+      <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
+        <div className="animate-pulse space-y-3" aria-hidden="true">
+          <div className="h-3 rounded" style={{ width: '32%', background: colors.surface2 }} />
+          <div className="h-5 rounded-lg" style={{ width: '58%', background: colors.surface2 }} />
+          <div className="flex flex-wrap gap-2 mt-2">
+            <div className="h-9 rounded-lg" style={{ width: 120, background: colors.surface2 }} />
+            <div className="h-9 rounded-lg" style={{ width: 140, background: colors.surface2 }} />
+          </div>
+        </div>
+        <span className="sr-only">Loading contest prep summary</span>
+      </Card>
+    );
+  }
+
+  if (!prep) return null;
 
   const weeksOut = prep.weeks_out != null ? Number(prep.weeks_out) : null;
   const daysOut = prep.days_out != null ? Number(prep.days_out) : null;
@@ -165,13 +185,14 @@ export default function PrepHeader({ clientId, showPrepInsights = false }) {
     show_name: prep.show_name,
     division: prep.division,
   } : null;
-  const atlasPrepInsight = prepData ? generatePrepInsight(prepData) : null;
+  const atlasPrepInsight = prepData ? generatePrepInsight(prepData, viewerWU) : null;
   const showAtlasPrep = atlasPrepInsight && atlasPrepInsight.title !== 'No active prep';
 
   const summaries = showPrepInsights && insightsData
     ? getPrepInsightSummaries(insightsData.header, insightsData.metrics, {
         poseChecksLast4w: insightsData.poseChecksLast4w,
         poseSubmittedThisWeek: prep.pose_check_submitted_this_week === true,
+        viewerWeightUnit: viewerWU,
       })
     : [];
 

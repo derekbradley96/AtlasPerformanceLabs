@@ -391,7 +391,7 @@ export default function OrganisationAnalyticsPage() {
         {!loading && summary && (summary.totalClients ?? 0) === 0 && (summary.activeCoaches ?? 0) <= 1 && (
           <EmptyState
             title="No analytics data yet"
-            description="Add clients and assign them to coaches to see team-wide metrics, retention distribution, and workload here. Operations-focused view for owners and admins."
+            description="When coaches invite clients (link or code) and rosters grow, team-wide metrics, retention, and workload appear here."
             icon={BarChart3}
             actionLabel="Go to Organisation"
             onAction={() => navigate('/organisation')}

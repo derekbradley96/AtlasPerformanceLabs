@@ -22,8 +22,8 @@ const ITEMS = [
   },
   {
     key: 'first_client',
-    label: 'Add or import first client',
-    path: '/clients',
+    label: 'Invite first client (link or code)',
+    path: '/get-clients',
     icon: UserPlus,
   },
   {

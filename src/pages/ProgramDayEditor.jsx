@@ -1,4 +1,7 @@
-import React, { useState } from 'react';
+/**
+ * Legacy Base44 program day editor. Canonical Supabase editing is `ProgramBuilderPage.jsx`; keep this route for legacy program trees only.
+ */
+import React, { useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { base44 } from '@/lib/emptyApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -11,6 +14,7 @@ import { PageLoader } from '@/components/ui/LoadingState';
 import ExerciseSelector from '@/components/program/ExerciseSelector';
 import ExerciseEditor from '@/components/program/ExerciseEditor';
 import { toast } from 'sonner';
+import { atlasMigrationDataAttributes, deriveProgramDayEditorRouteState } from '@/lib/atlasMigrationPhases';
 
 export default function ProgramDayEditor() {
   const navigate = useNavigate();
@@ -108,12 +112,21 @@ export default function ProgramDayEditor() {
     toast.success('Exercise added!');
   };
 
+  const dayEditorMigrationAttrs = useMemo(() => {
+    const s = deriveProgramDayEditorRouteState({ surface: isLoading ? 'loading' : 'active' });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [isLoading]);
+
   if (isLoading) {
-    return <PageLoader />;
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" {...dayEditorMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24" {...dayEditorMigrationAttrs}>
       <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 p-4">
         <div className="flex items-center justify-between">
           <button 

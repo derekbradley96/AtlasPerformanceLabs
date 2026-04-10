@@ -12,6 +12,7 @@ import { getClientById, getClientCheckIns, getClients } from '@/data/selectors';
 import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { listMedia } from '@/lib/repos/compPrepRepo';
 import { getPoseById } from '@/lib/repos/poseLibraryRepo';
+import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
 /** @typedef {'active' | 'waiting' | 'done'} SegmentStatus */
 /** @typedef {'checkin' | 'posing' | 'photo'} FilterType */
@@ -36,7 +37,8 @@ import { getPoseById } from '@/lib/repos/poseLibraryRepo';
  * @returns {FeedItem[]}
  */
 export function getClientReviewFeed(clientId, options = {}) {
-  const { status = 'active', filterType = null } = options;
+  const { status = 'active', filterType = null, weightUnit = 'kg' } = options;
+  const wu = normalizeWeightUnit(weightUnit);
   const client = getClientById(clientId);
   if (!client) return [];
 
@@ -56,7 +58,7 @@ export function getClientReviewFeed(clientId, options = {}) {
       if (status === 'done' && itemStatus !== 'reviewed') continue;
       const createdAt = c.submitted_at || c.created_date;
       const summaryLines = [];
-      if (c.weight_kg != null) summaryLines.push(`${c.weight_kg} kg`);
+      if (c.weight_kg != null) summaryLines.push(formatWeightForViewer(c.weight_kg, wu));
       if (c.adherence_pct != null) summaryLines.push(`${c.adherence_pct}% adherence`);
       if (c.steps != null) summaryLines.push(`${c.steps.toLocaleString()} steps`);
       if (summaryLines.length === 0) summaryLines.push('Submitted');

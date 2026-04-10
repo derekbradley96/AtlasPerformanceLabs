@@ -4,6 +4,7 @@
  */
 import { getAppOrigin } from '@/lib/appOrigin';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { getInviteCode, getOrCreateInviteCode } from '@/lib/inviteCodeStore';
 
 /**
  * Build the shareable referral link (auth signup with ref param).
@@ -15,6 +16,49 @@ export function getCoachReferralLink(coach) {
   if (!code) return '';
   const origin = getAppOrigin();
   return `${origin.replace(/\/$/, '')}/auth?ref=${encodeURIComponent(code)}`;
+}
+
+/**
+ * Single link coaches share with clients: opens client signup with invite attached (AuthScreen reads `invite`).
+ * Same code as invite / referral_code on the coach profile.
+ * @param {string|null|undefined} inviteCode - e.g. atlas-3034
+ * @returns {string} Full URL or empty if no code
+ */
+export function getCoachClientSignupLink(inviteCode) {
+  const code = (inviteCode ?? '').toString().trim();
+  if (!code) return '';
+  const origin = getAppOrigin().replace(/\/$/, '');
+  return `${origin}/auth?mode=signup&account=client&invite=${encodeURIComponent(code)}`;
+}
+
+/**
+ * Stable join URL when referral_code is not in UI state yet; resolves to a code on open (see JoinByCodePage).
+ * @param {string|null|undefined} coachUserId - profiles.id (UUID) or demo trainer id
+ * @returns {string}
+ */
+export function getCoachJoinLinkByCoachId(coachUserId) {
+  const id = (coachUserId ?? '').toString().trim();
+  if (!id) return '';
+  const origin = getAppOrigin().replace(/\/$/, '');
+  return `${origin}/join?coach=${encodeURIComponent(id)}`;
+}
+
+/**
+ * Prefer direct auth invite URL when code is known; otherwise `/join?coach=` (live) or local demo invite link.
+ * @param {string|null|undefined} inviteCode
+ * @param {string|null|undefined} coachUserId
+ * @returns {string}
+ */
+export function getCoachClientJoinLinkPrimary(inviteCode, coachUserId) {
+  const code = (inviteCode ?? '').toString().trim();
+  if (code) return getCoachClientSignupLink(code);
+  const id = (coachUserId ?? '').toString().trim();
+  if (!id) return '';
+  if (!hasSupabase) {
+    const localCode = getInviteCode(id) || getOrCreateInviteCode(id);
+    return getCoachClientSignupLink(localCode);
+  }
+  return getCoachJoinLinkByCoachId(id);
 }
 
 /**

@@ -6,6 +6,8 @@
  * training_completion, nutrition_adherence, week_start, submitted_at.
  */
 
+import { formatAbsWeightDeltaFromKg, formatWeightDeltaKg, formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+
 function toNum(v) {
   if (v == null) return null;
   const n = Number(v);
@@ -47,18 +49,18 @@ export function summariseWeightTrend(checkin, previous = null) {
   if (weight != null && prevWeight != null) {
     const change = weight - prevWeight;
     if (change <= WEIGHT_CHANGE_DOWN_WARN) {
-      details.push(`Weight down ${Math.abs(change).toFixed(1)} kg from last check-in.`);
+      details.push(`Weight down ${formatAbsWeightDeltaFromKg(Math.abs(change), wu)} from last check-in.`);
       level = 'warning';
     } else if (change >= WEIGHT_CHANGE_UP_INFO) {
-      details.push(`Weight up ${change.toFixed(1)} kg from last check-in.`);
+      details.push(`Weight up ${formatWeightDeltaKg(change, wu).replace(/^\+/, '')} from last check-in.`);
     } else if (Math.abs(change) <= WEIGHT_STABLE_TOLERANCE) {
       details.push('Weight stable vs last check-in.');
       level = 'positive';
     } else {
-      details.push(`Weight change: ${change > 0 ? '+' : ''}${change.toFixed(1)} kg.`);
+      details.push(`Weight change: ${formatWeightDeltaKg(change, wu)}.`);
     }
   } else if (weight != null) {
-    details.push(`Current weight: ${weight} kg.`);
+    details.push(`Current weight: ${formatWeightForViewer(weight, wu)}.`);
   }
 
   const summary = details.length > 0 ? details[0] : 'No weight trend available.';

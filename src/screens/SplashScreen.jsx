@@ -79,8 +79,8 @@ export default function SplashScreen() {
       return;
     }
     if (isSupabaseAuthed) {
-      if (import.meta.env.DEV) console.log('[SPLASH] route -> /home');
-      navigate('/home', { replace: true });
+      if (import.meta.env.DEV) console.log('[SPLASH] route -> /onboarding (resolver sends home or role onboarding)');
+      navigate('/onboarding', { replace: true });
     } else {
       if (import.meta.env.DEV) console.log('[SPLASH] route -> /auth');
       navigate('/auth', { replace: true });

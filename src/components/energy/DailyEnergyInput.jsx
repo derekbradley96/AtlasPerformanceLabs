@@ -49,7 +49,7 @@ export default function DailyEnergyInput({ clientId }) {
           min={1}
           max={10}
           value={energy}
-          onChange={(e) => setEnergy(Number(e.target.value))}
+          onChange={(e) => setEnergy(e.target.value)}
           className="flex-1 min-w-[120px] h-2 rounded-full accent-blue-500"
         />
         <span className="text-white font-medium w-6">{energy}</span>

@@ -40,7 +40,7 @@ export default function SetupWizard() {
   const [workingDays, setWorkingDays] = useState([1, 2, 3, 4, 5]);
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
-  const [responseTargetHours, setResponseTargetHours] = useState(24);
+  const [responseTargetHours, setResponseTargetHours] = useState('24');
   const [services, setServices] = useState([{ id: 's1', name: 'Online coaching, monthly', compPrepAddOn: false, checkInFrequency: 'weekly', tags: ['training', 'nutrition'] }]);
   const [policies, setPolicies] = useState({
     checkInDay: 1,
@@ -59,7 +59,7 @@ export default function SetupWizard() {
     instagram: '',
     website: '',
   });
-  const [adminBudgetHoursPerWeek, setAdminBudgetHoursPerWeek] = useState(5);
+  const [adminBudgetHoursPerWeek, setAdminBudgetHoursPerWeek] = useState('5');
   const [planTier, setPlanTier] = useState('pro');
 
   useEffect(() => {
@@ -75,11 +75,11 @@ export default function SetupWizard() {
         if (wh.startTime) setStartTime(wh.startTime);
         if (wh.endTime) setEndTime(wh.endTime);
       }
-      if (existing.responseTargetHours != null) setResponseTargetHours(existing.responseTargetHours);
+      if (existing.responseTargetHours != null) setResponseTargetHours(String(existing.responseTargetHours));
       if (existing.services?.length) setServices(existing.services);
       if (existing.policies && Object.keys(existing.policies).length) setPolicies((p) => ({ ...p, ...existing.policies }));
       if (existing.branding && Object.keys(existing.branding).length) setBranding((b) => ({ ...b, ...existing.branding }));
-      if (existing.adminBudgetHoursPerWeek != null) setAdminBudgetHoursPerWeek(existing.adminBudgetHoursPerWeek);
+      if (existing.adminBudgetHoursPerWeek != null) setAdminBudgetHoursPerWeek(String(existing.adminBudgetHoursPerWeek));
       if (existing.plan_tier) setPlanTier(existing.plan_tier);
     }
   }, [trainerId]);
@@ -94,12 +94,12 @@ export default function SetupWizard() {
       handle: step >= 1 ? handle : undefined,
       timezone: step >= 1 ? timezone : undefined,
       workingHours: step >= 2 ? { days: workingDays, startTime, endTime } : undefined,
-      responseTargetHours: step >= 2 ? responseTargetHours : undefined,
+      responseTargetHours: step >= 2 ? (Number(responseTargetHours) || 0) : undefined,
       services: step >= 3 ? services : undefined,
       policies: step >= 4 ? policies : undefined,
       branding: step >= 5 ? branding : undefined,
       plan_tier: step >= 6 ? planTier : undefined,
-      adminBudgetHoursPerWeek: step >= 7 ? adminBudgetHoursPerWeek : undefined,
+      adminBudgetHoursPerWeek: step >= 7 ? (Number(adminBudgetHoursPerWeek) || 0) : undefined,
     });
   }, [trainerId, step, displayName, handle, timezone, workingDays, startTime, endTime, responseTargetHours, services, policies, branding, planTier, adminBudgetHoursPerWeek]);
 
@@ -114,12 +114,12 @@ export default function SetupWizard() {
         handle,
         timezone,
         workingHours: { days: workingDays, startTime, endTime },
-        responseTargetHours,
+        responseTargetHours: Number(responseTargetHours) || 0,
         services,
         policies,
         branding,
         plan_tier: planTier,
-        adminBudgetHoursPerWeek,
+        adminBudgetHoursPerWeek: Number(adminBudgetHoursPerWeek) || 0,
         onboardingComplete: true,
         onboardingSkipped: false,
       });
@@ -261,7 +261,7 @@ export default function SetupWizard() {
             </div>
             <div>
               <label className="block text-[13px] mb-1" style={{ color: colors.muted }}>Response time target (hours)</label>
-              <input type="number" min={1} max={72} value={responseTargetHours} onChange={(e) => setResponseTargetHours(parseInt(e.target.value, 10) || 24)} style={{ width: '100%', padding: 12, borderRadius: radii.sm, border: `1px solid ${colors.border}`, background: colors.card, color: colors.text }} />
+              <input type="number" min={1} max={72} value={responseTargetHours} onChange={(e) => setResponseTargetHours(e.target.value)} onFocus={(e) => e.target.select()} style={{ width: '100%', padding: 12, borderRadius: radii.sm, border: `1px solid ${colors.border}`, background: colors.card, color: colors.text }} />
             </div>
           </div>
         </>
@@ -367,7 +367,7 @@ export default function SetupWizard() {
           <div className="space-y-4">
             <div>
               <label className="block text-[13px] mb-1" style={{ color: colors.muted }}>Hours per week</label>
-              <input type="number" min={1} max={40} value={adminBudgetHoursPerWeek} onChange={(e) => setAdminBudgetHoursPerWeek(parseInt(e.target.value, 10) || 5)} style={{ width: '100%', padding: 12, borderRadius: radii.sm, border: `1px solid ${colors.border}`, background: colors.card, color: colors.text }} />
+              <input type="number" min={1} max={40} value={adminBudgetHoursPerWeek} onChange={(e) => setAdminBudgetHoursPerWeek(e.target.value)} onFocus={(e) => e.target.select()} style={{ width: '100%', padding: 12, borderRadius: radii.sm, border: `1px solid ${colors.border}`, background: colors.card, color: colors.text }} />
             </div>
           </div>
         </>

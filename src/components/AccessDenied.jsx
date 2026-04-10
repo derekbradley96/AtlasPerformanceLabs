@@ -9,7 +9,7 @@ import { roleHomePath } from '@/lib/roles';
 /**
  * Shown when user hits a route they don't have permission for (e.g. client/solo on trainer-only).
  * No crash; clear message and way back. Redirect matches EntryRoute (client→/messages, solo→/home).
- * Optional secondaryAction: { label, path } e.g. { label: 'Find a Coach', path: '/discover' } for personal upgrade path.
+ * Optional secondaryAction: { label, path } e.g. { label: 'Find a Coach', path: '/personal/coach-tier-selection?source=from_general_discovery' } for Personal → coach conversion.
  */
 export default function AccessDenied({ message = "You don't have access to this area.", title = 'Access denied', secondaryAction }) {
   const navigate = useNavigate();

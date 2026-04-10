@@ -1,24 +1,10 @@
 /**
- * Notification Centre: unread and read notifications with deep links.
- * Uses public.notifications (profile_id, type, title, message, data, is_read).
- * Tap row → mark as read + navigate to linked screen when data has route.
+ * Notification Centre: sections (Action required / Messages / Insights), deep links, read state.
  */
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  Bell,
-  Calendar,
-  CheckSquare,
-  CreditCard,
-  MessageCircle,
-  FileText,
-  Trophy,
-  Check,
-  RefreshCw,
-  Settings,
-  ChevronRight,
-} from 'lucide-react';
+import { Bell, Check, RefreshCw, Settings, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { getNotifications, markNotificationRead, markAllNotificationsRead } from '@/lib/notifications';
 import { hasSupabase } from '@/lib/supabaseClient';
@@ -31,69 +17,21 @@ import { hapticLight } from '@/lib/haptics';
 import { colors, spacing } from '@/ui/tokens';
 import { toast } from 'sonner';
 import EmptyState from '@/components/ui/EmptyState';
+import {
+  CATEGORY_ORDER,
+  CATEGORY_LABELS,
+  groupNotificationsByCategory,
+} from '@/lib/notificationTaxonomy';
+import { getRouteForNotification, getIconForNotificationType } from '@/lib/notificationRoutes';
+import { deriveNotificationsSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 
 const PAGE_SIZE = 50;
-
-/**
- * Resolve deep-link route from notification type and data.
- * Returns path string or null if no link.
- */
-function getRouteForNotification(notification) {
-  if (!notification?.type) return null;
-  const data = notification.data && typeof notification.data === 'object' ? notification.data : {};
-  const clientId = data.client_id ?? data.clientId;
-  const checkinId = data.checkin_id ?? data.checkinId;
-  const threadId = data.thread_id ?? data.threadId;
-  const peakWeekId = data.peak_week_id ?? data.peakWeekId;
-
-  switch (notification.type) {
-    case 'checkin_review':
-      if (clientId && checkinId) return `/clients/${clientId}/checkins/${checkinId}`;
-      if (clientId) return `/clients/${clientId}/review-center`;
-      return '/review-center/queue';
-    case 'message_received':
-      if (clientId) return `/messages/${clientId}`;
-      if (threadId) return '/messages';
-      return '/messages';
-    case 'checkin_due':
-      return '/check-in';
-    case 'habit_due':
-    case 'habit_streak':
-      return '/habits-daily';
-    case 'peak_week_update':
-      if (clientId) return `/clients/${clientId}/peak-week`;
-      if (peakWeekId) return '/peak-week';
-      return '/peak-week';
-    case 'program_update':
-      if (clientId) return `/clients/${clientId}`;
-      return null;
-    case 'payment_due':
-      if (clientId) return `/clients/${clientId}/billing`;
-      return '/revenue';
-    default:
-      return null;
-  }
-}
-
-function getIconForType(type) {
-  const map = {
-    checkin_due: Calendar,
-    checkin_review: FileText,
-    message_received: MessageCircle,
-    habit_due: CheckSquare,
-    habit_streak: CheckSquare,
-    peak_week_update: Trophy,
-    program_update: FileText,
-    payment_due: CreditCard,
-  };
-  return map[type] || Bell;
-}
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const [filter, setFilter] = useState('all'); // 'all' | 'unread'
+  const { user, effectiveRole } = useAuth();
+  const [filter, setFilter] = useState('all');
 
   const {
     data: notifications = [],
@@ -126,6 +64,17 @@ export default function NotificationsPage() {
   const unreadCount = notifications.filter((n) => !n.is_read).length;
   const filteredList =
     filter === 'unread' ? notifications.filter((n) => !n.is_read) : notifications;
+  const grouped = groupNotificationsByCategory(filteredList);
+
+  const notificationsMigration = useMemo(
+    () =>
+      deriveNotificationsSurfaceState({
+        loading: isLoading,
+        isEmpty: filteredList.length === 0,
+        filter,
+      }),
+    [isLoading, filteredList.length, filter]
+  );
 
   const handleMarkReadOnly = (e, notification) => {
     e.stopPropagation();
@@ -136,12 +85,96 @@ export default function NotificationsPage() {
   const handleRowClick = (notification) => {
     hapticLight();
     if (!notification.is_read) markAsReadMutation.mutate(notification.id);
-    const route = getRouteForNotification(notification);
+    const route = getRouteForNotification(notification, effectiveRole);
     if (route) {
       navigate(route);
     } else if (!notification.is_read) {
       toast.success('Marked read');
     }
+  };
+
+  const renderCard = (notification) => {
+    const Icon = getIconForNotificationType(notification.type);
+    const route = getRouteForNotification(notification, effectiveRole);
+    const unread = !notification.is_read;
+    return (
+      <Card
+        key={notification.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => handleRowClick(notification)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleRowClick(notification);
+          }
+        }}
+        style={{
+          padding: spacing[16],
+          borderColor: unread ? colors.primary : colors.border,
+          borderWidth: 1,
+          background: unread ? 'rgba(59, 130, 246, 0.08)' : colors.card,
+          cursor: 'pointer',
+        }}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{
+              background: unread ? 'rgba(59, 130, 246, 0.2)' : colors.surface2,
+            }}
+          >
+            <Icon className="w-5 h-5" style={{ color: unread ? colors.primary : colors.muted }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              <h3 className="font-semibold text-sm" style={{ color: unread ? colors.text : colors.muted }}>
+                {notification.title}
+              </h3>
+              {unread && (
+                <span
+                  className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
+                  style={{ background: colors.primary }}
+                  aria-hidden
+                />
+              )}
+            </div>
+            <p className="text-sm mb-2" style={{ color: colors.muted }}>
+              {notification.message}
+            </p>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-xs" style={{ color: colors.muted }}>
+                {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
+              </span>
+              <div className="flex items-center gap-2">
+                {unread && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleMarkReadOnly(e, notification)}
+                    className="text-xs font-medium flex items-center gap-1 rounded-lg px-2 py-1 active:opacity-80"
+                    style={{
+                      color: colors.primary,
+                      background: 'rgba(59, 130, 246, 0.12)',
+                      border: 'none',
+                    }}
+                    aria-label="Mark as read"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Mark read
+                  </button>
+                )}
+                {route && (
+                  <span className="text-xs flex items-center gap-0.5" style={{ color: colors.primary }}>
+                    Open
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
   };
 
   if (!hasSupabase || !user) {
@@ -165,7 +198,11 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="min-h-screen pb-24" style={{ background: colors.bg, color: colors.text }}>
+    <div
+      className="min-h-screen pb-24"
+      {...atlasMigrationDataAttributes(notificationsMigration.phase, notificationsMigration.primary)}
+      style={{ background: colors.bg, color: colors.text }}
+    >
       <TopBar
         title="Notifications"
         onBack={() => navigate(-1)}
@@ -211,7 +248,6 @@ export default function NotificationsPage() {
         }
       />
 
-      {/* Subheader: unread count + filters */}
       <div
         className="sticky z-10 border-b px-4 py-3"
         style={{ background: colors.surface1, borderColor: colors.border }}
@@ -264,8 +300,7 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      {/* List */}
-      <div className="p-4 space-y-3">
+      <div className="p-4 space-y-6">
         {filteredList.length === 0 ? (
           <EmptyState
             icon={Bell}
@@ -277,95 +312,16 @@ export default function NotificationsPage() {
             }
           />
         ) : (
-          filteredList.map((notification) => {
-            const Icon = getIconForType(notification.type);
-            const route = getRouteForNotification(notification);
-            const unread = !notification.is_read;
+          CATEGORY_ORDER.map((cat) => {
+            const items = grouped[cat] || [];
+            if (items.length === 0) return null;
             return (
-              <Card
-                key={notification.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => handleRowClick(notification)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleRowClick(notification);
-                  }
-                }}
-                style={{
-                  padding: spacing[16],
-                  borderColor: unread ? colors.primary : colors.border,
-                  borderWidth: 1,
-                  background: unread ? 'rgba(59, 130, 246, 0.08)' : colors.card,
-                  cursor: 'pointer',
-                }}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={{
-                      background: unread ? 'rgba(59, 130, 246, 0.2)' : colors.surface2,
-                    }}
-                  >
-                    <Icon
-                      className="w-5 h-5"
-                      style={{ color: unread ? colors.primary : colors.muted }}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <h3
-                        className="font-semibold text-sm"
-                        style={{ color: unread ? colors.text : colors.muted }}
-                      >
-                        {notification.title}
-                      </h3>
-                      {unread && (
-                        <span
-                          className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
-                          style={{ background: colors.primary }}
-                          aria-hidden
-                        />
-                      )}
-                    </div>
-                    <p className="text-sm mb-2" style={{ color: colors.muted }}>
-                      {notification.message}
-                    </p>
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-xs" style={{ color: colors.muted }}>
-                        {formatDistanceToNow(new Date(notification.created_at), {
-                          addSuffix: true,
-                        })}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {unread && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleMarkReadOnly(e, notification)}
-                            className="text-xs font-medium flex items-center gap-1 rounded-lg px-2 py-1 active:opacity-80"
-                            style={{
-                              color: colors.primary,
-                              background: 'rgba(59, 130, 246, 0.12)',
-                              border: 'none',
-                            }}
-                            aria-label="Mark as read"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            Mark read
-                          </button>
-                        )}
-                        {route && (
-                          <span className="text-xs flex items-center gap-0.5" style={{ color: colors.primary }}>
-                            Open
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
+              <section key={cat} className="space-y-3">
+                <h2 className="text-xs font-semibold uppercase tracking-wide px-0.5" style={{ color: colors.muted }}>
+                  {CATEGORY_LABELS[cat] || cat}
+                </h2>
+                <div className="space-y-3">{items.map((n) => renderCard(n))}</div>
+              </section>
             );
           })
         )}

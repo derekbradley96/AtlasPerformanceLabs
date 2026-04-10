@@ -1,9 +1,13 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
+import { normalizeRole, isClient, isCoach } from '@/lib/roles';
+import { getMyClientProfile } from '@/lib/clientProfiles';
+import { getClientNutritionSnapshot } from '@/lib/clientNutritionPlan';
+import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
 import { 
   Dumbbell, Calendar, Target, MessageSquare, 
   ChevronRight, Apple
@@ -11,21 +15,19 @@ import {
 import { Button } from '@/components/ui/button';
 import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
 import { motion } from 'framer-motion';
+import PersonalMyProgram from './PersonalMyProgram';
+import { atlasMigrationDataAttributes, deriveMyProgramRouteState } from '@/lib/atlasMigrationPhases';
 
-export default function MyProgram() {
+function ClientMyProgram() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const loading = false;
   const error = null;
 
   const { data: clientProfile, isLoading: profileLoading, error: profileError } = useQuery({
     queryKey: ['client-profile', user?.id],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('client-profile-list', { user_id: user?.id });
-      const list = Array.isArray(data) ? data : [];
-      return list[0] || null;
-    },
-    enabled: !!user?.id,
+    queryFn: async () => getMyClientProfile(user?.id),
+    enabled: !!user?.id && isClient(effectiveRole),
     retry: 1,
     staleTime: 30000
   });
@@ -33,64 +35,42 @@ export default function MyProgram() {
   const { data: assignment, isLoading: assignmentLoading } = useQuery({
     queryKey: ['program-assignment', clientProfile?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('program-assignment-list', { client_id: clientProfile?.id, status: 'active' });
-      const list = Array.isArray(data) ? data : [];
-      return list[0] || null;
+      return getAssignedWorkoutForToday({ role: 'client', clientId: clientProfile?.id });
     },
     enabled: !!clientProfile?.id,
     retry: 1,
     staleTime: 30000
   });
 
-  const { data: program } = useQuery({
-    queryKey: ['assigned-program', assignment?.program_id],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('program-get', { id: assignment?.program_id });
-      return data ?? null;
-    },
-    enabled: !!assignment?.program_id,
-    retry: 1,
-    staleTime: 30000
-  });
-
-  const { data: weeks = [] } = useQuery({
-    queryKey: ['program-weeks', program?.id],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('program-week-list', { program_id: program?.id });
-      return Array.isArray(data) ? data : [];
-    },
-    enabled: !!program?.id,
-    retry: 1
-  });
-
   const { data: nutritionPlan } = useQuery({
     queryKey: ['nutrition-plan', clientProfile?.id],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('nutrition-plan-list', { client_id: clientProfile?.id, is_active: true });
-      const list = Array.isArray(data) ? data : [];
-      return list[0] || null;
-    },
+    queryFn: async () => getClientNutritionSnapshot(clientProfile?.id),
     enabled: !!clientProfile?.id,
     retry: 1,
     staleTime: 30000
   });
 
   const { data: trainer } = useQuery({
-    queryKey: ['trainer', clientProfile?.trainer_id],
+    queryKey: ['trainer', clientProfile?.trainer_id, clientProfile?.coach_id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('trainer-profile-get', { id: clientProfile?.trainer_id });
+      const linkedCoachId = clientProfile?.trainer_id ?? clientProfile?.coach_id;
+      const { data } = await invokeSupabaseFunction('trainer-profile-get', { id: linkedCoachId });
       const list = Array.isArray(data) ? data : [];
       return list[0] ?? data ?? null;
     },
-    enabled: !!clientProfile?.trainer_id,
+    enabled: !!(clientProfile?.trainer_id ?? clientProfile?.coach_id),
     retry: 1,
     staleTime: 30000
   });
 
   // Error state
   if (error === 'timeout' || error === 'user_fetch' || profileError) {
+    const mpM = deriveMyProgramRouteState({ roleView: 'client', surface: 'error' });
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24">
+      <div
+        {...atlasMigrationDataAttributes(mpM.phase, mpM.primary)}
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24"
+      >
         <div className="text-center">
           <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center mb-4 mx-auto">
             <span className="text-3xl">⚠️</span>
@@ -108,16 +88,42 @@ export default function MyProgram() {
   }
 
   // Initial loading
-  if (loading || !user) return <PageLoader />;
+  if (loading || !user) {
+    const mpM = deriveMyProgramRouteState({ roleView: 'client', surface: 'loading' });
+    return (
+      <div {...atlasMigrationDataAttributes(mpM.phase, mpM.primary)}>
+        <PageLoader />
+      </div>
+    );
+  }
 
   // Profile still loading
-  if (profileLoading) return <PageLoader />;
+  if (profileLoading) {
+    const mpM = deriveMyProgramRouteState({ roleView: 'client', surface: 'loading' });
+    return (
+      <div {...atlasMigrationDataAttributes(mpM.phase, mpM.primary)}>
+        <PageLoader />
+      </div>
+    );
+  }
 
-  const hasTrainer = !!clientProfile?.trainer_id;
+  const hasTrainer = !!(clientProfile?.trainer_id || clientProfile?.coach_id);
+  const assignmentRow = assignment?.assignment ?? assignment ?? null;
+  const programView = assignment?.block
+    ? {
+        name: assignment.block.title || 'Program',
+        duration_weeks: assignment.block.total_weeks || 1,
+        goal: null,
+      }
+    : null;
 
   if (!hasTrainer) {
+    const mpM = deriveMyProgramRouteState({ roleView: 'client', surface: 'no_trainer' });
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24">
+      <div
+        {...atlasMigrationDataAttributes(mpM.phase, mpM.primary)}
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24"
+      >
         <EmptyState
           icon={Dumbbell}
           title="No Trainer Assigned"
@@ -144,9 +150,13 @@ export default function MyProgram() {
     );
   }
 
-  if (!assignment || !program) {
+  if (!assignmentRow || !programView) {
+    const mpM = deriveMyProgramRouteState({ roleView: 'client', surface: 'no_assignment' });
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24">
+      <div
+        {...atlasMigrationDataAttributes(mpM.phase, mpM.primary)}
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24"
+      >
         <EmptyState
           icon={Dumbbell}
           title="No Program Assigned Yet"
@@ -166,18 +176,23 @@ export default function MyProgram() {
   }
 
   // Calculate current week and day
-  const startDate = new Date(assignment.start_date);
+  const startDate = new Date(assignmentRow.start_date || new Date().toISOString());
   const today = new Date();
   const daysSinceStart = Math.floor((today - startDate) / (1000 * 60 * 60 * 24));
   const currentWeekNumber = Math.floor(daysSinceStart / 7) + 1;
   const currentDayOfWeek = today.getDay(); // 0 = Sunday
 
   // Get weekly schedule
-  const scheduleDays = assignment.weekly_schedule || [1, 3, 5]; // Mon, Wed, Fri default
+  const scheduleDays = assignmentRow.weekly_schedule || [1, 3, 5]; // Mon, Wed, Fri default
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+  const mpActive = deriveMyProgramRouteState({ roleView: 'client', surface: 'active' });
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24">
+    <div
+      {...atlasMigrationDataAttributes(mpActive.phase, mpActive.primary)}
+      className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24"
+    >
       <div className="p-4 md:p-6 border-b border-slate-800">
         <h1 className="text-2xl font-bold text-white mb-1">My Program</h1>
         <p className="text-slate-400">Your complete training & nutrition plan</p>
@@ -195,21 +210,22 @@ export default function MyProgram() {
               <Target className="w-6 h-6 text-blue-400" />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-bold text-white mb-1">{program.name}</h2>
+              <h2 className="text-lg font-bold text-white mb-1">{programView.name}</h2>
               <p className="text-sm text-slate-300">
-                Week {currentWeekNumber} of {program.duration_weeks} • {program.goal?.replace('_', ' ')}
+                Week {currentWeekNumber} of {programView.duration_weeks}
+                {programView.goal ? ` • ${String(programView.goal).replace('_', ' ')}` : ''}
               </p>
             </div>
           </div>
           
-          {program.description && (
-            <p className="text-sm text-slate-300 mb-4">{program.description}</p>
+          {assignment?.day?.notes && (
+            <p className="text-sm text-slate-300 mb-4">{assignment.day.notes}</p>
           )}
 
-          {assignment.notes && (
+          {assignmentRow.notes && (
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
               <p className="text-xs text-blue-300 font-medium mb-1">Coach Notes:</p>
-              <p className="text-sm text-slate-200">{assignment.notes}</p>
+              <p className="text-sm text-slate-200">{assignmentRow.notes}</p>
             </div>
           )}
         </motion.div>
@@ -264,7 +280,7 @@ export default function MyProgram() {
               </div>
               <Dumbbell className="w-8 h-8 text-green-400" />
             </div>
-            <Link to={createPageUrl('Workout')}>
+            <Link to="/today">
               <Button className="w-full bg-green-500 hover:bg-green-600">
                 Start Workout <ChevronRight className="w-4 h-4 ml-2" />
               </Button>
@@ -368,4 +384,18 @@ export default function MyProgram() {
       </div>
     </div>
   );
+}
+
+export default function MyProgram() {
+  const { user, effectiveRole } = useAuth();
+  const userRole = normalizeRole(effectiveRole || user?.role || user?.user_type);
+
+  if (userRole === 'personal') {
+    return <PersonalMyProgram />;
+  }
+  if (isCoach(effectiveRole || user?.role)) {
+    return <Navigate to="/programs" replace />;
+  }
+
+  return <ClientMyProgram />;
 }

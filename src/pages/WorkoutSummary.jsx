@@ -9,6 +9,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { motion } from 'framer-motion';
+
+/**
+ * Legacy workout summary page (base44-era).
+ * Canonical post-session flow is handled by Workout Player completion surfaces.
+ */
 // Inline confetti component
 function Confetti() {
   const [particles, setParticles] = React.useState([]);
@@ -91,7 +96,7 @@ export default function WorkoutSummary() {
   if (isLoading) return <PageLoader />;
 
   if (!workout) {
-    navigate(createPageUrl('Workout'));
+    navigate('/today');
     return null;
   }
 

@@ -6,14 +6,15 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
+import { isInternalAdmin } from '@/lib/internalAccess';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard } from '@/ui/pageLayout';
 import { Users, MessageSquare, Activity, AlertTriangle, BarChart3, TrendingUp, Loader2, RefreshCw } from 'lucide-react';
 
 export default function BetaHealthDashboard() {
-  const { user } = useAuth();
-  const isAdmin = user?.email === ADMIN_EMAIL || import.meta.env.DEV;
+  const { supabaseUser } = useAuth();
+  const isAdmin = isInternalAdmin(supabaseUser);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

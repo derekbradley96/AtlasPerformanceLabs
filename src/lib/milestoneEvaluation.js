@@ -3,6 +3,7 @@
  * Returns only milestones that are newly crossed and not yet unlocked (once per threshold).
  */
 import { normalizePhase } from '@/lib/intelligence/clientRisk';
+import { formatAbsWeightDeltaFromKg, formatWeightDeltaKg, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 import { isUnlocked } from './milestonesStore';
 
 const TIME_WEEKS = [4, 12, 24, 52];
@@ -109,7 +110,8 @@ function has8WeekAdherenceStreak(weeklyAdherence) {
  * @param {Array} lifts - Optional lift entries { date, liftKey, value } or { liftKey, valueKg }
  * @returns {{ newMilestones: Array<{ type: string, milestoneId: string, title: string, description: string, statImprovement: string }> }}
  */
-export function evaluateMilestones(client, checkins, lifts = []) {
+export function evaluateMilestones(client, checkins, lifts = [], viewerWeightUnit = 'kg') {
+  const wu = normalizeWeightUnit(viewerWeightUnit);
   const clientId = client?.id;
   if (!clientId) return { newMilestones: [] };
 
@@ -140,9 +142,9 @@ export function evaluateMilestones(client, checkins, lifts = []) {
         newMilestones.push({
           type: 'weight',
           milestoneId,
-          title: 'Bulk: +5 kg',
-          description: 'You gained 5 kg during your bulk phase.',
-          statImprovement: `+${weightDelta.delta.toFixed(1)} kg`,
+          title: 'Bulk milestone',
+          description: `You gained at least ${formatAbsWeightDeltaFromKg(WEIGHT_PHASE_KG, wu)} during your bulk phase.`,
+          statImprovement: formatWeightDeltaKg(weightDelta.delta, wu),
         });
       }
     } else if (phase === 'cut' && weightDelta.delta <= -WEIGHT_PHASE_KG) {
@@ -151,9 +153,9 @@ export function evaluateMilestones(client, checkins, lifts = []) {
         newMilestones.push({
           type: 'weight',
           milestoneId,
-          title: 'Cut: -5 kg',
-          description: 'You lost 5 kg during your cut phase.',
-          statImprovement: `${weightDelta.delta.toFixed(1)} kg`,
+          title: 'Cut milestone',
+          description: `You lost at least ${formatAbsWeightDeltaFromKg(WEIGHT_PHASE_KG, wu)} during your cut phase.`,
+          statImprovement: formatWeightDeltaKg(weightDelta.delta, wu),
         });
       }
     }

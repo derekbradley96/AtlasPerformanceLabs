@@ -14,7 +14,7 @@ export default function AppHeader() {
   const pathname = location.pathname?.toLowerCase() ?? '';
   const tabRoutes = getTabRoutesForRole(effectiveRole);
   const homePath = tabRoutes[0]?.path ?? '/home';
-  const showBack = !isTabRoute(pathname);
+  const showBack = !isTabRoute(pathname, effectiveRole);
   const title = getRouteTitle(location.pathname);
 
   const handleBack = useCallback(() => {

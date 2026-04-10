@@ -2,13 +2,14 @@
  * Public lead checkout: select service, enter name/email, pay via Stripe Checkout.
  * URL: /lead-checkout?uid=USER_ID&service=SERVICE_ID (optional: name=, email=)
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { toast } from 'sonner';
 import { listServices, stripeCheckoutSession, MOCK_SERVICES } from '@/lib/supabaseStripeApi';
+import { atlasMigrationDataAttributes, deriveLeadCheckoutRouteState } from '@/lib/atlasMigrationPhases';
 
 const getFunctionsUrl = () => (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) ? 'yes' : null;
 const useSupabase = !!getFunctionsUrl();
@@ -89,9 +90,22 @@ export default function LeadCheckout() {
     }
   }, [uid, service, name, email]);
 
+  const leadCheckoutMigrationAttrs = useMemo(() => {
+    let surface = 'form';
+    if (!uid) surface = 'invalid';
+    else if (loading) surface = 'loading';
+    else if (paying) surface = 'paying';
+    const s = deriveLeadCheckoutRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [uid, loading, paying]);
+
   if (!uid) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg, color: colors.muted }}>
+      <div
+        className="min-h-screen flex items-center justify-center p-6"
+        style={{ background: colors.bg, color: colors.muted }}
+        {...leadCheckoutMigrationAttrs}
+      >
         <p className="text-sm">Invalid link. Use the payment link from your coach.</p>
       </div>
     );
@@ -99,7 +113,11 @@ export default function LeadCheckout() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: colors.bg, color: colors.muted }}>
+      <div
+        className="min-h-screen flex items-center justify-center p-6"
+        style={{ background: colors.bg, color: colors.muted }}
+        {...leadCheckoutMigrationAttrs}
+      >
         <p className="text-sm">Loading…</p>
       </div>
     );
@@ -114,6 +132,7 @@ export default function LeadCheckout() {
         background: colors.bg,
         color: colors.text,
       }}
+      {...leadCheckoutMigrationAttrs}
     >
       <h1 className="text-xl font-semibold mb-2" style={{ color: colors.text }}>Checkout</h1>
       <p className="text-sm mb-6" style={{ color: colors.muted }}>Choose a plan and pay securely with Stripe.</p>

@@ -9,7 +9,9 @@ import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { toast } from 'sonner';
 import { impactLight } from '@/lib/haptics';
-import { PLANS, CURRENCY } from '@/config/plans';
+import { PLANS, CURRENCY, resolveCoachPlanTier } from '@/config/plans';
+import { usePresentationMode } from '@/lib/presentationMode';
+import { desktopRhythm, cardContentRhythm } from '@/ui/pageLayout';
 
 const BIO_MAX = 800;
 const RESPONSE_TIME_OPTIONS = [
@@ -46,6 +48,10 @@ function getCurrentPlanIdFromStorage() {
 
 export default function TrainerProfileSettings() {
   const navigate = useNavigate();
+  const { isDesktopWeb } = usePresentationMode();
+  const rhythm = desktopRhythm(isDesktopWeb);
+  const cardRhythm = cardContentRhythm(isDesktopWeb);
+  const cardPadding = isDesktopWeb ? spacing[24] : spacing[20];
   const { user, isDemoMode } = useAuth();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
   const fileInputRef = useRef(null);
@@ -273,7 +279,7 @@ export default function TrainerProfileSettings() {
   if (!trainerId) return null;
 
   const openModal = portfolioModalIndex !== null ? form.trainerPortfolio[portfolioModalIndex] : null;
-  const planId = getCurrentPlanIdFromStorage();
+  const planId = resolveCoachPlanTier(authProfile, user);
   const currentPlan = PLANS.find((p) => p.id === planId) || PLANS[1];
 
   return (
@@ -281,18 +287,21 @@ export default function TrainerProfileSettings() {
       className="app-screen min-w-0 max-w-full overflow-x-hidden bg-[#0B1220] animate-in fade-in slide-in-from-right-4 duration-200"
       style={{
         paddingBottom: `calc(72px + env(safe-area-inset-bottom) + 24px)`,
-        paddingLeft: spacing[16],
-        paddingRight: spacing[16],
-        paddingTop: spacing[8],
+        paddingLeft: isDesktopWeb ? spacing[20] : spacing[16],
+        paddingRight: isDesktopWeb ? spacing[20] : spacing[16],
+        paddingTop: rhythm.top,
+        maxWidth: isDesktopWeb ? 1240 : undefined,
+        margin: '0 auto',
+        width: '100%',
       }}
     >
-      <div className="max-w-2xl mx-auto space-y-6">
+      <div className={`${isDesktopWeb ? 'max-w-4xl' : 'max-w-2xl'} mx-auto`} style={{ display: 'flex', flexDirection: 'column', gap: isDesktopWeb ? spacing[20] : spacing[24] }}>
         {/* Plan card */}
-        <Card style={{ padding: spacing[20] }}>
-          <h2 className="text-lg font-semibold mb-3" style={{ color: colors.text }}>Plan & Billing</h2>
+        <Card style={{ padding: cardPadding }}>
+          <h2 className="text-lg font-semibold" style={{ color: colors.text, marginBottom: cardRhythm.titleBottom }}>Plan & Billing</h2>
           <p className="text-sm font-medium mb-1" style={{ color: colors.muted }}>Current plan</p>
           <p className="text-[17px] font-semibold mb-1" style={{ color: colors.text }}>{currentPlan.name}</p>
-          <p className="text-sm mb-4" style={{ color: colors.muted }}>
+          <p className="text-sm" style={{ color: colors.muted, marginBottom: cardRhythm.bodyBottom }}>
             {currentPlan.price === 0 ? `${CURRENCY}0` : `${CURRENCY}${currentPlan.price}`}/month
             {currentPlan.commission != null && ` · ${currentPlan.commission} commission`}
           </p>
@@ -307,9 +316,9 @@ export default function TrainerProfileSettings() {
         </Card>
 
         {/* Public Profile */}
-        <Card style={{ padding: spacing[20] }}>
-          <h2 className="text-lg font-semibold mb-4" style={{ color: colors.text }}>Public Profile</h2>
-          <div className="space-y-4">
+        <Card style={{ padding: cardPadding }}>
+          <h2 className="text-lg font-semibold" style={{ color: colors.text, marginBottom: cardRhythm.bodyBottom }}>Public Profile</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktopWeb ? spacing[14] : spacing[16] }}>
             <div className="flex gap-4 items-start">
               <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleProfileImage} />
               <button
@@ -390,11 +399,12 @@ export default function TrainerProfileSettings() {
                       if (form.specialties.includes(s)) update({ specialties: form.specialties.filter((x) => x !== s) });
                       else update({ specialties: [...form.specialties, s] });
                     }}
-                    className="rounded-full px-3 py-1.5 text-sm border"
+                    className="rounded-full text-sm border"
                     style={{
                       borderColor: form.specialties.includes(s) ? colors.accent : colors.border,
                       background: form.specialties.includes(s) ? 'rgba(37,99,235,0.2)' : 'transparent',
                       color: form.specialties.includes(s) ? '#93C5FD' : colors.muted,
+                      padding: `${isDesktopWeb ? spacing[5] : spacing[6]}px ${isDesktopWeb ? spacing[12] : spacing[12]}px`,
                     }}
                   >
                     {s}
@@ -416,7 +426,11 @@ export default function TrainerProfileSettings() {
               {form.specialties.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {form.specialties.map((s, i) => (
-                    <span key={s} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm bg-blue-500/20 text-blue-300">
+                    <span
+                      key={s}
+                      className="inline-flex items-center gap-1 rounded-full text-sm bg-blue-500/20 text-blue-300"
+                      style={{ padding: `${isDesktopWeb ? spacing[5] : spacing[4]}px ${spacing[10]}px` }}
+                    >
                       {s}
                       <button type="button" onClick={() => removeSpecialty(i)} aria-label="Remove"><X size={14} /></button>
                     </span>
@@ -524,7 +538,7 @@ export default function TrainerProfileSettings() {
         </Card>
 
         {/* Portfolio */}
-        <Card style={{ padding: spacing[20] }}>
+        <Card style={{ padding: cardPadding }}>
           <h2 className="text-lg font-semibold mb-4" style={{ color: colors.text }}>Portfolio</h2>
           <div className="grid grid-cols-3 gap-3">
             {form.trainerPortfolio.map((item, index) => (
@@ -552,7 +566,7 @@ export default function TrainerProfileSettings() {
         </Card>
 
         {/* Services */}
-        <Card style={{ padding: spacing[20] }}>
+        <Card style={{ padding: cardPadding }}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Services</h2>
             <Button variant="secondary" onClick={addService} className="gap-1"><Plus size={16} /> Add</Button>

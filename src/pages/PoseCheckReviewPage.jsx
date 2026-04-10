@@ -1,30 +1,45 @@
 /**
  * Coach: list clients with latest pose check status (this week submitted or not).
  * Click opens detail at /review-center/pose-checks/:poseCheckId.
- * Shows prep insight (generatePrepInsight) per client when they have active prep.
+ * Grouped by urgency: review now → missing this week → caught up.
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
-import { colors, spacing } from '@/ui/tokens';
+import { colors, spacing, shadows } from '@/ui/tokens';
 import { getCoachClients } from '@/lib/checkins';
 import { getWeekStartISO, getLatestPoseChecksForCoach } from '@/lib/poseChecks';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { generatePrepInsight } from '@/lib/atlasInsights';
-import { ChevronRight } from 'lucide-react';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
+import { ChevronRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 
-const STATUS_SUBMITTED = 'submitted';
-const STATUS_MISSED = 'missed';
+const TIER_REVIEW = 0;
+const TIER_MISSING = 1;
+const TIER_DONE = 2;
 
-function getStatus(latest, currentWeekStart) {
-  if (!latest) return STATUS_MISSED;
-  return latest.week_start === currentWeekStart ? STATUS_SUBMITTED : STATUS_MISSED;
+function classifyPoseRow(latest, currentWeekStart) {
+  if (!latest) return { tier: TIER_MISSING, label: 'No submission this week' };
+  const thisWeek = latest.week_start === currentWeekStart;
+  const reviewed = !!(latest.reviewed_at || latest.reviewed_by);
+  if (thisWeek && !reviewed) return { tier: TIER_REVIEW, label: 'Needs your review' };
+  if (!thisWeek) return { tier: TIER_MISSING, label: 'No submission this week' };
+  return { tier: TIER_DONE, label: 'Reviewed this week' };
 }
+
+const SECTIONS = [
+  { tier: TIER_REVIEW, title: 'Review now', subtitle: 'Submitted this week — add feedback', Icon: AlertCircle, border: colors.primary },
+  { tier: TIER_MISSING, title: 'Missing this week', subtitle: 'Nudge or check in', Icon: Clock, border: colors.warning },
+  { tier: TIER_DONE, title: 'Caught up', subtitle: 'Reviewed or no action needed', Icon: CheckCircle2, border: colors.border },
+];
 
 export default function PoseCheckReviewPage() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState([]);
   const [latestMap, setLatestMap] = useState({});
@@ -71,25 +86,53 @@ export default function PoseCheckReviewPage() {
     return map;
   }, [prepHeaders]);
 
-  const rows = useMemo(() => {
+  const enrichedRows = useMemo(() => {
     return clients.map((client) => {
       const latest = latestMap[client.id] || null;
-      const status = getStatus(latest, currentWeekStart);
+      const { tier, label } = classifyPoseRow(latest, currentWeekStart);
       const prep = prepByClientId[client.id] ?? null;
-      const prepData = prep ? { has_active_prep: true, days_out: prep.days_out, show_date: prep.show_date, pose_check_submitted_this_week: prep.pose_check_submitted_this_week === true, show_name: prep.show_name, division: prep.division } : null;
-      const prepInsight = prepData ? generatePrepInsight(prepData) : null;
+      const prepData = prep
+        ? {
+            has_active_prep: true,
+            days_out: prep.days_out,
+            show_date: prep.show_date,
+            pose_check_submitted_this_week: prep.pose_check_submitted_this_week === true,
+            show_name: prep.show_name,
+            division: prep.division,
+          }
+        : null;
+      const prepInsight = prepData ? generatePrepInsight(prepData, viewerWU) : null;
       const prepSummary = prepInsight && prepInsight.title !== 'No active prep' ? prepInsight.summary : null;
-      return { client, latest, status, prepSummary };
+      const peakHint =
+        prep?.is_peak_week === true
+          ? 'Peak week'
+          : prep?.days_out != null && prep.days_out <= 14
+            ? `${prep.days_out}d to show`
+            : null;
+      return { client, latest, tier, statusLabel: label, prepSummary, peakHint };
     });
-  }, [clients, latestMap, currentWeekStart, prepByClientId]);
+  }, [clients, latestMap, currentWeekStart, prepByClientId, viewerWU]);
 
-  const statusLabel = (status) => (status === STATUS_SUBMITTED ? 'Submitted this week' : 'No submission');
-  const statusColor = (status) => (status === STATUS_SUBMITTED ? colors.primary : colors.muted);
+  const byTier = useMemo(() => {
+    const m = { [TIER_REVIEW]: [], [TIER_MISSING]: [], [TIER_DONE]: [] };
+    for (const row of enrichedRows) {
+      m[row.tier].push(row);
+    }
+    const sortFn = (a, b) => {
+      const ta = a.latest?.submitted_at ? new Date(a.latest.submitted_at).getTime() : 0;
+      const tb = b.latest?.submitted_at ? new Date(b.latest.submitted_at).getTime() : 0;
+      return tb - ta;
+    };
+    m[TIER_REVIEW].sort(sortFn);
+    m[TIER_MISSING].sort((a, b) => (a.client.name || '').localeCompare(b.client.name || ''));
+    m[TIER_DONE].sort(sortFn);
+    return m;
+  }, [enrichedRows]);
 
   if (loading) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-        <TopBar title="Pose check review" onBack={() => navigate(-1)} />
+        <TopBar title="Posing review" onBack={() => navigate(-1)} />
         <div className="p-4 flex items-center justify-center" style={{ minHeight: 200 }}>
           <p style={{ color: colors.muted }}>Loading…</p>
         </div>
@@ -98,48 +141,88 @@ export default function PoseCheckReviewPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
-      <TopBar title="Pose check review" onBack={() => navigate(-1)} />
+    <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
+      <TopBar title="Posing review" onBack={() => navigate(-1)} />
       <div className="p-4 pb-8">
-        <p className="text-sm mb-4" style={{ color: colors.muted }}>
-          Week of {currentWeekStart}
-        </p>
-        {rows.length === 0 ? (
+        <Card
+          style={{
+            padding: spacing[16],
+            marginBottom: spacing[16],
+            border: `1px solid ${colors.primary}44`,
+            boxShadow: shadows.glow,
+          }}
+        >
+          <p className="text-sm font-semibold" style={{ color: colors.text }}>Weekly posing queue</p>
+          <p className="text-xs mt-1" style={{ color: colors.muted }}>
+            Week of {currentWeekStart} · Start with <strong style={{ color: colors.text }}>Review now</strong>, then chase missing submissions.
+          </p>
+        </Card>
+
+        {enrichedRows.length === 0 ? (
           <Card style={{ padding: spacing[24], textAlign: 'center' }}>
             <p style={{ color: colors.muted }}>No clients yet.</p>
           </Card>
         ) : (
-          rows.map(({ client, latest, status, prepSummary }) => (
-            <Card
-              key={client.id}
-              style={{ marginBottom: spacing[12], padding: spacing[16], cursor: latest ? 'pointer' : 'default' }}
-              onClick={() => latest?.id && navigate(`/review-center/pose-checks/${latest.id}`)}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold" style={{ color: colors.text }}>
-                    {client.full_name || client.name || 'Client'}
-                  </p>
-                  <p className="text-sm" style={{ color: statusColor(status) }}>
-                    {statusLabel(status)}
-                  </p>
-                  {prepSummary && (
-                    <p className="text-xs mt-1" style={{ color: colors.muted }}>
-                      {prepSummary}
-                    </p>
-                  )}
-                  {latest?.submitted_at && (
-                    <p className="text-xs mt-1" style={{ color: colors.muted }}>
-                      Submitted {new Date(latest.submitted_at).toLocaleString()}
-                    </p>
-                  )}
+          SECTIONS.map(({ tier, title, subtitle, Icon, border }) => {
+            const list = byTier[tier] || [];
+            if (list.length === 0) return null;
+            return (
+              <section key={tier} style={{ marginBottom: spacing[20] }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Icon size={18} style={{ color: tier === TIER_REVIEW ? colors.primary : tier === TIER_MISSING ? colors.warning : colors.muted }} />
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide" style={{ color: colors.text }}>{title}</p>
+                    <p className="text-[11px]" style={{ color: colors.muted }}>{subtitle} · {list.length} client{list.length === 1 ? '' : 's'}</p>
+                  </div>
                 </div>
-                {latest?.id && (
-                  <ChevronRight size={20} style={{ color: colors.muted }} />
-                )}
-              </div>
-            </Card>
-          ))
+                <div className="space-y-2">
+                  {list.map(({ client, latest, statusLabel, prepSummary, peakHint }) => (
+                    <Card
+                      key={client.id}
+                      style={{
+                        padding: spacing[14],
+                        cursor: latest?.id ? 'pointer' : 'default',
+                        borderLeft: `4px solid ${border}`,
+                      }}
+                      onClick={() => latest?.id && navigate(`/review-center/pose-checks/${latest.id}`)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold truncate" style={{ color: colors.text }}>
+                            {client.full_name || client.name || 'Client'}
+                          </p>
+                          <p className="text-sm" style={{ color: tier === TIER_REVIEW ? colors.primary : colors.muted }}>
+                            {statusLabel}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {peakHint && (
+                              <span
+                                className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full"
+                                style={{ background: colors.warningSubtle, color: colors.warning }}
+                              >
+                                {peakHint}
+                              </span>
+                            )}
+                          </div>
+                          {prepSummary && (
+                            <p className="text-xs mt-1 line-clamp-2" style={{ color: colors.muted }}>
+                              {prepSummary}
+                            </p>
+                          )}
+                          {latest?.submitted_at && (
+                            <p className="text-[11px] mt-1" style={{ color: colors.muted }}>
+                              Submitted {new Date(latest.submitted_at).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                        {latest?.id && <ChevronRight size={20} style={{ color: colors.muted, flexShrink: 0 }} />}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            );
+          })
         )}
       </div>
     </div>

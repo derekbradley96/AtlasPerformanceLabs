@@ -19,6 +19,9 @@ import TimeframeFilter, { getCutoffDateForRange, DEFAULT_TIMEFRAME, TIMEFRAME_OP
 import { resolveOrgCoachScope } from '@/lib/organisationScope';
 import { toCSV, downloadCSV } from '@/lib/csvExport';
 import { ChevronRight, TrendingUp, AlertTriangle, ClipboardCheck, Award, BarChart3, Download, Loader2 } from 'lucide-react';
+import { resolveCoachPlanTier } from '@/config/plans';
+import { CoachAnalyticsProGateCard } from '@/components/coaching/CoachUpgradeMoments';
+import { usePresentationMode } from '@/lib/presentationMode';
 
 const TOP_LIST_SIZE = 5;
 const MAX_TREND_WEEKS = 52;
@@ -311,6 +314,7 @@ function parseTimeframeFromSearchParams(searchParams) {
 
 export default function CoachAnalyticsPage() {
   const navigate = useNavigate();
+  const { isDesktopWeb } = usePresentationMode();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, effectiveRole, profile, coachFocus: coachFocusFromAuth } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -328,6 +332,7 @@ export default function CoachAnalyticsPage() {
   });
 
   const coachId = user?.id ?? null;
+  const planTier = resolveCoachPlanTier(profile, user);
   const isCoachRole = isCoach(effectiveRole);
   const coachFocus = getCoachFocus(profile, coachFocusFromAuth);
   const showPrep = showPoseAndPeakByFocus(coachFocus);
@@ -384,7 +389,7 @@ export default function CoachAnalyticsPage() {
   if (loading) {
     return (
       <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
-        <div className="p-4 max-w-lg mx-auto">
+        <div className={`p-4 ${isDesktopWeb ? 'max-w-6xl' : 'max-w-lg'} mx-auto`}>
           <h1 className="atlas-page-title">Analytics</h1>
           <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>Roster health and trends at a glance.</p>
           <div style={{ marginBottom: spacing[16] }}>
@@ -511,15 +516,15 @@ export default function CoachAnalyticsPage() {
   if (!hasRoster) {
     return (
       <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
-        <div className="p-4 max-w-lg mx-auto">
+        <div className={`p-4 ${isDesktopWeb ? 'max-w-6xl' : 'max-w-lg'} mx-auto`}>
           <h1 className="atlas-page-title">Analytics</h1>
           <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>Roster health and trends at a glance.</p>
           <EmptyState
             title="No analytics yet"
-            description="Your roster is empty. Add clients to see compliance, check-in trends, and retention insights here."
+            description="Your roster is empty. Invite athletes with your link or coach code; after they complete onboarding, analytics appear here."
             icon={BarChart3}
-            actionLabel="View clients"
-            onAction={() => navigate('/clients')}
+            actionLabel="Invite clients"
+            onAction={() => navigate('/get-clients')}
           />
         </div>
       </div>
@@ -528,7 +533,7 @@ export default function CoachAnalyticsPage() {
 
   return (
     <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
-      <div className="p-4 max-w-lg mx-auto">
+      <div className={`p-4 ${isDesktopWeb ? 'max-w-6xl' : 'max-w-lg'} mx-auto`}>
         <h1 className="atlas-page-title">Analytics</h1>
         <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>
           Roster health and trends at a glance.
@@ -593,6 +598,8 @@ export default function CoachAnalyticsPage() {
             </div>
           </div>
         </Card>
+
+        <CoachAnalyticsProGateCard planTier={planTier} />
 
         {/* Adaptive insights */}
         <div className="mb-2">

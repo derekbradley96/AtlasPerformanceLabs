@@ -1,14 +1,14 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
+import { isInternalAdmin } from '@/lib/internalAccess';
 import { useAlertStatus } from '@/components/hooks/useAlertStatus';
-import { UserCircle, MessageSquare, Palette, HelpCircle, Trophy, Phone, Link2, Users, CheckSquare, Award, BarChart3, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Dumbbell, Store, Inbox, Bell, Gift, Calendar, Building2, Building, Pill, Activity, LayoutDashboard } from 'lucide-react';
-import { createPageUrl } from '@/utils';
+import { UserCircle, MessageSquare, Palette, HelpCircle, Trophy, Phone, Link2, Users, CheckSquare, Award, BarChart3, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Store, Inbox, Bell, Gift, Calendar, Building2, Activity, LayoutDashboard, ChevronRight, UtensilsCrossed, Crosshair, UserPlus, Send, ClipboardList, Dumbbell, LineChart, Target, Share2 } from 'lucide-react';
 import { seedIfEmpty, resetSandbox, addClient } from '@/lib/sandboxStore';
 import { getTrainerId } from '@/lib/getTrainerId';
 import { getClientByUserId, getClientCheckIns } from '@/data/selectors';
 import { getTrainerProfile } from '@/lib/trainerFoundation/trainerProfileRepo';
-import { PLANS, CURRENCY } from '@/config/plans';
+import { PLANS, PLAN_TIER_IDS } from '@/config/plans';
 import { getAchievementsList, getShownAchievementIds } from '@/lib/milestonesStore';
 import { evaluateUserMilestones } from '@/lib/milestoneEngine';
 import {
@@ -18,19 +18,23 @@ import {
   shouldShowMilestone,
 } from '@/lib/milestoneDismissedStore';
 import { useTrainerPermissions } from '@/components/hooks/useTrainerPermissions';
-import { shouldShowModule } from '@/lib/coachFocus';
-import { isCoach, isClient, isPersonal, roleHomePath } from '@/lib/roles';
-import { getRouteTitle } from '@/lib/routeMeta';
+import { isCoach, isClient, isPersonal } from '@/lib/roles';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
 import Card from '@/ui/Card';
 import Row from '@/ui/Row';
-import { colors, spacing, shell } from '@/ui/tokens';
-import { pageContainer, standardCard, sectionGap } from '@/ui/pageLayout';
+import { colors, spacing } from '@/ui/tokens';
+import { pageContainer, standardCard } from '@/ui/pageLayout';
 import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';
 import RequestConsultationModal from '@/components/consultation/RequestConsultationModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { personalMoreHubHelperText, personalPlanBadgeLabel } from '@/lib/personalAccountUx';
+import PersonalSurface from '@/components/personal/PersonalSurface';
+import { usePresentationMode } from '@/lib/presentationMode';
+import PersonalMoreDesktopLayout from '@/components/personal/PersonalMoreDesktopLayout';
+import { deriveMorePageSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
+import { showCoachManualClientAcquisitionTools } from '@/lib/coachClientAcquisition';
 
 /** Local error boundary: captures and shows the real error so we can fix it. */
 class MoreErrorBoundary extends React.Component {
@@ -107,42 +111,6 @@ class MoreErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
-
-const TRAINER_ROWS = [
-  { label: 'Command center', icon: LayoutDashboard, path: '/command-center' },
-  { label: 'Briefing', icon: FileText, path: '/briefing' },
-  { label: 'Analytics', icon: TrendingUp, path: '/analytics' },
-  { label: 'Daily closeout', icon: CheckSquare, path: '/closeout' },
-  { label: 'Capacity', icon: BarChart3, path: '/capacity' },
-  { label: 'Session calendar', icon: Calendar, path: '/calendar' },
-  { label: 'Gym overview', icon: Building2, path: '/gym' },
-  { label: 'Supplement stacks', icon: Pill, path: '/supplements/stacks' },
-  { label: 'Competition Prep', icon: Award, path: '/comp-prep' },
-  { label: 'Marketplace listing', icon: Store, path: '/marketplace-setup' },
-  { label: 'Marketplace profile', icon: Store, path: '/marketplace-profile' },
-  { label: 'Inquiry inbox', icon: Inbox, path: '/inquiry-inbox' },
-  { label: 'Account', icon: UserCircle, path: '/account' },
-  { label: 'Plan & Billing', icon: CreditCard, path: '/plan' },
-  { label: 'Referrals', icon: Gift, path: '/referrals' },
-  { label: 'Enquiries', icon: Inbox, path: '/enquiries' },
-  { label: 'Result stories', icon: Trophy, path: '/results-stories/new' },
-  { label: 'Organisation', icon: Building, path: '/organisation' },
-  { label: 'Team', icon: UsersRound, path: '/team' },
-  { label: 'Notification Center', icon: Bell, path: '/notifications' },
-  { label: 'Notification settings', icon: MessageSquare, path: '/settings/notifications' },
-  { label: 'Branding', icon: Image, path: '/settings/branding' },
-  { label: 'Appearance', icon: Palette, page: 'Appearance' },
-  { label: 'Help', icon: HelpCircle, page: 'HelpSupport' },
-  { label: 'Consultations', icon: Phone, path: '/consultations' },
-  { label: 'Onboarding link', icon: Link2, path: '/onboarding-link' },
-  { label: 'Public link', icon: Link2, path: '/public-link' },
-  { label: 'Services', icon: Package, path: '/services' },
-  { label: 'Import clients', icon: Package, path: '/import-clients' },
-  { label: 'Import program', icon: FileText, path: '/import-programs' },
-  { label: 'Import bodyweight history', icon: Activity, path: '/import-bodyweight' },
-  { label: 'Intake templates', icon: FileText, path: '/intake-templates' },
-  { label: 'Leads', icon: Users, path: '/leads' },
-];
 
 /** DEV-only: Sandbox Tools sheet – Add Temp Client, Seed, Reset. */
 function SandboxToolsSheet({ onClose, onAdded, getTrainerId, addClient: addClientFn, seedIfEmpty: seedFn, resetSandbox: resetFn }) {
@@ -271,21 +239,31 @@ function SandboxToolsSheet({ onClose, onAdded, getTrainerId, addClient: addClien
   );
 }
 
-function getCurrentPlanIdFromStorage() {
-  try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('atlas_trainer_plan') : null;
-    return raw || 'pro';
-  } catch {
-    return 'pro';
-  }
-}
-
 function MoreContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { openFeedback, openSupport } = useFeedbackModal();
-  const { user: authUser, profile, logout, role: authRole, effectiveRole, setRole, setFakeSession, setRoleOverride, setCoachFocusOverride, canUseRoleSwitcher, hasCompetitionPrep, coachFocus, coachFocusOverride, supabaseSession } = useAuth();
-  const isPlatformAdmin = profile?.is_admin === true || authUser?.email === ADMIN_EMAIL;
+  const {
+    user: authUser,
+    profile,
+    logout,
+    role: authRole,
+    effectiveRole,
+    setRole,
+    setFakeSession,
+    supabaseSession,
+    resolvedAccess,
+    supabaseUser,
+    isDemoMode,
+    isAdminBypass,
+  } = useAuth();
+  const showManualClientTools = showCoachManualClientAcquisitionTools({
+    isDemoMode,
+    isAdminBypass,
+    profile,
+    supabaseUser,
+  });
+  const isPlatformAdmin = isInternalAdmin(supabaseUser);
   const [achievementModalRecord, setAchievementModalRecord] = useState(null);
   const [consultationModalOpen, setConsultationModalOpen] = useState(false);
   const [sandboxToolsOpen, setSandboxToolsOpen] = useState(false);
@@ -298,7 +276,7 @@ function MoreContent() {
   const trainerProfile = (isCoach(authRole) && userId) ? getTrainerProfile(userId) : null;
   const { canAccessTeam, isAssistant } = useTrainerPermissions();
   const clientForUser = userId ? getClientByUserId(userId) : null;
-  const planId = getCurrentPlanIdFromStorage();
+  const planId = resolvedAccess?.coachPlanTier || 'basic';
   const fallbackPlan = PLANS.find((p) => p.id === 'pro') || PLANS[0] || { id: 'pro', name: 'Pro', price: 0, commission: null };
   const currentPlan = PLANS.find((p) => p.id === planId) || fallbackPlan;
   const checkInsForUser = clientForUser ? getClientCheckIns(clientForUser.id) : [];
@@ -318,6 +296,17 @@ function MoreContent() {
     markAlertsSeen();
   }, [userId, markAlertsSeen]);
 
+  /** Keep localStorage in sync with DB so Trainer Plan + permissions match onboarding. */
+  useEffect(() => {
+    const t = (profile?.plan_tier ?? displayUser?.plan_tier ?? '').toString().toLowerCase().trim();
+    if (!PLAN_TIER_IDS.includes(t) || typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem('atlas_trainer_plan', t);
+    } catch {
+      // ignore
+    }
+  }, [profile?.plan_tier, displayUser?.plan_tier]);
+
   useEffect(() => {
     if (!userId || isCoach(authRole)) return;
     const newlyUnlocked = evaluateUserMilestones(userId, checkInsForUser);
@@ -334,32 +323,29 @@ function MoreContent() {
     setAchievementModalRecord(newlyUnlocked);
   }, [userId, authRole, checkInsForUser.length]);
 
+  const { isWideWeb } = usePresentationMode();
   const roleLabel = isCoach(effectiveRole) ? 'Coach' : isClient(effectiveRole) ? 'Client' : 'Personal';
-  const isTrainer = isCoach(effectiveRole);
-  const isSolo = isPersonal(effectiveRole);
+  const isTrainer = resolvedAccess?.isCoach ?? isCoach(effectiveRole);
+  const isSolo = resolvedAccess?.isPersonal ?? isPersonal(effectiveRole);
   const showContent = !!displayUser;
 
-  const handleRoleSwitcher = (viewRole) => {
-    if (viewRole === 'admin') {
-      impactLight();
-      navigate('/admin', { replace: true });
-      return;
-    }
-    if (viewRole !== 'coach' && viewRole !== 'client' && viewRole !== 'personal') return;
-    setRoleOverride(viewRole);
-    impactLight();
-    navigate(roleHomePath(viewRole), { replace: true });
-  };
-  const handleUseActualRole = () => {
-    setRoleOverride(null);
-    impactLight();
-    navigate(roleHomePath(authRole), { replace: true });
-  };
+  const coachFocusEffective = resolvedAccess?.coachFocus || 'transformation';
+  const personalTier = resolvedAccess?.personalPlanTier || 'basic';
+  const realRoleKey = isCoach(effectiveRole) ? 'coach' : isClient(effectiveRole) ? 'client' : 'personal';
+  const [previewRole, setPreviewRole] = useState(() => (isPlatformAdmin ? realRoleKey : null));
+  const [previewCoachSubtype, setPreviewCoachSubtype] = useState(() => String(coachFocusEffective || 'transformation'));
+  const [previewCoachTier, setPreviewCoachTier] = useState(() => String(planId || 'basic'));
+  const [previewClientSubtype, setPreviewClientSubtype] = useState(() => String(resolvedAccess?.clientDeliveryContext || 'transformation'));
+  const [previewPersonalTier, setPreviewPersonalTier] = useState(() => String(personalTier || 'basic'));
 
-  const handleRow = (item) => {
-    if (item.path) navigate(item.path);
-    else if (item.page) navigate(createPageUrl(item.page));
-  };
+  useEffect(() => {
+    if (!isPlatformAdmin) return;
+    setPreviewRole(realRoleKey);
+    setPreviewCoachSubtype(String(coachFocusEffective || 'transformation'));
+    setPreviewCoachTier(String(planId || 'basic'));
+    setPreviewClientSubtype(String(resolvedAccess?.clientDeliveryContext || 'transformation'));
+    setPreviewPersonalTier(String(personalTier || 'basic'));
+  }, [isPlatformAdmin, realRoleKey, coachFocusEffective, planId, resolvedAccess?.clientDeliveryContext, personalTier]);
 
   const handleDevRoleChange = (newRole) => {
     if (newRole !== 'coach' && newRole !== 'client' && newRole !== 'personal') return;
@@ -367,9 +353,260 @@ function MoreContent() {
     setFakeSession(newRole, displayUser?.email || '');
   };
 
+
+  const previewIdentityLine = useMemo(() => {
+    if (!isPlatformAdmin) return roleLabel;
+    if (previewRole === 'coach') {
+      return `Coach · ${previewCoachSubtype.charAt(0).toUpperCase() + previewCoachSubtype.slice(1)} · ${String(previewCoachTier || 'basic').toUpperCase()}`;
+    }
+    if (previewRole === 'client') {
+      return `Client · ${previewClientSubtype.charAt(0).toUpperCase() + previewClientSubtype.slice(1)}`;
+    }
+    if (previewRole === 'personal') {
+      return `Personal · ${previewPersonalTier === 'enhanced' ? 'Enhanced' : 'Basic'}`;
+    }
+    return 'Admin / Owner';
+  }, [isPlatformAdmin, previewRole, previewCoachSubtype, previewCoachTier, previewClientSubtype, previewPersonalTier, roleLabel]);
+
+  const previewModeActive = isPlatformAdmin && previewRole && previewRole !== realRoleKey;
+  const activePreviewRole = isPlatformAdmin ? previewRole : realRoleKey;
+  /** Website shell: wide Personal More uses sidebar + sections (not mobile list). */
+  const showPersonalMoreDesktop =
+    isWideWeb && activePreviewRole === 'personal' && (isSolo || isPlatformAdmin);
+  const personalTierEffective =
+    isPlatformAdmin && activePreviewRole === 'personal' ? previewPersonalTier : personalTier;
+  const personalTierLabelDesktop = personalTierEffective === 'enhanced' ? 'Enhanced' : 'Basic';
+  const isBasicTierDesktop = personalTierEffective !== 'enhanced';
+
+  const renderRolePreviewMenus = () => {
+    const menuRow = (icon, title, subtitle, to) => (
+      <Row
+        left={icon}
+        title={title}
+        subtitle={subtitle}
+        showChevron
+        onPress={() => {
+          impactLight();
+          if (to) navigate(to);
+        }}
+      />
+    );
+
+    if (activePreviewRole === 'coach') {
+      const prepCoachSurfaces =
+        isPlatformAdmin && previewRole === 'coach'
+          ? previewCoachSubtype === 'competition' || previewCoachSubtype === 'integrated'
+          : !!resolvedAccess?.hasCompetitionPrep;
+      return (
+        <>
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Growth
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<UserPlus size={20} style={{ color: colors.muted }} />, 'Get Clients', 'Invite link, code, and pending joins', '/get-clients')}
+            {menuRow(<Store size={20} style={{ color: colors.muted }} />, 'Marketplace Setup', 'Discovery profile, pricing, go public', '/marketplace-setup')}
+            {menuRow(<Link2 size={20} style={{ color: colors.muted }} />, 'Onboarding link', 'Coach signup and onboarding entry', '/onboarding-link')}
+            {menuRow(<Send size={20} style={{ color: colors.muted }} />, 'Public link', 'Shareable entry without full onboarding', '/public-link')}
+            {menuRow(<Inbox size={20} style={{ color: colors.muted }} />, 'Enquiries', 'Inbound questions from athletes', '/enquiries')}
+            {menuRow(<Share2 size={20} style={{ color: colors.muted }} />, 'Referrals', 'Share Atlas and track referrals', '/referrals')}
+            {menuRow(<Image size={20} style={{ color: colors.muted }} />, 'Result stories', 'Before/after and social proof', '/results-stories/new')}
+            {showManualClientTools
+              ? menuRow(
+                  <Package size={20} style={{ color: colors.muted }} />,
+                  'Client import (dev / admin)',
+                  'CSV migration — not a production roster path',
+                  '/import-clients'
+                )
+              : null}
+          </div>
+
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Coaching
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Review Queue', 'Prioritized triage, filters, and sort', '/review-center')}
+            {menuRow(<FileText size={20} style={{ color: colors.muted }} />, 'Programs', 'Program library and templates', '/programs')}
+            {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition plans', 'Per-client nutrition plans', '/trainer/nutrition')}
+            {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Check-in templates', 'Templates coaches send to clients', '/checkintemplates')}
+            {menuRow(<Phone size={20} style={{ color: colors.muted }} />, 'Services', 'Offers and service packages', '/services')}
+            {menuRow(<Zap size={20} style={{ color: colors.muted }} />, 'Training Intelligence', 'Workload and automation signals', '/trainingintelligence')}
+            {menuRow(<Activity size={20} style={{ color: colors.muted }} />, 'Capacity', 'Roster load and limits', '/capacity')}
+          </div>
+
+          {prepCoachSurfaces ? (
+            <>
+              <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+                <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+                  Comp prep
+                </p>
+              </Card>
+              <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+                {menuRow(<Award size={20} style={{ color: colors.muted }} />, 'Prep command center', 'Roster prep overview and timeline', '/prep-dashboard')}
+                {menuRow(<Crosshair size={20} style={{ color: colors.muted }} />, 'Prep library & tools', 'Poses, photo guide, media, reviews', '/comp-prep')}
+                {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Peak Week', 'Command center and dashboards', '/peak-week-dashboard')}
+                {menuRow(<LineChart size={20} style={{ color: colors.muted }} />, 'Prep comparison', 'Side-by-side prep views', '/prep-comparison')}
+                {menuRow(<LayoutDashboard size={20} style={{ color: colors.muted }} />, 'Peak Week command center', 'Peak-week operations hub', '/peak-week-command-center')}
+              </div>
+            </>
+          ) : null}
+
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Business
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<CreditCard size={20} style={{ color: colors.muted }} />, 'Earnings', 'Subscriptions, payouts, invoices', '/earnings')}
+            {menuRow(<TrendingUp size={20} style={{ color: colors.muted }} />, 'Revenue', 'Expected and collected revenue', '/revenue')}
+            {menuRow(<LineChart size={20} style={{ color: colors.muted }} />, 'Revenue analytics', 'Trends and cohort views', '/revenue-analytics')}
+            {menuRow(<BarChart3 size={20} style={{ color: colors.muted }} />, 'Analytics', 'Coaching and roster signals', '/analytics')}
+            {menuRow(<Building2 size={20} style={{ color: colors.muted }} />, 'Organisation', 'Org dashboard and setup', '/organisation')}
+            {menuRow(<UsersRound size={20} style={{ color: colors.muted }} />, 'Team', 'Seats and permissions', '/team')}
+            {menuRow(<Gift size={20} style={{ color: colors.muted }} />, 'Plan & billing', 'Subscription and upgrades', '/plan')}
+            {menuRow(<Inbox size={20} style={{ color: colors.muted }} />, 'Leads', 'Lead pipeline', '/leads')}
+            {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Consultations', 'Booking and consult offers', '/consultations')}
+          </div>
+
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Account
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<UserCircle size={20} style={{ color: colors.muted }} />, 'Profile', 'Photo, name, and preferences', '/profile-account')}
+            {menuRow(<Palette size={20} style={{ color: colors.muted }} />, 'Settings', 'Account, appearance, and security', '/settings/account')}
+            {menuRow(<Bell size={20} style={{ color: colors.muted }} />, 'Notifications', 'Alerts and delivery settings', '/notifications')}
+            {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help & support', 'Get help and contact support', '/helpsupport')}
+          </div>
+        </>
+      );
+    }
+    if (activePreviewRole === 'client') {
+      return (
+        <>
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Coaching
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<Dumbbell size={20} style={{ color: colors.muted }} />, 'Training plan', 'Your assigned program', '/myprogram')}
+            {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition plan', 'Targets and daily fuel', '/nutrition')}
+            {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Check-ins', 'Submit and review check-ins', '/clientcheckin')}
+            {menuRow(<TrendingUp size={20} style={{ color: colors.muted }} />, 'Progress', 'Trends and milestones', '/progress')}
+            {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Habits', 'Daily habit tracking', '/habits-daily')}
+          </div>
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Communication
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<MessageSquare size={20} style={{ color: colors.muted }} />, 'Messages', 'Chat with your coach', '/messages')}
+            {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'My coach', 'Coach relationship and contact', '/my-trainer')}
+          </div>
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Account
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<UserCircle size={20} style={{ color: colors.muted }} />, 'Profile', 'Your profile and preferences', '/profile-account')}
+            {menuRow(<Palette size={20} style={{ color: colors.muted }} />, 'Settings', 'Account and app settings', '/settings/account')}
+            {menuRow(<Bell size={20} style={{ color: colors.muted }} />, 'Notifications', 'Alerts and delivery settings', '/notifications')}
+          </div>
+          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+              Support
+            </p>
+          </Card>
+          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+            {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help & support', 'Get help and contact support', '/helpsupport')}
+            {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Check-in preferences', 'Daily check-in settings', '/check-in')}
+          </div>
+        </>
+      );
+    }
+    if (activePreviewRole === 'admin') {
+      return (
+        <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+          {menuRow(<UserCircle size={20} style={{ color: colors.muted }} />, 'Account & settings', 'Owner account preferences', '/profile-account')}
+          {menuRow(<Bell size={20} style={{ color: colors.muted }} />, 'Notifications', 'Owner notification center', '/notifications')}
+          {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help & support', 'Support and reporting', '/helpsupport')}
+        </div>
+      );
+    }
+    if (showPersonalMoreDesktop) return null;
+    return (
+      <>
+        <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+          <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+            Training
+          </p>
+        </Card>
+        <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+          {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Today', 'Today’s session and plan', '/today')}
+          {menuRow(<Dumbbell size={20} style={{ color: colors.muted }} />, 'My program', 'Blocks and training plan', '/myprogram')}
+          {menuRow(<FileText size={20} style={{ color: colors.muted }} />, 'Program builder', 'Edit your personal program', '/program-builder?personal=1')}
+        </div>
+        <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+          <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+            Nutrition
+          </p>
+        </Card>
+        <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+          {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition', 'Logging and daily fuel', '/nutrition')}
+          {menuRow(<Target size={20} style={{ color: colors.muted }} />, 'Nutrition targets', 'Calories and macros', '/nutrition-targets')}
+        </div>
+        <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+          <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+            Progress
+          </p>
+        </Card>
+        <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+          {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Daily check-in', 'Readiness and recovery', '/readiness-checkin')}
+          {menuRow(<TrendingUp size={20} style={{ color: colors.muted }} />, 'Progress', 'Trends and consistency', '/progress')}
+          {menuRow(<Image size={20} style={{ color: colors.muted }} />, 'Progress photos', 'Photo check-ins', '/progressphotos')}
+          {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Check-ins', 'History and templates', '/checkins')}
+        </div>
+        <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+          <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+            Account
+          </p>
+        </Card>
+        <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+          {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'Work with a coach', 'Browse coaches and matching', '/personal/coach-transition')}
+          {menuRow(<UserCircle size={20} style={{ color: colors.muted }} />, 'Profile', 'Goals, units, and preferences', '/profile-account')}
+          {menuRow(<Palette size={20} style={{ color: colors.muted }} />, 'Settings', 'Account and app settings', '/settings/account')}
+          {menuRow(<Bell size={20} style={{ color: colors.muted }} />, 'Notifications', 'Activity and alerts', '/notifications')}
+          {menuRow(<Trophy size={20} style={{ color: colors.muted }} />, 'Achievements', 'Milestones and unlocks', '/achievements')}
+          {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help & support', 'Get help and contact support', '/helpsupport')}
+        </div>
+      </>
+    );
+  };
+
+  const moreMigration = useMemo(
+    () =>
+      deriveMorePageSurfaceState({
+        signedIn: showContent,
+        activeRoleKey: activePreviewRole,
+        adminPreview: previewModeActive,
+      }),
+    [showContent, activePreviewRole, previewModeActive]
+  );
+
   // Single stable root: sign-in prompt when no user, content when ready. Never swap root tree.
   return (
-    <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={showContent ? pageContainer : undefined}>
+    <div
+      className="app-screen min-w-0 max-w-full overflow-x-hidden"
+      {...atlasMigrationDataAttributes(moreMigration.phase, moreMigration.primary)}
+      style={showContent ? pageContainer : undefined}
+    >
       {!showContent ? (
         <Card style={{ ...standardCard, marginTop: spacing[24], padding: spacing[24], textAlign: 'center' }}>
           <p className="text-[17px] font-medium mb-2" style={{ color: colors.text }}>Please sign in</p>
@@ -384,8 +621,33 @@ function MoreContent() {
           </button>
         </Card>
       ) : (
+        <PersonalSurface variant={showPersonalMoreDesktop ? 'home' : 'default'}>
         <>
-      <Card style={{ marginBottom: spacing[24] }}>
+      {!showPersonalMoreDesktop ? (
+        <>
+      <Card style={{ marginBottom: spacing[12], padding: spacing[16] }}>
+        <p className="text-[20px] font-semibold" style={{ color: colors.text }}>More</p>
+        <p className="text-sm mt-1" style={{ color: colors.muted }}>
+          {isPlatformAdmin
+            ? 'Preview role wrappers and manage platform controls'
+            : 'Directory for tools, settings, and profile — same app, role-specific shortcuts'}
+        </p>
+      </Card>
+
+      <Card
+        style={{
+          marginBottom: spacing[16],
+          ...(isPlatformAdmin || isSolo ? {} : { cursor: 'pointer' }),
+        }}
+        onClick={
+          isSolo || isPlatformAdmin
+            ? undefined
+            : () => {
+                impactLight();
+                navigate('/profile-account');
+              }
+        }
+      >
         <div className="flex items-center gap-3">
           <div
             className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-semibold flex-shrink-0 overflow-hidden"
@@ -394,67 +656,101 @@ function MoreContent() {
             {trainerProfile?.profileImage ? (
               <img src={trainerProfile.profileImage} alt="" className="w-full h-full object-cover" />
             ) : (
-              (displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || '?').slice(0, 2).toUpperCase()
+              (profile?.full_name || profile?.display_name || displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || '?').slice(0, 2).toUpperCase()
             )}
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-[17px] font-semibold truncate" style={{ color: colors.text }}>
-              {displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || 'User'}
+              {profile?.full_name || profile?.display_name || displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || 'Your profile'}
             </p>
-            <p className="text-sm truncate" style={{ color: colors.muted }}>{roleLabel}</p>
+            <p className="text-sm truncate" style={{ color: colors.muted }}>{previewIdentityLine}</p>
             {(displayUser?.email ?? displayUser?.user_metadata?.email) && (
               <p className="text-xs truncate mt-0.5" style={{ color: colors.muted }}>{displayUser?.email ?? displayUser?.user_metadata?.email}</p>
             )}
+            {activePreviewRole === 'personal' && (
+              <p className="text-xs mt-1.5 font-semibold" style={{ color: colors.primary }}>
+                {isPlatformAdmin
+                  ? (previewPersonalTier === 'enhanced' ? 'Enhanced' : 'Basic')
+                  : personalPlanBadgeLabel({ profile, user: displayUser })}
+              </p>
+            )}
           </div>
-          <span
-            className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium"
-            style={{
-              background: isTrainer ? colors.primarySubtle : authRole === 'client' ? colors.successSubtle : colors.surface1,
-              color: isTrainer ? colors.accent : authRole === 'client' ? colors.success : colors.muted,
-            }}
-          >
-            {roleLabel}
-          </span>
+          {previewModeActive ? (
+            <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: colors.primarySubtle, color: colors.primary }}>
+              Preview mode
+            </span>
+          ) : !isSolo && (
+            <div className="shrink-0 flex items-center gap-2">
+              <span
+                className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                style={{
+                  background: isTrainer ? colors.primarySubtle : authRole === 'client' ? colors.successSubtle : colors.surface1,
+                  color: isTrainer ? colors.accent : authRole === 'client' ? colors.success : colors.muted,
+                }}
+              >
+                {roleLabel}
+              </span>
+              <ChevronRight size={16} style={{ color: colors.muted }} />
+            </div>
+          )}
         </div>
+        {activePreviewRole === 'personal' ? (
+          <p className="text-xs mt-3 leading-relaxed" style={{ color: colors.muted }}>
+            {personalMoreHubHelperText({ profile, user: displayUser })}
+          </p>
+        ) : (
+          <p className="text-xs mt-2" style={{ color: colors.primary, fontWeight: 600 }}>
+            Edit profile
+          </p>
+        )}
       </Card>
+        </>
+      ) : activePreviewRole === 'personal' ? (
+        <Card style={{ marginBottom: spacing[16], padding: spacing[14] }}>
+          <p className="text-[18px] font-semibold m-0" style={{ color: colors.text }}>Account</p>
+          <p className="text-sm mt-1 m-0" style={{ color: colors.muted }}>
+            {isPlatformAdmin ? 'Preview as Personal · manage platform controls below' : 'Settings and preferences'}
+          </p>
+        </Card>
+      ) : null}
 
-      {canUseRoleSwitcher && (
+      {isPlatformAdmin ? (
         <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
-          <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Developer tools (testing)</p>
-          <p className="text-xs mb-2" style={{ color: colors.muted }}>View as</p>
+          <p className="text-xs font-semibold mb-2" style={{ color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Role preview
+          </p>
+          <p className="text-xs mb-2" style={{ color: colors.muted }}>Preview wrapper as</p>
           <div className="flex flex-wrap gap-2 mb-3">
-            {['coach', 'client', 'personal', ...(isPlatformAdmin ? ['admin'] : [])].map((r) => (
+            {['coach', 'client', 'personal', 'admin'].map((r) => (
               <button
                 key={r}
                 type="button"
-                onClick={() => handleRoleSwitcher(r)}
+                onClick={() => setPreviewRole(r)}
                 className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
                 style={{
-                  background: (r === 'coach' ? (effectiveRole === 'coach' || effectiveRole === 'trainer') : r === 'client' || r === 'personal' ? effectiveRole === r : false) ? colors.primary : colors.surface1,
-                  color: (r === 'coach' ? (effectiveRole === 'coach' || effectiveRole === 'trainer') : r === 'client' || r === 'personal' ? effectiveRole === r : false) ? '#fff' : colors.text,
-                  border: r === 'admin' ? `1px solid ${colors.border}` : 'none',
+                  background: previewRole === r ? colors.primary : colors.surface1,
+                  color: previewRole === r ? '#fff' : colors.text,
+                  border: 'none',
                 }}
               >
                 {r === 'coach' ? 'Coach' : r === 'client' ? 'Client' : r === 'personal' ? 'Personal' : 'Admin'}
               </button>
             ))}
           </div>
-          {isTrainer && setCoachFocusOverride && (
+
+          {previewRole === 'coach' && (
             <>
-              <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Coach focus (when viewing as Coach)</p>
+              <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Coach subtype</p>
               <div className="flex flex-wrap gap-2">
                 {['transformation', 'competition', 'integrated'].map((focus) => (
                   <button
                     key={focus}
                     type="button"
-                    onClick={() => {
-                      setCoachFocusOverride(focus);
-                      impactLight();
-                    }}
+                    onClick={() => setPreviewCoachSubtype(focus)}
                     className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
                     style={{
-                      background: (coachFocusOverride ?? coachFocus) === focus ? colors.primary : colors.surface1,
-                      color: (coachFocusOverride ?? coachFocus) === focus ? '#fff' : colors.text,
+                      background: previewCoachSubtype === focus ? colors.primary : colors.surface1,
+                      color: previewCoachSubtype === focus ? '#fff' : colors.text,
                       border: 'none',
                     }}
                   >
@@ -462,229 +758,121 @@ function MoreContent() {
                   </button>
                 ))}
               </div>
+              <p className="text-xs font-medium mt-4 mb-2" style={{ color: colors.muted }}>Coach tier</p>
+              <div className="flex flex-wrap gap-2">
+                {PLAN_TIER_IDS.map((tierId) => (
+                  <button
+                    key={tierId}
+                    type="button"
+                    onClick={() => setPreviewCoachTier(tierId)}
+                    className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
+                    style={{
+                      background: previewCoachTier === tierId ? colors.primary : colors.surface1,
+                      color: previewCoachTier === tierId ? '#fff' : colors.text,
+                    }}
+                  >
+                    {tierId.toUpperCase()}
+                  </button>
+                ))}
+              </div>
             </>
           )}
-          {effectiveRole !== authRole && (
+
+          {previewRole === 'client' && (
+            <>
+              <p className="text-xs font-medium mt-4 mb-2" style={{ color: colors.muted }}>Client subtype</p>
+              <div className="flex flex-wrap gap-2">
+                {['transformation', 'competition'].map((ctx) => (
+                  <button
+                    key={ctx}
+                    type="button"
+                    onClick={() => setPreviewClientSubtype(ctx)}
+                    className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
+                    style={{
+                      background: previewClientSubtype === ctx ? colors.primary : colors.surface1,
+                      color: previewClientSubtype === ctx ? '#fff' : colors.text,
+                      border: 'none',
+                    }}
+                  >
+                    {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {previewRole === 'personal' && (
+            <>
+              <p className="text-xs font-medium mt-4 mb-2" style={{ color: colors.muted }}>Personal tier</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { id: 'basic', label: 'Basic' },
+                  { id: 'enhanced', label: 'Enhanced' },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setPreviewPersonalTier(t.id)}
+                    className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
+                    style={{
+                      background: previewPersonalTier === t.id ? colors.primary : colors.surface1,
+                      color: previewPersonalTier === t.id ? '#fff' : colors.text,
+                      border: 'none',
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {previewModeActive && (
             <button
               type="button"
-              onClick={handleUseActualRole}
+              onClick={() => setPreviewRole(realRoleKey)}
               className="mt-2 text-sm font-medium"
               style={{ color: colors.muted, background: 'none', border: 'none' }}
             >
-              Use my actual role ({authRole})
+              Use my real role
             </button>
           )}
         </Card>
-      )}
+      ) : null}
 
-      {isTrainer && !isAssistant && (
-        <Card style={{ marginBottom: spacing[16], padding: spacing[20], border: `1px solid ${colors.border}` }}>
-          <div className="flex items-start gap-3">
-            <span style={{ width: 44, height: 44, borderRadius: 12, background: colors.primarySubtle, color: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Building2 size={22} strokeWidth={2} />
-            </span>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-[17px] font-semibold mb-1" style={{ color: colors.text }}>Create Team</h3>
-              <p className="text-sm mb-3" style={{ color: colors.muted }}>
-                Organisation mode is for multi-coach teams, prep companies, and coaching brands. You become the owner and can invite more coaches later.
-              </p>
-              <button
-                type="button"
-                onClick={() => { impactLight(); navigate('/organisation/setup'); }}
-                className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-[15px] font-medium transition-opacity active:opacity-90"
-                style={{ background: colors.primarySubtle, color: colors.primary, border: 'none' }}
-              >
-                <Building2 size={18} />
-                Create Team
-              </button>
-            </div>
+      {renderRolePreviewMenus()}
+
+      {showPersonalMoreDesktop && activePreviewRole === 'personal' ? (
+        <PersonalMoreDesktopLayout
+          displayUser={displayUser}
+          profile={profile}
+          trainerProfile={trainerProfile}
+          personalTierLabel={personalTierLabelDesktop}
+          isBasicTier={isBasicTierDesktop}
+          onUpgrade={() => navigate('/pricing')}
+          previewIdentityLine={previewIdentityLine}
+          previewModeActive={previewModeActive}
+          navigate={navigate}
+          onOpenConsultation={() => setConsultationModalOpen(true)}
+          onLogout={logout}
+        />
+      ) : null}
+
+      {isPlatformAdmin ? (
+        <Card style={{ marginBottom: spacing[12], padding: spacing[12], border: `1px solid ${colors.border}`, background: colors.surface2 }}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold" style={{ color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Owner tools</p>
+            <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: colors.primarySubtle, color: colors.primary }}>Internal only</span>
           </div>
-        </Card>
-      )}
-
-      {isTrainer && !isAssistant && (
-        <Row
-          left={null}
-          title="Edit Profile"
-          showChevron={true}
-          onPress={() => navigate('/editprofile')}
-          style={{ marginBottom: spacing[8] }}
-        />
-      )}
-
-      {isTrainer && !isAssistant && (
-        <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
-          <p className="text-xs font-medium mb-1" style={{ color: colors.muted }}>Current plan</p>
-          <p className="text-[17px] font-semibold mb-1" style={{ color: colors.text }}>{currentPlan.name}</p>
-          <p className="text-sm mb-3" style={{ color: colors.muted }}>
-            {currentPlan.price === 0 ? `${CURRENCY}0` : `${CURRENCY}${currentPlan.price}`}/month
-            {currentPlan.commission != null && ` · ${currentPlan.commission} commission`}
-          </p>
-          <button
-            type="button"
-            onClick={() => { impactLight(); navigate('/plan'); }}
-            className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-[15px] font-medium"
-            style={{ background: colors.primarySubtle, color: colors.primary, border: 'none' }}
-          >
-            <Zap size={18} />
-            Upgrade & manage billing
-          </button>
-        </Card>
-      )}
-
-      {isSolo && (
-        <Row
-          left={<Phone size={20} style={{ color: colors.muted }} />}
-          title="Request consultation"
-          showChevron={true}
-          onPress={() => setConsultationModalOpen(true)}
-          style={{ marginBottom: spacing[8] }}
-        />
-      )}
-
-      {isSolo && (
-        <Card style={{ marginBottom: sectionGap, padding: spacing[20], border: `1px solid ${colors.border}` }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: spacing[12], marginBottom: spacing[16] }}>
-            <span style={{ width: 44, height: 44, borderRadius: shell.iconContainerRadius, background: colors.primarySubtle, color: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Users size={22} strokeWidth={2} />
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <h3 style={{ fontSize: 17, fontWeight: 600, color: colors.text, margin: 0, marginBottom: 4 }}>Find a Coach</h3>
-              <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>Discover coaches and get personalized programs, nutrition plans, and accountability.</p>
-            </div>
+          <div className="app-card overflow-hidden">
+            <Row left={<LayoutDashboard size={20} style={{ color: colors.muted }} />} title="Platform admin" showChevron onPress={() => navigate('/admin')} />
+            <Row left={<Zap size={20} style={{ color: colors.muted }} />} title="Sandbox tools" showChevron onPress={() => setSandboxToolsOpen(true)} />
+            <Row left={<Building2 size={20} style={{ color: colors.muted }} />} title="Navigation audit" showChevron onPress={() => navigate('/navigation-audit')} />
+            <Row left={<Users size={20} style={{ color: colors.muted }} />} title="Role select (internal)" showChevron onPress={() => navigate('/role-select')} />
           </div>
-          <button
-            type="button"
-            onClick={() => { impactLight(); navigate('/discover'); }}
-            className="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-[15px] font-semibold transition-opacity active:opacity-90"
-            style={{ background: colors.primary, color: '#fff', border: 'none' }}
-          >
-            Find a Coach
-          </button>
-        </Card>
-      )}
-
-      {authRole === 'client' && (
-        <>
-          <Row
-            left={<Activity size={20} style={{ color: colors.muted }} />}
-            title="Athlete dashboard"
-            showChevron={true}
-            onPress={() => { impactLight(); navigate('/client-dashboard'); }}
-            style={{ marginBottom: spacing[8] }}
-          />
-          <Row
-            left={<Calendar size={20} style={{ color: colors.muted }} />}
-            title="My sessions"
-            showChevron={true}
-            onPress={() => { impactLight(); navigate('/client/sessions'); }}
-            style={{ marginBottom: spacing[8] }}
-          />
-          <Row
-            left={<Pill size={20} style={{ color: colors.muted }} />}
-            title="My supplements"
-            showChevron={true}
-            onPress={() => { impactLight(); navigate('/client/supplements'); }}
-            style={{ marginBottom: spacing[8] }}
-          />
-          <Row
-            left={<Dumbbell size={20} style={{ color: colors.muted }} />}
-            title="Gym & equipment"
-            showChevron={true}
-            onPress={() => { impactLight(); navigate('/settings/equipment'); }}
-            style={{ marginBottom: spacing[8] }}
-          />
-        </>
-      )}
-
-      <div className="app-card overflow-hidden" style={{ marginBottom: spacing[24] }}>
-        <Row
-          left={<Trophy size={20} style={{ color: colors.muted }} />}
-          title="Achievements"
-          rightLabel={achievements.length > 0 ? `${achievements.length}` : null}
-          showChevron={true}
-          onPress={() => navigate('/achievements')}
-        />
-        <Row
-          left={<MessageSquare size={20} style={{ color: colors.muted }} />}
-          title="Send feedback"
-          showChevron={true}
-          onPress={() => { impactLight(); openFeedback(getRouteTitle(location.pathname)); }}
-        />
-        <Row
-          left={<HelpCircle size={20} style={{ color: colors.muted }} />}
-          title="Get help"
-          showChevron={true}
-          onPress={() => { impactLight(); openSupport(); }}
-        />
-        {isPlatformAdmin && (
-          <Row
-            left={<LayoutDashboard size={20} style={{ color: colors.muted }} />}
-            title="Platform admin"
-            showChevron={true}
-            onPress={() => { impactLight(); navigate('/admin'); }}
-          />
-        )}
-        {!isTrainer && (
-          <Row
-            left={<Users size={20} style={{ color: colors.muted }} />}
-            title="Find a Coach"
-            showChevron={true}
-            onPress={() => { impactLight(); navigate('/discover'); }}
-          />
-        )}
-        {TRAINER_ROWS.filter((item) => {
-          if (item.path === '/team' && !canAccessTeam) return false;
-          if (item.path === '/comp-prep' && (!hasCompetitionPrep || !shouldShowModule(coachFocus, 'comp_prep'))) return false;
-          return true;
-        }).map((item) => {
-          const Icon = item.icon;
-          return (
-            <Row
-              key={item.path || item.page}
-              left={<Icon size={20} style={{ color: colors.muted }} />}
-              title={item.label}
-              showChevron={true}
-              onPress={() => handleRow(item)}
-            />
-            );
-        })}
-      </div>
-
-      <div className="app-card overflow-hidden">
-        <button
-          type="button"
-          onClick={() => logout(true)}
-          className="w-full flex items-center justify-between text-left active:opacity-90"
-          style={{
-            minHeight: 68,
-            paddingLeft: spacing[16],
-            paddingRight: spacing[16],
-            background: 'transparent',
-            border: 'none',
-            borderTop: `1px solid ${colors.border}`,
-            color: colors.destructive,
-            fontSize: 15,
-            fontWeight: 500,
-          }}
-        >
-          Log out
-        </button>
-      </div>
-
-      {import.meta.env.DEV && (
-        <>
-          <div style={{ marginTop: spacing[24], paddingTop: spacing[16], borderTop: `1px solid ${colors.border}` }}>
-            <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Dev: Role</p>
-            <div
-              style={{
-                display: 'flex',
-                gap: 0,
-                background: colors.surface1,
-                borderRadius: 10,
-                padding: 2,
-              }}
-            >
+          <div style={{ marginTop: spacing[10] }}>
+            <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Dev role switcher (real)</p>
+            <div style={{ display: 'flex', gap: 0, background: colors.surface1, borderRadius: 10, padding: 2 }}>
               {['coach', 'client', 'personal'].map((r) => (
                 <button
                   key={r}
@@ -706,24 +894,42 @@ function MoreContent() {
                 </button>
               ))}
             </div>
-            <Row
-              left={<Zap size={20} style={{ color: colors.muted }} />}
-              title="Sandbox Tools"
-              onPress={() => setSandboxToolsOpen(true)}
-              style={{ marginTop: spacing[12] }}
-            />
           </div>
-          {sandboxToolsOpen && (
-            <SandboxToolsSheet
-              onClose={() => setSandboxToolsOpen(false)}
-              onAdded={() => { setSandboxToolsOpen(false); window.dispatchEvent(new Event('atlas-sandbox-updated')); }}
-              getTrainerId={() => getTrainerId(supabaseSession)}
-              addClient={addClient}
-              seedIfEmpty={seedIfEmpty}
-              resetSandbox={resetSandbox}
-            />
-          )}
-        </>
+        </Card>
+      ) : null}
+
+      {!(showPersonalMoreDesktop && activePreviewRole === 'personal') ? (
+        <div className="app-card overflow-hidden">
+          <button
+            type="button"
+            onClick={() => logout(true)}
+            className="w-full flex items-center justify-between text-left active:opacity-90"
+            style={{
+              minHeight: 68,
+              paddingLeft: spacing[16],
+              paddingRight: spacing[16],
+              background: 'transparent',
+              border: 'none',
+              borderTop: `1px solid ${colors.border}`,
+              color: colors.destructive,
+              fontSize: 15,
+              fontWeight: 500,
+            }}
+          >
+            Log out
+          </button>
+        </div>
+      ) : null}
+
+      {isPlatformAdmin && sandboxToolsOpen && (
+        <SandboxToolsSheet
+          onClose={() => setSandboxToolsOpen(false)}
+          onAdded={() => { setSandboxToolsOpen(false); window.dispatchEvent(new Event('atlas-sandbox-updated')); }}
+          getTrainerId={() => getTrainerId(supabaseSession)}
+          addClient={addClient}
+          seedIfEmpty={seedIfEmpty}
+          resetSandbox={resetSandbox}
+        />
       )}
 
       {achievementModalRecord && (
@@ -752,6 +958,7 @@ function MoreContent() {
         />
       )}
         </>
+        </PersonalSurface>
       )}
     </div>
   );

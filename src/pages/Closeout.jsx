@@ -17,6 +17,7 @@ import { notificationSuccess } from '@/lib/haptics';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
+import { normalizeReviewQueueFilterParam, REVIEW_QUEUE_PATH } from '@/lib/coachReviewRoutes';
 
 const CATEGORIES = [
   { key: 'checkinReview', label: 'Reviews', icon: ClipboardList, type: 'CHECKIN_REVIEW', filter: 'reviews' },
@@ -51,13 +52,15 @@ export default function Closeout() {
 
   const handleResolve = useCallback(
     (filter) => {
-      navigate(`/review-center?tab=active&filter=${filter}`);
+      const mapped = normalizeReviewQueueFilterParam(filter);
+      const qs = mapped ? `?filter=${encodeURIComponent(mapped)}` : '';
+      navigate(`${REVIEW_QUEUE_PATH}${qs}`);
     },
     [navigate]
   );
 
   const handleFinishCloseout = useCallback(() => {
-    navigate('/review-center?tab=active&filter=all');
+    navigate(REVIEW_QUEUE_PATH);
   }, [navigate]);
 
   const handleMarkComplete = useCallback(async () => {

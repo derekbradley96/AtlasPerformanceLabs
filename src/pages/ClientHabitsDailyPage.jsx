@@ -15,10 +15,18 @@ import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard } from '@/ui/pageLayout';
 import EmptyState from '@/components/ui/EmptyState';
 import { HabitCardSkeleton } from '@/components/ui/LoadingState';
-import { CheckSquare, Square, ClipboardList } from 'lucide-react';
+import { CheckSquare, Square, ClipboardList, Flame } from 'lucide-react';
 import { hapticLight } from '@/lib/haptics';
 import { toast } from 'sonner';
+import { createPageUrl } from '@/utils';
 import { notifyClientHabitMissed } from '@/services/notificationTriggers';
+import { trackFirstHabitLogged } from '@/services/firstSessionTracker';
+import {
+  fetchOrCreateDailyHabitState,
+  updateDailyHabitState,
+  getRetentionStreaks,
+  maybeCreateRetentionNudge,
+} from '@/lib/retentionHabitService';
 
 const CATEGORY_LABELS = {
   steps: 'Steps',
@@ -63,7 +71,7 @@ function computeCompleted(habit, value) {
 export default function ClientHabitsDailyPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const supabase = hasSupabase ? getSupabase() : null;
   const todayStr = useMemo(() => toISODate(new Date()), []);
 
@@ -82,6 +90,7 @@ export default function ClientHabitsDailyPage() {
   });
 
   const clientId = client?.id ?? null;
+  const shouldShowStandaloneChecklist = effectiveRole === 'personal' || effectiveRole === 'solo' || !!clientId;
 
   const { data: habits = [], isLoading: habitsLoading } = useQuery({
     queryKey: ['client_habits_active', clientId],
@@ -110,6 +119,18 @@ export default function ClientHabitsDailyPage() {
       return error ? [] : (data ?? []);
     },
     enabled: !!supabase && !!clientId && !!todayStr,
+  });
+
+  const { data: dailyState, isLoading: dailyStateLoading } = useQuery({
+    queryKey: ['retention-habit-daily', user?.id, clientId, todayStr],
+    queryFn: async () => fetchOrCreateDailyHabitState({ profileId: user?.id, clientId, date: todayStr }),
+    enabled: !!user?.id && shouldShowStandaloneChecklist,
+  });
+
+  const { data: streaks } = useQuery({
+    queryKey: ['retention-streaks', user?.id],
+    queryFn: async () => getRetentionStreaks({ profileId: user?.id }),
+    enabled: !!user?.id && shouldShowStandaloneChecklist,
   });
 
   const logByHabitId = useMemo(() => {
@@ -152,6 +173,12 @@ export default function ClientHabitsDailyPage() {
       if (error) throw error;
     },
     onSuccess: (_, variables) => {
+      if (user?.id) {
+        trackFirstHabitLogged(user.id, {
+          habit_id: variables.habit_id,
+          completed: variables.completed,
+        });
+      }
       setPendingNumeric((prev) => ({ ...prev, [variables.habit_id]: undefined }));
       queryClient.invalidateQueries({ queryKey: ['client_habit_logs', clientId, todayStr] });
       queryClient.invalidateQueries({ queryKey: ['v_client_habit_adherence', clientId] });
@@ -182,6 +209,36 @@ export default function ClientHabitsDailyPage() {
 
   const loading = loadingClient || habitsLoading || logsLoading;
 
+  const checklistMutation = useMutation({
+    mutationFn: async ({ key, value }) => {
+      if (!user?.id) return null;
+      return updateDailyHabitState({
+        profileId: user.id,
+        clientId,
+        date: todayStr,
+        patch: { [key]: value },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['retention-habit-daily', user?.id, clientId, todayStr] });
+      queryClient.invalidateQueries({ queryKey: ['retention-streaks', user?.id] });
+    },
+  });
+
+  useEffect(() => {
+    if (!dailyState || !user?.id) return;
+    const noWorkoutToday = !dailyState.workout_completed;
+    const lowMacroAdherence = !dailyState.nutrition_completed;
+    const checkinDue = !dailyState.checkin_completed;
+    const missedPreviousDay =
+      !dailyState.workout_completed && !dailyState.nutrition_completed && !dailyState.checkin_completed;
+    maybeCreateRetentionNudge({
+      profileId: user.id,
+      clientId,
+      signals: { noWorkoutToday, lowMacroAdherence, checkinDue, missedPreviousDay },
+    }).catch(() => {});
+  }, [dailyState, user?.id, clientId]);
+
   if (!user) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
@@ -194,24 +251,43 @@ export default function ClientHabitsDailyPage() {
     );
   }
 
-  if (!clientId && !loadingClient) {
+  if (!clientId && !loadingClient && !shouldShowStandaloneChecklist) {
+    const isPersonal = effectiveRole === 'personal' || effectiveRole === 'solo';
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
         <TopBar title="Daily habits" onBack={() => navigate(-1)} />
         <div className="p-4 max-w-lg mx-auto" style={pageContainer}>
           <EmptyState
-            title="No client profile"
-            description="Daily habits are for clients with a coach. Link with a coach to get assigned habits."
+            title={isPersonal ? 'Habits need a linked client profile' : 'No client profile'}
+            description={
+              isPersonal
+                ? 'Habits are stored on your linked client profile. Link with a coach to unlock habit assignments, or use Progress and Today to track training while solo.'
+                : 'Daily habits are for clients with a coach. Link with a coach to get assigned habits.'
+            }
             icon={ClipboardList}
-            actionLabel="Back"
-            onAction={() => { hapticLight(); navigate(-1); }}
+            actionLabel={isPersonal ? 'Go to home' : 'Back'}
+            onAction={() => {
+              hapticLight();
+              if (isPersonal) navigate('/home');
+              else navigate(-1);
+            }}
           />
+          {isPersonal && (
+            <div className="mt-4 flex flex-col gap-2">
+              <Button variant="outline" className="w-full" onClick={() => navigate('/discover')}>
+                Find a coach
+              </Button>
+              <Button variant="outline" className="w-full" onClick={() => navigate(createPageUrl('Progress'))}>
+                Open progress
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  if (habits.length === 0 && !loading) {
+  if (habits.length === 0 && !loading && !shouldShowStandaloneChecklist) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
         <TopBar title="Daily habits" onBack={() => navigate(-1)} />
@@ -237,6 +313,67 @@ export default function ClientHabitsDailyPage() {
         <p className="text-sm mb-4" style={{ color: colors.muted }}>
           Today: {todayStr ? new Date(todayStr + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) : ''}
         </p>
+        {streaks && (
+          <Card style={{ ...cardStyle, marginBottom: spacing[12] }}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Flame size={16} style={{ color: colors.warning }} />
+                <p className="text-sm font-medium" style={{ color: colors.text }}>Streaks</p>
+              </div>
+              <p className="text-xs" style={{ color: colors.muted }}>{streaks.gracePolicy}</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              <div className="rounded-lg border p-2" style={{ borderColor: colors.border }}>
+                <p className="text-xs" style={{ color: colors.muted }}>Workout</p>
+                <p className="text-sm font-semibold" style={{ color: colors.text }}>{streaks.workoutStreak || 0}d</p>
+              </div>
+              <div className="rounded-lg border p-2" style={{ borderColor: colors.border }}>
+                <p className="text-xs" style={{ color: colors.muted }}>Nutrition</p>
+                <p className="text-sm font-semibold" style={{ color: colors.text }}>{streaks.nutritionStreak || 0}d</p>
+              </div>
+              <div className="rounded-lg border p-2" style={{ borderColor: colors.border }}>
+                <p className="text-xs" style={{ color: colors.muted }}>Check-in</p>
+                <p className="text-sm font-semibold" style={{ color: colors.text }}>{streaks.checkinStreak || 0}d</p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {shouldShowStandaloneChecklist && (
+          <Card style={{ ...cardStyle, marginBottom: spacing[12] }}>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium" style={{ color: colors.text }}>Daily checklist</p>
+              {dailyStateLoading ? <p className="text-xs" style={{ color: colors.muted }}>Loading…</p> : null}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              {[
+                ['workout_completed', 'Workout'],
+                ['nutrition_completed', 'Nutrition'],
+                ['steps_completed', 'Steps'],
+                ['water_completed', 'Water'],
+                ['checkin_completed', 'Check-in'],
+                ['posing_completed', 'Posing'],
+              ].map(([key, label]) => {
+                const active = !!dailyState?.[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => checklistMutation.mutate({ key, value: !active })}
+                    className="rounded-lg border px-3 py-2 text-left text-sm"
+                    style={{
+                      borderColor: active ? colors.primary : colors.border,
+                      background: active ? colors.primarySubtle : 'transparent',
+                      color: colors.text,
+                    }}
+                  >
+                    {active ? '✓ ' : ''}{label}
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {loading ? (
           <div className="space-y-3">

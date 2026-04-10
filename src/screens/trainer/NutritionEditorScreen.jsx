@@ -53,6 +53,7 @@ export default function NutritionEditorScreen() {
   const effectiveCoachType = coachType ?? profile?.coach_type ?? null;
   const canChoose = canChooseDietType(effectiveCoachType);
   const defaultDiet = getDefaultDietType(effectiveCoachType);
+  const transformationStarter = getStarterMacros('lifestyle');
 
   const loadClient = useCallback(async () => {
     if (!data?.getClient || !clientId) return null;
@@ -172,6 +173,43 @@ export default function NutritionEditorScreen() {
     }
   }, [trainerId, clientId, plan, dietType, phase, calories, protein, carbs, fats, refeedDay, peakWeek, checkinAdjustment, notes]);
 
+  const handleCopyPreviousPlan = useCallback(async () => {
+    if (!trainerId || !clientId || !hasSupabase || !supabase) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const { data: rows, error: err } = await supabase
+        .from('nutrition_plans')
+        .select('*')
+        .eq('trainer_id', trainerId)
+        .neq('client_id', clientId)
+        .order('updated_at', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (err) throw err;
+      const source = Array.isArray(rows) ? rows[0] : null;
+      if (!source) {
+        toast.error('No previous nutrition plan found to copy');
+        return;
+      }
+      setDietType(source.diet_type === 'prep' ? 'prep' : 'lifestyle');
+      setPhase(source.phase ?? '');
+      setCalories(source.calories != null ? String(source.calories) : '');
+      setProtein(source.protein != null ? String(source.protein) : '');
+      setCarbs(source.carbs != null ? String(source.carbs) : '');
+      setFats(source.fats != null ? String(source.fats) : '');
+      setRefeedDay(!!source.refeed_day);
+      setPeakWeek(!!source.peak_week);
+      setCheckinAdjustment(source.checkin_adjustment ?? '');
+      setNotes(source.notes ?? '');
+      toast.success('Copied previous plan values');
+    } catch (e) {
+      toast.error(e?.message || 'Could not copy previous plan');
+    } finally {
+      setSaving(false);
+    }
+  }, [trainerId, clientId]);
+
   if (!trainerId) {
     return (
       <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={{ padding: spacing[24] }}>
@@ -204,6 +242,11 @@ export default function NutritionEditorScreen() {
             Last updated {safeFormatDate(plan.updated_at || plan.created_at)}
           </p>
         )}
+        <Card style={{ padding: spacing[12], marginBottom: spacing[12] }}>
+          <p className="text-xs" style={{ color: colors.muted, margin: 0 }}>
+            Saving this plan sets it as the active nutrition plan for this client.
+          </p>
+        </Card>
 
         {error && (
           <div className="mb-4 p-3 rounded-xl" style={{ background: 'rgba(239,68,68,0.12)', color: colors.destructive }}>
@@ -256,6 +299,32 @@ export default function NutritionEditorScreen() {
 
         <Card style={{ padding: spacing[16], marginBottom: spacing[16] }}>
           <p className="text-xs font-medium mb-3" style={{ color: colors.muted }}>Macros</p>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => {
+                setCalories(String(transformationStarter.calories));
+                setProtein(String(transformationStarter.protein));
+                setCarbs(String(transformationStarter.carbs));
+                setFats(String(transformationStarter.fats));
+              }}
+              className="text-xs px-3 py-1.5 rounded-full"
+              style={{ border: `1px solid ${colors.border}`, color: colors.text, background: colors.surface2 }}
+            >
+              Apply transformation starter
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const cals = Math.max(1000, Number(calories || transformationStarter.calories) - 200);
+                setCalories(String(cals));
+              }}
+              className="text-xs px-3 py-1.5 rounded-full"
+              style={{ border: `1px solid ${colors.border}`, color: colors.text, background: colors.surface2 }}
+            >
+              Quick cut -200 kcal
+            </button>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             {['calories', 'protein', 'carbs', 'fats'].map((key) => {
               const val = key === 'calories' ? calories : key === 'protein' ? protein : key === 'carbs' ? carbs : fats;
@@ -313,6 +382,10 @@ export default function NutritionEditorScreen() {
             style={{ ...inputBase, minHeight: 80 }}
           />
         </Card>
+
+        <Button variant="secondary" onClick={handleCopyPreviousPlan} disabled={saving} style={{ width: '100%', minHeight: 44, marginBottom: spacing[12] }}>
+          Copy previous nutrition plan
+        </Button>
 
         <Button variant="primary" onClick={handleSave} disabled={saving} style={{ width: '100%', minHeight: 48 }}>
           {saving ? 'Saving…' : 'Save plan'}

@@ -1,6 +1,6 @@
 /**
  * Week selector tabs for Program Builder.
- * Clean pill tabs; later weeks show as muted when not yet created.
+ * Week rows are created for 1..totalWeeks on save/load (may be empty until you add days).
  */
 import React from 'react';
 import { colors, spacing, shell } from '@/ui/tokens';

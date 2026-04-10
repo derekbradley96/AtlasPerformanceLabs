@@ -21,6 +21,7 @@ import { getAchievementsList } from '@/lib/milestonesStore';
 import { getClientCompProfile, listMedia } from '@/lib/repos/compPrepRepo';
 import { getActionLogForClient } from '@/lib/timeline/actionLogRepo';
 import { getClientTimeline } from '@/lib/timeline/buildTimeline';
+import { formatWeightDeltaKg, formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
 const MARGIN = 20;
 const HEADER_H = 28;
@@ -110,7 +111,8 @@ function formatDate(iso) {
 /**
  * Generate Progress Report PDF. Returns Blob.
  */
-export async function generateProgressReport(clientId, trainerId) {
+export async function generateProgressReport(clientId, trainerId, opts = {}) {
+  const wu = normalizeWeightUnit(opts.weightUnit ?? 'kg');
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let branding = getBranding(trainerId);
   if (branding.logoUrl && !/jpe?g/i.test(branding.logoUrl)) {
@@ -164,7 +166,7 @@ export async function generateProgressReport(clientId, trainerId) {
     checkIns.forEach((c) => {
       if (y > CONTENT_BOTTOM) return;
       const date = formatDate(c.submitted_at || c.created_date);
-      const detail = [c.weight_kg != null ? `${c.weight_kg} kg` : null, c.adherence_pct != null ? `${c.adherence_pct}% adherence` : null].filter(Boolean).join(' · ') || 'Submitted';
+      const detail = [c.weight_kg != null ? formatWeightForViewer(Number(c.weight_kg), wu) : null, c.adherence_pct != null ? `${c.adherence_pct}% adherence` : null].filter(Boolean).join(' · ') || 'Submitted';
       doc.setFontSize(9);
       doc.setTextColor(60, 60, 60);
       doc.text(`${date}: ${detail}`, MARGIN + 2, y);
@@ -179,7 +181,7 @@ export async function generateProgressReport(clientId, trainerId) {
 /**
  * Generate Comp Prep Report PDF. Returns Blob.
  */
-export async function generateCompPrepReport(clientId, trainerId) {
+export async function generateCompPrepReport(clientId, trainerId, _opts = {}) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let branding = getBranding(trainerId);
   if (branding.logoUrl && !/jpe?g/i.test(branding.logoUrl)) {
@@ -239,7 +241,7 @@ export async function generateCompPrepReport(clientId, trainerId) {
 /**
  * Generate Payment Summary PDF. Returns Blob.
  */
-export async function generatePaymentSummary(clientId, trainerId) {
+export async function generatePaymentSummary(clientId, trainerId, _opts = {}) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let branding = getBranding(trainerId);
   if (branding.logoUrl && !/jpe?g/i.test(branding.logoUrl)) {
@@ -301,7 +303,8 @@ export async function generatePaymentSummary(clientId, trainerId) {
 /**
  * Generate Timeline Summary PDF (last 30 days). Returns Blob.
  */
-export async function generateTimelineReport(clientId, trainerId) {
+export async function generateTimelineReport(clientId, trainerId, opts = {}) {
+  const wu = normalizeWeightUnit(opts.weightUnit ?? 'kg');
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let branding = getBranding(trainerId);
   if (branding.logoUrl && !/jpe?g/i.test(branding.logoUrl)) {
@@ -314,7 +317,7 @@ export async function generateTimelineReport(clientId, trainerId) {
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const allEvents = await getClientTimeline(clientId, new Date());
+  const allEvents = await getClientTimeline(clientId, new Date(), { weightUnit: wu });
   const events = allEvents.filter((e) => new Date(e.occurredAt) >= thirtyDaysAgo);
 
   addReportHeader(doc, branding, 'Timeline Summary', clientName);

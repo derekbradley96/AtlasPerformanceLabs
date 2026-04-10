@@ -26,6 +26,14 @@ import { safeDate } from '@/lib/format';
 import RevenueTrend from '@/components/earnings/RevenueTrend';
 import TaxSetAsideCard from '@/components/earnings/TaxSetAsideCard';
 import AddReceiptModal from '@/components/earnings/AddReceiptModal';
+import UpgradeTriggerSimulator from '@/components/dev/UpgradeTriggerSimulator';
+import UpgradePrompt from '@/components/UpgradePrompt';
+import {
+  evaluateUpgradeTriggers,
+  selectUpgradePrompt,
+  markMajorPromptShown,
+  trackUpgradePromptEvent,
+} from '@/utils/upgradeTriggers';
 
 const BG = '#0B1220';
 const CARD_BG = '#111827';
@@ -86,6 +94,7 @@ export default function Earnings() {
   const isStripeConnectedNow = stripeConnectedState || isStripeConnected();
   const [clients, setClients] = useState([]);
   const [periodData, setPeriodData] = useState({ totals: {}, transactions: [], series: [], payouts: [] });
+  const [dismissedUpgradePromptId, setDismissedUpgradePromptId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,6 +231,40 @@ export default function Earnings() {
     transition: `opacity 240ms ease-out ${delay}ms, transform 240ms ease-out ${delay}ms`,
   });
 
+  const currentPlan = String(user?.user_metadata?.plan_tier || 'basic').toLowerCase();
+  const earningsUpgradePrompt = useMemo(() => {
+    const result = evaluateUpgradeTriggers({
+      clientCount: clients.length,
+      monthlyRevenue: Number(totals.grossRevenue || 0),
+      currentPlan,
+      billingState: coachData?.billing_state ?? null,
+    });
+    const selected = selectUpgradePrompt(result.prompts, { allowMajor: true });
+    if (selected?.id && selected.id === dismissedUpgradePromptId) return null;
+    return selected;
+  }, [clients.length, totals.grossRevenue, currentPlan, coachData?.billing_state, dismissedUpgradePromptId]);
+
+  const handleEarningsPromptShown = useCallback((prompt) => {
+    if (!prompt?.id) return;
+    if (prompt.kind === 'major') markMajorPromptShown();
+    trackUpgradePromptEvent({
+      eventType: 'shown',
+      promptId: prompt.id,
+      userId: userId || null,
+      properties: { surface: 'earnings', plan_tier: currentPlan },
+    });
+  }, [userId, currentPlan]);
+
+  const handleEarningsPromptClick = useCallback((prompt) => {
+    trackUpgradePromptEvent({
+      eventType: 'clicked',
+      promptId: prompt?.id || 'unknown',
+      userId: userId || null,
+      properties: { surface: 'earnings', plan_tier: currentPlan },
+    });
+    navigate('/plan');
+  }, [userId, currentPlan, navigate]);
+
   return (
     <div
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
@@ -338,6 +381,23 @@ export default function Earnings() {
         </div>
       </section>
 
+      {earningsUpgradePrompt && (
+        <section style={{ marginBottom: spacing[16], ...sectionStyle(70) }}>
+          <UpgradePrompt
+            prompt={earningsUpgradePrompt}
+            variant="inline"
+            onShown={handleEarningsPromptShown}
+            onUpgrade={handleEarningsPromptClick}
+            onDismiss={(prompt) => setDismissedUpgradePromptId(prompt?.id || null)}
+          />
+        </section>
+      )}
+      {import.meta.env.DEV && (
+        <section style={{ marginBottom: spacing[16], ...sectionStyle(75) }}>
+          <UpgradeTriggerSimulator />
+        </section>
+      )}
+
       {/* Summary cards */}
       <section style={{ marginBottom: spacing[16], ...sectionStyle(80) }}>
         <div className="grid grid-cols-2" style={{ gap: spacing[12] }}>
@@ -371,6 +431,16 @@ export default function Earnings() {
               </Card>
             )}
           </div>
+        )}
+        {coachData?.billing_state?.recommended_plan && coachData?.billing_state?.recommended_plan !== currentPlan && (
+          <Card style={{ marginTop: spacing[12], padding: spacing[12] }}>
+            <p className="text-[12px] font-semibold" style={{ color: colors.text }}>
+              Plan signal: {String(coachData.billing_state.recommended_plan).toUpperCase()} is currently more cost-efficient.
+            </p>
+            <p className="text-[11px] mt-1" style={{ color: colors.muted }}>
+              This month {String(currentPlan).toUpperCase()} is estimated at {formatCurrency(Number(coachData?.billing_state?.monthly_fees_estimate || 0))}.
+            </p>
+          </Card>
         )}
       </section>
 

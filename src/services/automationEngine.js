@@ -16,6 +16,7 @@
 
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getReminderCopy } from '@/lib/reminderTriggers';
+import { getCategoryForType } from '@/lib/notificationTaxonomy';
 
 /**
  * @typedef {import('@supabase/supabase-js').SupabaseClient} SupabaseClient
@@ -100,11 +101,19 @@ export async function executeAction(rule, payload, options = {}) {
         : null) ||
       getReminderCopy(type).message;
 
+    const t = String(type).trim() || 'automation';
+    const category = getCategoryForType(t, null);
+    const payloadData = payload.data && typeof payload.data === 'object' ? payload.data : {};
+    const entityRaw = payload.entity_id ?? payload.entityId;
     const { error } = await client.from('notifications').insert({
-      user_id: userId,
-      type,
+      profile_id: userId,
+      type: t,
       title,
       message,
+      data: payloadData,
+      category,
+      entity_id: entityRaw != null && String(entityRaw).trim() ? String(entityRaw).trim() : null,
+      is_read: false,
     });
     if (error) return { ok: false, error: error.message };
     return { ok: true, action: 'send_notification' };

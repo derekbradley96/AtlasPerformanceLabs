@@ -1,0 +1,186 @@
+---
+description: Atlas core architecture and cross-role/shell implementation laws
+alwaysApply: true
+---
+
+# ATLAS CURSOR RULE BOOK - DO NOT VIOLATE
+
+You are working on Atlas Performance Labs, a multi-role coaching platform with Coach, Client, and Personal modes.
+
+Your job is NOT to build isolated features.
+Your job is to maintain a unified system across roles and platforms.
+
+You must follow ALL rules below on every implementation.
+
+## LAW 1 - NEVER BUILD IN ISOLATION
+
+Before building or modifying any feature, ask:
+
+- Is this a shared human workflow?
+  (e.g. logging food, logging workouts, setting targets, check-ins, program building)
+
+If YES:
+-> This MUST be implemented as a shared system, not role-specific logic.
+
+## LAW 2 - SHARED ENGINE, ROLE WRAPPER
+
+All shared workflows must be built as:
+
+- ONE shared engine (logic, data model, rules)
+- MULTIPLE role wrappers (Coach, Client, Personal)
+
+Do NOT duplicate logic per role.
+
+## LAW 3 - ROLE OWNERSHIP RULES
+
+### Personal
+- user owns setup, targets, and actions
+- self-directed language
+- upgrade / Enhanced surfaces allowed
+
+### Coach
+- coach owns prescriptions for clients
+- has power tools (assign, duplicate, template, manage)
+- operates at scale (multiple clients)
+
+### Client
+- follows coach-defined structure (by default)
+- logs, completes, and responds
+- limited editing where appropriate
+- must NOT feel like a downgraded experience
+
+## LAW 4 - PERSONAL -> CLIENT TRANSLATION IS MANDATORY
+
+If a feature is built or improved in Personal AND it represents a shared workflow:
+
+-> You MUST translate it to Client automatically.
+
+Examples:
+- nutrition logging
+- workout logging
+- readiness check-ins
+- progress tracking
+
+Client must inherit the same quality of experience.
+
+## LAW 5 - COACH INHERITS CORE, ADDS CONTROL
+
+Coach must reuse shared systems from Personal, but extend them with:
+
+- assignment tools
+- duplication tools
+- templates
+- roster-level actions
+- review visibility
+
+Do NOT create a separate inferior or different system for Coach.
+
+## LAW 6 - ALWAYS IMPLEMENT BOTH SHELLS
+
+Every feature must be implemented for:
+
+### App shell (mobile)
+- stacked layout
+- thumb-friendly interactions
+- sticky CTAs where needed
+- safe-area aware
+
+### Website shell (desktop)
+- wider layouts
+- grid / split panels
+- better use of horizontal space
+- hover states and denser information
+
+Do NOT let:
+- web look like stretched mobile
+- mobile inherit desktop clutter
+
+## LAW 7 - INTERPRETATION OVER RAW DATA
+
+Atlas is NOT a tracker.
+Atlas is an intelligent system.
+
+Whenever showing data (nutrition, training, progress), you must:
+
+1. Interpret it
+2. Relate it to the user's goal
+3. Provide a small, useful next action
+
+Never just show numbers without meaning.
+
+## LAW 8 - GOAL-AWARE SYSTEMS
+
+All relevant systems must adapt to user goal:
+
+- build muscle
+- lose fat
+- competition prep
+- general fitness
+
+Examples:
+- calorie interpretation changes by goal
+- macro importance changes by goal
+- adjustment logic changes by goal
+
+## LAW 9 - DO NOT DUPLICATE LOGIC
+
+If similar logic exists in multiple places:
+
+-> Refactor into shared modules.
+
+Examples:
+- nutrition calculations
+- readiness scoring
+- adherence logic
+- adjustment rules
+
+## LAW 10 - DO NOT PORT BLINDLY
+
+When translating features across roles:
+
+DO:
+- adjust ownership
+- adjust permissions
+- adjust copy
+
+DO NOT:
+- copy UI blindly
+- copy Personal upgrade flows into Client
+- copy Coach controls into Personal
+
+## LAW 11 - CONSISTENCY OVER SPEED
+
+It is better to:
+- refactor properly once
+
+Than to:
+- hack features into one role and "fix later"
+
+## LAW 12 - EVERY CHANGE MUST PASS THE ATLAS CHECK
+
+Before completing any task, verify:
+
+1. Is this built as a shared system where appropriate?
+2. Does Personal behave correctly?
+3. Does Client receive the same experience where it should?
+4. Does Coach extend this properly?
+5. Does it work correctly on mobile (app shell)?
+6. Does it work correctly on desktop (website shell)?
+7. Is the logic goal-aware and interpreted, not raw?
+
+If any answer is NO:
+-> You are not finished.
+
+## OUTPUT REQUIREMENT
+
+For every major implementation, report:
+
+- Shared system used or created
+- Personal behaviour
+- Client behaviour
+- Coach behaviour
+- App shell differences
+- Website shell differences
+- Any intentionally excluded translations
+
+END OF RULE BOOK

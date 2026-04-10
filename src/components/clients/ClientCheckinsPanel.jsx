@@ -3,6 +3,8 @@
  */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 import { ChevronRight, ClipboardList } from 'lucide-react';
 import EmptyState from '@/components/ui/EmptyState';
 import { colors, spacing, touchTargetMin } from '@/ui/tokens';
@@ -15,6 +17,8 @@ export default function ClientCheckinsPanel({
   onCheckinSelect,
 }) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
 
   if (!Array.isArray(checkInsList) || checkInsList.length === 0) {
     return (
@@ -64,7 +68,7 @@ export default function ClientCheckinsPanel({
               </div>
               <div className="flex flex-wrap gap-x-3 gap-y-0 text-xs mt-0.5" style={{ color: colors.muted }}>
                 {c.adherence_pct != null && <span>{c.adherence_pct}% adherence</span>}
-                {c.weight_kg != null && <span>{c.weight_kg} kg</span>}
+                {c.weight_kg != null && <span>{formatWeightForViewer(Number(c.weight_kg), viewerWU)}</span>}
                 {c.status === 'pending' && <span>Pending</span>}
                 {c.status === 'submitted' && c.adherence_pct == null && c.weight_kg == null && <span>Submitted</span>}
               </div>

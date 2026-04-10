@@ -1,3 +1,6 @@
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { readinessStoredToPercent0to100 } from '@/lib/progressMetricsValidation';
+
 /**
  * Adaptive training recommendation engine (MVP).
  * Deterministic, rules-based, no AI/external calls.
@@ -35,8 +38,11 @@ function normalizeFlags(flags) {
  * @returns {{ score: number; status: string; flags: string[] }}
  */
 function normalizeReadiness(readinessData = {}) {
-  const scoreRaw = Number(readinessData.readiness_score);
-  const score = Number.isFinite(scoreRaw) ? Math.max(0, Math.min(100, Math.round(scoreRaw))) : 60;
+  const raw = readinessData.readiness_score;
+  const score =
+    raw === undefined || raw === null || raw === ''
+      ? 60
+      : readinessStoredToPercent0to100(raw);
   const status = String(readinessData.readiness_status || '').toLowerCase().trim();
   const flags = normalizeFlags(readinessData.flags);
   return { score, status, flags };
@@ -63,9 +69,14 @@ export function shouldRecommendDeload(history = []) {
   if (!Array.isArray(history) || history.length < 3) return false;
   const scores = history
     .map((item) => {
-      if (typeof item === 'number') return Number.isFinite(item) ? item : null;
-      const score = Number(item?.readiness_score);
-      if (Number.isFinite(score)) return score;
+      if (typeof item === 'number') {
+        return Number.isFinite(item) ? readinessStoredToPercent0to100(item) : null;
+      }
+      const raw = item?.readiness_score;
+      if (raw !== undefined && raw !== null && raw !== '') {
+        const score = Number(raw);
+        if (Number.isFinite(score)) return readinessStoredToPercent0to100(score);
+      }
       const status = String(item?.readiness_status || '').toLowerCase();
       if (status === 'recovery_needed') return 30;
       if (status === 'high_fatigue') return 45;
@@ -238,5 +249,20 @@ export function getAdjustmentSummary(recommendation = {}) {
   if (type === REC_TYPES.RECOVERY_SESSION) return 'Swap today to a recovery variation session.';
   if (type === REC_TYPES.DELOAD) return 'Suggest deload week due to repeated low readiness.';
   return 'Keep today’s session as programmed.';
+}
+
+/**
+ * Evaluate and persist client_state + recommendation from server-side function.
+ * Uses public.evaluate_client_state(p_client_id uuid).
+ * @param {string} clientId
+ * @returns {Promise<Record<string, any> | null>}
+ */
+export async function evaluateClientState(clientId) {
+  if (!clientId || !hasSupabase) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc('evaluate_client_state', { p_client_id: clientId });
+  if (error) return null;
+  return data ?? null;
 }
 

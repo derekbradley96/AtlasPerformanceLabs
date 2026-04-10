@@ -86,13 +86,23 @@ function toUI(client: localStore.Client | supabaseRepo.SupabaseClientRow): Clien
 }
 
 function fromSupabaseRow(row: supabaseRepo.SupabaseClientRow): localStore.Client {
+  const r = row as Record<string, unknown>;
   return {
+    ...r,
     id: row.id,
-    trainer_id: row.trainer_id,
+    trainer_id: (row.trainer_id ?? row.coach_id ?? '') as string,
     name: row.name ?? '',
-    phase: (row as Record<string, unknown>).phase as string | undefined,
-    days_out: (row as Record<string, unknown>).days_out as number | undefined,
+    phase: r.phase as string | undefined,
+    days_out: r.days_out as number | undefined,
     created_at: row.created_at,
+    client_type: r.client_type as string | undefined,
+    delivery_context: r.delivery_context as string | undefined,
+    goals: r.goals as string | undefined,
+    email: r.email as string | undefined,
+    start_date: r.start_date as string | undefined,
+    show_date: r.show_date as string | undefined,
+    showDate: r.show_date ?? r.showDate,
+    gym_equipment_json: r.gym_equipment_json,
   };
 }
 
@@ -137,7 +147,23 @@ export async function addClientForTrainer(
 
   if (useSupabase) {
     try {
-      const remote = await supabaseRepo.createClient(trainerId, { name });
+      const remote = await supabaseRepo.createClient(trainerId, {
+        full_name: name,
+        name,
+        phase: payload.phase,
+        goal: payload.goal,
+        goals: payload.goals,
+        client_type: payload.client_type,
+        client_journey: payload.client_journey,
+        show_date: payload.show_date ?? payload.showDate,
+        showDate: payload.showDate ?? payload.show_date,
+        start_date: payload.start_date,
+        email: payload.email,
+        federation: payload.federation,
+        show_name: payload.show_name,
+        division: payload.division,
+        gym_equipment: payload.gym_equipment,
+      });
       if (remote) return toUI(fromSupabaseRow(remote));
     } catch (e) {
       const err = e as Error & { code?: string };
@@ -151,6 +177,14 @@ export async function addClientForTrainer(
     name,
     phase: payload.phase ?? 'Maintenance',
     days_out: payload.days_out,
+    client_type: (payload.client_type as string) ?? (payload.client_journey as string) ?? 'transformation',
+    goals: (payload.goal ?? payload.goals) as string | undefined,
+    showDate: (payload.showDate ?? payload.show_date) as string | undefined,
+    show_date: (payload.show_date ?? payload.showDate) as string | undefined,
+    start_date: payload.start_date as string | undefined,
+    email: payload.email as string | undefined,
+    gym_equipment_json: payload.gym_equipment,
+    federation: payload.federation as string | undefined,
   };
   const created = localStore.addClient(partial as Partial<localStore.Client> & { trainer_id: string });
   return created ? toUI(created) : null;

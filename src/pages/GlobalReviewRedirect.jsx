@@ -1,23 +1,26 @@
 import { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { normalizeReviewQueueFilterParam, REVIEW_QUEUE_PATH } from '@/lib/coachReviewRoutes';
 
 /**
- * /global-review with query params: if tab or filter present, go to Review Center list; else single-item flow.
+ * /global-review: with tab/filter → global triage queue (mapped ?filter= only; `tab` is legacy/no-op).
+ * With no params → `/review-global` (“review next” single-item flow).
  */
 export default function GlobalReviewRedirect() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const tab = searchParams.get('tab') || 'active';
-  const filter = searchParams.get('filter') || 'all';
 
   useEffect(() => {
     const hasParams = searchParams.has('tab') || searchParams.has('filter');
     if (hasParams) {
-      navigate(`/review-center?tab=${tab}&filter=${filter}`, { replace: true });
+      const filterRaw = searchParams.get('filter') || 'all';
+      const mapped = normalizeReviewQueueFilterParam(filterRaw === 'all' ? null : filterRaw);
+      const qs = mapped ? `?filter=${encodeURIComponent(mapped)}` : '';
+      navigate(`${REVIEW_QUEUE_PATH}${qs}`, { replace: true });
     } else {
       navigate('/review-global', { replace: true });
     }
-  }, [navigate, tab, filter, searchParams]);
+  }, [navigate, searchParams]);
 
   return null;
 }

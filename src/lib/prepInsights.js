@@ -3,6 +3,8 @@
  * Deterministic rules only; no AI. Uses v_client_prep_header, v_client_progress_metrics, pose_checks counts.
  */
 
+import { formatWeightDeltaKg, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+
 function toNum(v) {
   if (v == null) return null;
   const n = Number(v);
@@ -106,7 +108,7 @@ export function getPrepInsightSummaries(header, metrics, options = {}) {
     out.push({
       level: 'warning',
       title: 'Weight trend is moving quickly relative to show date',
-      detail: `Latest change ${weightChange > 0 ? '+' : ''}${Number(weightChange).toFixed(1)} kg. Worth a check-in.`,
+      detail: `Latest change ${formatWeightDeltaKg(weightChange, wu)}. Worth a check-in.`,
     });
   }
 

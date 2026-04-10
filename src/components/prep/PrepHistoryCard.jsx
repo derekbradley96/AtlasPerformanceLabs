@@ -10,6 +10,7 @@ import Card from '@/ui/Card';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { History } from 'lucide-react';
 import { safeFormatDate } from '@/lib/format';
+import { formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 function formatPeakWeekStrategy(outcome) {
   const parts = [];
@@ -92,7 +93,7 @@ export default function PrepHistoryCard({ clientId }) {
                 <div>
                   <span className="text-xs" style={{ color: colors.muted }}>Stage weight</span>
                   <p className="font-medium" style={{ color: colors.text }}>
-                    {o.stage_weight != null && o.stage_weight !== '' ? `${Number(o.stage_weight)} kg` : '—'}
+                    {o.stage_weight != null && o.stage_weight !== '' ? formatWeightForViewer(Number(o.stage_weight), viewerWU) : '—'}
                   </p>
                 </div>
                 <div>

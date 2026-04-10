@@ -8,6 +8,7 @@ import FullScreenModal from '@/components/ui/FullScreenModal';
 import Button from '@/ui/Button';
 import { colors, spacing, radii } from '@/ui/tokens';
 import { safeDate } from '@/lib/format';
+import { formatWeightDeltaKg, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 const BADGE_STYLE = {
   green: { bg: colors.successSubtle, color: colors.success },
@@ -71,13 +72,13 @@ export default function HealthBreakdownModal({
   const deltaVsLastWeek = useMemo(() => {
     if (weightCurrent == null || weightPrevious == null) return null;
     const d = weightCurrent - weightPrevious;
-    return `${d > 0 ? '+' : ''}${d.toFixed(1)} kg`;
-  }, [weightCurrent, weightPrevious]);
+    return formatWeightDeltaKg(d, viewerWU);
+  }, [weightCurrent, weightPrevious, viewerWU]);
 
   const submitted = Array.isArray(checkIns) ? checkIns.filter((c) => (c?.status ?? '').toLowerCase() === 'submitted') : [];
   const latestCheckIn = [...submitted].sort((a, b) => (safeDate(b?.submitted_at ?? b?.created_date)?.getTime() ?? 0) - (safeDate(a?.submitted_at ?? a?.created_date)?.getTime() ?? 0))[0];
 
-  const weightDisplay = weightCurrent != null ? `${Number(weightCurrent).toFixed(1)} kg` : '—';
+  const weightDisplay = weightCurrent != null ? formatWeightForViewer(weightCurrent, viewerWU) : '—';
   const stepsDisplay = latestCheckIn?.steps ?? latestCheckIn?.steps_avg != null ? `${Number(latestCheckIn?.steps ?? latestCheckIn?.steps_avg).toLocaleString()}` : '—';
   const sleepDisplay = latestCheckIn?.sleep_hours ?? latestCheckIn?.sleep_avg != null ? `${Number(latestCheckIn?.sleep_hours ?? latestCheckIn?.sleep_avg).toFixed(1)}h` : '—';
   const adherencePct = latestCheckIn?.adherence_pct;

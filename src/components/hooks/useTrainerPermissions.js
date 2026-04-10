@@ -1,9 +1,13 @@
 /**
- * GATING AUDIT (Atlas Performance Labs)
- * --------------------------------------
- * 1. Team: Gated to Elite (and scale) only. canAccessTeam is true only when plan is elite/scale.
- * 2. Commission: Varies by plan (Basic 10%, Pro 3%, Elite 0%). Applied in Stripe/backend only; see config/plans.js getCommissionPercentForTier.
- * 3. Everything else: Available to all plans. No feature gating on Plan & Billing, Branding, Programs, Comp Prep, etc.
+ * Trainer permissions & assistant scope (Atlas Performance Labs)
+ * ---------------------------------------------------------------
+ * 1. Team: Elite / Scale only — canAccessTeam when plan is elite or scale (owner only).
+ * 2. Commission: Varies by tier (Basic 10%, Pro 3%, Elite 0%) — see config/plans.js.
+ * 3. Plan & Billing, Branding, Programs, Comp Prep entry: available on owner plans as defined in routing
+ *    (this hook does not duplicate App.jsx capability gates).
+ * 4. Heavy automation surfaces — command center, advanced analytics, revenue analytics, training intelligence,
+ *    capacity — are gated to Pro/Elite in App.jsx via RequireCoachCapability(capability: 'can_access_advanced_coach_automation').
+ * 5. Peak week routes — gated to coaches with competition or integrated focus via can_access_peak_week in accessModel.js.
  */
 
 import { useMemo } from 'react';
@@ -14,24 +18,14 @@ import {
   getAssistantPermissions,
   OWNER_PERMISSIONS,
 } from '@/lib/coachTeamMemberStore';
-
-const PLAN_STORAGE_KEY = 'atlas_trainer_plan';
-
-function getPlanIdFromStorage() {
-  try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PLAN_STORAGE_KEY) : null;
-    return (raw || 'pro').toLowerCase();
-  } catch {
-    return 'pro';
-  }
-}
+import { resolveCoachPlanTier } from '@/config/plans';
 
 /**
  * For coach-role users: returns owner id, whether current user is an assistant,
  * and permission flags. Only Team is gated by plan (Elite only). Plan, Branding, etc. are available to all owners.
  */
 export function useTrainerPermissions() {
-  const { user, role } = useAuth();
+  const { user, role, profile } = useAuth();
   const userId = user?.id;
 
   return useMemo(() => {
@@ -59,7 +53,7 @@ export function useTrainerPermissions() {
       ? getAssistantPermissions(ownerId, userId)
       : OWNER_PERMISSIONS;
 
-    const planId = getPlanIdFromStorage();
+    const planId = resolveCoachPlanTier(profile, user);
     const isEliteOrScale = planId === 'elite' || planId === 'scale';
 
     return {
@@ -76,5 +70,5 @@ export function useTrainerPermissions() {
       canReviewPosing: permissions?.canReviewPosing ?? true,
       canMessageClients: permissions?.canMessageClients ?? true,
     };
-  }, [role, userId]);
+  }, [role, userId, profile?.plan_tier, user?.plan_tier]);
 }

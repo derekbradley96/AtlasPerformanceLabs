@@ -15,6 +15,7 @@ import { colors, spacing, shell } from '@/ui/tokens';
 import {
   getPoseCheckById,
   getPoseCheckItems,
+  getPoseCheckPriorToWeek,
   updatePoseCheckItem,
   savePoseCheckReview,
   createPoseCheckPhotoSignedUrl,
@@ -24,6 +25,7 @@ import {
   POSE_CONDITIONING_TAGS,
 } from '@/lib/poseChecks';
 import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { getActiveProgramAssignmentForClient } from '@/lib/programAssignments';
 import { getPrepInsight } from '@/lib/checkinInsights';
@@ -33,7 +35,7 @@ import ReviewActionTray from '@/components/review/ReviewActionTray';
 import InsightCard from '@/components/review/InsightCard';
 import PrepTimelineCard from '@/components/prep/PrepTimelineCard';
 import PoseCheckTimeline from '@/components/prep/PoseCheckTimeline';
-import { MessageCircle, Check, ClipboardList, Award, User, Tag, X } from 'lucide-react';
+import { MessageCircle, Check, ClipboardList, Award, User, Tag, X, ChevronDown, ChevronUp, GitCompare } from 'lucide-react';
 
 function showPrepInsightsByFocus(coachFocus) {
   const f = (coachFocus ?? '').toString().trim().toLowerCase();
@@ -43,7 +45,8 @@ function showPrepInsightsByFocus(coachFocus) {
 export default function PoseCheckReviewDetailPage() {
   const navigate = useNavigate();
   const { poseCheckId } = useParams();
-  const { coachFocus } = useAuth();
+  const { coachFocus, profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [poseCheck, setPoseCheck] = useState(null);
   const [items, setItems] = useState([]);
   const [itemSignedUrls, setItemSignedUrls] = useState({});
@@ -104,6 +107,47 @@ export default function PoseCheckReviewDetailPage() {
 
   const clientId = poseCheck?.client_id ?? null;
   const supabase = hasSupabase ? getSupabase() : null;
+
+  const { data: priorCheck } = useQuery({
+    queryKey: ['pose_check_prior', clientId, poseCheck?.week_start],
+    queryFn: () => getPoseCheckPriorToWeek(clientId, poseCheck.week_start),
+    enabled: !!clientId && !!poseCheck?.week_start,
+  });
+
+  const { data: priorItems = [] } = useQuery({
+    queryKey: ['pose_check_prior_items', priorCheck?.id],
+    queryFn: () => getPoseCheckItems(priorCheck.id),
+    enabled: !!priorCheck?.id,
+  });
+
+  const priorByPoseKey = useMemo(() => {
+    const m = {};
+    for (const p of priorItems) {
+      if (p?.pose_key) m[p.pose_key] = p;
+    }
+    return m;
+  }, [priorItems]);
+
+  useEffect(() => {
+    if (!priorItems.length) {
+      setPriorItemUrls({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const next = {};
+      await Promise.all(
+        priorItems
+          .filter((i) => i.photo_path)
+          .map(async (i) => {
+            const url = await createPoseCheckPhotoSignedUrl(i.photo_path);
+            if (!cancelled && url) next[i.pose_key] = url;
+          })
+      );
+      if (!cancelled) setPriorItemUrls(next);
+    })();
+    return () => { cancelled = true; };
+  }, [priorItems]);
   const { data: metrics } = useQuery({
     queryKey: ['v_client_progress_metrics', clientId],
     queryFn: async () => {
@@ -174,8 +218,8 @@ export default function PoseCheckReviewDetailPage() {
   }, [metrics, prepHeader, activePrep]);
 
   const atlasPrepInsight = useMemo(
-    () => (prepDataForInsight ? generatePrepInsight(prepDataForInsight) : null),
-    [prepDataForInsight]
+    () => (prepDataForInsight ? generatePrepInsight(prepDataForInsight, viewerWU) : null),
+    [prepDataForInsight, viewerWU]
   );
   const showAtlasPrepCard = atlasPrepInsight && atlasPrepInsight.title !== 'No active prep';
 
@@ -184,8 +228,9 @@ export default function PoseCheckReviewDetailPage() {
     return getPrepInsightSummaries(prepHeader ?? null, metrics, {
       poseChecksLast4w: poseChecksCount ?? 0,
       poseSubmittedThisWeek: prepHeader?.pose_check_submitted_this_week === true,
+      viewerWeightUnit: viewerWU,
     });
-  }, [coachFocus, metrics, prepHeader, poseChecksCount]);
+  }, [coachFocus, metrics, prepHeader, poseChecksCount, viewerWU]);
 
   const prepInsightCards = useMemo(() => {
     const cards = [];
@@ -222,12 +267,40 @@ export default function PoseCheckReviewDetailPage() {
   const [addTagValue, setAddTagValue] = useState('');
   const [addTagNote, setAddTagNote] = useState('');
   const [addingTag, setAddingTag] = useState(false);
+  const [prepContextOpen, setPrepContextOpen] = useState(false);
+  const [priorItemUrls, setPriorItemUrls] = useState({});
+  const [activePoseIndex, setActivePoseIndex] = useState(null);
+  const [compareWeekMode, setCompareWeekMode] = useState(false);
+  const [touchStartX, setTouchStartX] = useState(null);
 
   const setItemEdit = (itemId, field, value) => {
     setItemEdits((prev) => ({
       ...prev,
       [itemId]: { ...(prev[itemId] || {}), [field]: value },
     }));
+  };
+
+  const openPoseDetail = (idx, compareMode = false) => {
+    setCompareWeekMode(compareMode);
+    setActivePoseIndex(idx);
+  };
+  const closePoseDetail = () => setActivePoseIndex(null);
+  const activePose = activePoseIndex != null ? items[activePoseIndex] : null;
+  const activePoseCurrentUrl = activePose ? (itemSignedUrls[activePose.id] || null) : null;
+  const activePosePriorUrl = activePose?.pose_key ? (priorItemUrls[activePose.pose_key] || null) : null;
+  const handlePoseSwipeStart = (e) => {
+    const x = e?.touches?.[0]?.clientX;
+    if (typeof x === 'number') setTouchStartX(x);
+  };
+  const handlePoseSwipeEnd = (e) => {
+    if (touchStartX == null || activePoseIndex == null) return;
+    const endX = e?.changedTouches?.[0]?.clientX;
+    if (typeof endX !== 'number') return;
+    const delta = endX - touchStartX;
+    if (Math.abs(delta) < 40) return;
+    if (delta < 0 && activePoseIndex < items.length - 1) setActivePoseIndex(activePoseIndex + 1);
+    if (delta > 0 && activePoseIndex > 0) setActivePoseIndex(activePoseIndex - 1);
+    setTouchStartX(null);
   };
 
   const handleAddConditioningTag = async () => {
@@ -363,14 +436,25 @@ export default function PoseCheckReviewDetailPage() {
     <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Pose check" onBack={() => navigate(-1)} />
       <div className="p-4 pb-8" style={{ paddingBottom: 120 }}>
-        <p className="text-sm mb-1" style={{ color: colors.muted }}>
-          Week of {poseCheck.week_start}
-          {activePrep && (activePrep.division || activePrep.division_key) && (
-            <span className="ml-2" style={{ color: colors.text }}>
-              · {activePrep.division || activePrep.division_key}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <p className="text-sm mb-0" style={{ color: colors.muted }}>
+            Week of {poseCheck.week_start}
+            {activePrep && (activePrep.division || activePrep.division_key) && (
+              <span className="ml-2" style={{ color: colors.text }}>
+                · {activePrep.division || activePrep.division_key}
+              </span>
+            )}
+          </p>
+          {priorCheck?.week_start && (
+            <span
+              className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+              style={{ background: colors.primarySubtle, color: colors.primary }}
+            >
+              <GitCompare size={12} />
+              vs week {priorCheck.week_start}
             </span>
           )}
-        </p>
+        </div>
 
         {clientId && metrics?.has_active_prep && (
           <section style={{ marginBottom: spacing[16] }}>
@@ -379,28 +463,36 @@ export default function PoseCheckReviewDetailPage() {
           </section>
         )}
 
-        {(showAtlasPrepCard || prepInsightSummaries.length > 0) && (
+        {(showAtlasPrepCard || prepInsightSummaries.length > 0 || prepInsightCards.length > 0) && (
           <section style={{ marginBottom: spacing[16] }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Prep insights</p>
-            {showAtlasPrepCard && (
-              <InsightCard
-                level={atlasPrepInsight.level === 'warning' ? 'warning' : atlasPrepInsight.level === 'positive' ? 'positive' : 'neutral'}
-                title={atlasPrepInsight.title}
-                detail={atlasPrepInsight.summary}
-              />
+            <button
+              type="button"
+              className="w-full flex items-center justify-between gap-2 py-2 px-1 rounded-lg text-left"
+              style={{ color: colors.text }}
+              onClick={() => setPrepContextOpen((o) => !o)}
+            >
+              <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: colors.muted }}>
+                Prep context &amp; insights
+              </span>
+              {prepContextOpen ? <ChevronUp size={18} style={{ color: colors.muted }} /> : <ChevronDown size={18} style={{ color: colors.muted }} />}
+            </button>
+            {prepContextOpen && (
+              <div className="space-y-2 mt-2">
+                {showAtlasPrepCard && (
+                  <InsightCard
+                    level={atlasPrepInsight.level === 'warning' ? 'warning' : atlasPrepInsight.level === 'positive' ? 'positive' : 'neutral'}
+                    title={atlasPrepInsight.title}
+                    detail={atlasPrepInsight.summary}
+                  />
+                )}
+                {prepInsightSummaries.map((s, i) => (
+                  <InsightCard key={i} level={s.level} title={s.title} detail={s.detail} />
+                ))}
+                {prepInsightCards.map(({ key, level, title, detail }) => (
+                  <InsightCard key={key} level={level} title={title} detail={detail} />
+                ))}
+              </div>
             )}
-            {prepInsightSummaries.map((s, i) => (
-              <InsightCard key={i} level={s.level} title={s.title} detail={s.detail} />
-            ))}
-          </section>
-        )}
-
-        {prepInsightCards.length > 0 && (
-          <section style={{ marginBottom: spacing[16] }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Atlas Insights</p>
-            {prepInsightCards.map(({ key, level, title, detail }) => (
-              <InsightCard key={key} level={level} title={title} detail={detail} />
-            ))}
           </section>
         )}
 
@@ -413,13 +505,18 @@ export default function PoseCheckReviewDetailPage() {
 
         {hasStructuredItems ? (
           <section style={{ marginBottom: spacing[24] }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: colors.muted }}>Mandatory poses</p>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: colors.muted }}>Mandatory poses</p>
+            <p className="text-xs mb-3" style={{ color: colors.muted }}>
+              This week vs previous submission (same pose) when available — quick scan for progression.
+            </p>
             <div className="space-y-4">
               {items.map((item) => {
                 const edit = itemEdits[item.id] || {};
                 const rating = edit.coach_rating !== undefined ? edit.coach_rating : item.coach_rating;
                 const notes = edit.coach_notes !== undefined ? edit.coach_notes : (item.coach_notes ?? '');
                 const imageUrl = itemSignedUrls[item.id] || null;
+                const prior = item.pose_key ? priorByPoseKey[item.pose_key] : null;
+                const priorUrl = item.pose_key ? priorItemUrls[item.pose_key] : null;
                 return (
                   <Card
                     key={item.id}
@@ -431,126 +528,201 @@ export default function PoseCheckReviewDetailPage() {
                     }}
                   >
                     <p className="text-sm font-semibold mb-3" style={{ color: colors.text }}>{item.pose_label}</p>
-                    <div className="flex flex-col sm:flex-row gap-4">
-                      <div className="flex-shrink-0">
-                        {imageUrl ? (
-                          <a
-                            href={imageUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block rounded-lg overflow-hidden"
-                            style={{ width: 160, height: 200, background: colors.surface2 }}
-                          >
-                            <img src={imageUrl} alt={item.pose_label} className="w-full h-full object-cover" />
-                          </a>
-                        ) : (
-                          <div
-                            className="rounded-lg flex items-center justify-center"
-                            style={{ width: 160, height: 200, background: colors.surface2, color: colors.muted }}
-                          >
-                            <span className="text-xs">No photo</span>
+                    <div className="flex flex-col gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: colors.primary }}>This week</p>
+                          <div className="flex-shrink-0">
+                            {imageUrl ? (
+                              <a
+                                href={imageUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block rounded-lg overflow-hidden"
+                                style={{ width: '100%', maxWidth: 220, height: 200, background: colors.surface2 }}
+                              >
+                                <img src={imageUrl} alt={item.pose_label} className="w-full h-full object-cover" />
+                              </a>
+                            ) : (
+                              <div
+                                className="rounded-lg flex items-center justify-center"
+                                style={{ width: '100%', maxWidth: 220, height: 200, background: colors.surface2, color: colors.muted }}
+                              >
+                                <span className="text-xs">No photo</span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {/* Conditioning tag markers */}
-                        <div className="flex flex-wrap gap-1.5 mt-2 items-center">
-                          {(notesByItemId[item.id] || []).map((n) => {
-                            const label = POSE_CONDITIONING_TAGS.find((t) => t.value === n.tag)?.label || n.tag;
-                            return (
-                              <span
-                                key={n.id}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs"
-                                style={{ background: colors.primarySubtle, color: colors.primary }}
-                              >
-                                {label}
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveConditioningTag(n.id)}
-                                  aria-label="Remove tag"
-                                  style={{ padding: 0, border: 'none', background: 'none', color: 'inherit', cursor: 'pointer', display: 'flex' }}
-                                >
-                                  <X size={12} />
-                                </button>
-                              </span>
-                            );
-                          })}
-                          {addTagItemId === item.id ? (
-                            <div className="flex flex-wrap gap-2 items-center">
-                              <select
-                                value={addTagValue}
-                                onChange={(e) => setAddTagValue(e.target.value)}
-                                className="rounded border text-sm"
-                                style={{ padding: 4, background: colors.surface2, borderColor: colors.border, color: colors.text }}
-                              >
-                                <option value="">Select tag</option>
-                                {POSE_CONDITIONING_TAGS.map((t) => (
-                                  <option key={t.value} value={t.value}>{t.label}</option>
-                                ))}
-                              </select>
-                              <input
-                                type="text"
-                                placeholder="Note (optional)"
-                                value={addTagNote}
-                                onChange={(e) => setAddTagNote(e.target.value)}
-                                className="rounded border text-xs w-24"
-                                style={{ padding: 4, background: colors.surface2, borderColor: colors.border, color: colors.text }}
-                              />
-                              <button
-                                type="button"
-                                onClick={handleAddConditioningTag}
-                                disabled={!addTagValue || addingTag}
-                                className="text-xs px-2 py-1 rounded"
-                                style={{ background: colors.primary, color: '#fff', border: 'none', cursor: addingTag ? 'wait' : 'pointer' }}
-                              >
-                                {addingTag ? '…' : 'Add'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => { setAddTagItemId(null); setAddTagValue(''); setAddTagNote(''); }}
-                                className="text-xs px-1"
-                                style={{ color: colors.muted }}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setAddTagItemId(item.id)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border"
-                              style={{ borderColor: colors.border, color: colors.muted, background: 'transparent', cursor: 'pointer' }}
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: colors.muted }}>
+                            Previous
+                            {priorCheck?.week_start ? ` · ${priorCheck.week_start}` : ''}
+                          </p>
+                          {priorUrl ? (
+                            <a
+                              href={priorUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block rounded-lg overflow-hidden"
+                              style={{ width: '100%', maxWidth: 220, height: 200, background: colors.surface2 }}
                             >
-                              <Tag size={12} /> Add tag
-                            </button>
+                              <img src={priorUrl} alt={`Previous ${item.pose_label}`} className="w-full h-full object-cover" />
+                            </a>
+                          ) : (
+                            <div
+                              className="rounded-lg flex items-center justify-center text-center px-2"
+                              style={{ width: '100%', maxWidth: 220, height: 200, background: colors.surface2, color: colors.muted }}
+                            >
+                              <span className="text-xs">{prior ? 'No photo last week' : 'No prior week to compare'}</span>
+                            </div>
                           )}
                         </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>Rating (1–10)</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={10}
-                          value={rating === null || rating === undefined || rating === '' ? '' : rating}
-                          onChange={(e) => setItemEdit(item.id, 'coach_rating', e.target.value === '' ? '' : e.target.value)}
-                          placeholder="Optional"
-                          className="w-full rounded-lg border bg-black/20 text-white placeholder:text-gray-500"
-                          style={{ padding: 8, borderColor: colors.border, marginBottom: spacing[12], maxWidth: 80 }}
-                        />
-                        <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>Notes</label>
-                        <textarea
-                          value={notes}
-                          onChange={(e) => setItemEdit(item.id, 'coach_notes', e.target.value)}
-                          placeholder="Optional"
-                          rows={2}
-                          className="w-full rounded-lg border bg-black/20 text-white placeholder:text-gray-500"
-                          style={{ padding: 8, borderColor: colors.border, fontSize: 14 }}
-                        />
+                      <div className="flex flex-col sm:flex-row gap-4 pt-2" style={{ borderTop: `1px solid ${colors.border}` }}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Conditioning tags</p>
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {(notesByItemId[item.id] || []).map((n) => {
+                              const label = POSE_CONDITIONING_TAGS.find((t) => t.value === n.tag)?.label || n.tag;
+                              return (
+                                <span
+                                  key={n.id}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs"
+                                  style={{ background: colors.primarySubtle, color: colors.primary }}
+                                >
+                                  {label}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveConditioningTag(n.id)}
+                                    aria-label="Remove tag"
+                                    style={{ padding: 0, border: 'none', background: 'none', color: 'inherit', cursor: 'pointer', display: 'flex' }}
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </span>
+                              );
+                            })}
+                            {addTagItemId === item.id ? (
+                              <div className="flex flex-wrap gap-2 items-center">
+                                <select
+                                  value={addTagValue}
+                                  onChange={(e) => setAddTagValue(e.target.value)}
+                                  className="rounded border text-sm"
+                                  style={{ padding: 4, background: colors.surface2, borderColor: colors.border, color: colors.text }}
+                                >
+                                  <option value="">Select tag</option>
+                                  {POSE_CONDITIONING_TAGS.map((t) => (
+                                    <option key={t.value} value={t.value}>{t.label}</option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="text"
+                                  placeholder="Note (optional)"
+                                  value={addTagNote}
+                                  onChange={(e) => setAddTagNote(e.target.value)}
+                                  className="rounded border text-xs w-24"
+                                  style={{ padding: 4, background: colors.surface2, borderColor: colors.border, color: colors.text }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleAddConditioningTag}
+                                  disabled={!addTagValue || addingTag}
+                                  className="text-xs px-2 py-1 rounded"
+                                  style={{ background: colors.primary, color: '#fff', border: 'none', cursor: addingTag ? 'wait' : 'pointer' }}
+                                >
+                                  {addingTag ? '…' : 'Add'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setAddTagItemId(null); setAddTagValue(''); setAddTagNote(''); }}
+                                  className="text-xs px-1"
+                                  style={{ color: colors.muted }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setAddTagItemId(item.id)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs border"
+                                style={{ borderColor: colors.border, color: colors.muted, background: 'transparent', cursor: 'pointer' }}
+                              >
+                                <Tag size={12} /> Add tag
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>Rating (1–10)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={10}
+                            value={rating === null || rating === undefined || rating === '' ? '' : rating}
+                            onChange={(e) => setItemEdit(item.id, 'coach_rating', e.target.value === '' ? '' : e.target.value)}
+                            placeholder="Optional"
+                            className="w-full rounded-lg border bg-black/20 text-white placeholder:text-gray-500"
+                            style={{ padding: 8, borderColor: colors.border, marginBottom: spacing[12], maxWidth: 80 }}
+                          />
+                          <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>Notes</label>
+                          <textarea
+                            value={notes}
+                            onChange={(e) => setItemEdit(item.id, 'coach_notes', e.target.value)}
+                            placeholder="Optional"
+                            rows={2}
+                            className="w-full rounded-lg border bg-black/20 text-white placeholder:text-gray-500"
+                            style={{ padding: 8, borderColor: colors.border, fontSize: 14 }}
+                          />
+                        </div>
                       </div>
                     </div>
                   </Card>
                 );
               })}
             </div>
+            <Card style={{ marginTop: spacing[12], padding: spacing[12], border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-semibold uppercase tracking-wide mb-0" style={{ color: colors.muted }}>Pose grid</p>
+                <button
+                  type="button"
+                  onClick={() => setCompareWeekMode((v) => !v)}
+                  className="text-xs px-2 py-1 rounded border"
+                  style={{ borderColor: colors.border, color: colors.text, background: colors.surface2 }}
+                >
+                  {compareWeekMode ? 'Single week' : 'Compare weeks'}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {items.map((item, idx) => {
+                  const currentUrl = itemSignedUrls[item.id] || null;
+                  const prevUrl = item.pose_key ? (priorItemUrls[item.pose_key] || null) : null;
+                  return (
+                    <button
+                      key={`grid-${item.id}`}
+                      type="button"
+                      onClick={() => openPoseDetail(idx, compareWeekMode)}
+                      className="rounded-lg overflow-hidden text-left border"
+                      style={{ borderColor: colors.border, background: colors.surface2 }}
+                    >
+                      <div style={{ height: 120, display: 'grid', gridTemplateColumns: compareWeekMode ? '1fr 1fr' : '1fr' }}>
+                        <div style={{ background: colors.surface2 }}>
+                          {currentUrl ? <img src={currentUrl} alt={item.pose_label} className="w-full h-full object-cover" loading="lazy" /> : null}
+                        </div>
+                        {compareWeekMode && (
+                          <div style={{ background: colors.surface1 }}>
+                            {prevUrl ? <img src={prevUrl} alt={`Previous ${item.pose_label}`} className="w-full h-full object-cover" loading="lazy" /> : null}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ padding: 8 }}>
+                        <p className="text-xs font-medium truncate mb-0" style={{ color: colors.text }}>{item.pose_label}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
           </section>
         ) : (
           <>
@@ -593,6 +765,39 @@ export default function PoseCheckReviewDetailPage() {
           ]}
         />
       </div>
+      {activePose && (
+        <div
+          className="fixed inset-0 z-50"
+          style={{ background: 'rgba(2, 6, 23, 0.95)' }}
+          onTouchStart={handlePoseSwipeStart}
+          onTouchEnd={handlePoseSwipeEnd}
+        >
+          <div className="p-3 flex items-center justify-between" style={{ color: colors.text }}>
+            <p className="text-sm font-semibold mb-0">
+              {activePose.pose_label} · {activePoseIndex + 1}/{items.length}
+            </p>
+            <button type="button" onClick={closePoseDetail} style={{ border: 'none', background: 'transparent', color: colors.text }}>
+              <X size={20} />
+            </button>
+          </div>
+          <div className="px-3 pb-6 h-[calc(100%-52px)] flex items-center justify-center">
+            {compareWeekMode ? (
+              <div className="w-full h-full grid grid-cols-2 gap-2">
+                <div className="rounded-lg overflow-hidden" style={{ background: colors.surface2 }}>
+                  {activePoseCurrentUrl ? <img src={activePoseCurrentUrl} alt={activePose.pose_label} className="w-full h-full object-contain" /> : null}
+                </div>
+                <div className="rounded-lg overflow-hidden" style={{ background: colors.surface1 }}>
+                  {activePosePriorUrl ? <img src={activePosePriorUrl} alt={`Previous ${activePose.pose_label}`} className="w-full h-full object-contain" /> : null}
+                </div>
+              </div>
+            ) : (
+              <div className="w-full h-full rounded-lg overflow-hidden" style={{ background: colors.surface2 }}>
+                {activePoseCurrentUrl ? <img src={activePoseCurrentUrl} alt={activePose.pose_label} className="w-full h-full object-contain" /> : null}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

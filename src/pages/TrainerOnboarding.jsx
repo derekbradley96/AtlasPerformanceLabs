@@ -22,7 +22,7 @@ export default function TrainerOnboarding() {
     display_name: '',
     niche: '',
     bio: '',
-    monthly_rate: 100
+    monthly_rate: '100'
   });
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export default function TrainerOnboarding() {
         display_name: formData.display_name,
         niche: formData.niche,
         bio: formData.bio,
-        monthly_rate: formData.monthly_rate * 100,
+        monthly_rate: (Number(formData.monthly_rate) || 0) * 100,
         stripe_connected: false
       });
       setStep(2);
@@ -170,7 +170,8 @@ export default function TrainerOnboarding() {
                 <Input
                   type="number"
                   value={formData.monthly_rate}
-                  onChange={(e) => setFormData({ ...formData, monthly_rate: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => setFormData({ ...formData, monthly_rate: e.target.value })}
+                  onFocus={(e) => e.target.select()}
                   placeholder="99"
                   className="bg-slate-900 border-slate-800 h-12"
                 />

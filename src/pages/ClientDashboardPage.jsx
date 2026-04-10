@@ -12,7 +12,7 @@ const DEMO_USER = { id: 'demo-user', full_name: 'Demo User', user_type: 'client'
 const mountTransition = { duration: 0.24, ease: 'easeOut' };
 
 export default function ClientDashboardPage() {
-  const { user: authUser, isDemoMode, isAdminBypass } = useAuth();
+  const { user: authUser, profile, isDemoMode, isAdminBypass } = useAuth();
   const [applyingInvite, setApplyingInvite] = useState(false);
   const queryClient = useQueryClient();
   const user = authUser || (isDemoMode ? DEMO_USER : null) || (isAdminBypass ? { id: 'admin', full_name: 'Admin', user_type: 'client' } : null);
@@ -73,7 +73,7 @@ export default function ClientDashboardPage() {
       animate={{ opacity: 1, y: 0 }}
       transition={mountTransition}
     >
-      <ClientDashboard user={user} />
+      <ClientDashboard user={user} linkedFromPersonalAt={profile?.linked_from_personal_at} />
     </motion.div>
   );
 }

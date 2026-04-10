@@ -24,7 +24,7 @@ export default function AdminMarketplaceSettings({ adminEmail }) {
 
   const [form, setForm] = useState({
     verification_enabled: true,
-    new_trainer_boost_days: 30,
+    new_trainer_boost_days: '30',
     specialties_list: ["Strength", "Hypertrophy", "Fat Loss", "Nutrition", "Powerlifting", "Bodybuilding", "CrossFit", "Olympic Lifting", "Rehabilitation", "Sports Performance"]
   });
 
@@ -34,7 +34,7 @@ export default function AdminMarketplaceSettings({ adminEmail }) {
     if (settings) {
       setForm({
         verification_enabled: settings.verification_enabled ?? true,
-        new_trainer_boost_days: settings.new_trainer_boost_days || 30,
+        new_trainer_boost_days: String(settings.new_trainer_boost_days ?? 30),
         specialties_list: settings.specialties_list || []
       });
     }
@@ -42,17 +42,21 @@ export default function AdminMarketplaceSettings({ adminEmail }) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const payload = {
+        ...form,
+        new_trainer_boost_days: Number(form.new_trainer_boost_days) || 0,
+      };
       if (settings) {
-        await base44.entities.MarketplaceSettings.update(settings.id, form);
+        await base44.entities.MarketplaceSettings.update(settings.id, payload);
       } else {
-        await base44.entities.MarketplaceSettings.create(form);
+        await base44.entities.MarketplaceSettings.create(payload);
       }
       await base44.entities.AdminAuditLog.create({
         admin_email: adminEmail,
         action_type: 'marketplace_settings_updated',
         target_type: 'MarketplaceSettings',
         old_value: JSON.stringify(settings),
-        new_value: JSON.stringify(form),
+        new_value: JSON.stringify(payload),
         timestamp: new Date().toISOString()
       });
     },
@@ -101,7 +105,8 @@ export default function AdminMarketplaceSettings({ adminEmail }) {
               type="number"
               min="0"
               value={form.new_trainer_boost_days}
-              onChange={(e) => setForm({ ...form, new_trainer_boost_days: parseInt(e.target.value) })}
+              onChange={(e) => setForm({ ...form, new_trainer_boost_days: e.target.value })}
+              onFocus={(e) => e.target.select()}
               className="bg-slate-900 border-slate-700"
             />
             <p className="text-xs text-slate-500 mt-1">Days to prioritize new trainers in search</p>

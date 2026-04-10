@@ -6,6 +6,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
+import { usePresentationMode } from '@/lib/presentationMode';
 import {
   Users,
   UserCheck,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react';
 
 export default function AdminDashboardPage() {
+  const { isDesktopWeb } = usePresentationMode();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -73,7 +75,7 @@ export default function AdminDashboardPage() {
 
   if (error) {
     return (
-      <div style={pageContainer}>
+      <div style={{ ...pageContainer, maxWidth: isDesktopWeb ? 1240 : undefined, margin: '0 auto' }}>
         <p style={{ color: colors.text }}>{error}</p>
         <button
           type="button"
@@ -94,7 +96,7 @@ export default function AdminDashboardPage() {
   const formatNum = (v) => (v != null ? Number(v).toLocaleString() : '—');
 
   return (
-    <div style={pageContainer}>
+    <div style={{ ...pageContainer, maxWidth: isDesktopWeb ? 1240 : undefined, margin: '0 auto' }}>
       <h2 className="text-lg font-semibold mb-1" style={{ color: colors.text }}>
         Atlas Admin Dashboard
       </h2>

@@ -6,10 +6,13 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Phone, Video, MessageCircle, Reply } from 'lucide-react';
+import { Phone, Video, MessageCircle, Reply, Smile, X } from 'lucide-react';
 import { getClientById, getClientCheckIns } from '@/data/selectors';
 import { trackFriction, trackRecoverableError } from '@/services/frictionTracker';
 import { useData } from '@/data/useData';
+import { useAuth } from '@/lib/AuthContext';
+import { normalizeRole } from '@/lib/roles';
+import { atlasMigrationDataAttributes, deriveMessagesThreadRouteState } from '@/lib/atlasMigrationPhases';
 import { getClientMarkedPaid } from '@/lib/clientDetailStorage';
 import { getClientRiskEvaluation } from '@/lib/riskService';
 import { getChatContextSnapshot } from '@/lib/chatContextSnapshot';
@@ -26,6 +29,8 @@ import QuickReplyChips from '@/components/chat/QuickReplyChips';
 import VoiceNoteComposer from '@/components/messages/VoiceNoteComposer';
 import AudioBubble from '@/components/messages/AudioBubble';
 import { addAudioMessage, sendVoiceMessage, listMessages as listLocalMessages, deleteMessage as deleteMessageFromStore } from '@/lib/messaging/messageStore';
+import { compressImage } from '@/lib/messaging/messageMediaStorage';
+import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import CallPrepSheet from '@/components/chat/CallPrepSheet';
 import SummaryCardBubble from '@/components/chat/SummaryCardBubble';
 import EmptyState from '@/components/ui/EmptyState';
@@ -40,20 +45,50 @@ const ACCENT = colors.primary;
 const MUTED = colors.muted;
 const BORDER = colors.border;
 const AUTO_SCROLL_THRESHOLD = 120;
-const TYPING_DELAY_MIN = 500;
-const TYPING_DELAY_MAX = 900;
-const TYPING_DURATION_MIN = 1200;
-const TYPING_DURATION_MAX = 2100;
 /** Composer bar height (padding + input row) for thread padding-bottom. */
 const COMPOSER_HEIGHT = 72;
-const SENT_DELAY_MIN = 200;
-const SENT_DELAY_MAX = 500;
-const DELIVERED_DELAY_MIN = 700;
-const DELIVERED_DELAY_MAX = 1200;
-const READ_DELAY_MIN = 1400;
-const READ_DELAY_MAX = 2200;
+const MEDIA_LONG_PRESS_MS = 360;
 const PAYMENT_REMINDER_MSG = 'Hi! This is a friendly reminder that your payment is overdue. Please settle at your earliest convenience. Thanks!';
 const QUICK_REPLIES = ['Got it!', 'On it', 'Send when you can', 'Sounds good'];
+const GIPHY_KEY = import.meta.env.VITE_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
+/** Clock / ordering slack so read cursors count as covering the message. */
+const READ_RECEIPT_TIME_SLACK_MS = 2500;
+
+function isOptimisticMessageId(id) {
+  const s = String(id ?? '');
+  return (
+    s.startsWith('local-') ||
+    s.startsWith('local-img-') ||
+    s.startsWith('local-gif-') ||
+    s.startsWith('voice-') ||
+    s.startsWith('audio-')
+  );
+}
+
+/** True if a server row is the persisted version of a still-optimistic local row (race: realtime before send().then updates id). */
+function optimisticMatchesServerRow(localMsg, serverMsg) {
+  if (!localMsg || !serverMsg) return false;
+  if (String(localMsg.sender || '') !== String(serverMsg.sender || '')) return false;
+  const lb = String(localMsg.body || '').trim();
+  const sb = String(serverMsg.body || '').trim();
+  if (lb.length > 0 || sb.length > 0) {
+    if (lb !== sb) return false;
+    const lt = safeDate(localMsg.created_date)?.getTime() ?? 0;
+    const st = safeDate(serverMsg.created_date)?.getTime() ?? 0;
+    return Math.abs(st - lt) < 120000;
+  }
+  const lu = localMsg.media_url ? String(localMsg.media_url) : '';
+  const su = serverMsg.media_url ? String(serverMsg.media_url) : '';
+  if (lu && su && lu === su) return true;
+  const lt = localMsg.type || 'text';
+  const st = serverMsg.type || 'text';
+  if (lt === st && (lt === 'voice' || lt === 'image' || lt === 'gif')) {
+    const ltm = safeDate(localMsg.created_date)?.getTime() ?? 0;
+    const stm = safeDate(serverMsg.created_date)?.getTime() ?? 0;
+    return Math.abs(stm - ltm) < 180000;
+  }
+  return false;
+}
 
 function formatMessageTimestamp(iso) {
   const d = safeDate(iso);
@@ -95,8 +130,10 @@ async function heavyHaptic() {
 }
 
 /** Allow "Delete for everyone" when recipient has not read. TODO: tie into real read receipts when Supabase messages table exists. */
-function canDeleteForEveryone(message) {
-  const isOutgoingSender = message?.sender === 'coach' || message?.sender === 'trainer';
+function canDeleteForEveryone(message, isClientView) {
+  const isOutgoingSender = isClientView
+    ? message?.sender === 'client'
+    : message?.sender === 'coach' || message?.sender === 'trainer';
   if (!message || !isOutgoingSender) return false;
   if (message.read_at != null || message?.status === 'read') return false;
   const sentAt = message?.created_date ? new Date(message.created_date).getTime() : 0;
@@ -137,6 +174,10 @@ export default function ChatThread() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const data = useData();
+  const { user, effectiveRole, clientLinkedRow, profile } = useAuth();
+  const role = normalizeRole(effectiveRole ?? user?.role ?? null);
+  const isClientView = role === 'client';
+  const outgoingSenderKey = isClientView ? 'client' : 'coach';
   const { setHeaderTitle, setHeaderRight } = useOutletContext() || {};
   const messagesRef = useRef(null);
   const inputRef = useRef(null);
@@ -162,13 +203,20 @@ export default function ChatThread() {
     setConversationDeleted(false);
     setCurrentThread(null);
     let cancelled = false;
-    data.getClient(clientId).then((c) => {
-      if (!cancelled) setLoadedClient(c ?? null);
-    });
+    if (isClientView && clientLinkedRow?.id && clientId === clientLinkedRow.id) {
+      const nm = profile?.full_name || profile?.name || 'You';
+      setLoadedClient({ id: clientLinkedRow.id, full_name: nm, name: nm });
+    } else {
+      data.getClient(clientId).then((c) => {
+        if (!cancelled) setLoadedClient(c ?? null);
+      });
+    }
     const ensureAndLoad = async () => {
-      const thread = typeof data?.ensureThreadForClient === 'function'
-        ? await data.ensureThreadForClient(clientId)
-        : await data.getThread?.(clientId) ?? null;
+      const thread = isClientView
+        ? await (typeof data?.getThread === 'function' ? data.getThread(clientId) : null)
+        : typeof data?.ensureThreadForClient === 'function'
+          ? await data.ensureThreadForClient(clientId)
+          : await data.getThread?.(clientId) ?? null;
       if (cancelled) return;
       if (!thread) {
         setConversationDeleted(true);
@@ -201,7 +249,7 @@ export default function ChatThread() {
     };
     ensureAndLoad();
     return () => { cancelled = true; };
-  }, [clientId, data]);
+  }, [clientId, data, isClientView, clientLinkedRow?.id, profile?.full_name, profile?.name]);
 
   useEffect(() => {
     const prefilled = location.state?.prefilledMessage;
@@ -226,15 +274,23 @@ export default function ChatThread() {
   const [pendingDeleteMessage, setPendingDeleteMessage] = useState(null);
   const [pendingDeleteType, setPendingDeleteType] = useState(null); // 'me' | 'everyone'
   const [replyTo, setReplyTo] = useState(null);
-  const [isTyping, setIsTyping] = useState(false);
+  /** Other party is typing (Supabase Realtime broadcast). */
+  const [remoteTyping, setRemoteTyping] = useState(false);
   const [newMessageIds, setNewMessageIds] = useState(() => new Set());
   const [showAttachmentSheet, setShowAttachmentSheet] = useState(false);
-  const [attachmentFileName, setAttachmentFileName] = useState(null);
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [gifSearch, setGifSearch] = useState('');
+  const [gifResults, setGifResults] = useState([]);
+  const [mediaPreview, setMediaPreview] = useState(null);
+  const fileInputRef = useRef(null);
   const [isSending, setIsSending] = useState(false);
-  const typingTimeoutRef = useRef(null);
-  const autoReplyTimeoutRef = useRef(null);
   const statusTimersRef = useRef([]);
+  const realtimeChannelRef = useRef(null);
+  const channelSubscribedRef = useRef(false);
+  const remoteTypingHideRef = useRef(null);
+  const lastTypingBroadcastRef = useRef(0);
   const atBottomRef = useRef(true);
+  const mediaLongPressTimeoutRef = useRef(null);
 
   const { keyboardInset } = useKeyboardInset();
   const { atBottom, showJump, newCount, smoothJumpToBottom, markNewMessage, checkBottom } =
@@ -254,41 +310,131 @@ export default function ChatThread() {
 
   const seedList = Array.isArray(loadedMessages) ? loadedMessages : [];
   const localList = Array.isArray(localMessages) ? localMessages : [];
-  const allMessages = [...seedList, ...localList].sort((a, b) => {
-    const ta = safeDate(a?.created_date)?.getTime() ?? 0;
-    const tb = safeDate(b?.created_date)?.getTime() ?? 0;
-    return ta - tb;
-  });
-  const outgoing = allMessages.filter((m) => m?.sender === 'coach' || m?.sender === 'trainer');
+  const allMessages = useMemo(() => {
+    const merged = [...seedList, ...localList];
+    const byId = new Map();
+    for (const m of merged) {
+      if (m?.id == null) continue;
+      const cur = byId.get(m.id);
+      if (!cur) {
+        byId.set(m.id, m);
+        continue;
+      }
+      const pick =
+        (cur.status === 'sending' || cur.status === 'sent') && !(m.status === 'sending' || m.status === 'sent')
+          ? cur
+          : m.status && !cur.status
+            ? m
+            : cur;
+      byId.set(m.id, pick);
+    }
+    return Array.from(byId.values()).sort((a, b) => {
+      const ta = safeDate(a?.created_date)?.getTime() ?? 0;
+      const tb = safeDate(b?.created_date)?.getTime() ?? 0;
+      return ta - tb;
+    });
+  }, [seedList, localList]);
+  const outgoing = allMessages.filter((m) =>
+    isClientView ? m?.sender === 'client' : m?.sender === 'coach' || m?.sender === 'trainer'
+  );
   const lastOutgoingMessage = outgoing.length ? outgoing[outgoing.length - 1] : null;
+  const persistedSupabaseThread = useMemo(() => {
+    if (!hasSupabase || !currentThread?.id) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(currentThread.id));
+  }, [currentThread?.id]);
+  /** Delivered/read under last bubble: DB read cursors for Supabase; local simulation for sandbox. */
+  const lastOutgoingDelivery = useMemo(() => {
+    const m = lastOutgoingMessage;
+    if (!m?.id) return { status: null, readAt: null };
+    if (m.status === 'sending' || m.status === 'sent') {
+      return { status: m.status, readAt: null };
+    }
+    if (persistedSupabaseThread) {
+      const msgMs = safeDate(m.created_date)?.getTime();
+      if (msgMs != null && !Number.isNaN(msgMs)) {
+        if (isClientView) {
+          const coachRead = currentThread?.coach_last_read_at
+            ? new Date(currentThread.coach_last_read_at).getTime()
+            : NaN;
+          if (!Number.isNaN(coachRead) && coachRead >= msgMs - READ_RECEIPT_TIME_SLACK_MS) {
+            return { status: 'read', readAt: currentThread.coach_last_read_at };
+          }
+        } else {
+          const clientRead = currentThread?.client_last_read_at
+            ? new Date(currentThread.client_last_read_at).getTime()
+            : NaN;
+          if (!Number.isNaN(clientRead) && clientRead >= msgMs - READ_RECEIPT_TIME_SLACK_MS) {
+            return { status: 'read', readAt: currentThread.client_last_read_at };
+          }
+        }
+        return { status: 'delivered', readAt: null };
+      }
+    }
+    if (m.status === 'read' || m.status === 'delivered') {
+      return { status: m.status, readAt: m.readAt ?? null };
+    }
+    if (m.status) return { status: m.status, readAt: m.readAt ?? null };
+    return { status: null, readAt: null };
+  }, [lastOutgoingMessage, currentThread, isClientView, persistedSupabaseThread]);
+  const replyPreviewById = useMemo(() => {
+    const byId = new Map(allMessages.map((msg) => [msg?.id, msg]));
+    const result = new Map();
+    allMessages.forEach((msg) => {
+      const source = byId.get(msg?.reply_to_id);
+      const body = String(source?.body || '').trim();
+      if (!body || !msg?.id) return;
+      result.set(msg.id, body.length > 70 ? `${body.slice(0, 70)}...` : body);
+    });
+    return result;
+  }, [allMessages]);
+
+  const startMediaLongPress = useCallback((message) => {
+    if (mediaLongPressTimeoutRef.current) clearTimeout(mediaLongPressTimeoutRef.current);
+    mediaLongPressTimeoutRef.current = setTimeout(() => {
+      setMenuMessage(message);
+    }, MEDIA_LONG_PRESS_MS);
+  }, []);
+
+  const cancelMediaLongPress = useCallback(() => {
+    if (mediaLongPressTimeoutRef.current) {
+      clearTimeout(mediaLongPressTimeoutRef.current);
+      mediaLongPressTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     setLocalMessages([]);
     setReplyTo(null);
     setMenuMessage(null);
-    setIsTyping(false);
+    setRemoteTyping(false);
     statusTimersRef.current.forEach(clearTimeout);
     statusTimersRef.current = [];
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    if (autoReplyTimeoutRef.current) clearTimeout(autoReplyTimeoutRef.current);
+    if (remoteTypingHideRef.current) clearTimeout(remoteTypingHideRef.current);
   }, [clientId]);
 
+  useEffect(() => () => cancelMediaLongPress(), [cancelMediaLongPress]);
+
+  /** Sandbox / non-Supabase: fake “read” when scrolled to bottom (not used for real DB threads). */
   useEffect(() => {
-    if (!atBottom) return;
+    if (!atBottom || persistedSupabaseThread) return;
     setLocalMessages((prev) =>
       prev.map((m) => {
-        if ((m?.sender !== 'coach' && m?.sender !== 'trainer') || m?.status !== 'delivered') return m;
+        const isOut = isClientView ? m?.sender === 'client' : m?.sender === 'coach' || m?.sender === 'trainer';
+        if (!isOut || m?.status !== 'delivered') return m;
         return { ...m, status: 'read', readAt: m.readAt ?? Date.now() };
       })
     );
-  }, [atBottom]);
+  }, [atBottom, isClientView, persistedSupabaseThread]);
 
   useEffect(() => {
-    if (typeof setHeaderTitle === 'function') {
-      setHeaderTitle(client?.full_name || 'Chat');
+    if (typeof setHeaderTitle !== 'function') return undefined;
+    if (isClientView) {
+      setHeaderTitle('Your coach');
       return () => setHeaderTitle(null);
     }
-  }, [client, setHeaderTitle]);
+    setHeaderTitle(client?.full_name || 'Chat');
+    return () => setHeaderTitle(null);
+  }, [client, setHeaderTitle, isClientView]);
 
   useEffect(() => {
     setPrepNotesState(clientId ? getCoachPrepNotes(clientId) : '');
@@ -307,7 +453,7 @@ export default function ChatThread() {
   );
 
   useEffect(() => {
-    if (typeof setHeaderRight !== 'function' || !client) {
+    if (typeof setHeaderRight !== 'function' || !client || isClientView) {
       if (typeof setHeaderRight === 'function') setHeaderRight(null);
       return () => {};
     }
@@ -340,7 +486,7 @@ export default function ChatThread() {
       </div>
     );
     return () => setHeaderRight(null);
-  }, [setHeaderRight, client]);
+  }, [setHeaderRight, client, isClientView]);
 
   const handlePrepNotesChange = useCallback(
     (text) => {
@@ -352,7 +498,7 @@ export default function ChatThread() {
 
   const handleSendSummaryCard = useCallback(
     (payload) => {
-      if (!payload || !clientId) return;
+      if (!payload || !clientId || isClientView) return;
       const created_date = new Date().toISOString();
       const bodyText = [payload.title, (payload.wins ?? []).join(' · '), (payload.nextSteps ?? []).join(' ')].filter(Boolean).join('\n');
       const newMsg = {
@@ -374,7 +520,7 @@ export default function ChatThread() {
       }
       toast.success('Summary sent to chat');
     },
-    [clientId, currentThread, data]
+    [clientId, currentThread, data, isClientView]
   );
 
   const scrollToBottom = useCallback((force) => {
@@ -389,17 +535,16 @@ export default function ChatThread() {
 
   const handleSend = useCallback(() => {
     const text = (input ?? '').trim();
-    const hasContent = text.length > 0 || attachmentFileName;
+    const hasContent = text.length > 0;
     if (!hasContent) return;
     lightHaptic();
     setIsSending(true);
-    setAttachmentFileName(null);
     const created_date = new Date().toISOString();
-    const bodyToSend = text || '(attachment)';
+    const bodyToSend = text;
     const newMsg = {
       id: `local-${Date.now()}`,
       client_id: clientId,
-      sender: 'coach',
+      sender: outgoingSenderKey,
       body: text || '(attachment)',
       created_date,
       status: 'sending',
@@ -437,19 +582,208 @@ export default function ChatThread() {
       finishSend();
     }
 
-    const readDelay = READ_DELAY_MIN + Math.random() * (READ_DELAY_MAX - READ_DELAY_MIN);
-    const msgId = newMsg.id;
-    const t3 = setTimeout(() => {
-      if (atBottomRef.current) {
-        setLocalMessages((prev) =>
-          prev.map((m) => (m?.id === msgId ? { ...m, status: 'read', readAt: Date.now() } : m))
-        );
-      }
-    }, readDelay);
-    statusTimersRef.current.push(t3);
-
     requestAnimationFrame(() => scrollToBottom(true));
-  }, [input, attachmentFileName, clientId, currentThread, scrollToBottom, data, replyTo]);
+  }, [input, clientId, currentThread, scrollToBottom, data, replyTo, outgoingSenderKey]);
+
+  const handlePickImage = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleImageSelected = useCallback(async (event) => {
+    const file = event.target?.files?.[0];
+    if (!file || !clientId) return;
+    event.target.value = '';
+    setIsSending(true);
+    try {
+      const compressed = await compressImage(file);
+      const localUrl = URL.createObjectURL(compressed);
+      const created_date = new Date().toISOString();
+      const localId = `local-img-${Date.now()}`;
+      setLocalMessages((prev) => [...prev, {
+        id: localId,
+        client_id: clientId,
+        sender: outgoingSenderKey,
+        type: 'image',
+        media_url: localUrl,
+        body: '',
+        created_date,
+        status: 'sending',
+      }]);
+      const threadId = currentThread?.id ?? clientId;
+      const added = await data.sendMessage(threadId, {
+        type: 'image',
+        blob: compressed,
+        mimeType: compressed.type || 'image/jpeg',
+        text: '',
+        fileName: file.name || 'image.jpg',
+      });
+      if (added) {
+        setLocalMessages((prev) => prev.map((m) => (
+          m?.id === localId ? { ...m, id: added.id, media_url: added.media_url || m.media_url, status: 'delivered' } : m
+        )));
+      }
+      requestAnimationFrame(() => scrollToBottom(true));
+    } catch (err) {
+      toast.error('Failed to send image');
+    } finally {
+      setIsSending(false);
+    }
+  }, [clientId, currentThread, data, scrollToBottom, outgoingSenderKey]);
+
+  const handleSendGif = useCallback(async (gifUrl) => {
+    if (!gifUrl || !clientId) return;
+    setShowGifPicker(false);
+    setIsSending(true);
+    try {
+      const response = await fetch(gifUrl);
+      const blob = await response.blob();
+      const created_date = new Date().toISOString();
+      const localId = `local-gif-${Date.now()}`;
+      setLocalMessages((prev) => [...prev, {
+        id: localId,
+        client_id: clientId,
+        sender: outgoingSenderKey,
+        type: 'gif',
+        media_url: gifUrl,
+        body: '',
+        created_date,
+        status: 'sending',
+      }]);
+      const threadId = currentThread?.id ?? clientId;
+      const added = await data.sendMessage(threadId, {
+        type: 'gif',
+        blob,
+        mimeType: 'image/gif',
+        text: '',
+        fileName: 'gif.gif',
+      });
+      if (added) {
+        setLocalMessages((prev) => prev.map((m) => (
+          m?.id === localId ? { ...m, id: added.id, media_url: added.media_url || m.media_url, status: 'delivered' } : m
+        )));
+      }
+      requestAnimationFrame(() => scrollToBottom(true));
+    } catch (_) {
+      toast.error('Failed to send GIF');
+    } finally {
+      setIsSending(false);
+    }
+  }, [clientId, currentThread, data, scrollToBottom, outgoingSenderKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const query = gifSearch.trim();
+      const endpoint = query
+        ? `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(GIPHY_KEY)}&q=${encodeURIComponent(query)}&limit=16&rating=pg`
+        : `https://api.giphy.com/v1/gifs/trending?api_key=${encodeURIComponent(GIPHY_KEY)}&limit=16&rating=pg`;
+      try {
+        const res = await fetch(endpoint);
+        const json = await res.json();
+        if (!cancelled) setGifResults(Array.isArray(json?.data) ? json.data : []);
+      } catch (_) {
+        if (!cancelled) setGifResults([]);
+      }
+    };
+    if (showGifPicker) run();
+    return () => { cancelled = true; };
+  }, [showGifPicker, gifSearch]);
+
+  useEffect(() => {
+    const threadId = currentThread?.id;
+    if (!threadId || !hasSupabase) return;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(threadId));
+    if (!isUuid) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const myRole = isClientView ? 'client' : 'coach';
+    const channel = supabase.channel(`chat-live-${threadId}`, {
+      config: { broadcast: { self: false } },
+    });
+    realtimeChannelRef.current = channel;
+    channelSubscribedRef.current = false;
+
+    const mergeMessagesFromServer = async () => {
+      const latest = await data.listMessages(threadId).catch(() => []);
+      const arr = Array.isArray(latest) ? latest : [];
+      setLoadedMessages(arr);
+      setLocalMessages((prev) => {
+        const ids = new Set(arr.map((x) => x?.id).filter(Boolean));
+        return prev.filter((m) => {
+          if (ids.has(m.id)) return false;
+          if (!isOptimisticMessageId(m?.id)) return true;
+          return !arr.some((s) => optimisticMatchesServerRow(m, s));
+        });
+      });
+      try {
+        data.markThreadRead?.(threadId);
+      } catch (_) {}
+      try {
+        window.dispatchEvent(new CustomEvent('atlas-messaging-updated'));
+      } catch (_) {}
+      requestAnimationFrame(() => scrollToBottom(false));
+    };
+
+    channel
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (!payload || payload.role === myRole) return;
+        setRemoteTyping(true);
+        if (remoteTypingHideRef.current) clearTimeout(remoteTypingHideRef.current);
+        remoteTypingHideRef.current = setTimeout(() => setRemoteTyping(false), 2800);
+      })
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'message_messages', filter: `thread_id=eq.${threadId}` },
+        () => {
+          void mergeMessagesFromServer();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'message_threads', filter: `id=eq.${threadId}` },
+        (payload) => {
+          const row = payload?.new;
+          if (!row?.id) return;
+          setCurrentThread((prev) =>
+            prev && prev.id === row.id
+              ? {
+                  ...prev,
+                  coach_last_read_at: row.coach_last_read_at ?? prev.coach_last_read_at,
+                  client_last_read_at: row.client_last_read_at ?? prev.client_last_read_at,
+                  updated_at: row.updated_at ?? prev.updated_at,
+                }
+              : prev
+          );
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') channelSubscribedRef.current = true;
+        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') channelSubscribedRef.current = false;
+      });
+
+    return () => {
+      channelSubscribedRef.current = false;
+      realtimeChannelRef.current = null;
+      if (remoteTypingHideRef.current) clearTimeout(remoteTypingHideRef.current);
+      try {
+        supabase.removeChannel(channel);
+      } catch (_) {}
+    };
+  }, [currentThread?.id, data, scrollToBottom, isClientView]);
+
+  const pulseRemoteTypingIndicator = useCallback(() => {
+    const ch = realtimeChannelRef.current;
+    if (!ch || !channelSubscribedRef.current) return;
+    const now = Date.now();
+    if (now - lastTypingBroadcastRef.current < 700) return;
+    lastTypingBroadcastRef.current = now;
+    void ch.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { role: isClientView ? 'client' : 'coach' },
+    });
+  }, [isClientView]);
 
   const sendText = useCallback(
     (textToSend) => {
@@ -457,12 +791,11 @@ export default function ChatThread() {
       if (!t) return;
       lightHaptic();
       setIsSending(true);
-      setAttachmentFileName(null);
       const created_date = new Date().toISOString();
       const newMsg = {
         id: `local-${Date.now()}`,
         client_id: clientId,
-        sender: 'coach',
+        sender: outgoingSenderKey,
         body: t,
         created_date,
         status: 'sending',
@@ -494,7 +827,7 @@ export default function ChatThread() {
       }
       requestAnimationFrame(() => scrollToBottom(true));
     },
-    [clientId, currentThread, data, scrollToBottom, replyTo]
+    [clientId, currentThread, data, scrollToBottom, replyTo, outgoingSenderKey]
   );
 
   const handleSendVoice = useCallback(
@@ -506,7 +839,7 @@ export default function ChatThread() {
       const newMsg = {
         id: `voice-${Date.now()}`,
         client_id: clientId,
-        sender: 'coach',
+        sender: outgoingSenderKey,
         type: 'voice',
         audioKey: audioKey || null,
         mimeType: mimeType || 'audio/webm',
@@ -534,13 +867,13 @@ export default function ChatThread() {
             return;
           }
         }
-        const added = await sendVoiceMessage(clientId, { sender: 'coach', audioKey, mimeType, durationMs });
+        const added = await sendVoiceMessage(clientId, { sender: outgoingSenderKey, audioKey, mimeType, durationMs });
         if (added) setLocalMessages((prev) => prev.map((m) => (m?.id === newMsg.id ? { ...m, id: added.id } : m)));
       } catch (_) {
         toast.error('Failed to send voice note');
       }
     },
-    [clientId, currentThread, data, scrollToBottom]
+    [clientId, currentThread, data, scrollToBottom, outgoingSenderKey]
   );
 
   const handleVoiceNoteDone = useCallback(
@@ -551,7 +884,7 @@ export default function ChatThread() {
       const newMsg = {
         id: `audio-${Date.now()}`,
         client_id: clientId,
-        sender: 'coach',
+        sender: outgoingSenderKey,
         type: 'audio',
         audioDataUrl,
         durationMs: durationMs || 0,
@@ -560,10 +893,10 @@ export default function ChatThread() {
       setLocalMessages((prev) => [...prev, newMsg]);
       requestAnimationFrame(() => scrollToBottom(true));
       try {
-        await addAudioMessage(clientId, { sender: 'coach', audioDataUrl, durationMs: durationMs || 0 });
+        await addAudioMessage(clientId, { sender: outgoingSenderKey, audioDataUrl, durationMs: durationMs || 0 });
       } catch (_) {}
     },
-    [clientId, scrollToBottom]
+    [clientId, scrollToBottom, outgoingSenderKey]
   );
 
   const handleCopy = useCallback(async (message) => {
@@ -604,11 +937,11 @@ export default function ChatThread() {
   }, []);
 
   const handleDeleteForEveryone = useCallback((message) => {
-    if (!message?.id || !canDeleteForEveryone(message)) return;
+    if (!message?.id || !canDeleteForEveryone(message, isClientView)) return;
     setPendingDeleteMessage(message);
     setPendingDeleteType('everyone');
     setMenuMessage(null);
-  }, []);
+  }, [isClientView]);
 
   const handleConfirmDeleteForMe = useCallback(async () => {
     if (!pendingDeleteMessage || pendingDeleteType !== 'me') return;
@@ -652,9 +985,41 @@ export default function ChatThread() {
   const showQuickReplies = keyboardInset > 0 && !(input ?? '').trim();
   const showThreadSkeleton = clientId && !clientResolved;
 
+  const threadMigrationAttrs = useMemo(() => {
+    const roleView = isClientView ? 'client' : 'coach';
+    let state;
+    if (clientId && !clientResolved) {
+      state = deriveMessagesThreadRouteState({ roleView, surface: 'loading' });
+    } else if (conversationDeleted && clientId) {
+      state = deriveMessagesThreadRouteState({ roleView, surface: 'deleted' });
+    } else if (showNotFound) {
+      state = deriveMessagesThreadRouteState({ roleView, surface: 'not_found' });
+    } else if (!client) {
+      state = deriveMessagesThreadRouteState({ roleView, surface: 'no_client' });
+    } else if (allMessages.length === 0 && !remoteTyping) {
+      state = deriveMessagesThreadRouteState({ roleView, surface: 'empty' });
+    } else {
+      state = deriveMessagesThreadRouteState({ roleView, surface: 'active' });
+    }
+    return atlasMigrationDataAttributes(state.phase, state.primary);
+  }, [
+    isClientView,
+    clientId,
+    clientResolved,
+    conversationDeleted,
+    showNotFound,
+    client,
+    allMessages.length,
+    remoteTyping,
+  ]);
+
   if (showThreadSkeleton) {
     return (
-      <div className="app-screen min-w-0 max-w-full overflow-x-hidden flex flex-col" style={{ background: BG, padding: spacing[16] }}>
+      <div
+        className="app-screen min-w-0 max-w-full overflow-x-hidden flex flex-col"
+        style={{ background: BG, padding: spacing[16] }}
+        {...threadMigrationAttrs}
+      >
         <div className="flex items-center gap-3 mb-6">
           <Skeleton height={40} width={40} style={{ borderRadius: '50%' }} />
           <Skeleton height={18} width={120} />
@@ -668,7 +1033,11 @@ export default function ChatThread() {
 
   if (conversationDeleted && clientId) {
     return (
-      <div className="app-screen min-w-0 max-w-full overflow-x-hidden flex flex-col flex-1" style={{ background: BG, padding: spacing[16] }}>
+      <div
+        className="app-screen min-w-0 max-w-full overflow-x-hidden flex flex-col flex-1"
+        style={{ background: BG, padding: spacing[16] }}
+        {...threadMigrationAttrs}
+      >
         <EmptyState
           title="Conversation deleted"
           description="Start a new message to create a new thread."
@@ -696,6 +1065,7 @@ export default function ChatThread() {
       <div
         className="app-screen min-w-0 max-w-full overflow-x-hidden flex flex-col items-center justify-center"
         style={{ background: BG, color: MUTED, paddingTop: 24, paddingLeft: 16, paddingRight: 16, minHeight: 200 }}
+        {...threadMigrationAttrs}
       >
         <p className="text-sm mb-4">Conversation not found.</p>
         <button
@@ -711,7 +1081,13 @@ export default function ChatThread() {
   }
 
   if (!client) {
-    return null;
+    return (
+      <div
+        className="min-h-0 flex-1"
+        aria-hidden="true"
+        {...threadMigrationAttrs}
+      />
+    );
   }
 
   return (
@@ -723,6 +1099,7 @@ export default function ChatThread() {
         background: BG,
         color: colors.text,
       }}
+      {...threadMigrationAttrs}
     >
       <div
         ref={messagesRef}
@@ -738,30 +1115,40 @@ export default function ChatThread() {
             minHeight: '100%',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: allMessages.length === 0 && !isTyping ? 'center' : 'flex-start',
+            justifyContent: allMessages.length === 0 && !remoteTyping ? 'center' : 'flex-start',
           }}
         >
-          {allMessages.length === 0 && !isTyping ? (
+          {allMessages.length === 0 && !remoteTyping ? (
             <EmptyState
               title="No messages yet"
-              description="Send a message to start the conversation."
+              description={
+                isClientView
+                  ? 'When your coach messages you, it will show up here.'
+                  : 'Send a message to start the conversation.'
+              }
               icon={MessageCircle}
-              actionLabel="Request check-in"
-              onAction={() => {
-                lightHaptic();
-                setCallPrepOpen(true);
-              }}
+              actionLabel={isClientView ? undefined : 'Request check-in'}
+              onAction={
+                isClientView
+                  ? undefined
+                  : () => {
+                      lightHaptic();
+                      setCallPrepOpen(true);
+                    }
+              }
             />
           ) : (
             Array.isArray(allMessages) &&
             allMessages.map((m, idx) => {
-              const isOutgoing = m?.sender === 'coach' || m?.sender === 'trainer';
+              const isOutgoing = isClientView
+                ? m?.sender === 'client'
+                : m?.sender === 'coach' || m?.sender === 'trainer';
               const prev = allMessages[idx - 1];
               const prevDate = prev?.created_date ? dateGroupLabel(prev.created_date) : '';
               const thisDate = m?.created_date ? dateGroupLabel(m.created_date) : '';
               const showDateLabel = thisDate && thisDate !== prevDate;
               const isConsecutiveFromSameSender = prev != null && prev?.sender === m?.sender;
-              const isLastOutgoingWithStatus = lastOutgoingMessage?.id === m?.id && lastOutgoingMessage?.status;
+              const isLastOutgoingWithStatus = lastOutgoingMessage?.id === m?.id && !!lastOutgoingDelivery.status;
               return (
                 <React.Fragment key={m?.id ?? idx}>
                   {showDateLabel && (
@@ -780,24 +1167,74 @@ export default function ChatThread() {
                     </div>
                   )}
                   {m?.summaryPayload ? (
-                    <SummaryCardBubble message={m} isOutgoing={isOutgoing} />
+                    <div
+                      onContextMenu={(e) => { e.preventDefault(); setMenuMessage(m); }}
+                      onPointerDown={() => startMediaLongPress(m)}
+                      onPointerUp={cancelMediaLongPress}
+                      onPointerCancel={cancelMediaLongPress}
+                      onPointerLeave={cancelMediaLongPress}
+                    >
+                      <SummaryCardBubble message={m} isOutgoing={isOutgoing} />
+                    </div>
                   ) : m?.type === 'voice' ? (
-                    <AudioBubble
-                      audioKey={m.audioKey}
-                      mimeType={m.mimeType}
-                      durationMs={m.durationMs ?? m.duration_ms}
-                      isMine={isOutgoing}
-                      mediaUrl={m.media_url}
-                      messageId={m.id}
-                    />
+                    <div
+                      onContextMenu={(e) => { e.preventDefault(); setMenuMessage(m); }}
+                      onPointerDown={() => startMediaLongPress(m)}
+                      onPointerUp={cancelMediaLongPress}
+                      onPointerCancel={cancelMediaLongPress}
+                      onPointerLeave={cancelMediaLongPress}
+                    >
+                      <AudioBubble
+                        audioKey={m.audioKey}
+                        mimeType={m.mimeType}
+                        durationMs={m.durationMs ?? m.duration_ms}
+                        isMine={isOutgoing}
+                        mediaUrl={m.media_url}
+                        messageId={m.id}
+                      />
+                    </div>
                   ) : m?.type === 'audio' ? (
-                    <AudioMessage message={m} isOutgoing={isOutgoing} />
+                    <div
+                      onContextMenu={(e) => { e.preventDefault(); setMenuMessage(m); }}
+                      onPointerDown={() => startMediaLongPress(m)}
+                      onPointerUp={cancelMediaLongPress}
+                      onPointerCancel={cancelMediaLongPress}
+                      onPointerLeave={cancelMediaLongPress}
+                    >
+                      <AudioMessage message={m} isOutgoing={isOutgoing} />
+                    </div>
+                  ) : (m?.type === 'image' || m?.type === 'gif') ? (
+                    <div className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`} style={{ marginBottom: 10 }}>
+                      <button
+                        type="button"
+                        onClick={() => setMediaPreview(m.media_url)}
+                        onContextMenu={(e) => { e.preventDefault(); setMenuMessage(m); }}
+                        onPointerDown={() => startMediaLongPress(m)}
+                        onPointerUp={cancelMediaLongPress}
+                        onPointerCancel={cancelMediaLongPress}
+                        onPointerLeave={cancelMediaLongPress}
+                        style={{ maxWidth: '72%', border: 'none', background: 'transparent', padding: 0 }}
+                      >
+                        <img
+                          src={m.media_url}
+                          alt=""
+                          style={{
+                            width: '100%',
+                            maxHeight: 280,
+                            objectFit: 'cover',
+                            borderRadius: 14,
+                            border: `1px solid ${colors.border}`,
+                          }}
+                        />
+                      </button>
+                    </div>
                   ) : (
                     <ChatBubble
                       message={m}
                       isOutgoing={isOutgoing}
                       isNew={newMessageIds.has(m?.id)}
                       isConsecutiveFromSameSender={isConsecutiveFromSameSender}
+                      replyPreview={replyPreviewById.get(m?.id) || ''}
                       onLongPress={setMenuMessage}
                       onSwipeReply={handleSwipeReply}
                       onDelete={handleDelete}
@@ -807,8 +1244,8 @@ export default function ChatThread() {
                   {isLastOutgoingWithStatus && !m?.summaryPayload && (
                     <div className="flex justify-end" style={{ marginTop: -2, marginBottom: 8, paddingRight: 4 }}>
                       <MessageStatusFooter
-                        status={lastOutgoingMessage?.status}
-                        readAt={lastOutgoingMessage?.readAt}
+                        status={lastOutgoingDelivery.status}
+                        readAt={lastOutgoingDelivery.readAt}
                       />
                     </div>
                   )}
@@ -816,9 +1253,11 @@ export default function ChatThread() {
               );
             })
           )}
-          {isTyping && (
+          {remoteTyping && (
             <div className="flex justify-start" style={{ marginBottom: 8 }}>
-              <TypingIndicator />
+              <TypingIndicator
+                label={isClientView ? 'Your coach' : (client?.full_name || client?.name || 'Client')}
+              />
             </div>
           )}
         </div>
@@ -859,7 +1298,7 @@ export default function ChatThread() {
           bottom: 0,
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           transform: `translateY(-${keyboardInset}px)`,
-          zIndex: 30,
+          zIndex: 40,
           paddingTop: 8,
           paddingLeft: `calc(12px + env(safe-area-inset-left, 0px))`,
           paddingRight: `calc(12px + env(safe-area-inset-right, 0px))`,
@@ -894,31 +1333,99 @@ export default function ChatThread() {
           }}
           visible={showQuickReplies}
         />
-        <VoiceNoteComposer
-          disabled={isSending}
-          onSendText={sendText}
-          onSendVoice={handleSendVoice}
-          placeholder="Message..."
-          clientId={clientId}
-          onAttach={() => { lightHaptic(); setShowAttachmentSheet(true); }}
-          inputRef={inputRef}
-          value={input}
-          onChange={(v) => setInput(v)}
-        />
+        <div
+          className="flex items-center gap-2 w-full"
+          style={{ minHeight: COMPOSER_HEIGHT - 20 }}
+        >
+          <div className="flex-1 min-w-0">
+            <VoiceNoteComposer
+              disabled={isSending}
+              onSendText={sendText}
+              onSendVoice={handleSendVoice}
+              placeholder="Message..."
+              clientId={clientId}
+              onAttach={() => { lightHaptic(); setShowAttachmentSheet(true); }}
+              inputRef={inputRef}
+              value={input}
+              onChange={(v) => {
+                setInput(v);
+                pulseRemoteTypingIndicator();
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              lightHaptic();
+              setShowGifPicker(true);
+            }}
+            style={{
+              flexShrink: 0,
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              border: `1px solid ${colors.border}`,
+              background: colors.surface1,
+              color: colors.text,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            aria-label="Open GIF picker"
+          >
+            <Smile size={18} />
+          </button>
+        </div>
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelected} />
       </div>
 
       {showAttachmentSheet && (
         <AttachmentActionSheet
           onPhoto={() => {
-            setAttachmentFileName('photo.jpg');
+            handlePickImage();
             setShowAttachmentSheet(false);
           }}
           onCamera={() => {
-            setAttachmentFileName('camera.jpg');
+            handlePickImage();
             setShowAttachmentSheet(false);
           }}
           onCancel={() => setShowAttachmentSheet(false)}
         />
+      )}
+
+      {showGifPicker && (
+        <div className="fixed inset-0 z-40" style={{ background: colors.overlay }}>
+          <div className="absolute inset-x-3 top-8 bottom-8 rounded-2xl border flex flex-col" style={{ background: colors.bg, borderColor: colors.border }}>
+            <div className="flex items-center gap-2 p-3 border-b" style={{ borderColor: colors.border }}>
+              <input
+                value={gifSearch}
+                onChange={(e) => setGifSearch(e.target.value)}
+                placeholder="Search GIFs"
+                style={{ flex: 1, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, padding: '8px 10px' }}
+              />
+              <button type="button" onClick={() => setShowGifPicker(false)} style={{ border: 'none', background: 'transparent', color: colors.muted }}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 grid grid-cols-2 gap-2">
+              {gifResults.map((g) => {
+                const url = g?.images?.fixed_width?.url || g?.images?.downsized?.url;
+                if (!url) return null;
+                return (
+                  <button key={g.id} type="button" onClick={() => handleSendGif(url)} style={{ border: 'none', padding: 0, background: 'transparent' }}>
+                    <img src={url} alt={g?.title || 'gif'} style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 10 }} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mediaPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.9)' }} onClick={() => setMediaPreview(null)}>
+          <img src={mediaPreview} alt="" style={{ maxWidth: '94vw', maxHeight: '92vh', objectFit: 'contain' }} />
+        </div>
       )}
 
       <CallPrepSheet
@@ -945,8 +1452,17 @@ export default function ChatThread() {
           onReply={() => handleReply(menuMessage)}
           onDelete={() => handleDelete(menuMessage)}
           onDeleteForEveryone={() => handleDeleteForEveryone(menuMessage)}
-          showDelete={menuMessage?.sender === 'coach' || menuMessage?.sender === 'trainer'}
-          showDeleteForEveryone={(menuMessage?.sender === 'coach' || menuMessage?.sender === 'trainer') && canDeleteForEveryone(menuMessage)}
+          showDelete={
+            isClientView
+              ? menuMessage?.sender === 'client'
+              : menuMessage?.sender === 'coach' || menuMessage?.sender === 'trainer'
+          }
+          showDeleteForEveryone={
+            (isClientView
+              ? menuMessage?.sender === 'client'
+              : menuMessage?.sender === 'coach' || menuMessage?.sender === 'trainer') &&
+            canDeleteForEveryone(menuMessage, isClientView)
+          }
           onCancel={() => setMenuMessage(null)}
         />
       )}

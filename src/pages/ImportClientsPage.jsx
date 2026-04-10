@@ -1,11 +1,11 @@
 /**
  * ImportClientsPage
  *
+ * Dev / admin / migration only — not shown in production coach UX.
  * Coach tool for importing client CSVs from other coaching apps.
- * MVP: upload CSV → parse → preview → create clients → optional progress import.
  */
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
@@ -14,14 +14,27 @@ import { parseClientCSV, createClients, mapPrograms, importProgressData } from '
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { trackFriction } from '@/services/frictionTracker';
+import { useAuth } from '@/lib/AuthContext';
+import { trackFirstClientAdded } from '@/services/firstSessionTracker';
+import { showCoachManualClientAcquisitionTools } from '@/lib/coachClientAcquisition';
 
 export default function ImportClientsPage() {
   const navigate = useNavigate();
+  const { user, isDemoMode, isAdminBypass, profile, supabaseUser } = useAuth();
   const [csvText, setCsvText] = useState('');
   const [parsed, setParsed] = useState(null);
   const [createdClients, setCreatedClients] = useState([]);
   const [programSummary, setProgramSummary] = useState(null);
   const [loading, setLoading] = useState(false);
+  const allowImport = showCoachManualClientAcquisitionTools({
+    isDemoMode,
+    isAdminBypass,
+    profile,
+    supabaseUser,
+  });
+  if (!allowImport) {
+    return <Navigate to="/get-clients" replace />;
+  }
 
   const handleParse = () => {
     try {
@@ -53,7 +66,15 @@ export default function ImportClientsPage() {
       if (created.length) {
         const { trackClientCreated } = await import('@/services/analyticsService');
         for (const c of created) {
-          if (c?.id) trackClientCreated({ client_id: c.id, source: 'import' });
+          if (c?.clientId) trackClientCreated({ client_id: c.clientId, source: 'import' });
+        }
+        const firstId = created.find((c) => c?.clientId)?.clientId;
+        if (user?.id) {
+          trackFirstClientAdded(user.id, {
+            source: 'import',
+            batch_size: created.length,
+            ...(firstId ? { client_id: firstId } : {}),
+          });
         }
         toast.success(`Created ${created.length} clients`);
       }

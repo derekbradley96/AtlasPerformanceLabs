@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { createPageUrl } from '@/utils';
 import { Button } from '@/components/ui/button';
-import AtlasLogo from '@/components/Brand/AtlasLogo';
 import { colors } from '@/ui/tokens';
+import { atlasMigrationDataAttributes, deriveLoginShellRouteState } from '@/lib/atlasMigrationPhases';
 
 const isDev = import.meta.env.DEV;
 
@@ -28,6 +28,14 @@ export default function Login() {
     navigate(createPageUrl('Home'));
   };
 
+  const loginShellMigrationAttrs = useMemo(() => {
+    let surface = 'default';
+    if (redirectError) surface = 'redirect_error';
+    else if (isAuthenticated) surface = 'authenticated';
+    const s = deriveLoginShellRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [redirectError, isAuthenticated]);
+
   // Always render visible UI; never return null or block on async
   return (
     <div
@@ -40,11 +48,11 @@ export default function Login() {
         paddingLeft: 'max(16px, env(safe-area-inset-left, 0))',
         paddingRight: 'max(16px, env(safe-area-inset-right, 0))',
       }}
+      {...loginShellMigrationAttrs}
     >
       <div className="w-full">
-        <div className="flex items-center gap-3 mb-6">
-          <AtlasLogo variant="header" className="shrink-0" />
-          <span className="text-base font-semibold" style={{ color: colors.text }}>Sign in</span>
+        <div className="mb-6">
+          <span className="text-lg font-semibold" style={{ color: colors.text }}>Sign in</span>
         </div>
 
         <div className="bg-atlas-surface/50 border border-atlas-border/50 rounded-2xl p-6 space-y-4">

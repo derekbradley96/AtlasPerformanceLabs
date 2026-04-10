@@ -94,9 +94,13 @@ export default function TrainerInviteCard({ stripeConnected, onConnect }) {
           <>
             <div className="flex-1">
               <p className="text-sm text-slate-400 mb-1">Your invite code</p>
-              <p className="text-2xl font-bold text-blue-400 font-mono">
-                {code || '----'}
-              </p>
+              {code ? (
+                <p className="text-2xl font-bold text-blue-400 font-mono">{code}</p>
+              ) : (
+                <p className="text-sm text-slate-400 leading-relaxed pr-2">
+                  Your code is generating. Use your link for now.
+                </p>
+              )}
             </div>
             <Button
               onClick={copyCode}

@@ -1,9 +1,10 @@
 /**
- * At "/": show loading until auth ready; then redirect logged-in users to app /home, else show marketing outlet.
- * Uses a static loading view (no redirect) so unauthenticated users see marketing after load.
+ * At "/": show loading until auth ready; then always show the marketing outlet (hero, about, CTAs).
+ * Logged-in users are not redirected to /home here — they can open the app via Login, Train on Atlas, or /auth.
+ * That keeps https://example.com/ as the public landing URL even when a session exists (e.g. incomplete personal onboarding).
  */
 import React from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { colors } from '@/ui/tokens';
 import AtlasLogo from '@/components/Brand/AtlasLogo';
@@ -46,10 +47,8 @@ function MarketingLoading() {
 }
 
 export default function MarketingGate() {
-  const { authReady, isAuthenticated, role } = useAuth();
-  const hasRole = role === 'coach' || role === 'client' || role === 'personal' || role === 'trainer' || role === 'solo';
+  const { authReady } = useAuth();
 
   if (!authReady) return <MarketingLoading />;
-  if (isAuthenticated && hasRole) return <Navigate to="/home" replace />;
   return <Outlet />;
 }

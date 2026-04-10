@@ -112,7 +112,7 @@ export default function PeakWeekClientPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text, paddingBottom: 96 }}>
+    <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Peak Week" onBack={() => navigate(-1)} />
       <div className="p-4 max-w-lg mx-auto">
         {loading ? (

@@ -114,9 +114,11 @@ export function calculateReadinessScore(input = {}) {
     toInversePct(stress),
     toPositivePct(motivation),
   ];
-  const readiness_score = Math.round(
+  let readiness_score = Math.round(
     contributions.reduce((acc, value) => acc + value, 0) / contributions.length
   );
+  if (!Number.isFinite(readiness_score)) readiness_score = 60;
+  readiness_score = Math.min(100, Math.max(0, readiness_score));
 
   const flags = getFatigueFlags({ sleep_score: sleep, fatigue_score: fatigue, soreness_score: soreness, stress_score: stress, motivation_score: motivation });
   const readiness_status = getReadinessStatus(readiness_score);

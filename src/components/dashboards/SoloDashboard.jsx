@@ -116,7 +116,7 @@ export default function SoloDashboard({ user }) {
           </div>
           <Dumbbell className="w-8 h-8 text-blue-400" />
         </div>
-        <Link to={activeWorkout ? createPageUrl('ActiveWorkout') : createPageUrl('Workout')}>
+        <Link to={activeWorkout ? '/workout-player?resume=1' : '/workout-player'}>
           <Button className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold">
             {activeWorkout ? (
               <>Continue Workout <ArrowRight className="w-4 h-4 ml-2" /></>
@@ -166,7 +166,7 @@ export default function SoloDashboard({ user }) {
               key={template.id}
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
-              onClick={() => navigate(createPageUrl('Workout') + `?template=${template.id}`)}
+              onClick={() => navigate('/today')}
               className="w-full bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800 transition-colors text-left"
             >
               <div className="flex items-center justify-between">
@@ -231,10 +231,10 @@ export default function SoloDashboard({ user }) {
           <p className="font-medium text-white text-sm">Progress</p>
           <p className="text-xs text-slate-500">Track gains</p>
         </Link>
-        <Link to={createPageUrl('Workout')} className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800 transition-colors">
+        <Link to="/program-builder?personal=1" className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800 transition-colors">
           <Calendar className="w-5 h-5 text-blue-400 mb-2" />
-          <p className="font-medium text-white text-sm">Templates</p>
-          <p className="text-xs text-slate-500">Browse workouts</p>
+          <p className="font-medium text-white text-sm">Program</p>
+          <p className="text-xs text-slate-500">Build in Program Builder</p>
         </Link>
       </div>
 

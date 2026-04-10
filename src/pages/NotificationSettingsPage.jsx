@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Switch } from '@/components/ui/switch';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { getNotificationPreferences, updateNotificationPreference } from '@/lib/notificationPreferences';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { impactLight } from '@/lib/haptics';
+import { atlasMigrationDataAttributes, deriveNotificationPrefsPageRouteState } from '@/lib/atlasMigrationPhases';
 
 const TOGGLES = [
   { key: 'checkins', label: 'Check-ins', description: 'Check-in due and review notifications' },
@@ -55,6 +56,11 @@ export default function NotificationSettingsPage() {
     }
   }, [profileId]);
 
+  const prefsPageMigrationAttrs = useMemo(() => {
+    const s = deriveNotificationPrefsPageRouteState({ surface: loading ? 'loading' : 'active' });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [loading]);
+
   if (loading) {
     return (
       <div
@@ -64,6 +70,7 @@ export default function NotificationSettingsPage() {
           paddingRight: spacing[16],
           paddingBottom: `calc(${spacing[24]} + env(safe-area-inset-bottom, 0px))`,
         }}
+        {...prefsPageMigrationAttrs}
       >
         <p style={{ color: colors.muted, fontSize: 14 }}>Loading preferences…</p>
       </div>
@@ -78,6 +85,7 @@ export default function NotificationSettingsPage() {
         paddingRight: spacing[16],
         paddingBottom: `calc(${spacing[24]} + env(safe-area-inset-bottom, 0px))`,
       }}
+      {...prefsPageMigrationAttrs}
     >
       <div style={{ marginBottom: spacing[8] }}>
         <p className="text-[13px]" style={{ color: colors.muted }}>

@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { atlasMigrationDataAttributes, deriveMessagesListRouteState } from '@/lib/atlasMigrationPhases';
 import { useNavigate, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -17,8 +18,9 @@ import EmptyState from '@/components/ui/EmptyState';
 import { MessagesListSkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { colors, spacing, shell } from '@/ui/tokens';
-import { sectionLabel } from '@/ui/pageLayout';
+import { colors, spacing, shell, touchTargetMin } from '@/ui/tokens';
+import { sectionLabel, desktopRhythm } from '@/ui/pageLayout';
+import { usePresentationMode } from '@/lib/presentationMode';
 import { toast } from 'sonner';
 
 const PIN_BG = colors.primary;
@@ -43,12 +45,16 @@ export default function Messages() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { user, authReady } = useAuth();
-  const role = normalizeRole(user ?? null);
+  const { user, authReady, effectiveRole } = useAuth();
+  const role = normalizeRole(effectiveRole ?? user?.role ?? null);
   const isClientView = role === 'client';
   const filterUnread = searchParams.get('filter') === 'unread';
   const isListPage = location.pathname === '/messages' || location.pathname === '/trainer/messages' || location.pathname.endsWith('/messages');
   const data = useData();
+  const { isDesktopWeb } = usePresentationMode();
+  const rhythm = desktopRhythm(isDesktopWeb);
+  const rowPadY = isDesktopWeb ? 16 : 14;
+  const rowPadX = isDesktopWeb ? 16 : 14;
   const outletContext = useOutletContext() || {};
   const { registerRefresh, setHeaderRight } = outletContext;
   const [refreshKey, setRefreshKey] = useState(0);
@@ -67,9 +73,13 @@ export default function Messages() {
   const [loadError, setLoadError] = useState(false);
 
   const loadData = useCallback(() => {
-    if (typeof data?.listClients === 'function') data.listClients().then((c) => setClientsState(Array.isArray(c) ? c : []));
-    if (typeof data?.listThreads === 'function') data.listThreads().then((th) => setThreadsState(Array.isArray(th) ? th : []));
-  }, [data]);
+    if (!isClientView && typeof data?.listClients === 'function') {
+      data.listClients().then((c) => setClientsState(Array.isArray(c) ? c : []));
+    }
+    if (typeof data?.listThreads === 'function') {
+      data.listThreads().then((th) => setThreadsState(Array.isArray(th) ? th : []));
+    }
+  }, [data, isClientView]);
 
   useEffect(() => {
     if (hasSupabase && !authReady) {
@@ -79,7 +89,7 @@ export default function Messages() {
     }
     const listClients = data?.listClients;
     const listThreads = data?.listThreads;
-    if (typeof listClients !== 'function' || typeof listThreads !== 'function') {
+    if (typeof listThreads !== 'function' || (!isClientView && typeof listClients !== 'function')) {
       setDataLoading(true);
       setLoadError(false);
       return;
@@ -87,7 +97,8 @@ export default function Messages() {
     let cancelled = false;
     setDataLoading(true);
     setLoadError(false);
-    Promise.all([listClients(), listThreads()])
+    const listClientsPromise = isClientView ? Promise.resolve([]) : listClients();
+    Promise.all([listClientsPromise, listThreads()])
       .then(([c, th]) => {
         if (!cancelled) {
           setClientsState(Array.isArray(c) ? c : []);
@@ -108,11 +119,13 @@ export default function Messages() {
       });
     const onUpdate = () => { if (!cancelled) loadData(); };
     window.addEventListener('atlas-sandbox-updated', onUpdate);
+    window.addEventListener('atlas-messaging-updated', onUpdate);
     return () => {
       cancelled = true;
       window.removeEventListener('atlas-sandbox-updated', onUpdate);
+      window.removeEventListener('atlas-messaging-updated', onUpdate);
     };
-  }, [authReady, data, loadData, refreshKey]);
+  }, [authReady, data, loadData, refreshKey, isClientView]);
 
   useEffect(() => {
     if (isListPage) loadData();
@@ -173,7 +186,7 @@ export default function Messages() {
           setRefreshKey((k) => k + 1);
         }}
         className="text-[15px] font-medium px-2 py-1 rounded-lg active:opacity-80"
-        style={{ color: colors.accent, background: 'transparent', border: 'none' }}
+        style={{ color: colors.accent, background: 'transparent', border: 'none', minHeight: touchTargetMin }}
       >
         Mark all read
       </button>
@@ -277,10 +290,27 @@ export default function Messages() {
     loadData();
   }, [loadData]);
 
+  const messagesListMigration = useMemo(() => {
+    const roleView = isClientView ? 'client' : 'coach';
+    if (dataLoading) return deriveMessagesListRouteState({ roleView, surface: 'loading', unreadFilter: filterUnread });
+    if (loadError) return deriveMessagesListRouteState({ roleView, surface: 'error', unreadFilter: filterUnread });
+    if (threadList.length === 0) {
+      return deriveMessagesListRouteState({ roleView, surface: 'empty', unreadFilter: filterUnread });
+    }
+    return deriveMessagesListRouteState({ roleView, surface: 'list', unreadFilter: filterUnread });
+  }, [dataLoading, loadError, threadList.length, isClientView, filterUnread]);
+
   return (
     <div
+      {...atlasMigrationDataAttributes(messagesListMigration.phase, messagesListMigration.primary)}
       className="app-screen min-w-0 max-w-full overflow-x-hidden flex-1 min-h-0 flex flex-col"
-      style={{ background: colors.bg }}
+      style={{
+        background: colors.bg,
+        maxWidth: isDesktopWeb ? 1240 : undefined,
+        margin: '0 auto',
+        width: '100%',
+        paddingTop: rhythm.top,
+      }}
     >
       {dataLoading ? (
         <div className="flex-1 min-h-0 overflow-auto">
@@ -310,16 +340,27 @@ export default function Messages() {
         <div className="flex-1 min-h-0 flex flex-col relative">
           <div
             className="flex-1 min-h-0 overflow-y-auto"
-            style={{ WebkitOverflowScrolling: 'touch', paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH, paddingTop: shell.topSpacing, paddingBottom: 120 }}
+            style={{
+              WebkitOverflowScrolling: 'touch',
+              paddingLeft: shell.pagePaddingH,
+              paddingRight: shell.pagePaddingH,
+              paddingTop: isDesktopWeb ? spacing[16] : shell.topSpacing,
+              paddingBottom: shell.scrollContentInsetBottom,
+              maxWidth: isDesktopWeb ? 1100 : undefined,
+              margin: '0 auto',
+              width: '100%',
+            }}
           >
-            <div style={{ marginBottom: shell.sectionLabelMarginBottom }}>
+            <div style={{ marginBottom: isDesktopWeb ? spacing[10] : shell.sectionLabelMarginBottom }}>
               <span style={sectionLabel}>{isClientView ? 'Messages' : 'Conversations'}</span>
             </div>
 
             {Array.isArray(threadList) ? threadList.map(({ client, thread }) => {
               const threadId = client?.id ?? thread?.client_id ?? thread?.id ?? 'unknown';
               const isPinned = pinnedIds.includes(threadId);
-              const name = (client?.full_name ?? thread?.name ?? '') || 'Client';
+              const name = isClientView
+                ? 'Your coach'
+                : (client?.full_name ?? thread?.name ?? '') || 'Client';
               const lastMessageAt = thread?.last_message_at ?? thread?.lastMessageAt ?? null;
               const previewRaw = (thread?.last_message_preview ?? thread?.lastMessage ?? '').trim();
               const lastMessage = previewRaw || 'Tap to start a conversation';
@@ -395,9 +436,9 @@ export default function Messages() {
                   aria-label={`Open chat with ${name}`}
                   className="flex items-center gap-3 active:opacity-90 transition-opacity w-full text-left"
                   style={{
-                    paddingVertical: 14,
-                    paddingHorizontal: 14,
-                    minHeight: 76,
+                    paddingVertical: rowPadY,
+                    paddingHorizontal: rowPadX,
+                    minHeight: isDesktopWeb ? 80 : 76,
                   }}
                 >
                   <div
@@ -406,7 +447,7 @@ export default function Messages() {
                   >
                     {(name || '?').slice(0, 2).toUpperCase()}
                   </div>
-                  <div className="flex-1 min-w-0 flex flex-col justify-center gap-2">
+                  <div className="flex-1 min-w-0 flex flex-col justify-center gap-1.5">
                     <div className="flex items-center gap-2 min-w-0">
                       {isPinned && <Pin size={12} style={{ color: colors.muted, flexShrink: 0 }} />}
                       <span
@@ -451,8 +492,8 @@ export default function Messages() {
                   onClose={handleClose}
                   onSwipeStart={handleSwipeStart}
                   onRowPress={() => handleRow(clientId)}
-                  leftActions={leftActions}
-                  rightActions={rightActions}
+                  leftActions={isClientView ? null : leftActions}
+                  rightActions={isClientView ? null : rightActions}
                   isDeleting={deletingId === threadId}
                   onDeleteAnimationEnd={() => handleDeleteAnimationEnd(threadId)}
                 >
@@ -462,7 +503,7 @@ export default function Messages() {
                       overflow: 'hidden',
                       border: `1px solid ${colors.border}`,
                       background: colors.surface1,
-                      marginBottom: 10,
+                      marginBottom: isDesktopWeb ? spacing[12] : 10,
                       padding: 0,
                     }}
                   >
@@ -472,6 +513,7 @@ export default function Messages() {
               );
             }) : null}
           </div>
+          {!isClientView && (
           <button
             type="button"
             onClick={() => { lightHaptic(); setStartConversationOpen(true); }}
@@ -490,6 +532,7 @@ export default function Messages() {
           >
             <Plus size={24} strokeWidth={2.5} />
           </button>
+          )}
         </div>
       )}
 
@@ -501,11 +544,24 @@ export default function Messages() {
           aria-modal="true"
           aria-label="Start conversation"
         >
-          <div className="flex-shrink-0 flex items-center justify-between gap-2 px-4 py-3 border-b" style={{ borderColor: colors.border }}>
+          <div
+            className="flex-shrink-0 flex items-center justify-between gap-2 py-3 border-b"
+            style={{ borderColor: colors.border, paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH }}
+          >
             <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Choose client</h2>
-            <button type="button" onClick={() => { setStartConversationOpen(false); setClientSearch(''); }} className="text-sm font-medium" style={{ color: colors.accent }}>Cancel</button>
+            <button
+              type="button"
+              onClick={() => { setStartConversationOpen(false); setClientSearch(''); }}
+              className="text-sm font-medium"
+              style={{ color: colors.accent, minHeight: touchTargetMin }}
+            >
+              Cancel
+            </button>
           </div>
-          <div className="flex-shrink-0 px-4 py-2 border-b" style={{ borderColor: colors.border }}>
+          <div
+            className="flex-shrink-0 py-2 border-b"
+            style={{ borderColor: colors.border, paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH }}
+          >
             <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: colors.surface1, border: `1px solid ${colors.border}` }}>
               <Search size={18} style={{ color: colors.muted }} />
               <input
@@ -521,7 +577,7 @@ export default function Messages() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             {filteredClients.length === 0 ? (
-              <div className="px-4 py-8 flex flex-col items-center text-center gap-3">
+              <div className="py-8 flex flex-col items-center text-center gap-3" style={{ paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH }}>
                 <p className="text-sm" style={{ color: colors.text }}>
                   {clientSearch.trim() ? "No clients match your search." : "You don't have any clients yet."}
                 </p>
@@ -542,9 +598,10 @@ export default function Messages() {
                     color: colors.primary,
                     border: 'none',
                     cursor: 'pointer',
+                    minHeight: touchTargetMin,
                   }}
                 >
-                  {clientSearch.trim() ? 'Clear search' : 'Go to Clients'}
+                  {clientSearch.trim() ? 'Clear search' : 'Open clients'}
                 </button>
               </div>
             ) : (
@@ -553,8 +610,8 @@ export default function Messages() {
                   key={c?.id}
                   type="button"
                   onClick={() => handleStartConversation(c)}
-                  className="w-full text-left flex items-center gap-3 px-4 py-3 active:opacity-80 border-b"
-                  style={{ borderColor: colors.border, color: colors.text }}
+                  className="w-full text-left flex items-center gap-3 py-3 active:opacity-80 border-b"
+                  style={{ borderColor: colors.border, color: colors.text, paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH }}
                 >
                   <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-medium" style={{ background: colors.surface1, color: colors.muted }}>
                     {(c?.full_name || c?.name || '?').slice(0, 2).toUpperCase()}

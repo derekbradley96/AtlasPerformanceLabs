@@ -28,7 +28,9 @@ const MODULES = {
  * @returns {string[]} enabled module keys
  */
 export function getEnabledModules(coachFocus) {
-  const focus = (coachFocus || 'integrated').toLowerCase();
+  /** Missing/invalid focus defaults to transformation so prep surfaces never leak when coach_focus is unset. */
+  const raw = (coachFocus ?? '').toString().trim().toLowerCase();
+  const focus = VALID_COACH_FOCUS.includes(raw) ? raw : 'transformation';
   return Object.keys(MODULES).filter((key) => MODULES[key].includes(focus));
 }
 
@@ -38,7 +40,16 @@ export function getEnabledModules(coachFocus) {
  * @returns {boolean}
  */
 export function shouldShowModule(coachFocus, moduleKey) {
-  const focus = (coachFocus || 'integrated').toLowerCase();
+  const raw = (coachFocus ?? '').toString().trim().toLowerCase();
+  const focus = VALID_COACH_FOCUS.includes(raw) ? raw : 'transformation';
   const allowed = MODULES[moduleKey];
   return Array.isArray(allowed) && allowed.includes(focus);
+}
+
+/**
+ * Prep / peak / pose client surfaces should only show when the linked coach is competition or integrated.
+ * @param {string|null|undefined} coachFocus - profiles.coach_focus
+ */
+export function coachFocusAllowsPrepFeatures(coachFocus) {
+  return shouldShowModule(coachFocus, 'peak_week');
 }

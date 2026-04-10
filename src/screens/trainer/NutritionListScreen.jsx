@@ -13,6 +13,17 @@ import { impactLight } from '@/lib/haptics';
 import Card from '@/ui/Card';
 import { colors, spacing, touchTargetMin } from '@/ui/tokens';
 
+async function fetchCoachClientsDirect(coachId) {
+  if (!hasSupabase || !supabase || !coachId) return [];
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, name')
+    .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`)
+    .order('created_at', { ascending: false });
+  if (error) return [];
+  return Array.isArray(data) ? data : [];
+}
+
 export default function NutritionListScreen() {
   const navigate = useNavigate();
   const { profile, supabaseUser } = useAuth();
@@ -23,6 +34,7 @@ export default function NutritionListScreen() {
   const [plansByClient, setPlansByClient] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [loadRetried, setLoadRetried] = useState(false);
 
   const loadClients = useCallback(async () => {
     if (!data?.listClients) return;
@@ -31,13 +43,36 @@ export default function NutritionListScreen() {
     try {
       const list = await data.listClients();
       setClients(Array.isArray(list) ? list : []);
+      setLoadRetried(false);
     } catch (e) {
-      setError(e?.message ?? 'Failed to load clients');
-      setClients([]);
+      const raw = e?.message ? String(e.message) : 'Failed to load clients';
+      const isTransient = /is not a function|undefined is not a function|not ready/i.test(raw);
+      if (isTransient && !loadRetried) {
+        setLoadRetried(true);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        try {
+          const retryList = await data.listClients();
+          setClients(Array.isArray(retryList) ? retryList : []);
+          setError(null);
+          return;
+        } catch (_) {
+          // Fall through to direct Supabase fallback.
+        }
+      }
+
+      // Fallback for occasional data-layer timing failures on first mount.
+      const fallback = await fetchCoachClientsDirect(trainerId);
+      if (fallback.length > 0) {
+        setClients(fallback);
+        setError(null);
+      } else {
+        setError(raw);
+        setClients([]);
+      }
     } finally {
       setLoading(false);
     }
-  }, [data]);
+  }, [data, loadRetried, trainerId]);
 
   const loadPlans = useCallback(async () => {
     if (!hasSupabase || !supabase || !trainerId) return;
@@ -111,7 +146,7 @@ export default function NutritionListScreen() {
           <Card style={{ padding: spacing[24], textAlign: 'center' }}>
             <UtensilsCrossed size={32} style={{ color: colors.muted, marginBottom: spacing[12] }} />
             <p className="text-sm" style={{ color: colors.muted }}>
-              No clients yet. Add clients from the Clients tab to assign nutrition plans.
+              No clients yet. Invite athletes from Clients (link, code, or QR); after they join, assign nutrition plans here.
             </p>
           </Card>
         ) : (
@@ -119,6 +154,7 @@ export default function NutritionListScreen() {
             {clients.map((client, i) => {
               const plan = plansByClient[client.id] ?? null;
               const dietLabel = plan?.diet_type === 'prep' ? 'Prep' : plan?.diet_type === 'lifestyle' ? 'Lifestyle' : 'No plan';
+              const hasActivePlan = !!plan;
               return (
                 <button
                   key={client.id}
@@ -139,6 +175,14 @@ export default function NutritionListScreen() {
                       {client.full_name || client.name || 'Client'}
                     </p>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
+                      {hasActivePlan && (
+                        <span
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded"
+                          style={{ background: 'rgba(34,197,94,0.18)', color: '#4ADE80' }}
+                        >
+                          Active
+                        </span>
+                      )}
                       <span
                         className="text-[11px] font-medium px-2 py-0.5 rounded"
                         style={{

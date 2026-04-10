@@ -3,7 +3,7 @@
  * Search (auto-focus), Recent (max 8), Favorites (max 8), compact filter chips (Muscle + Equipment), tight list rows.
  */
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Search, Star, X, Plus } from 'lucide-react';
+import { Search, Star, X, Plus, Sparkles, History } from 'lucide-react';
 import {
   EXERCISES,
   MUSCLES,
@@ -26,6 +26,15 @@ import {
 
 const RECENT_MAX = 8;
 const FAVORITE_MAX = 8;
+
+/** Personal Basic: common lifts — matched by exact `name` in library. */
+const QUICK_PICK_NAMES = [
+  'Barbell Bench Press',
+  'Barbell Back Squat',
+  'Romanian Deadlift',
+  'Lat Pulldown',
+  'Barbell Row',
+];
 const INPUT_FONT_SIZE = 16; // Prevent iOS zoom on focus
 const CHIP_HEIGHT = 28;
 const ROW_MIN_HEIGHT = 52;
@@ -75,6 +84,11 @@ export default function ExercisePickerModal({
   isTrainer = true,
   replaceForExerciseId = null,
   showRecentSection = true,
+  mode = 'basic',
+  suggestedExercises = [],
+  lastWeekExercises = [],
+  /** Wider filters + quick picks + muscle groups (Personal Basic program builder). */
+  compactBasic = false,
 }) {
   const [search, setSearch] = useState('');
   const [filterMuscle, setFilterMuscle] = useState('');
@@ -85,18 +99,20 @@ export default function ExercisePickerModal({
   const [customEquipment, setCustomEquipment] = useState('Dumbbell');
   const [favoriteIds, setFavoriteIds] = useState(() => getFavorites());
   const searchInputRef = useRef(null);
+  const [showFilters, setShowFilters] = useState(false);
 
   const cid = coachId ?? 'default';
 
   useEffect(() => {
     if (open) {
       setFavoriteIds(getFavorites());
+      if (compactBasic) setShowFilters(true);
       const t = setTimeout(() => {
         searchInputRef.current?.focus?.();
       }, 100);
       return () => clearTimeout(t);
     }
-  }, [open]);
+  }, [open, compactBasic]);
 
   const allExercises = useMemo(() => getAllExercises(cid), [cid]);
   const recentIds = useMemo(() => getRecent().slice(0, RECENT_MAX), [open]);
@@ -119,18 +135,60 @@ export default function ExercisePickerModal({
     [replaceForExerciseId, cid]
   );
 
+  const quickPickExercises = useMemo(() => {
+    const byName = new Map((allExercises || []).map((e) => [String(e?.name || '').toLowerCase(), e]));
+    return QUICK_PICK_NAMES.map((n) => byName.get(n.toLowerCase())).filter(Boolean);
+  }, [allExercises]);
+
   const filteredAll = useMemo(() => {
     let list = allExercises || [];
     const q = (search || '').toLowerCase().trim();
-    if (q) {
-      list = list.filter(
-        (e) =>
-          (e?.name && e.name.toLowerCase().includes(q)) ||
-          ((e?.primaryMuscle || e?.primaryMuscleGroup || '') &&
-            (e.primaryMuscle || e.primaryMuscleGroup).toLowerCase().includes(q)) ||
-          (e?.equipment && e.equipment.some((eq) => eq && eq.toLowerCase().includes(q)))
-      );
-    }
+    const recentIndex = new Map(recentIds.map((id, idx) => [id, idx]));
+
+    const fuzzyScore = (text, needle) => {
+      if (!needle) return 0;
+      const t = String(text || '').toLowerCase();
+      const n = String(needle || '').toLowerCase();
+      if (!t || !n) return -9999;
+      if (t === n) return 200;
+      if (t.startsWith(n)) return 150;
+      if (t.includes(n)) return 100;
+      let ti = 0;
+      let ni = 0;
+      let streak = 0;
+      while (ti < t.length && ni < n.length) {
+        if (t[ti] === n[ni]) {
+          ni += 1;
+          streak += 1;
+        } else {
+          streak = 0;
+        }
+        ti += 1;
+      }
+      if (ni === n.length) return 60 + streak;
+      return -9999;
+    };
+
+    const scoreExercise = (e) => {
+      const name = String(e?.name || '');
+      const muscle = String(e?.primaryMuscle || e?.primaryMuscleGroup || '');
+      const equipment = Array.isArray(e?.equipment) ? e.equipment.join(' ') : '';
+      const sName = fuzzyScore(name, q);
+      const sMuscle = fuzzyScore(muscle, q);
+      const sEq = fuzzyScore(equipment, q);
+      const base = Math.max(sName, sMuscle - 20, sEq - 30);
+      if (!q && base < 0) return 0;
+      if (q && base < 0) return -9999;
+      const recentBoost = recentIndex.has(e.id) ? Math.max(0, 30 - (recentIndex.get(e.id) * 4)) : 0;
+      return base + recentBoost;
+    };
+
+    const scored = list
+      .map((e) => ({ e, score: scoreExercise(e) }))
+      .filter(({ score }) => score > -9999)
+      .sort((a, b) => b.score - a.score)
+      .map(({ e }) => e);
+    list = scored;
     if (filterMuscle)
       list = list.filter((e) => (e?.primaryMuscle || e?.primaryMuscleGroup) === filterMuscle);
     if (filterEquipment)
@@ -141,7 +199,27 @@ export default function ExercisePickerModal({
       );
     }
     return list;
-  }, [allExercises, search, filterMuscle, filterEquipment, referenceExercise]);
+  }, [allExercises, search, filterMuscle, filterEquipment, referenceExercise, recentIds]);
+
+  const muscleGroupedSections = useMemo(() => {
+    if (!compactBasic || (search || '').trim()) return null;
+    const muscleMap = new Map();
+    for (const e of allExercises || []) {
+      if (filterMuscle && (e?.primaryMuscle || e?.primaryMuscleGroup) !== filterMuscle) continue;
+      if (filterEquipment && !(e?.equipment?.includes?.(filterEquipment))) continue;
+      const m = e?.primaryMuscle || e?.primaryMuscleGroup || 'Other';
+      if (!muscleMap.has(m)) muscleMap.set(m, []);
+      muscleMap.get(m).push(e);
+    }
+    const rows = [...muscleMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    if (referenceExercise) {
+      return rows.map(([muscle, list]) => [
+        muscle,
+        [...list].sort((a, b) => scoreForReplace(b, referenceExercise) - scoreForReplace(a, referenceExercise)),
+      ]);
+    }
+    return rows;
+  }, [allExercises, compactBasic, search, filterMuscle, filterEquipment, referenceExercise]);
 
   const handleSelect = (exercise) => {
     if (!exercise?.id) return;
@@ -219,6 +297,23 @@ export default function ExercisePickerModal({
     </div>
   );
 
+  const highlightText = (text) => {
+    const label = String(text || '');
+    const q = String(search || '').trim();
+    if (!q) return label;
+    const i = label.toLowerCase().indexOf(q.toLowerCase());
+    if (i < 0) return label;
+    return (
+      <>
+        {label.slice(0, i)}
+        <mark style={{ background: 'rgba(59,130,246,0.28)', color: colors.text, borderRadius: 4, padding: '0 2px' }}>
+          {label.slice(i, i + q.length)}
+        </mark>
+        {label.slice(i + q.length)}
+      </>
+    );
+  };
+
   const renderExerciseRow = (e, idx, section) => {
     if (!e) return null;
     const id = e.id || `row-${section}-${idx}`;
@@ -244,7 +339,7 @@ export default function ExercisePickerModal({
         >
           <span className="flex-1 min-w-0">
             <span className="font-medium block truncate text-[15px] leading-tight" style={{ color: colors.text }}>
-              {name}
+              {highlightText(name)}
             </span>
             {secondary ? (
               <span className="text-[12px] block truncate mt-0.5" style={{ color: colors.muted }}>
@@ -340,9 +435,21 @@ export default function ExercisePickerModal({
             ) : null}
           </div>
 
-          <div className="flex flex-col gap-0 mt-3 overflow-x-hidden">
-            <ChipRow label="Muscle" options={MUSCLES || []} value={filterMuscle} setValue={setFilterMuscle} />
-            <ChipRow label="Equipment" options={EQUIPMENT_LIST || []} value={filterEquipment} setValue={setFilterEquipment} />
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => setShowFilters((v) => !v)}
+              className="text-xs font-semibold"
+              style={{ color: colors.muted }}
+            >
+              {showFilters ? 'Hide filters' : compactBasic ? 'Muscle & equipment' : 'Filters (optional)'}
+            </button>
+            {showFilters && (
+              <div className="flex flex-col gap-0 mt-1 overflow-x-hidden">
+                <ChipRow label="Muscle" options={MUSCLES || []} value={filterMuscle} setValue={setFilterMuscle} />
+                <ChipRow label="Equipment" options={EQUIPMENT_LIST || []} value={filterEquipment} setValue={setFilterEquipment} />
+              </div>
+            )}
           </div>
         </DrawerHeader>
 
@@ -458,6 +565,32 @@ export default function ExercisePickerModal({
                 </button>
               )}
 
+              {compactBasic && quickPickExercises.length > 0 && (
+                <section className="mb-5">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: colors.muted }}>
+                    Quick picks
+                  </h3>
+                  <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    {quickPickExercises.map((e) => (
+                      <button
+                        key={e.id}
+                        type="button"
+                        onClick={() => handleSelect(e)}
+                        className="flex-shrink-0 rounded-full px-3 py-2 text-xs font-semibold"
+                        style={{
+                          border: `1px solid ${colors.border}`,
+                          background: colors.card,
+                          color: colors.text,
+                          maxWidth: 160,
+                        }}
+                      >
+                        <span className="line-clamp-2 text-left">{e.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {recentExercises.length > 0 && showRecentSection && (
                 <section className="mb-5">
                   <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: colors.muted }}>
@@ -465,6 +598,28 @@ export default function ExercisePickerModal({
                   </h3>
                   <ul className="space-y-2">
                     {recentExercises.map((e, idx) => renderExerciseRow(e, idx, 'recent'))}
+                  </ul>
+                </section>
+              )}
+
+              {mode === 'enhanced' && Array.isArray(suggestedExercises) && suggestedExercises.length > 0 && (
+                <section className="mb-5">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: colors.muted }}>
+                    <Sparkles size={12} /> Suggested for this session
+                  </h3>
+                  <ul className="space-y-2">
+                    {suggestedExercises.slice(0, 8).map((e, idx) => renderExerciseRow(e, idx, 'suggested'))}
+                  </ul>
+                </section>
+              )}
+
+              {mode === 'enhanced' && Array.isArray(lastWeekExercises) && lastWeekExercises.length > 0 && (
+                <section className="mb-5">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color: colors.muted }}>
+                    <History size={12} /> Continue from last week
+                  </h3>
+                  <ul className="space-y-2">
+                    {lastWeekExercises.slice(0, 10).map((e, idx) => renderExerciseRow(e, idx, 'lastweek'))}
                   </ul>
                 </section>
               )}
@@ -482,17 +637,38 @@ export default function ExercisePickerModal({
 
               <section>
                 <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: colors.muted }}>
-                  {replaceForExerciseId ? 'Best matches first' : 'All exercises'}
+                  {replaceForExerciseId ? 'Best matches first' : compactBasic ? 'Library' : 'All exercises'}
                 </h3>
-                <ul className="space-y-2">
-                  {!filteredAll.length ? (
-                    <li className="py-8 text-center text-sm" style={{ color: colors.muted }}>
-                      No exercises match
-                    </li>
-                  ) : (
-                    filteredAll.map((e, idx) => renderExerciseRow(e, idx, 'all'))
-                  )}
-                </ul>
+                {compactBasic && muscleGroupedSections && muscleGroupedSections.length > 0 && !referenceExercise ? (
+                  <div className="space-y-5">
+                    {muscleGroupedSections.map(([muscle, list]) => (
+                      <div key={muscle}>
+                        <p className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: colors.muted }}>
+                          {muscle}
+                        </p>
+                        <ul className="space-y-2">
+                          {list.length ? (
+                            list.map((e, idx) => renderExerciseRow(e, idx, `muscle-${muscle}`))
+                          ) : (
+                            <li className="text-xs" style={{ color: colors.muted }}>
+                              No exercises
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {!filteredAll.length ? (
+                      <li className="py-8 text-center text-sm" style={{ color: colors.muted }}>
+                        No exercises match
+                      </li>
+                    ) : (
+                      filteredAll.map((e, idx) => renderExerciseRow(e, idx, 'all'))
+                    )}
+                  </ul>
+                )}
               </section>
             </>
           )}

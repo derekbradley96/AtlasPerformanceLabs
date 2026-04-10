@@ -13,7 +13,9 @@ import { getClientRiskEvaluation } from '@/lib/riskService';
 import { markReviewItemDone, getDedupeKeyForReview, getTopActiveReviewItem } from '@/lib/reviewQueueLegacy';
 import { checkinToReviewItem, posingToReviewItem } from '@/features/reviewEngine/adapters';
 import { ReviewEngine } from '@/features/reviewEngine';
+import { buildReviewNextDoneUrl } from '@/lib/coachReviewRoutes';
 import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { colors } from '@/ui/tokens';
 
@@ -36,8 +38,9 @@ export default function ReviewDetail() {
   const navigate = useNavigate();
   const clientIdFromQuery = searchParams.get('clientId');
   const fromGlobal = searchParams.get('from') === 'global';
-  const { user, isDemoMode } = useAuth();
+  const { user, isDemoMode, profile } = useAuth();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? 'trainer-1';
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [coachResponse, setCoachResponse] = useState('');
   const [showSendFeedbackConfirm, setShowSendFeedbackConfirm] = useState(false);
   const [pendingSendFeedback, setPendingSendFeedback] = useState(null);
@@ -58,7 +61,7 @@ export default function ReviewDetail() {
       const cl = cid ? getClientById(cid) : client;
       const risk = cid ? getClientRiskEvaluation(cid) : null;
       if (!thisWeek || !cl) return { reviewItem: null, clientId: cid };
-      const item = checkinToReviewItem(thisWeek, lastWeek, cl, risk);
+      const item = checkinToReviewItem(thisWeek, lastWeek, cl, risk, viewerWU);
       return { reviewItem: item, clientId: cid };
     }
 
@@ -82,7 +85,7 @@ export default function ReviewDetail() {
     }
 
     return { reviewItem: null, clientId: null };
-  }, [reviewType, id, clientIdFromQuery]);
+  }, [reviewType, id, clientIdFromQuery, viewerWU]);
 
   const handleMarkReviewed = useCallback(async () => {
     await mediumHaptic();
@@ -100,14 +103,14 @@ export default function ReviewDetail() {
       toast.success('Marked as reviewed');
       await successHaptic();
       if (fromGlobal) {
-        const next = getTopActiveReviewItem(trainerId);
+        const next = getTopActiveReviewItem(trainerId, viewerWU);
         if (next) {
           const nextType = next.metadata?.feedType ?? (next.type === 'posing_review' ? 'posing' : 'checkin');
           const nextId = next.id;
           const nextClientId = next.clientId ?? '';
           navigate(`/review/${nextType}/${encodeURIComponent(nextId)}?clientId=${encodeURIComponent(nextClientId)}&from=global`, { replace: true });
         } else {
-          navigate('/review-global?done=1', { replace: true });
+          navigate(buildReviewNextDoneUrl(), { replace: true });
         }
         return;
       }
@@ -127,14 +130,14 @@ export default function ReviewDetail() {
       toast.success('Marked as reviewed');
       await successHaptic();
       if (fromGlobal) {
-        const next = getTopActiveReviewItem(trainerId);
+        const next = getTopActiveReviewItem(trainerId, viewerWU);
         if (next) {
           const nextType = next.metadata?.feedType ?? 'posing';
           const nextId = next.id;
           const nextClientId = next.clientId ?? '';
           navigate(`/review/${nextType}/${encodeURIComponent(nextId)}?clientId=${encodeURIComponent(nextClientId)}&from=global`, { replace: true });
         } else {
-          navigate('/review-global?done=1', { replace: true });
+          navigate(buildReviewNextDoneUrl(), { replace: true });
         }
         return;
       }
@@ -145,7 +148,7 @@ export default function ReviewDetail() {
       toast.success('Marked as reviewed');
       navigate(clientId ? `/clients/${clientId}/review-center` : '/review-center');
     }
-  }, [reviewType, id, clientId, coachResponse, navigate, fromGlobal, trainerId]);
+  }, [reviewType, id, clientId, coachResponse, navigate, fromGlobal, trainerId, viewerWU, user?.id]);
 
   const handleMessageClient = useCallback(
     (prefilled) => {
@@ -201,7 +204,7 @@ export default function ReviewDetail() {
             className="mt-2 text-sm font-medium"
             style={{ color: colors.accent }}
           >
-            Back to Review Center
+            Back to reviews
           </button>
         </div>
       );

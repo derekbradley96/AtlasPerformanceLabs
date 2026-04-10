@@ -1,7 +1,8 @@
 /**
  * Platform usage analytics: track key events for product and engagement metrics.
  *
- * Events: client_created, program_assigned, checkin_reviewed, message_sent, workout_logged
+ * Events: client_created, program_assigned, checkin_reviewed, message_sent, workout_logged,
+ * first-session funnel (first_dashboard_view, first_client_added, …) via firstSessionTracker.
  *
  * - track(eventName, properties?) — enqueue and optionally persist to Supabase (platform_usage_events).
  * - In dev, events are logged to console when VITE_DEV_ANALYTICS_LOG is set.
@@ -29,6 +30,34 @@ export const ANALYTICS_EVENTS = {
   MESSAGE_SEND_FAILED: 'message_send_failed',
   WORKOUT_START_FAILED: 'workout_start_failed',
   RECOVERABLE_ERROR: 'recoverable_error',
+  /** First 5 minutes funnel (once per user via firstSessionTracker) */
+  FIRST_DASHBOARD_VIEW: 'first_dashboard_view',
+  FIRST_CLIENT_ADDED: 'first_client_added',
+  FIRST_PROGRAM_CREATED: 'first_program_created',
+  FIRST_NUTRITION_PLAN_CREATED: 'first_nutrition_plan_created',
+  FIRST_WORKOUT_OPENED: 'first_workout_opened',
+  FIRST_HABIT_LOGGED: 'first_habit_logged',
+  FIRST_CHECKIN_OPENED: 'first_checkin_opened',
+  FIRST_COACH_LINK_COPIED: 'first_coach_link_copied',
+  COACH_BRIDGE_SEEN: 'coach_bridge_seen',
+  COACH_BRIDGE_DISMISSED: 'coach_bridge_dismissed',
+  COACH_BRIDGE_CLICKED: 'coach_bridge_clicked',
+  COACHING_HUB_OPENED: 'coaching_hub_opened',
+  MARKETPLACE_OPENED_FROM_PERSONAL: 'marketplace_opened_from_personal',
+  MARKETPLACE_OPENED_FROM_PLATEAU: 'marketplace_opened_from_plateau',
+  MARKETPLACE_OPENED_FROM_PREP: 'marketplace_opened_from_prep',
+  MARKETPLACE_OPENED_FROM_ACCOUNTABILITY: 'marketplace_opened_from_accountability',
+  MARKETPLACE_OPENED_FROM_ADVANCED_REFINEMENT: 'marketplace_opened_from_advanced_refinement',
+  MARKETPLACE_OPENED_FROM_GENERAL_DISCOVERY: 'marketplace_opened_from_general_discovery',
+  MARKETPLACE_OPENED_FROM_LOW_READINESS: 'marketplace_opened_from_low_readiness',
+  MARKETPLACE_OPENED_FROM_GOAL_URGENCY: 'marketplace_opened_from_goal_urgency',
+  PERSONAL_COACH_TIER_SELECTED: 'personal_coach_tier_selected',
+  COACH_PROFILE_OPENED_FROM_PERSONAL: 'coach_profile_opened_from_personal',
+  COACH_CONSULTATION_REQUESTED_FROM_PERSONAL: 'coach_consultation_requested_from_personal',
+  INVITE_CODE_ENTERED_FROM_PERSONAL: 'invite_code_entered_from_personal',
+  INVITE_CODE_OPENED_FROM_PERSONAL: 'invite_code_opened_from_personal',
+  PREP_USER_COACH_PROMPT_SEEN: 'prep_user_coach_prompt_seen',
+  PLATEAU_COACH_PROMPT_SEEN: 'plateau_coach_prompt_seen',
 };
 
 const VALID_EVENTS = new Set(Object.values(ANALYTICS_EVENTS));

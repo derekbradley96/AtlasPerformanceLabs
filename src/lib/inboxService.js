@@ -26,6 +26,7 @@ import { buildCompPrepInboxItems } from '@/lib/inbox/compPrepInbox';
 import { listCompClientsForTrainer, getMediaLogsForClients } from '@/lib/repos/compPrepRepo';
 import { getAllPoses } from '@/lib/repos/poseLibraryRepo';
 import { safeDate } from '@/lib/format';
+import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
 const BASE_SCORE = {
   payment_failed: 100,
@@ -99,7 +100,8 @@ export function getCloseoutCounts(trainerId) {
 }
 
 /** Build raw inbox items from all sources (no overrides applied). */
-export function buildRawInboxItems(trainerId) {
+export function buildRawInboxItems(trainerId, weightUnit = 'kg') {
+  const wu = normalizeWeightUnit(weightUnit);
   const items = [];
   const clientsRaw = getClients() ?? [];
   const clients = (Array.isArray(clientsRaw) ? clientsRaw : []).filter((c) => c?.trainer_id === trainerId);
@@ -432,8 +434,8 @@ export function sortInboxItems(items) {
 }
 
 /** Apply overrides and segment into Active / Waiting / Done. Pinned first in Active, then sortInboxItems. */
-export function buildSegmentedInbox(trainerId) {
-  const raw = buildRawInboxItems(trainerId);
+export function buildSegmentedInbox(trainerId, weightUnit = 'kg') {
+  const raw = buildRawInboxItems(trainerId, weightUnit);
   const withStatus = raw.map((item) => {
     const key = getItemKey(item.type, item.id);
     const override = getOverride(key);

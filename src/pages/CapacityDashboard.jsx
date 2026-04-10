@@ -122,15 +122,15 @@ export default function CapacityDashboard() {
         </div>
         <h2 className="text-[18px] font-semibold mb-2" style={{ color: colors.text }}>No clients yet</h2>
         <p className="text-[14px] text-center max-w-[280px] mb-6" style={{ color: colors.muted }}>
-          Add clients to see capacity and workload here.
+          Invite clients with your link or coach code; once they join, capacity and workload show here.
         </p>
         <button
           type="button"
-          onClick={() => navigate('/clients')}
+          onClick={() => navigate('/get-clients')}
           className="rounded-full px-5 py-2.5 text-[15px] font-medium border-none"
           style={{ background: colors.accent, color: '#fff' }}
         >
-          View clients
+          Invite clients
         </button>
       </div>
     );
@@ -308,7 +308,7 @@ export default function CapacityDashboard() {
           type="button"
           onClick={async () => {
             await impactLight();
-            navigate('/global-review?tab=active&filter=all');
+            navigate('/review-center');
           }}
           className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-[14px] font-medium border-none"
           style={{ background: colors.accent, color: '#fff' }}

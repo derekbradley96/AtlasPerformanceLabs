@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Camera, Upload, ArrowLeftRight, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { trackProgressPhotoUploaded } from '@/services/engagementTracker';
+import { formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 export default function ProgressPhotos() {
   const navigate = useNavigate();
@@ -270,7 +271,7 @@ export default function ProgressPhotos() {
                     {new Date(photo.date_taken).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </p>
                   {photo.weight_kg && (
-                    <p className="text-xs text-slate-300">{photo.weight_kg} kg</p>
+                    <p className="text-xs text-slate-300">{formatWeightForViewer(Number(photo.weight_kg), viewerWU)}</p>
                   )}
                 </div>
               </button>

@@ -29,17 +29,21 @@ export default function ChatBubble({
   isOutgoing,
   isNew,
   isConsecutiveFromSameSender,
+  replyPreview,
   onLongPress,
   onSwipeReply,
   onDelete,
   canDelete,
 }) {
   const [animateIn, setAnimateIn] = useState(!!isNew);
+  const [showTimestamp, setShowTimestamp] = useState(false);
   const startRef = useRef({ x: 0, y: 0 });
   const [swipeX, setSwipeX] = useState(0);
 
   const longPressHandlers = useLongPress({
     onLongPress: useCallback(() => {
+      setShowTimestamp(true);
+      setTimeout(() => setShowTimestamp(false), 2500);
       if (typeof onLongPress === 'function') onLongPress(message);
     }, [onLongPress, message]),
     durationMs: LONG_PRESS_MS,
@@ -120,10 +124,28 @@ export default function ChatBubble({
         onPointerLeave={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
       >
+        {replyPreview ? (
+          <div
+            style={{
+              marginBottom: 8,
+              padding: '6px 8px',
+              borderRadius: 10,
+              border: `1px solid ${isOutgoing ? 'rgba(255,255,255,0.28)' : colors.border}`,
+              background: isOutgoing ? 'rgba(255,255,255,0.12)' : colors.surface2,
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 11, lineHeight: 1.3, color: isOutgoing ? 'rgba(255,255,255,0.78)' : colors.muted }}>
+              Replying to
+            </p>
+            <p style={{ margin: '2px 0 0', fontSize: 12, lineHeight: 1.35, color: isOutgoing ? '#fff' : colors.text }}>
+              {replyPreview}
+            </p>
+          </div>
+        ) : null}
         <p className="break-words" style={{ fontSize: 15, lineHeight: 1.38 }}>
           {body}
         </p>
-        {timestampStr ? (
+        {showTimestamp && timestampStr ? (
           <p
             className="mt-1 text-[11px]"
             style={{

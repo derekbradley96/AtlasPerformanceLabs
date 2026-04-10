@@ -12,6 +12,8 @@ import { SkeletonCard } from '@/ui/Skeleton';
 import { colors, spacing } from '@/ui/tokens';
 import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatWeightDeltaKg } from '@/lib/bodyMeasurementUnits';
 
 const HEALTH_PILL = { on_track: { bg: 'rgba(34,197,94,0.2)', color: '#22C55E' }, monitor: { bg: 'rgba(245,158,11,0.2)', color: '#F59E0B' }, at_risk: { bg: 'rgba(239,68,68,0.2)', color: '#EF4444' } };
 
@@ -28,6 +30,8 @@ function formatDaysAgo(iso) {
 export default function Intervention() {
   const { id: clientId } = useParams();
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const outletContext = useOutletContext() || {};
   const { registerRefresh } = outletContext;
   const [snapshot, setSnapshot] = useState(null);
@@ -63,7 +67,7 @@ export default function Intervention() {
       <div className="app-screen" style={{ padding: spacing[16], background: colors.bg, color: colors.text }}>
         <p style={{ color: colors.muted }}>Client not found.</p>
         <button type="button" onClick={() => navigate('/review-center')} className="text-[15px] font-medium" style={{ color: colors.accent, marginTop: spacing[16] }}>
-          Back to Review Center
+          Back to review queue
         </button>
       </div>
     );
@@ -202,7 +206,7 @@ export default function Intervention() {
         <p className="text-[13px] font-medium mb-3" style={{ color: colors.muted }}>Trends</p>
         <div className="space-y-2 text-[14px]" style={{ color: colors.text }}>
           {trends.weight.last14dDelta != null && (
-            <p>Weight 14d: {trends.weight.last14dDelta > 0 ? '+' : ''}{trends.weight.last14dDelta} kg ({client.phase})</p>
+            <p>Weight 14d: {formatWeightDeltaKg(Number(trends.weight.last14dDelta), viewerWU)} ({client.phase})</p>
           )}
           {trends.strength.summary && <p>Strength: {trends.strength.summary}</p>}
           {(trends.adherence.last2Avg != null || trends.adherence.last4Avg != null) && (

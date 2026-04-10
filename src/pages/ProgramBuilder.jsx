@@ -3,17 +3,16 @@ import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom
 import { Plus, Trash2, GripVertical, Save, Users, Bookmark, X, MoreVertical, ChevronDown, ChevronRight, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { getProgramById, saveProgram, assignProgramToClient } from '@/lib/programsStore';
+import { getProgramById, getPrograms, saveProgram, assignProgramToClient } from '@/lib/programsStore';
 import { getExerciseById as getLibraryExerciseById } from '@/data/exerciseLibrary';
-import { saveProgramAsTemplate, getDayTemplates, saveDayAsTemplate } from '@/lib/programTemplatesStore';
+import { saveProgramAsTemplate, getDayTemplates, getProgramTemplates, saveDayAsTemplate } from '@/lib/programTemplatesStore';
 import { addProgramChangeLog } from '@/lib/programChangeLogStore';
 import { logAuditEvent } from '@/lib/auditLogStore';
 import { getClientById } from '@/data/selectors';
 import { useAuth } from '@/lib/AuthContext';
-import { GOALS, DIFFICULTIES } from '@/lib/programsStore';
+import { GOALS } from '@/lib/programsStore';
 import ExercisePickerModal from '@/components/programs/ExercisePickerModal';
 import Button from '@/ui/Button';
-import { Switch } from '@/components/ui/switch';
 import { impactLight } from '@/lib/haptics';
 import { trackFriction } from '@/services/frictionTracker';
 import { colors } from '@/ui/tokens';
@@ -89,8 +88,11 @@ const CATEGORY_OPTIONS = [
 export default function ProgramBuilder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, isDemoMode } = useAuth();
+  const { user, isDemoMode, coachFocus: rawCoachFocus } = useAuth();
+  const coachFocus = String(rawCoachFocus || '').toLowerCase();
+  const showCompPrepFields = coachFocus === 'competition' || coachFocus === 'integrated';
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? 'trainer-1';
+  const isPersonalUser = user?.user_type === 'personal' || user?.user_type === 'solo';
   const programId = searchParams.get('id');
   const assignToClientId = searchParams.get('assignTo') || searchParams.get('clientId');
   const { setHeaderRight, setHeaderTitle } = useOutletContext() || {};
@@ -110,9 +112,6 @@ export default function ProgramBuilder() {
     name: '',
     goal: 'general_fitness',
     duration_weeks: '4',
-    difficulty: 'intermediate',
-    description: '',
-    trainer_notes: '',
     usePhases: false,
     phaseName: 'Phase 1',
     phaseDurationWeeks: '4',
@@ -131,8 +130,13 @@ export default function ProgramBuilder() {
   const [showPreview, setShowPreview] = useState(false);
   const [activeExerciseKey, setActiveExerciseKey] = useState(null);
   const [exExpanded, setExExpanded] = useState({}); // { exId: true } for row expand
+  const [blockSplitType, setBlockSplitType] = useState('upper_lower');
+  const [entryMode, setEntryMode] = useState(programId ? 'build' : null);
+  const [entryPicker, setEntryPicker] = useState(null); // 'template' | 'duplicate' | null
 
   const program = programId ? getProgramById(programId) : null;
+  const availablePrograms = getPrograms().filter((p) => p?.id !== programId);
+  const availableTemplates = getProgramTemplates(trainerId);
   const clientForAssign = assignToClientId ? getClientById(assignToClientId) : null;
   const saveStateRef = useRef(saveState);
   const hasContentRef = useRef(false);
@@ -190,9 +194,6 @@ export default function ProgramBuilder() {
         name: p.name || '',
         goal: p.goal || 'general_fitness',
         duration_weeks: p.duration_weeks != null ? String(p.duration_weeks) : '4',
-        difficulty: p.difficulty || 'intermediate',
-        description: p.description || '',
-        trainer_notes: p.trainer_notes || '',
         usePhases: hasPhases,
         phaseName: firstPhase?.name || 'Phase 1',
         phaseDurationWeeks: firstPhase?.durationWeeks != null ? String(firstPhase.durationWeeks) : '4',
@@ -200,14 +201,15 @@ export default function ProgramBuilder() {
         division: p.division || '',
       });
       setDays(daysSource.length ? daysSource.map(mapDay) : [defaultDay()]);
+      const loadedDayNames = (daysSource || []).map((d) => String(d?.dayName || '').toLowerCase());
+      const isPPL = loadedDayNames.some((n) => n.includes('push') || n.includes('pull') || n.includes('legs'));
+      const isUL = loadedDayNames.some((n) => n.includes('upper') || n.includes('lower'));
+      setBlockSplitType(isPPL ? 'push_pull_legs' : (isUL ? 'upper_lower' : 'custom'));
     } else {
       setFormData({
         name: '',
         goal: 'general_fitness',
         duration_weeks: '4',
-        difficulty: 'intermediate',
-        description: '',
-        trainer_notes: '',
         usePhases: false,
         phaseName: 'Phase 1',
         phaseDurationWeeks: '4',
@@ -215,8 +217,78 @@ export default function ProgramBuilder() {
         division: '',
       });
       setDays([defaultDay()]);
+      setBlockSplitType('upper_lower');
     }
   }, [programId]);
+
+  const loadProgramIntoBuilder = (p) => {
+    if (!p) return;
+    const mapExercise = (e) => ({
+      id: nextId('e'),
+      exerciseId: e.exerciseId ?? '',
+      name: e.name ?? '',
+      sets: e.sets != null ? String(e.sets) : '3',
+      reps: e.reps != null ? String(e.reps) : '10',
+      rir: e.rir != null ? String(e.rir) : '2',
+      rpe: e.rpe != null ? String(e.rpe) : '',
+      restSeconds: e.restSeconds != null ? String(e.restSeconds) : '90',
+      tempo: e.tempo ?? '',
+      notes: e.notes ?? '',
+      groupId: e.groupId ?? '',
+      progressionRule: e.progressionRule ?? 'none',
+      progressionNotes: e.progressionNotes ?? '',
+      targetLoad: e.targetLoad,
+      lastWeekLoad: e.lastWeekLoad,
+      percentageOf1RM: e.percentageOf1RM,
+      bias: e.bias ?? undefined,
+      category: e.category ?? undefined,
+    });
+    const daysSource = Array.isArray(p.days) ? p.days : [];
+    setFormData((f) => ({
+      ...f,
+      name: p.name ? `${p.name} (copy)` : 'Copied Program',
+      goal: p.goal || 'general_fitness',
+      duration_weeks: p.duration_weeks != null ? String(p.duration_weeks) : '4',
+      isCompPrep: !!p.isCompPrep,
+      division: p.division || '',
+    }));
+    setDays(daysSource.length ? daysSource.map((d) => ({
+      id: nextId('d'),
+      dayName: d.dayName || '',
+      exercises: (d.exercises || []).map(mapExercise),
+    })) : [defaultDay()]);
+    setEntryMode('build');
+    setEntryPicker(null);
+  };
+
+  const generateDaysFromSplit = (split) => {
+    if (split === 'push_pull_legs') {
+      return [
+        { id: nextId('d'), dayName: 'Push', exercises: [] },
+        { id: nextId('d'), dayName: 'Pull', exercises: [] },
+        { id: nextId('d'), dayName: 'Legs', exercises: [] },
+      ];
+    }
+    if (split === 'upper_lower') {
+      return [
+        { id: nextId('d'), dayName: 'Upper A', exercises: [] },
+        { id: nextId('d'), dayName: 'Lower A', exercises: [] },
+        { id: nextId('d'), dayName: 'Upper B', exercises: [] },
+        { id: nextId('d'), dayName: 'Lower B', exercises: [] },
+      ];
+    }
+    return [
+      { id: nextId('d'), dayName: 'Day 1', exercises: [] },
+      { id: nextId('d'), dayName: 'Day 2', exercises: [] },
+      { id: nextId('d'), dayName: 'Day 3', exercises: [] },
+    ];
+  };
+
+  const handleSplitChange = (value) => {
+    setBlockSplitType(value);
+    setDays(generateDaysFromSplit(value));
+    toast.success('Days auto-generated');
+  };
 
   useEffect(() => {
     if (typeof setHeaderTitle === 'function') setHeaderTitle(programId ? 'Edit Program' : 'New Program');
@@ -265,9 +337,6 @@ export default function ProgramBuilder() {
       name: formData.name,
       goal: formData.goal,
       duration_weeks: parsedDuration,
-      difficulty: formData.difficulty,
-      description: formData.description,
-      trainer_notes: formData.trainer_notes,
       isCompPrep: !!formData.isCompPrep,
       division: formData.division || undefined,
     };
@@ -283,13 +352,19 @@ export default function ProgramBuilder() {
     }
     const saved = saveProgram(payload);
     setSaveState('saved');
-    if (assignToClientId) {
+    const effectiveAssignToId = assignToClientId || (isPersonalUser ? user?.id : null);
+    if (effectiveAssignToId) {
       const effectiveDate = new Date().toISOString().slice(0, 10);
-      assignProgramToClient(assignToClientId, saved.id, effectiveDate);
-      addProgramChangeLog({ clientId: assignToClientId, programId: saved.id, programName: saved.name, effectiveDate, action: 'assigned' });
-      logAuditEvent({ actorUserId: user?.id ?? 'demo-trainer', ownerTrainerUserId: trainerId, entityType: 'program_assignment', entityId: saved.id, action: 'program_assigned', after: { clientId: assignToClientId, programId: saved.id, programName: saved.name, effectiveDate } });
-      toast.success('Program saved and assigned to client!');
-      navigate(`/clients/${assignToClientId}?tab=program`, { replace: true });
+      assignProgramToClient(effectiveAssignToId, saved.id, effectiveDate);
+      addProgramChangeLog({ clientId: effectiveAssignToId, programId: saved.id, programName: saved.name, effectiveDate, action: 'assigned' });
+      logAuditEvent({ actorUserId: user?.id ?? 'demo-trainer', ownerTrainerUserId: trainerId, entityType: 'program_assignment', entityId: saved.id, action: 'program_assigned', after: { clientId: effectiveAssignToId, programId: saved.id, programName: saved.name, effectiveDate } });
+      if (isPersonalUser) {
+        toast.success('Program saved to your plan!');
+        navigate('/myprogram', { replace: true });
+      } else {
+        toast.success('Program saved and assigned to client!');
+        navigate(`/clients/${effectiveAssignToId}?tab=program`, { replace: true });
+      }
     } else {
       toast.success('Program saved!');
       if (!programId) navigate(`/programbuilder?id=${saved.id}`, { replace: true });
@@ -331,6 +406,16 @@ export default function ProgramBuilder() {
         i === dayIndex ? { ...day, exercises: [...(day.exercises || []), defaultExercise()] } : day
       )
     );
+  const addExerciseAndPick = (dayIndex) => {
+    const newEx = defaultExercise();
+    setDays((d) =>
+      d.map((day, i) =>
+        i === dayIndex ? { ...day, exercises: [...(day.exercises || []), newEx] } : day
+      )
+    );
+    setPickerTarget({ dayIndex, exIndex: (days[dayIndex]?.exercises || []).length });
+    setPickerOpen(true);
+  };
   const removeExercise = (dayIndex, exIndex) =>
     setDays((d) =>
       d.map((day, i) =>
@@ -474,7 +559,11 @@ export default function ProgramBuilder() {
     assignProgramToClient(assignToClientId, programId);
     logAuditEvent({ actorUserId: user?.id ?? 'demo-trainer', ownerTrainerUserId: trainerId, entityType: 'program_assignment', entityId: programId, action: 'program_assigned', after: { clientId: assignToClientId, programId, programName: prog?.name } });
     toast.success(`Program assigned to ${clientForAssign?.full_name || 'client'}`);
-    navigate(`/clients/${assignToClientId}`);
+    if (user?.user_type === 'personal' || user?.user_type === 'solo') {
+      navigate('/myprogram', { replace: true });
+    } else {
+      navigate(`/clients/${assignToClientId}`);
+    }
   };
 
   const inputClass = 'w-full rounded-md py-1.5 px-2 focus:outline-none focus:ring-1 focus:ring-white/20 min-w-0 border-0';
@@ -483,6 +572,87 @@ export default function ProgramBuilder() {
   const v = (n) => Math.round(n * 0.75); // compact vertical rhythm (~25% reduction)
   const pad = v(16);
   const gap = v(10);
+
+  if (!entryMode) {
+    return (
+      <div
+        className="app-screen app-section min-w-0 max-w-full flex flex-col overflow-x-hidden"
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingLeft: 'max(16px, env(safe-area-inset-left, 0px))', paddingRight: 'max(16px, env(safe-area-inset-right, 0px))' }}
+      >
+        <div className="py-5">
+          <p className="text-[11px] uppercase tracking-wider mb-2" style={{ color: colors.muted }}>Create Program</p>
+          <h1 className="text-[22px] font-semibold mb-4" style={{ color: colors.text }}>Choose how you want to start</h1>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => { setEntryMode('build'); setEntryPicker(null); }}
+              className="w-full rounded-xl px-4 py-4 text-left"
+              style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.03)', minHeight: 64 }}
+            >
+              <p className="text-[15px] font-semibold" style={{ color: colors.text }}>Build from scratch</p>
+              <p className="text-[12px]" style={{ color: colors.muted }}>Start clean and create your block quickly.</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryPicker(entryPicker === 'template' ? null : 'template')}
+              className="w-full rounded-xl px-4 py-4 text-left"
+              style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.03)', minHeight: 64 }}
+            >
+              <p className="text-[15px] font-semibold" style={{ color: colors.text }}>Use template</p>
+              <p className="text-[12px]" style={{ color: colors.muted }}>Start from a saved template.</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryPicker(entryPicker === 'duplicate' ? null : 'duplicate')}
+              className="w-full rounded-xl px-4 py-4 text-left"
+              style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.03)', minHeight: 64 }}
+            >
+              <p className="text-[15px] font-semibold" style={{ color: colors.text }}>Duplicate program</p>
+              <p className="text-[12px]" style={{ color: colors.muted }}>Copy an existing program and edit.</p>
+            </button>
+          </div>
+
+          {entryPicker === 'template' && (
+            <div className="mt-4 rounded-xl p-3" style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.02)' }}>
+              <p className="text-[11px] uppercase tracking-wider mb-2" style={{ color: colors.muted }}>Templates</p>
+              <div className="space-y-2">
+                {availableTemplates.slice(0, 8).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => loadProgramIntoBuilder(t.program)}
+                    className="w-full text-left rounded-lg px-3 py-2"
+                    style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.03)', color: colors.text, minHeight: 44 }}
+                  >
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {entryPicker === 'duplicate' && (
+            <div className="mt-4 rounded-xl p-3" style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.02)' }}>
+              <p className="text-[11px] uppercase tracking-wider mb-2" style={{ color: colors.muted }}>Existing Programs</p>
+              <div className="space-y-2">
+                {availablePrograms.slice(0, 10).map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => loadProgramIntoBuilder(p)}
+                    className="w-full text-left rounded-lg px-3 py-2"
+                    style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.03)', color: colors.text, minHeight: 44 }}
+                  >
+                    {p.name || 'Untitled program'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -516,74 +686,65 @@ export default function ProgramBuilder() {
         </div>
       )}
 
-      {/* Program Details — single flat panel */}
+      {/* Block Setup */}
       <section className="py-4" style={{ borderBottom: `1px solid ${sep}` }}>
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: colors.muted }}>Program Details</h2>
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: colors.muted }}>Block Setup</h2>
         <div className="space-y-4" style={{ gap: gap }}>
           <div>
-            <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Name</label>
+            <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Block name</label>
             <input
               value={formData.name}
               onChange={(e) => setFormData((f) => ({ ...f, name: e.target.value }))}
-              placeholder="e.g. 8-Week Hypertrophy Block"
+              placeholder="e.g. 4-Week Upper/Lower Block"
               className={inputClass}
               style={{ ...inputStyle, fontSize: 16 }}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Goal</label>
-              <select value={formData.goal} onChange={(e) => setFormData((f) => ({ ...f, goal: e.target.value }))} className={inputClass} style={{ ...inputStyle, width: '100%', fontSize: 16 }}>
-                {GOALS.map((g) => <option key={g} value={g}>{(g || '').replace('_', ' ')}</option>)}
+              <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Number of weeks</label>
+              <select
+                value={formData.duration_weeks}
+                onChange={(e) => setFormData((f) => ({ ...f, duration_weeks: e.target.value }))}
+                className={inputClass}
+                style={{ ...inputStyle, width: '100%', fontSize: 16 }}
+              >
+                {[1, 2, 3, 4, 5, 6].map((w) => (
+                  <option key={w} value={String(w)}>{w}</option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Weeks</label>
-              <input type="text" inputMode="numeric" value={formData.duration_weeks} onChange={(e) => { const val = e.target.value; if (/^\d*$/.test(val)) setFormData((f) => ({ ...f, duration_weeks: val })); }} placeholder="4" className={inputClass} style={{ ...inputStyle, fontSize: 16 }} />
+              <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Split type</label>
+              <select
+                value={blockSplitType}
+                onChange={(e) => handleSplitChange(e.target.value)}
+                className={inputClass}
+                style={{ ...inputStyle, width: '100%', fontSize: 16 }}
+              >
+                <option value="push_pull_legs">Push Pull Legs</option>
+                <option value="upper_lower">Upper Lower</option>
+                <option value="custom">Custom</option>
+              </select>
             </div>
           </div>
-          {programAdvancedMode && (
-            <>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={formData.usePhases} onChange={(e) => setFormData((f) => ({ ...f, usePhases: e.target.checked }))} className="rounded" style={{ accentColor: colors.accent }} />
-                <span className="text-[13px]" style={{ color: colors.text }}>Use phases</span>
-              </label>
-              {formData.usePhases && (
-                <div className="grid grid-cols-2 gap-3 pl-4">
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Phase name</label>
-                    <input value={formData.phaseName} onChange={(e) => setFormData((f) => ({ ...f, phaseName: e.target.value }))} placeholder="Phase 1" className={inputClass} style={{ ...inputStyle, fontSize: 16 }} />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Phase weeks</label>
-                    <input type="text" inputMode="numeric" value={formData.phaseDurationWeeks} onChange={(e) => { const v = e.target.value; if (/^\d*$/.test(v)) setFormData((f) => ({ ...f, phaseDurationWeeks: v })); }} placeholder="4" className={inputClass} style={{ ...inputStyle, fontSize: 16 }} />
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+          <div className="rounded-xl p-3" style={{ border: `1px solid ${sep}`, background: 'rgba(255,255,255,0.02)' }}>
+            <p className="text-[11px] uppercase tracking-wider mb-2" style={{ color: colors.muted }}>Auto-generated days</p>
+            <div className="flex flex-wrap gap-2">
+              {days.map((d, idx) => (
+                <span key={d.id || idx} className="text-[12px] px-2 py-1 rounded" style={{ background: 'rgba(255,255,255,0.06)', color: colors.text }}>
+                  {d.dayName || `Day ${idx + 1}`}
+                </span>
+              ))}
+            </div>
+          </div>
           <div>
-            <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Difficulty</label>
-            <select value={formData.difficulty} onChange={(e) => setFormData((f) => ({ ...f, difficulty: e.target.value }))} className={inputClass} style={{ ...inputStyle, fontSize: 16 }}>
-              {DIFFICULTIES.map((d) => <option key={d} value={d}>{d}</option>)}
+            <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Goal</label>
+            <select value={formData.goal} onChange={(e) => setFormData((f) => ({ ...f, goal: e.target.value }))} className={inputClass} style={{ ...inputStyle, width: '100%', fontSize: 16 }}>
+              {GOALS.map((g) => <option key={g} value={g}>{(g || '').replace('_', ' ')}</option>)}
             </select>
           </div>
-          <div className="flex items-center justify-between gap-3 py-2" style={{ borderTop: `1px solid ${sep}` }}>
-            <div>
-              <p className="text-[13px] font-medium" style={{ color: colors.text }}>Advanced mode</p>
-              <p className="text-[11px] mt-0.5" style={{ color: colors.muted }}>RPE, tempo, rest, notes, progression</p>
-            </div>
-            <Switch checked={programAdvancedMode} onCheckedChange={(checked) => { impactLight(); setProgramAdvancedModeOn(checked); }} aria-label="Advanced mode" />
-          </div>
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Description</label>
-            <textarea value={formData.description} onChange={(e) => setFormData((f) => ({ ...f, description: e.target.value }))} placeholder="What is this program about?" rows={2} className={inputClass} style={{ ...inputStyle, fontSize: 16, resize: 'vertical' }} />
-          </div>
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider mb-1" style={{ color: colors.muted }}>Trainer notes</label>
-            <textarea value={formData.trainer_notes} onChange={(e) => setFormData((f) => ({ ...f, trainer_notes: e.target.value }))} placeholder="Private notes…" rows={1} className={inputClass} style={{ ...inputStyle, fontSize: 16, resize: 'vertical' }} />
-          </div>
-          {programAdvancedMode && (
+          {showCompPrepFields && (
             <div className="space-y-2 pl-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={!!formData.isCompPrep} onChange={(e) => setFormData((f) => ({ ...f, isCompPrep: e.target.checked }))} className="rounded" style={{ accentColor: colors.accent }} />
@@ -598,10 +759,10 @@ export default function ProgramBuilder() {
         </div>
       </section>
 
-      {/* Days — collapsible panels */}
+      {/* Day cards */}
       <section className="py-4" style={{ borderBottom: `1px solid ${sep}` }}>
         <div className="flex items-center justify-between gap-2 mb-3">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: colors.muted }}>Days</h2>
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: colors.muted }}>Day Cards</h2>
           <button type="button" onClick={addDay} className="text-[12px] font-medium px-2 py-1 rounded" style={{ color: colors.muted, background: 'rgba(255,255,255,0.06)' }}>
             <Plus size={18} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add day
           </button>
@@ -627,24 +788,36 @@ export default function ProgramBuilder() {
 
         const isCollapsed = dayCollapsed[dayIndex];
         return (
-          <div key={day.id} className="mb-2" style={{ border: `1px solid ${sep}`, borderRadius: 8 }}>
+          <div key={day.id} className="mb-3" style={{ border: `1px solid ${sep}`, borderRadius: 12, background: 'rgba(255,255,255,0.02)' }}>
             <div
               className="flex items-center gap-2 py-2 px-3 w-full text-left"
-              style={{ minHeight: 44, borderBottom: isCollapsed ? 'none' : `1px solid ${sep}` }}
+              style={{ minHeight: 48, borderBottom: isCollapsed ? 'none' : `1px solid ${sep}` }}
             >
               <span className="flex-shrink-0 cursor-grab" style={{ color: colors.muted }} {...(isCollapsed ? {} : {})}><GripVertical size={18} /></span>
               <button type="button" onClick={() => toggleDayCollapsed(dayIndex)} className="flex-shrink-0 p-0.5" style={{ color: colors.muted }} aria-label={isCollapsed ? 'Expand' : 'Collapse'}>
                 {isCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
               </button>
-              <input
-                value={day.dayName}
-                onChange={(e) => setDay(dayIndex, 'dayName', e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                placeholder="Day name"
-                className="flex-1 min-w-0 text-[15px] font-medium bg-transparent border-none focus:outline-none focus:ring-0"
-                style={{ color: colors.text, fontSize: 16 }}
-              />
-              <span className="text-[11px] flex-shrink-0" style={{ color: colors.muted }}>{exercises.length} exercise{exercises.length !== 1 ? 's' : ''}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-semibold" style={{ color: colors.text }}>
+                  Day {dayIndex + 1} - {day.dayName || 'Session'}
+                </p>
+                <input
+                  value={day.dayName}
+                  onChange={(e) => setDay(dayIndex, 'dayName', e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  placeholder="Rename day"
+                  className="w-full min-w-0 text-[12px] bg-transparent border-none focus:outline-none focus:ring-0 mt-0.5 p-0"
+                  style={{ color: colors.muted }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => addExerciseAndPick(dayIndex)}
+                className="text-[11px] font-semibold px-2 py-1 rounded flex items-center gap-1"
+                style={{ minHeight: 36, color: colors.accent, background: 'rgba(37,99,235,0.12)' }}
+              >
+                <Plus size={14} /> Add exercise
+              </button>
               <div className="relative flex-shrink-0">
                 <button type="button" onClick={(e) => { e.stopPropagation(); setDayMenuOpen(dayMenuOpen === dayIndex ? null : dayIndex); }} className="p-1.5 rounded" style={{ color: colors.muted }} aria-label="Day menu">
                   <MoreVertical size={18} />
@@ -666,6 +839,7 @@ export default function ProgramBuilder() {
             </div>
             {!isCollapsed && (
             <div className="px-2 pb-2">
+            <p className="text-[11px] px-2 py-1" style={{ color: colors.muted }}>{exercises.length} exercise{exercises.length !== 1 ? 's' : ''}</p>
             <DragDropContext onDragEnd={(result) => { if (result.destination && result.destination.droppableId === `day-${dayIndex}`) reorderExercises(dayIndex, result.source.index, result.destination.index); }}>
               <Droppable droppableId={`day-${dayIndex}`}>
                 {(provided) => (
@@ -685,22 +859,34 @@ export default function ProgramBuilder() {
                               className="py-2 px-2 rounded"
                               style={{ borderBottom: `1px solid ${sep}`, ...providedDrag.draggableProps.style }}
                             >
-                              <div className="flex items-center gap-2 min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => setExExpanded((p) => ({ ...p, [ex.id]: !p[ex.id] }))}
+                                className="w-full flex items-center gap-2 min-w-0 text-left"
+                                style={{ background: 'transparent', border: 'none', color: 'inherit', padding: 0 }}
+                              >
                                 <span {...providedDrag.dragHandleProps} className="flex-shrink-0 cursor-grab" style={{ color: colors.muted }}><GripVertical size={18} /></span>
-                                <button type="button" onClick={() => { setPickerTarget({ dayIndex, exIndex }); setPickerOpen(true); }} className="flex-1 text-left min-w-0">
+                                <div className="flex-1 text-left min-w-0">
                                   <p className="text-[15px] font-semibold truncate" style={{ color: colors.text }}>{ex.name || 'Select exercise'}</p>
                                   <div className="flex flex-wrap gap-1 mt-0.5">
                                     {muscleLabel && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.08)', color: colors.muted }}>{muscleLabel}</span>}
                                     {equipLabel && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.05)', color: colors.muted }}>{equipLabel}</span>}
                                     {groupLabel && programAdvancedMode && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(37,99,235,0.2)', color: colors.accent }}>{groupLabel}</span>}
                                   </div>
-                                </button>
+                                </div>
                                 <div className="flex items-center gap-1 flex-shrink-0">
-                                  <span className="text-[12px]" style={{ color: colors.muted }}>{ex.sets}×{ex.reps}{programAdvancedMode && ex.rpe ? ` RPE${ex.rpe}` : ''}</span>
-                                  <button type="button" onClick={() => { setPickerTarget({ dayIndex, exIndex }); setPickerOpen(true); }} className="text-[11px] font-medium px-2 py-1 rounded" style={{ color: colors.accent }}>Replace</button>
-                                  <button type="button" onClick={() => setExExpanded((p) => ({ ...p, [ex.id]: !p[ex.id] }))} className="p-1 rounded" style={{ color: colors.muted }} aria-label={isRowExpanded ? 'Collapse' : 'Expand'}>
+                                  <span className="text-[12px]" style={{ color: colors.muted }}>
+                                    {ex.sets}×{ex.reps} · {ex.restSeconds || 90}s rest
+                                  </span>
+                                  <span className="p-1 rounded" style={{ color: colors.muted }} aria-hidden>
                                     {isRowExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                                  </button>
+                                  </span>
+                                </div>
+                              </button>
+                              <div className="flex items-center justify-end mt-1.5 gap-1">
+                                <button type="button" onClick={() => { setPickerTarget({ dayIndex, exIndex }); setPickerOpen(true); }} className="text-[11px] font-medium px-2 py-1 rounded" style={{ color: colors.accent }}>
+                                  {ex.name ? 'Replace' : 'Select'}
+                                </button>
                                   {programAdvancedMode && (
                                     <div className="relative">
                                       <button type="button" onClick={() => setExMenuOpen(exMenuOpen?.dayIndex === dayIndex && exMenuOpen?.exIndex === exIndex ? null : { dayIndex, exIndex })} className="p-1 rounded" style={{ color: colors.muted }}><MoreVertical size={18} /></button>
@@ -720,7 +906,6 @@ export default function ProgramBuilder() {
                                   {!programAdvancedMode && (
                                     <button type="button" onClick={() => removeExercise(dayIndex, exIndex)} className="p-1 rounded" style={{ color: colors.muted }} aria-label="Remove"><Trash2 size={18} /></button>
                                   )}
-                                </div>
                               </div>
                               {/* Expanded: Sets/Reps/RPE inputs, Rest, Tempo, Notes, Progression */}
                               {isRowExpanded && (
@@ -770,7 +955,7 @@ export default function ProgramBuilder() {
                       );
                     })}
                     {provided.placeholder}
-                    <button type="button" onClick={() => addExercise(dayIndex)} className="w-full py-2.5 mt-1 text-[13px] font-medium rounded flex items-center justify-center gap-1.5" style={{ color: colors.muted, border: `1px dashed ${sep}` }}>
+                    <button type="button" onClick={() => addExerciseAndPick(dayIndex)} className="w-full py-2.5 mt-1 text-[13px] font-medium rounded flex items-center justify-center gap-1.5" style={{ color: colors.muted, border: `1px dashed ${sep}` }}>
                       <Plus size={18} /> Add exercise
                     </button>
                   </div>
@@ -800,32 +985,17 @@ export default function ProgramBuilder() {
           gap: gap,
         }}
       >
-        <div className="flex gap-2">
-          <Button variant="primary" onClick={handleSave} disabled={!canSave} style={{ flex: 1, fontSize: 16 }} className="min-h-[48px]">
-            <Save size={18} style={{ marginRight: 8 }} />
-            {saveState === 'saving' ? 'Saving...' : 'Save program'}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              impactLight();
-              if (days.length > 0) addExercise(0);
-              else setDays((d) => [...d, { ...defaultDay(), exercises: [defaultExercise()] }]);
-            }}
-            style={{ flex: 0, fontSize: 15, minWidth: 44 }}
-            className="min-h-[48px]"
-            title="Add exercise to first day"
-          >
-            <Plus size={18} />
-          </Button>
-        </div>
+        <Button variant="primary" onClick={handleSave} disabled={!canSave} style={{ width: '100%', fontSize: 16 }} className="min-h-[50px]">
+          <Save size={18} style={{ marginRight: 8 }} />
+          {saveState === 'saving' ? 'Saving...' : 'Save Program'}
+        </Button>
         <button
           type="button"
           onClick={() => setShowProgramTemplateModal(true)}
-          className="text-[13px] font-medium py-2 rounded flex items-center justify-center gap-1.5 min-h-[44px]"
-          style={{ color: colors.muted, background: 'transparent' }}
+          className="text-[14px] font-medium py-2 rounded flex items-center justify-center gap-1.5 min-h-[44px]"
+          style={{ color: colors.text, background: 'transparent', border: `1px solid ${sep}` }}
         >
-          <Bookmark size={18} /> Template
+          <Bookmark size={18} /> Save as Template
         </button>
         <button
           type="button"
@@ -833,7 +1003,7 @@ export default function ProgramBuilder() {
           className="text-[13px] font-medium py-2 rounded flex items-center justify-center gap-1.5 min-h-[44px]"
           style={{ color: colors.muted, background: 'transparent' }}
         >
-          <Eye size={18} /> Preview
+          <Eye size={18} /> Preview week
         </button>
       </div>
 
@@ -850,19 +1020,27 @@ export default function ProgramBuilder() {
       {showPreview && (
         <div className="fixed inset-0 z-50 flex flex-col" style={{ background: colors.bg, paddingTop: 'env(safe-area-inset-top, 0)', paddingBottom: 'env(safe-area-inset-bottom, 0)' }}>
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: colors.border }}>
-            <h2 className="text-base font-semibold" style={{ color: colors.text }}>Program preview</h2>
+            <h2 className="text-base font-semibold" style={{ color: colors.text }}>Weekly plan preview</h2>
             <button type="button" onClick={() => setShowPreview(false)} className="p-2 rounded-lg" style={{ color: colors.muted }} aria-label="Close"><X size={18} /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            <p className="text-sm font-medium" style={{ color: colors.text }}>{formData.name || 'Untitled program'}</p>
-            <p className="text-xs" style={{ color: colors.muted }}>{formData.goal?.replace('_', ' ')} · {formData.duration_weeks || '—'} weeks · {formData.difficulty}</p>
-            {formData.description ? <p className="text-sm" style={{ color: colors.muted }}>{formData.description}</p> : null}
+            <div className="rounded-xl p-3" style={{ border: `1px solid ${colors.border}`, background: colors.card }}>
+              <p className="text-sm font-semibold" style={{ color: colors.text }}>{formData.name || 'Untitled block'}</p>
+              <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                {days.length} day split · {formData.duration_weeks || '—'} weeks
+              </p>
+            </div>
             {days.map((day, i) => (
               <div key={day.id} className="rounded-xl border p-3" style={{ borderColor: colors.border, background: colors.card }}>
-                <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>{day.dayName || `Day ${i + 1}`}</p>
-                <ul className="text-sm space-y-1" style={{ color: colors.muted }}>
-                  {(day.exercises || []).map((ex) => <li key={ex.id}>{ex.name || '—'} · {ex.sets}×{ex.reps}</li>)}
-                </ul>
+                <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>Day {i + 1} - {day.dayName || `Session ${i + 1}`}</p>
+                <div className="space-y-1.5">
+                  {(day.exercises || []).map((ex, idx) => (
+                    <div key={ex.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <p className="text-sm truncate" style={{ color: colors.text }}>{idx + 1}. {ex.name || 'Exercise'}</p>
+                      <p className="text-xs whitespace-nowrap" style={{ color: colors.muted }}>{ex.sets}×{ex.reps} · {ex.restSeconds || 90}s</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -876,19 +1054,23 @@ export default function ProgramBuilder() {
             <button type="button" onClick={() => setDayTemplateContext(null)} className="p-2 rounded-lg" style={{ color: colors.muted }} aria-label="Close"><X size={18} /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-3">
-            {(getDayTemplates(trainerId) || []).length === 0 ? (
-              <p className="text-sm py-4" style={{ color: colors.muted }}>No day templates yet. Save a day as template from the day menu.</p>
-            ) : (
-              <ul className="space-y-2">
-                {getDayTemplates(trainerId).map((t) => (
-                  <li key={t.id}>
-                    <button type="button" onClick={() => addDayFromTemplate(dayTemplateContext.dayIndex, t)} className="w-full text-left py-3 px-3 rounded-xl" style={{ background: colors.card, border: `1px solid ${colors.border}`, color: colors.text }}>
-                      {t.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ul className="space-y-2">
+              {(getDayTemplates(trainerId) || []).map((t) => (
+                <li key={t.id}>
+                  <button type="button" onClick={() => addDayFromTemplate(dayTemplateContext.dayIndex, t)} className="w-full text-left py-3 px-3 rounded-xl" style={{ background: colors.card, border: `1px solid ${colors.border}`, color: colors.text }}>
+                    {t.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => setDayTemplateContext(null)}
+              className="w-full mt-3 py-3 rounded-xl text-sm font-medium"
+              style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${colors.border}`, color: colors.text }}
+            >
+              Continue with current day cards
+            </button>
           </div>
         </div>
       )}

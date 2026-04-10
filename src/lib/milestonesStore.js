@@ -21,11 +21,11 @@ function safeSet(value) {
 
 /** Milestone definitions: id, title, description, category (weight | streak | loyalty | time | strength | adherence) */
 export const MILESTONE_DEFS = [
-  { id: 'weight_2_5', title: 'Weight shift ±2.5 kg', description: 'You changed your weight by 2.5 kg from baseline.', category: 'weight' },
-  { id: 'weight_5', title: 'Weight shift ±5 kg', description: 'You changed your weight by 5 kg from baseline.', category: 'weight' },
-  { id: 'weight_10', title: 'Weight shift ±10 kg', description: 'You changed your weight by 10 kg from baseline.', category: 'weight' },
-  { id: 'weight_bulk_5', title: 'Bulk: +5 kg', description: 'You gained 5 kg during your bulk phase.', category: 'weight' },
-  { id: 'weight_cut_5', title: 'Cut: -5 kg', description: 'You lost 5 kg during your cut phase.', category: 'weight' },
+  { id: 'weight_2_5', title: 'Weight shift (±2.5)', description: 'Meaningful bodyweight change from baseline.', category: 'weight' },
+  { id: 'weight_5', title: 'Weight shift (±5)', description: 'Strong bodyweight change from baseline.', category: 'weight' },
+  { id: 'weight_10', title: 'Weight shift (±10)', description: 'Major bodyweight change from baseline.', category: 'weight' },
+  { id: 'weight_bulk_5', title: 'Bulk milestone', description: 'Strong gain during your bulk phase.', category: 'weight' },
+  { id: 'weight_cut_5', title: 'Cut milestone', description: 'Strong loss during your cut phase.', category: 'weight' },
   { id: 'streak_7', title: '7-day streak', description: '7 days in a row of check-ins completed.', category: 'streak' },
   { id: 'streak_14', title: '14-day streak', description: '14 days in a row of check-ins completed.', category: 'streak' },
   { id: 'streak_30', title: '30-day streak', description: '30 days in a row of check-ins completed.', category: 'streak' },

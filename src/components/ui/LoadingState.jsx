@@ -17,12 +17,15 @@ export function LoadingSpinner({ size = 'md', className = '' }) {
   );
 }
 
-export function PageLoader() {
+export function PageLoader({ message = 'Loading…', hint }) {
   return (
-    <div className="flex items-center justify-center min-h-[60vh] bg-transparent">
-      <div className="flex flex-col items-center gap-4">
+    <div className="flex items-center justify-center min-h-[60vh] bg-transparent px-6">
+      <div className="flex flex-col items-center gap-3 text-center max-w-[280px]">
         <LoadingSpinner size="lg" />
-        <p className="text-slate-400 text-sm">Loading...</p>
+        <p className="text-slate-300 text-sm font-medium">{message}</p>
+        {hint ? (
+          <p className="text-slate-500 text-xs leading-relaxed">{hint}</p>
+        ) : null}
       </div>
     </div>
   );

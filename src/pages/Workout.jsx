@@ -1,6 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { isPersonal } from '@/lib/roles';
+import { PERSONAL_PROGRAM_BUILDER } from '@/lib/personalBuilderNav';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
@@ -9,10 +11,16 @@ import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 
+/**
+ * Legacy workout list page.
+ * Canonical execution flow is: /today -> /workout-player.
+ * Keep this page only as a compatibility surface while old links are retired.
+ */
 export default function Workout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
+  const personalBuilder = isPersonal(effectiveRole);
 
   const { data: savedWorkouts = [], isLoading } = useQuery({
     queryKey: ['saved-workouts', user?.id],
@@ -71,7 +79,7 @@ export default function Workout() {
       {/* Create Workout CTA - Prominent */}
       <div className="px-4 md:px-6 mb-8">
         <button
-          onClick={() => navigate(createPageUrl('CreateWorkout'))}
+          onClick={() => navigate(personalBuilder ? PERSONAL_PROGRAM_BUILDER : createPageUrl('CreateWorkout'))}
           className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 rounded-2xl p-6 text-left transition-all transform hover:scale-105"
         >
           <div className="flex items-center justify-between">
@@ -80,8 +88,12 @@ export default function Workout() {
                 <Plus className="w-6 h-6 text-white" />
               </div>
               <div>
-                <p className="text-white font-semibold text-lg">Create New Workout</p>
-                <p className="text-blue-200 text-sm">Build a custom workout routine</p>
+                <p className="text-white font-semibold text-lg">
+                  {personalBuilder ? 'Build your program' : 'Create New Workout'}
+                </p>
+                <p className="text-blue-200 text-sm">
+                  {personalBuilder ? 'Blocks, weeks, and days — same as My Program' : 'Build a custom workout routine'}
+                </p>
               </div>
             </div>
             <div className="text-white">
@@ -104,10 +116,10 @@ export default function Workout() {
             description="Create your first workout to get started"
             action={
               <button
-                onClick={() => navigate(createPageUrl('CreateWorkout'))}
+                onClick={() => navigate(personalBuilder ? PERSONAL_PROGRAM_BUILDER : createPageUrl('CreateWorkout'))}
                 className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors"
               >
-                Create Workout
+                {personalBuilder ? 'Open Program Builder' : 'Create Workout'}
               </button>
             }
           />

@@ -12,6 +12,7 @@ import { getClientCompProfile, listMedia } from '@/lib/repos/compPrepRepo';
 import { getStoredRetention } from '@/lib/retention/retentionRepo';
 import { getActionLogForClient } from './actionLogRepo';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
+import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
 function ev(
   id: string,
@@ -34,7 +35,14 @@ function ev(
   };
 }
 
-export async function getClientTimeline(clientId: string, _now: Date = new Date()): Promise<TimelineEvent[]> {
+export type ClientTimelineOptions = { weightUnit?: string };
+
+export async function getClientTimeline(
+  clientId: string,
+  _now: Date = new Date(),
+  options: ClientTimelineOptions = {}
+): Promise<TimelineEvent[]> {
+  const wu = normalizeWeightUnit(options.weightUnit ?? 'kg');
   const client = getClientById(clientId);
   const events: TimelineEvent[] = [];
 
@@ -82,7 +90,7 @@ export async function getClientTimeline(clientId: string, _now: Date = new Date(
     if (submittedAt) {
       events.push(
         ev(`checkin-sub-${c.id}`, clientId, 'CHECKIN_SUBMITTED', submittedAt, 'Check-in submitted', {
-          subtitle: c.weight_kg != null ? `${c.weight_kg} kg` : undefined,
+          subtitle: c.weight_kg != null ? formatWeightForViewer(Number(c.weight_kg), wu) : undefined,
           meta: { checkinId: c.id },
           route: `/clients/${clientId}/checkins/${c.id}`,
           badge: 'Review',

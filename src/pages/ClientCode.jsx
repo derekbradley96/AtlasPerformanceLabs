@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { clearPendingClientInviteStorage } from '@/lib/onboardingStatus';
 
 import { colors } from '@/ui/tokens';
 const BG = colors.bg;
@@ -45,12 +47,7 @@ export function getPendingInvite() {
 }
 
 export function clearPendingInvite() {
-  try {
-    if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.removeItem(PENDING_INVITE_KEY);
-      sessionStorage.removeItem(PENDING_TRAINER_KEY);
-    }
-  } catch (e) {}
+  clearPendingClientInviteStorage();
 }
 
 async function lightHaptic() {
@@ -68,6 +65,16 @@ export default function ClientCode() {
 
   const handleBack = async () => {
     await lightHaptic();
+    if (hasSupabase) {
+      const supabase = getSupabase();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          navigate('/home', { replace: true });
+          return;
+        }
+      } catch (_) {}
+    }
     navigate('/auth', { replace: true });
   };
 
@@ -101,7 +108,7 @@ export default function ClientCode() {
       }
       setPendingInvite(normalized, trainerId);
       toast.success('Code accepted. Complete your details to continue.');
-      navigate('/auth?mode=signup&account=client', { replace: true });
+      navigate('/client-onboarding-flow', { replace: true });
     } catch (err) {
       setLoading(false);
       setError('Could not validate code');

@@ -65,11 +65,11 @@ This checklist covers **public / marketing** surfaces only (not the in-app shell
 
 - [ ] Navbar:
   - [ ] Uses Atlas logo + “Performance Labs” wordmark.
-  - [ ] Links to Home, For Coaches, For Athletes, Pricing, Marketplace, Login.
+  - [ ] Links to Home, Coaches, Personal user, Pricing, Marketplace, Login.
   - [ ] Hover states are consistent and subtle (no app-style active tab states).
 - [ ] Footer:
   - [ ] Shows copyright.
-  - [ ] Links to key marketing pages (For Coaches, For Athletes, Pricing, Marketplace, Login).
+  - [ ] Links to key marketing pages (Coaches, Personal user, Pricing, Marketplace, Login).
   - [ ] Uses muted colors (no primary button styles).
 
 ---

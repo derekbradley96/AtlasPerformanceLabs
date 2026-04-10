@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
 import NotAuthorized from '@/components/NotAuthorized';
+import { atlasMigrationDataAttributes, deriveTrainerCheckInsHubRouteState } from '@/lib/atlasMigrationPhases';
 
 export default function CheckIns() {
   const navigate = useNavigate();
@@ -31,14 +32,6 @@ export default function CheckIns() {
     queryFn: () => listClients(coachId),
     enabled: !!coachId && !isDemoMode
   });
-
-  if (displayUser && displayUser.user_type !== 'coach' && displayUser?.user_type !== 'trainer') {
-    return <NotAuthorized />;
-  }
-
-  if (!isDemoMode && isLoading) {
-    return <PageLoader />;
-  }
 
   // Sort check-ins: overdue first, then submitted (newest first), then pending
   const sortedCheckins = [...checkins].sort((a, b) => {
@@ -65,8 +58,39 @@ export default function CheckIns() {
     return dueDate && dueDate < new Date() && c?.status === 'pending';
   }).length;
 
+  const checkinsHubMigrationAttrs = useMemo(() => {
+    if (displayUser && displayUser.user_type !== 'coach' && displayUser?.user_type !== 'trainer') {
+      const s = deriveTrainerCheckInsHubRouteState({ surface: 'unauthorized' });
+      return atlasMigrationDataAttributes(s.phase, s.primary);
+    }
+    let surface = 'list';
+    if (!isDemoMode && isLoading) surface = 'loading';
+    else if (sortedCheckins.length === 0) surface = 'empty';
+    const s = deriveTrainerCheckInsHubRouteState({ surface });
+    return atlasMigrationDataAttributes(s.phase, s.primary);
+  }, [displayUser, isDemoMode, isLoading, sortedCheckins.length]);
+
+  if (displayUser && displayUser.user_type !== 'coach' && displayUser?.user_type !== 'trainer') {
+    return (
+      <div className="min-h-screen" {...checkinsHubMigrationAttrs}>
+        <NotAuthorized />
+      </div>
+    );
+  }
+
+  if (!isDemoMode && isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" {...checkinsHubMigrationAttrs}>
+        <PageLoader />
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24">
+    <div
+      className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24"
+      {...checkinsHubMigrationAttrs}
+    >
       <div className="p-4 md:p-6 border-b border-slate-800">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>

@@ -232,7 +232,7 @@ export default function ProgramBlockBuilder() {
   }
 
   return (
-    <div className="min-w-0 max-w-full app-screen" style={{ background: colors.bg, color: colors.text, padding: spacing[16], paddingBottom: 80 }}>
+    <div className="min-w-0 max-w-full app-screen" style={{ background: colors.bg, color: colors.text, padding: spacing[16] }}>
       <div className="flex items-center gap-2 mb-4">
         <button
           type="button"
@@ -388,7 +388,7 @@ export default function ProgramBlockBuilder() {
                 <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>From week</label>
                 <select
                   value={dupWeekFrom}
-                  onChange={(e) => setDupWeekFrom(Number(e.target.value))}
+                  onChange={(e) => setDupWeekFrom(parseInt(e.target.value, 10))}
                   className="w-full rounded-xl py-2 px-3"
                   style={{ background: colors.surface1, border: `1px solid ${colors.border}`, color: colors.text }}
                 >
@@ -401,7 +401,7 @@ export default function ProgramBlockBuilder() {
                 <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>To week</label>
                 <select
                   value={dupWeekTo}
-                  onChange={(e) => setDupWeekTo(Number(e.target.value))}
+                  onChange={(e) => setDupWeekTo(parseInt(e.target.value, 10))}
                   className="w-full rounded-xl py-2 px-3"
                   style={{ background: colors.surface1, border: `1px solid ${colors.border}`, color: colors.text }}
                 >
@@ -431,7 +431,7 @@ export default function ProgramBlockBuilder() {
                 <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>From day</label>
                 <select
                   value={dupDaySource}
-                  onChange={(e) => setDupDaySource(Number(e.target.value))}
+                  onChange={(e) => setDupDaySource(parseInt(e.target.value, 10))}
                   className="w-full rounded-xl py-2 px-3"
                   style={{ background: colors.surface1, border: `1px solid ${colors.border}`, color: colors.text }}
                 >
@@ -444,7 +444,7 @@ export default function ProgramBlockBuilder() {
                 <label className="block text-xs font-medium mb-1" style={{ color: colors.muted }}>To day</label>
                 <select
                   value={dupDayTarget}
-                  onChange={(e) => setDupDayTarget(Number(e.target.value))}
+                  onChange={(e) => setDupDayTarget(parseInt(e.target.value, 10))}
                   className="w-full rounded-xl py-2 px-3"
                   style={{ background: colors.surface1, border: `1px solid ${colors.border}`, color: colors.text }}
                 >
@@ -484,7 +484,7 @@ function ExerciseEditorModal({ dayId, initial, onSave, onClose }) {
     percentage: initial?.percentage ?? null,
     scheme: initial?.scheme ?? null,
     notes: initial?.notes ?? null,
-    sort_order: initial?.sort_order ?? 0,
+    sort_order: initial?.sort_order != null ? String(initial.sort_order) : '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -589,8 +589,8 @@ function ExerciseEditorModal({ dayId, initial, onSave, onClose }) {
           <input
             type="number"
             min={0}
-            value={form.sort_order}
-            onChange={(e) => setForm((p) => ({ ...p, sort_order: Number(e.target.value) || 0 }))}
+            value={form.sort_order ?? ''}
+            onChange={(e) => setForm((p) => ({ ...p, sort_order: e.target.value }))}
             className="w-full rounded-xl py-2.5 px-3 mb-4"
             style={{ background: colors.surface1, border: `1px solid ${colors.border}`, color: colors.text }}
           />

@@ -106,6 +106,7 @@ export async function getCoach(userId) {
   if (error) return { error };
   return {
     coach: data?.coach ?? null,
+    billing_state: data?.billing_state ?? null,
     connected: !!data?.connected,
     charges_enabled: !!data?.charges_enabled,
     payouts_enabled: !!data?.payouts_enabled,
@@ -159,6 +160,24 @@ export async function stripeCheckoutSession(payload) {
     session_id: data?.session_id ?? null,
     lead_id: data?.lead_id ?? null,
   };
+}
+
+/**
+ * Logged-in client: coach offer summary (coach name + atlas_services package).
+ * @returns {Promise<{ data?: object, error?: string }>}
+ */
+export async function fetchClientCoachOfferContext() {
+  return invokeSupabaseFunction('client-coach-offer-context', {});
+}
+
+/**
+ * Logged-in client with clients.billing_status pending_payment: Stripe Checkout URL for coach package.
+ * @returns {Promise<{ url?: string|null, session_id?: string, error?: string }>}
+ */
+export async function clientCoachOfferCheckoutSession() {
+  const { data, error } = await invokeSupabaseFunction('client-coach-checkout-session', {});
+  if (error) return { error };
+  return { url: data?.url ?? null, session_id: data?.session_id ?? null };
 }
 
 /**
