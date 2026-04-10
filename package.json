@@ -166,6 +166,7 @@
     "minimatch": "^9.0.7",
     "tar": "^7.0.0",
     "file-type": "^21.3.2",
-    "quill": "^2.0.3"
+    "quill": "^2.0.3",
+    "@xmldom/xmldom": "^0.8.12"
   }
 }
