@@ -16,8 +16,13 @@ Deno.serve(async (req) => {
     const { data: coach, error } = await supabase.from(TABLE.coaches).select("id, user_id, stripe_account_id, charges_enabled, payouts_enabled, plan_tier, timezone, stripe_customer_id, subscription_status, current_period_end").eq("user_id", callerId).single();
 
     if (error && error.code !== "PGRST116") return jsonError("Request failed", 500);
+    const { data: billingState } = await supabase
+      .from("coach_billing_state")
+      .select("plan_tier,subscription_status,current_period_end,monthly_revenue_estimate,monthly_fees_estimate,recommended_plan,last_upgrade_prompt_at,upgrade_prompt_cooldown_until")
+      .eq("coach_id", callerId)
+      .maybeSingle();
     const connected = !!(coach?.stripe_account_id);
-    return new Response(JSON.stringify({ coach: coach ?? null, connected, charges_enabled: coach?.charges_enabled ?? false, payouts_enabled: coach?.payouts_enabled ?? false }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ coach: coach ?? null, billing_state: billingState ?? null, connected, charges_enabled: coach?.charges_enabled ?? false, payouts_enabled: coach?.payouts_enabled ?? false }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("get-coach", e);
     return jsonError("Request failed", 500);

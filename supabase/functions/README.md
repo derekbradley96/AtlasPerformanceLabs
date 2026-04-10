@@ -53,6 +53,8 @@ Required for Stripe-related functions:
 - **trainer-profile-get**, **trainer-profile-list**, **trainer-marketplace-list** – Coach profiles (profiles + marketplace_coach_profiles).
 - **client-list-by-trainer** – Clients for coach. Body: `{ trainer_id }`.
 - **checkin-list**, **checkin-get**, **checkin-update** – Check-ins for client / get by id / update.
+  - **checkin-update** (client submit / coach review): body may include `id`, `status`, `submitted_at`, `weight_kg`→`weight`, `energy_level`, **`mood_level`**, **`sleep_quality`** (mapped to `sleep_score` if `sleep_score` omitted), `notes`→`condition_notes`, **`answers`** (non-empty JSON array → stored as `questions` text), `photos`, plus other allowed columns (see `supabase/functions/checkin-update/index.ts`).
+  - **checkin-get** / **checkin-list**: response includes `sleep_quality` (alias of `sleep_score`), **`answers`** when `questions` holds template Q&A JSON, and **`notes`** (`condition_notes`, or legacy free-text `questions` when not template JSON—template JSON is not duplicated into `notes`).
 - **conversation-get**, **conversation-update**, **message-list**, **message-create**, **message-update** – Messaging (message_threads, message_messages).
 - **program-get** – Program by id (program_blocks).
 

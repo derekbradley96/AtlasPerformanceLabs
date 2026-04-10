@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
     const allowed = [
       "status", "submitted_at", "reviewed_at", "reviewed_by",
       "weight", "weight_kg", "steps_avg", "steps", "sleep_score", "sleep_hours",
-      "energy_level", "training_completion", "nutrition_adherence", "adherence_pct",
+      "energy_level", "mood_level", "training_completion", "nutrition_adherence", "adherence_pct",
       "wins", "struggles", "questions", "condition_notes", "notes", "photos",
     ];
     const payload: Record<string, unknown> = {};
@@ -49,6 +49,23 @@ Deno.serve(async (req) => {
     if (payload.weight_kg !== undefined && payload.weight === undefined) payload.weight = payload.weight_kg;
     if (payload.steps !== undefined && payload.steps_avg === undefined) payload.steps_avg = payload.steps;
     if (payload.notes !== undefined && payload.condition_notes === undefined) payload.condition_notes = payload.notes;
+    // Client template check-in (ClientCheckIn.jsx): sleep_quality 1–10 → sleep_score; template Q&A → questions JSON text
+    if (body.sleep_quality !== undefined && payload.sleep_score === undefined) {
+      const sq = Number(body.sleep_quality);
+      if (Number.isFinite(sq)) payload.sleep_score = Math.round(sq);
+    }
+    if (body.answers !== undefined) {
+      try {
+        const raw = body.answers;
+        if (Array.isArray(raw) && raw.length === 0) {
+          /* no template Q&A — do not overwrite questions */
+        } else {
+          payload.questions = typeof raw === "string" ? raw : JSON.stringify(raw);
+        }
+      } catch {
+        /* ignore invalid answers payload */
+      }
+    }
     delete payload.weight_kg;
     delete payload.steps;
     delete payload.notes;

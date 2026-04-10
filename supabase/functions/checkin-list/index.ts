@@ -4,6 +4,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, assertCoachOwnsClient, jsonError } from "../_shared/auth.ts";
+import { parseCheckinTemplateAnswers } from "../_shared/checkinTemplateAnswers.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -33,6 +34,7 @@ Deno.serve(async (req) => {
         steps_avg,
         sleep_score,
         energy_level,
+        mood_level,
         training_completion,
         nutrition_adherence,
         wins,
@@ -61,14 +63,22 @@ Deno.serve(async (req) => {
       const submitted = r.submitted_at != null;
       const rowStatus = String(r.status ?? (submitted ? "submitted" : "pending"));
       if (status != null && status !== "" && rowStatus !== status) return null;
+      const qRaw = r.questions;
+      const templateAnswers = parseCheckinTemplateAnswers(qRaw);
+      const notesLegacyQuestions =
+        typeof qRaw === "string" && templateAnswers.length === 0 && String(qRaw).trim() !== ""
+          ? String(qRaw)
+          : null;
       return {
         ...r,
+        sleep_quality: r.sleep_score,
+        answers: templateAnswers.length > 0 ? templateAnswers : undefined,
         trainer_id: coachId,
         status: rowStatus,
         created_date: r.submitted_at ?? r.created_at ?? r.week_start,
         checkin_date: r.week_start ?? r.submitted_at ?? r.created_at,
         due_date: r.week_start,
-        notes: r.condition_notes ?? r.questions ?? null,
+        notes: (r.condition_notes as string | null | undefined) ?? notesLegacyQuestions ?? null,
         weight_kg: r.weight,
         steps: r.steps_avg,
         adherence_pct: r.nutrition_adherence ?? r.training_completion ?? null,

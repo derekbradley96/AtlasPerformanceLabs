@@ -5,12 +5,19 @@ import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { corsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { isWebhookReplaySafe, safeLogWebhook } from "../_shared/stripe.ts";
+import {
+  ATLAS_PLAN_COMMISSION,
+  computeEffectiveMonthlyCosts,
+  computeMonthlyVolumeEstimate,
+  computeRecommendedPlan,
+  toAtlasPlanTier,
+} from "../_shared/billing.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
 
 /** Atlas commission by tier (default when no row in coach_subscription_tiers is basic 10%). Server-side only. */
-const TIER_COMMISSION = { basic: 0.1, pro: 0.03, elite: 0 } as const;
+const TIER_COMMISSION = ATLAS_PLAN_COMMISSION;
 
 function calculatePlatformFee(amountPaidCents: number, commissionRate: number): { platformFeeCents: number; coachAmountCents: number } {
   const rate = Number(commissionRate);
@@ -22,6 +29,88 @@ function calculatePlatformFee(amountPaidCents: number, commissionRate: number): 
 
 function jsonResp(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+async function resolveCoachProfileId(
+  supabase: ReturnType<typeof createClient>,
+  {
+    coachId,
+    stripeCustomerId,
+    stripeSubscriptionId,
+  }: { coachId?: string | null; stripeCustomerId?: string | null; stripeSubscriptionId?: string | null },
+): Promise<string | null> {
+  if (coachId) {
+    const { data } = await supabase.from(TABLE.coaches).select("user_id").eq("id", coachId).single();
+    if (data?.user_id) return data.user_id as string;
+  }
+  if (stripeCustomerId) {
+    const { data } = await supabase.from(TABLE.coaches).select("user_id").eq("stripe_customer_id", stripeCustomerId).single();
+    if (data?.user_id) return data.user_id as string;
+  }
+  if (stripeSubscriptionId) {
+    const { data: payment } = await supabase
+      .from(TABLE.payments)
+      .select("coach_id")
+      .eq("stripe_subscription_id", stripeSubscriptionId)
+      .single();
+    if (payment?.coach_id) {
+      const { data: coach } = await supabase.from(TABLE.coaches).select("user_id").eq("id", payment.coach_id).single();
+      if (coach?.user_id) return coach.user_id as string;
+    }
+  }
+  return null;
+}
+
+async function computeMonthlyRevenueEstimate(
+  supabase: ReturnType<typeof createClient>,
+  profileId: string,
+): Promise<number> {
+  const { data: summary } = await supabase
+    .from("v_coach_revenue_summary")
+    .select("revenue_last_30d")
+    .eq("coach_id", profileId)
+    .maybeSingle();
+  return computeMonthlyVolumeEstimate(summary?.revenue_last_30d);
+}
+
+async function syncCoachBillingState(
+  supabase: ReturnType<typeof createClient>,
+  {
+    coachProfileId,
+    planTier,
+    subscriptionStatus,
+    stripeCustomerId,
+    stripeSubscriptionId,
+    currentPeriodEnd,
+    now,
+  }: {
+    coachProfileId: string;
+    planTier?: string | null;
+    subscriptionStatus?: string | null;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+    currentPeriodEnd?: string | null;
+    now: string;
+  },
+) {
+  const monthlyRevenueEstimate = await computeMonthlyRevenueEstimate(supabase, coachProfileId);
+  const effectivePlan = toAtlasPlanTier(planTier);
+  const costs = computeEffectiveMonthlyCosts(monthlyRevenueEstimate);
+  const monthlyFeesEstimate = costs[effectivePlan];
+  const recommendation = computeRecommendedPlan(monthlyRevenueEstimate);
+
+  await supabase.from("coach_billing_state").upsert({
+    coach_id: coachProfileId,
+    stripe_customer_id: stripeCustomerId ?? null,
+    stripe_subscription_id: stripeSubscriptionId ?? null,
+    plan_tier: effectivePlan,
+    subscription_status: String(subscriptionStatus || "inactive"),
+    current_period_end: currentPeriodEnd ?? null,
+    monthly_revenue_estimate: monthlyRevenueEstimate,
+    monthly_fees_estimate: monthlyFeesEstimate,
+    recommended_plan: recommendation,
+    updated_at: now,
+  }, { onConflict: "coach_id" });
 }
 
 Deno.serve(async (req) => {
@@ -62,6 +151,18 @@ Deno.serve(async (req) => {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
+        const clientOffer = session.metadata?.client_offer === "1";
+        const publicClientsRowId = session.metadata?.clients_row_id ?? null;
+        if (clientOffer && publicClientsRowId) {
+          await supabase.from("clients").update({ billing_status: "active" }).eq("id", publicClientsRowId);
+          const clientUserId = session.metadata?.client_user_id ?? null;
+          if (clientUserId && typeof clientUserId === "string") {
+            await supabase.from("profiles").update({ onboarding_complete: true }).eq("id", clientUserId);
+          }
+          safeLogWebhook("checkout.session.completed", { objectId: session.id });
+          break;
+        }
+
         const coachId = session.metadata?.coach_id ?? null;
         const leadId = session.metadata?.lead_id ?? session.client_reference_id ?? null;
         const planTier = session.metadata?.plan_tier ?? null;
@@ -85,6 +186,22 @@ Deno.serve(async (req) => {
             current_period_end: currentPeriodEnd,
             updated_at: now,
           }).eq("id", coachId);
+          const profileId = await resolveCoachProfileId(supabase, {
+            coachId,
+            stripeCustomerId: (session.customer as string) ?? null,
+            stripeSubscriptionId: subId || null,
+          });
+          if (profileId) {
+            await syncCoachBillingState(supabase, {
+              coachProfileId: profileId,
+              planTier,
+              subscriptionStatus: "active",
+              stripeCustomerId: (session.customer as string) ?? null,
+              stripeSubscriptionId: subId || null,
+              currentPeriodEnd,
+              now,
+            });
+          }
           safeLogWebhook("checkout.session.completed", { objectId: session.id });
           break;
         }
@@ -134,7 +251,8 @@ Deno.serve(async (req) => {
         safeLogWebhook("checkout.session.completed", { objectId: session.id });
         break;
       }
-      case "invoice.paid": {
+      case "invoice.paid":
+      case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
         const subId = invoice.subscription as string;
         if (!subId) break;
@@ -168,10 +286,29 @@ Deno.serve(async (req) => {
           current_period_end: invoice.period_end ? new Date(invoice.period_end * 1000).toISOString() : null,
           updated_at: now,
         }).eq("stripe_subscription_id", subId);
+        const profileId = await resolveCoachProfileId(supabase, {
+          coachId: pay?.coach_id ?? null,
+          stripeCustomerId: (invoice.customer as string) ?? null,
+          stripeSubscriptionId: subId,
+        });
+        if (profileId) {
+          let planTier: string | null = null;
+          const { data: coachRow } = await supabase.from(TABLE.coaches).select("plan_tier").eq("user_id", profileId).single();
+          planTier = coachRow?.plan_tier ?? null;
+          await syncCoachBillingState(supabase, {
+            coachProfileId: profileId,
+            planTier,
+            subscriptionStatus: "active",
+            stripeCustomerId: (invoice.customer as string) ?? null,
+            stripeSubscriptionId: subId,
+            currentPeriodEnd: invoice.period_end ? new Date(invoice.period_end * 1000).toISOString() : null,
+            now,
+          });
+        }
         if (pay?.client_id) {
           await supabase.from(TABLE.review_items).update({ status: "done", updated_at: now }).eq("coach_id", pay.coach_id).eq("client_id", pay.client_id).eq("type", "payment_overdue");
         }
-        safeLogWebhook("invoice.paid", { objectId: invoice.id });
+        safeLogWebhook(event.type, { objectId: invoice.id });
         break;
       }
       case "invoice.payment_failed": {
@@ -184,6 +321,23 @@ Deno.serve(async (req) => {
           updated_at: now,
         }).eq("stripe_subscription_id", subId);
         const { data: pay } = await supabase.from(TABLE.payments).select("coach_id, client_id").eq("stripe_subscription_id", subId).single();
+        const profileId = await resolveCoachProfileId(supabase, {
+          coachId: pay?.coach_id ?? null,
+          stripeCustomerId: (invoice.customer as string) ?? null,
+          stripeSubscriptionId: subId,
+        });
+        if (profileId) {
+          const { data: coachRow } = await supabase.from(TABLE.coaches).select("plan_tier").eq("user_id", profileId).single();
+          await syncCoachBillingState(supabase, {
+            coachProfileId: profileId,
+            planTier: coachRow?.plan_tier ?? null,
+            subscriptionStatus: "past_due",
+            stripeCustomerId: (invoice.customer as string) ?? null,
+            stripeSubscriptionId: subId,
+            currentPeriodEnd: invoice.period_end ? new Date(invoice.period_end * 1000).toISOString() : null,
+            now,
+          });
+        }
         if (pay?.client_id) {
           const dedupeKey = `payment_overdue:${pay.coach_id}:${pay.client_id}`;
           await supabase.from(TABLE.review_items).upsert({
@@ -215,9 +369,10 @@ Deno.serve(async (req) => {
         break;
       }
       case "customer.subscription.updated":
+      case "customer.subscription.created":
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
-        const status = sub.status === "active" || sub.status === "trialing" ? "active" : sub.status === "past_due" ? "past_due" : "canceled";
+        const status = sub.status === "active" ? "active" : sub.status === "past_due" ? "past_due" : "canceled";
         const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
         const planTier = sub.metadata?.plan_tier ?? null;
         const coachIdSub = sub.metadata?.coach_id ?? null;
@@ -228,6 +383,22 @@ Deno.serve(async (req) => {
             current_period_end: periodEnd,
             updated_at: now,
           }).eq("id", coachIdSub);
+        }
+        const profileId = await resolveCoachProfileId(supabase, {
+          coachId: coachIdSub,
+          stripeCustomerId: (sub.customer as string) ?? null,
+          stripeSubscriptionId: sub.id,
+        });
+        if (profileId) {
+          await syncCoachBillingState(supabase, {
+            coachProfileId: profileId,
+            planTier,
+            subscriptionStatus: status,
+            stripeCustomerId: (sub.customer as string) ?? null,
+            stripeSubscriptionId: sub.id,
+            currentPeriodEnd: periodEnd,
+            now,
+          });
         }
         await supabase.from(TABLE.payments).update({
           status,

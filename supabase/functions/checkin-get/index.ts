@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
+import { parseCheckinTemplateAnswers } from "../_shared/checkinTemplateAnswers.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -25,7 +26,7 @@ Deno.serve(async (req) => {
       .from("checkins")
       .select(`
         id, client_id, week_start, submitted_at, focus_type, weight, steps_avg, sleep_score,
-        energy_level, training_completion, nutrition_adherence, wins, struggles, questions, photos,
+        energy_level, mood_level, training_completion, nutrition_adherence, wins, struggles, questions, photos,
         reviewed_at, reviewed_by, condition_notes, created_at
       `)
       .eq("id", id)
@@ -49,14 +50,23 @@ Deno.serve(async (req) => {
     }
     const trainerIdOut = coachId ?? trainerId ?? null;
     const submitted = (row as Record<string, unknown>).submitted_at != null;
+    const qRaw = (row as Record<string, unknown>).questions;
+    const templateAnswers = parseCheckinTemplateAnswers(qRaw);
+    const conditionNotes = (row as Record<string, unknown>).condition_notes;
+    const notesLegacyQuestions =
+      typeof qRaw === "string" && templateAnswers.length === 0 && String(qRaw).trim() !== ""
+        ? String(qRaw)
+        : null;
     const out = {
       ...row,
+      sleep_quality: (row as Record<string, unknown>).sleep_score,
+      answers: templateAnswers.length > 0 ? templateAnswers : undefined,
       trainer_id: trainerIdOut,
       status: submitted ? "submitted" : "pending",
       created_date: (row as Record<string, unknown>).submitted_at ?? (row as Record<string, unknown>).created_at ?? (row as Record<string, unknown>).week_start,
       checkin_date: (row as Record<string, unknown>).week_start,
       due_date: (row as Record<string, unknown>).week_start,
-      notes: (row as Record<string, unknown>).condition_notes ?? (row as Record<string, unknown>).questions,
+      notes: (conditionNotes as string | null | undefined) ?? notesLegacyQuestions ?? undefined,
       weight_kg: (row as Record<string, unknown>).weight,
       steps: (row as Record<string, unknown>).steps_avg,
       adherence_pct: (row as Record<string, unknown>).nutrition_adherence ?? (row as Record<string, unknown>).training_completion,

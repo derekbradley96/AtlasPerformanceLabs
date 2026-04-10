@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
     // Resolve coach by referral_code (profiles) or by coach_referral_codes.code
     const { data: profileRows, error: profileError } = await supabase
       .from("profiles")
-      .select("id, display_name, full_name, coach_focus, referral_code")
+      .select("id, display_name, full_name, coach_focus, referral_code, avatar_url")
       .ilike("referral_code", normalized)
       .limit(1);
 
@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
       const coachId = (refRow as { coach_id: string }).coach_id;
       const { data: pRows } = await supabase
         .from("profiles")
-        .select("id, display_name, full_name, coach_focus, referral_code")
+        .select("id, display_name, full_name, coach_focus, referral_code, avatar_url")
         .eq("id", coachId)
         .limit(1);
       const p = Array.isArray(pRows) && pRows.length > 0 ? pRows[0] : null;
@@ -73,10 +73,30 @@ Deno.serve(async (req) => {
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      return await buildResponse(supabase, p as { id: string; display_name?: string; full_name?: string; coach_focus?: string; referral_code?: string });
+      return await buildResponse(
+        supabase,
+        p as {
+          id: string;
+          display_name?: string;
+          full_name?: string;
+          coach_focus?: string;
+          referral_code?: string;
+          avatar_url?: string | null;
+        },
+      );
     }
 
-    return await buildResponse(supabase, profile as { id: string; display_name?: string; full_name?: string; coach_focus?: string; referral_code?: string });
+    return await buildResponse(
+      supabase,
+      profile as {
+        id: string;
+        display_name?: string;
+        full_name?: string;
+        coach_focus?: string;
+        referral_code?: string;
+        avatar_url?: string | null;
+      },
+    );
   } catch (err) {
     console.error("public-coach-profile:", err);
     return new Response(
@@ -88,7 +108,14 @@ Deno.serve(async (req) => {
 
 async function buildResponse(
   supabase: ReturnType<typeof createClient>,
-  profile: { id: string; display_name?: string; full_name?: string; coach_focus?: string; referral_code?: string }
+  profile: {
+    id: string;
+    display_name?: string;
+    full_name?: string;
+    coach_focus?: string;
+    referral_code?: string;
+    avatar_url?: string | null;
+  },
 ) {
   const coachId = profile.id;
 
@@ -134,6 +161,21 @@ async function buildResponse(
     metrics: [] as { metric_key: string; metric_label: string; metric_value: string; sort_order: number }[],
   }));
 
+  const { data: offerRow } = await supabase
+    .from("coach_offers")
+    .select("name, price_monthly, currency, includes_training, includes_nutrition, includes_checkins, includes_messaging")
+    .eq("coach_id", coachId)
+    .maybeSingle();
+
+  let clientsCoachedCount: number | null = null;
+  const { count: clientCount, error: clientCountError } = await supabase
+    .from("clients")
+    .select("id", { count: "exact", head: true })
+    .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`);
+  if (!clientCountError && typeof clientCount === "number") {
+    clientsCoachedCount = clientCount;
+  }
+
   const storyIds = stories.map((s) => s.id);
   if (storyIds.length > 0) {
     const { data: metricRows } = await supabase
@@ -155,6 +197,18 @@ async function buildResponse(
     }
   }
 
+  const offer = offerRow && typeof offerRow === "object"
+    ? {
+      name: String((offerRow as { name?: string }).name ?? "Online coaching"),
+      price_monthly: Math.max(1, Math.floor(Number((offerRow as { price_monthly?: number }).price_monthly) || 100)),
+      currency: String((offerRow as { currency?: string }).currency ?? "GBP"),
+      includes_training: (offerRow as { includes_training?: boolean }).includes_training !== false,
+      includes_nutrition: (offerRow as { includes_nutrition?: boolean }).includes_nutrition !== false,
+      includes_checkins: (offerRow as { includes_checkins?: boolean }).includes_checkins !== false,
+      includes_messaging: (offerRow as { includes_messaging?: boolean }).includes_messaging !== false,
+    }
+    : null;
+
   const coach = {
     id: coachId,
     name: coachName,
@@ -163,6 +217,7 @@ async function buildResponse(
     coach_focus: coachFocus,
     slug: (profile as { referral_code?: string }).referral_code ?? null,
     specialties: specialties.length > 0 ? specialties : coachingFocusArr,
+    avatar_url: (profile as { avatar_url?: string | null }).avatar_url ?? null,
   };
 
   const referralCode = (profile as { referral_code?: string }).referral_code ?? null;
@@ -176,7 +231,7 @@ async function buildResponse(
   }
 
   return new Response(
-    JSON.stringify({ coach, stories }),
+    JSON.stringify({ coach, stories, offer, clients_coached_count: clientsCoachedCount }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
 }

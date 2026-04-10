@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
 
     const { data: row, error } = await supabase
       .from("clients")
-      .select("id, user_id, coach_id, trainer_id, name, full_name, phase, phase_started_at, baseline_weight, gym_name, created_at, monthly_fee, next_due_date, billing_status, lifecycle_stage, membership_type")
+      .select("id, user_id, coach_id, trainer_id, name, full_name, phase, phase_started_at, baseline_weight, gym_name, created_at, monthly_fee, next_due_date, billing_status, lifecycle_stage, membership_type, training_days_per_week, injuries")
       .eq("id", id)
       .maybeSingle();
 

@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
+import { validateSelectedServiceForCoach } from "../_shared/clientSelectedService.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -48,19 +49,34 @@ Deno.serve(async (req) => {
     if (body.next_due_date !== undefined) updates.next_due_date = body.next_due_date;
     if (body.lifecycle_stage !== undefined) updates.lifecycle_stage = body.lifecycle_stage;
     if (body.membership_type !== undefined) updates.membership_type = body.membership_type;
+    if (body.training_days_per_week !== undefined) updates.training_days_per_week = body.training_days_per_week;
+    if (body.injuries !== undefined) updates.injuries = body.injuries;
 
     if (Object.keys(updates).length === 0) {
-      const { data: existing } = await supabase.from("clients").select("id, user_id, coach_id, trainer_id, name, full_name, billing_status").eq("id", id).single();
+      const { data: existing } = await supabase.from("clients").select("id, user_id, coach_id, trainer_id, name, full_name, billing_status, training_days_per_week, injuries").eq("id", id).single();
       return new Response(JSON.stringify(existing ?? null), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { data, error } = await supabase.from("clients").update(updates).eq("id", id).select("id, user_id, coach_id, trainer_id, name, full_name, billing_status").single();
+    const { data, error } = await supabase.from("clients").update(updates).eq("id", id).select("id, user_id, coach_id, trainer_id, name, full_name, billing_status, selected_service_id, training_days_per_week, injuries").single();
 
     if (error) {
       console.error("client-profile-update", error);
       return jsonError("Request failed", 500);
     }
     const out = data ? { ...data, subscription_status: (data as Record<string, unknown>).billing_status ?? "active" } : null;
+
+    // Linking a coach from a Personal account: promote to client and stamp transition (same user id).
+    if (updates.coach_id != null && typeof e.user_id === "string") {
+      const { data: prevProfile } = await supabase.from("profiles").select("role").eq("id", e.user_id).maybeSingle();
+      const prevRole = (prevProfile as { role?: string } | null)?.role;
+      if (prevRole === "personal") {
+        await supabase.from("profiles").update({
+          role: "client",
+          linked_from_personal_at: new Date().toISOString(),
+        }).eq("id", e.user_id);
+      }
+    }
+
     return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("client-profile-update", e);

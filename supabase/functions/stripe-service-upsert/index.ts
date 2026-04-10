@@ -34,8 +34,18 @@ Deno.serve(async (req) => {
     if (!ALLOWED_INTERVALS.includes(intv)) return jsonError("interval not allowed", 400);
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { data: coach } = await supabase.from(TABLE.coaches).select("id").eq("user_id", callerId).single();
-    if (!coach) return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    let { data: coach } = await supabase.from(TABLE.coaches).select("id").eq("user_id", callerId).single();
+    if (!coach) {
+      const { data: insertedCoach, error: insertCoachErr } = await supabase
+        .from(TABLE.coaches)
+        .insert({ user_id: callerId })
+        .select("id")
+        .single();
+      if (insertCoachErr || !insertedCoach) {
+        return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      coach = insertedCoach;
+    }
     const coachId = coach.id;
     const now = new Date().toISOString();
 

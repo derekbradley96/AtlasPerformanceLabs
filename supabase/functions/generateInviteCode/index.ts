@@ -5,11 +5,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
+/** Short, uppercase, easy to type; stable once stored on profiles.referral_code. */
 function randomCode() {
-  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
-  let s = "";
-  for (let i = 0; i < 4; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
-  return "atlas-" + s;
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "ATLAS-";
+  for (let i = 0; i < 6; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+  return s;
 }
 
 Deno.serve(async (req) => {
@@ -43,7 +44,7 @@ Deno.serve(async (req) => {
     }
 
     let code: string | null = null;
-    for (let attempt = 0; attempt < 10; attempt++) {
+    for (let attempt = 0; attempt < 18; attempt++) {
       const c = randomCode();
       const { data: conflict } = await supabase.from("profiles").select("id").eq("referral_code", c).maybeSingle();
       if (!conflict) {
