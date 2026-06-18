@@ -4,7 +4,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe.ts";
@@ -19,7 +19,7 @@ function feePercentForPlan(plan_tier: string | null): number {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   try {
     const callerId = await getAuthUserId(req);
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     if (billing !== "pending_payment") {
       return new Response(JSON.stringify({ error: "No pending coach offer payment for this account" }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -130,7 +130,7 @@ Deno.serve(async (req) => {
     const url = session.url ?? null;
     if (!url) return jsonError("No checkout URL", 500);
     return new Response(JSON.stringify({ url, session_id: session.id }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("client-coach-checkout-session", e);

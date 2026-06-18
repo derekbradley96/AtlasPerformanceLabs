@@ -5,6 +5,7 @@
  */
 
 import { getSupabase } from '@/lib/supabaseClient';
+import { isDeployedEdgeFunction } from '@/lib/deployedEdgeFunctions';
 
 const SUPABASE_URL_ERROR = 'Supabase URL not configured. Set VITE_SUPABASE_URL in .env.local.';
 
@@ -24,6 +25,12 @@ const getFunctionsUrl = () => {
   if (!base) return null;
   return `${base}/functions/v1`;
 };
+
+/**
+ * Ghost edge functions (historically `KNOWN_GHOST_FUNCTIONS`):
+ * any name **not** in `DEPLOYED_EDGE_FUNCTIONS` from `./deployedEdgeFunctions.js`.
+ * Dev warns below when `!isDeployedEdgeFunction(name)` — no separate array to drift.
+ */
 
 /** Normalize invite/coach code for validation: trim + lowercase so case never matters. */
 export function normalizeInviteCode(raw) {
@@ -47,6 +54,13 @@ if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
  * @returns {Promise<{ data?: unknown; error?: string }>}
  */
 export async function invokeSupabaseFunction(name, body = {}) {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && !isDeployedEdgeFunction(name)) {
+    console.warn(
+      `[invokeSupabaseFunction] GHOST CALL: "${name}" is not in the deployed edge function list. `
+      + 'Replace with a deployed function or a direct Supabase query. See docs/GHOST_FUNCTIONS_AUDIT.md '
+      + 'and src/lib/deployedEdgeFunctions.js',
+    );
+  }
   const base = getFunctionsUrl();
   if (!base) return { error: SUPABASE_URL_ERROR, data: null };
   const headers = { 'Content-Type': 'application/json' };

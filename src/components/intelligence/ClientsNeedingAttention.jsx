@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { AlertTriangle } from 'lucide-react';
 import ClientAttentionCard from './ClientAttentionCard';
 import { PageLoader } from '@/components/ui/LoadingState';

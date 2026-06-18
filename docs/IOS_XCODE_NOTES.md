@@ -31,3 +31,20 @@ Debug builds **disable minification** only for that run; normal `npm run build` 
 ## "Cannot access 'kn' before initialization" (historical – fixed)
 
 That error was a **minified variable name**; the real name was `nutritionLatestWeek`. The cause was use-before-declaration (TDZ) in `ClientDetail.jsx`; nutrition state was moved above the callbacks that use it. For any similar future error, use the **debug build** above to get the real variable name quickly.
+
+## HealthKit capability (required for Apple Health sync)
+
+When iOS native projects are regenerated or moved, re-check HealthKit capability in Xcode:
+
+1. Open `ios/App/App.xcodeproj` in Xcode.
+2. Select the **App** target.
+3. Open **Signing & Capabilities**.
+4. Click **+ Capability** and add **HealthKit**.
+5. Enable:
+   - **Health Records**
+   - **Background Delivery**
+
+`Info.plist` also requires:
+
+- `NSHealthShareUsageDescription`
+- `NSHealthUpdateUsageDescription`

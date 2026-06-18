@@ -158,3 +158,40 @@ export async function handlePushAction(callback) {
   });
   return () => h?.remove?.();
 }
+
+export async function clearBadge() {
+  if (!isNative()) return;
+  try {
+    const { PushNotifications } = await import('@capacitor/push-notifications');
+    await PushNotifications.removeAllDeliveredNotifications();
+  } catch (_) {}
+}
+
+export async function createAndroidChannels() {
+  if (!isNative() || getPlatform() !== 'android') return;
+  try {
+    const { PushNotifications } = await import('@capacitor/push-notifications');
+    await PushNotifications.createChannel({
+      id: 'coaching',
+      name: 'Coaching updates',
+      description: 'Check-in reviews, programme updates, and coach messages',
+      importance: 4,
+      vibration: true,
+      sound: 'default',
+    });
+    await PushNotifications.createChannel({
+      id: 'reminders',
+      name: 'Reminders',
+      description: 'Workout and check-in reminders',
+      importance: 3,
+      vibration: false,
+    });
+    await PushNotifications.createChannel({
+      id: 'payments',
+      name: 'Payments',
+      description: 'Payment and billing notifications',
+      importance: 3,
+      vibration: true,
+    });
+  } catch (_) {}
+}

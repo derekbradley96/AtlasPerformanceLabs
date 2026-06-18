@@ -27,6 +27,7 @@ import {
   getRetentionStreaks,
   maybeCreateRetentionNudge,
 } from '@/lib/retentionHabitService';
+import { isPersonal } from '@/lib/roles';
 
 const CATEGORY_LABELS = {
   steps: 'Steps',
@@ -90,7 +91,7 @@ export default function ClientHabitsDailyPage() {
   });
 
   const clientId = client?.id ?? null;
-  const shouldShowStandaloneChecklist = effectiveRole === 'personal' || effectiveRole === 'solo' || !!clientId;
+  const shouldShowStandaloneChecklist = isPersonal(effectiveRole) || !!clientId;
 
   const { data: habits = [], isLoading: habitsLoading } = useQuery({
     queryKey: ['client_habits_active', clientId],
@@ -172,6 +173,23 @@ export default function ClientHabitsDailyPage() {
         .upsert(payload, { onConflict: 'habit_id,log_date' });
       if (error) throw error;
     },
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: ['client_habit_logs', clientId, todayStr] });
+      const previous = queryClient.getQueryData(['client_habit_logs', clientId, todayStr]);
+      queryClient.setQueryData(['client_habit_logs', clientId, todayStr], (old) => {
+        const rows = Array.isArray(old) ? old : [];
+        const next = rows.filter((row) => row?.habit_id !== variables.habit_id);
+        next.push({
+          id: `optimistic-${variables.habit_id}`,
+          habit_id: variables.habit_id,
+          value: variables.value != null ? Number(variables.value) : null,
+          completed: Boolean(variables.completed),
+          notes: null,
+        });
+        return next;
+      });
+      return { previous };
+    },
     onSuccess: (_, variables) => {
       if (user?.id) {
         trackFirstHabitLogged(user.id, {
@@ -180,10 +198,17 @@ export default function ClientHabitsDailyPage() {
         });
       }
       setPendingNumeric((prev) => ({ ...prev, [variables.habit_id]: undefined }));
-      queryClient.invalidateQueries({ queryKey: ['client_habit_logs', clientId, todayStr] });
       queryClient.invalidateQueries({ queryKey: ['v_client_habit_adherence', clientId] });
     },
-    onError: (e) => toast.error(e?.message || 'Failed to save'),
+    onError: (_e, _variables, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(['client_habit_logs', clientId, todayStr], context.previous);
+      }
+      toast.error('Could not save — please try again');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['client_habit_logs', clientId, todayStr] });
+    },
   });
 
   const handleBooleanToggle = (habit) => {
@@ -252,27 +277,27 @@ export default function ClientHabitsDailyPage() {
   }
 
   if (!clientId && !loadingClient && !shouldShowStandaloneChecklist) {
-    const isPersonal = effectiveRole === 'personal' || effectiveRole === 'solo';
+    const personalNoClient = isPersonal(effectiveRole);
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
         <TopBar title="Daily habits" onBack={() => navigate(-1)} />
         <div className="p-4 max-w-lg mx-auto" style={pageContainer}>
           <EmptyState
-            title={isPersonal ? 'Habits need a linked client profile' : 'No client profile'}
+            title={personalNoClient ? 'Habits need a linked client profile' : 'No client profile'}
             description={
-              isPersonal
+              personalNoClient
                 ? 'Habits are stored on your linked client profile. Link with a coach to unlock habit assignments, or use Progress and Today to track training while solo.'
                 : 'Daily habits are for clients with a coach. Link with a coach to get assigned habits.'
             }
             icon={ClipboardList}
-            actionLabel={isPersonal ? 'Go to home' : 'Back'}
+            actionLabel={personalNoClient ? 'Go to home' : 'Back'}
             onAction={() => {
               hapticLight();
-              if (isPersonal) navigate('/home');
+              if (personalNoClient) navigate('/home');
               else navigate(-1);
             }}
           />
-          {isPersonal && (
+          {personalNoClient && (
             <div className="mt-4 flex flex-col gap-2">
               <Button variant="outline" className="w-full" onClick={() => navigate('/discover')}>
                 Find a coach

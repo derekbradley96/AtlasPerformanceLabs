@@ -5,6 +5,7 @@
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import Card from '@/ui/Card';
@@ -13,8 +14,9 @@ import { PeakWeekDashboardSkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
-import { Calendar, MessageSquare, ClipboardList, Scale, Activity, AlertTriangle, CheckCircle2, Circle } from 'lucide-react';
+import { Calendar, MessageSquare, ClipboardList, Scale, Activity, AlertTriangle, CheckCircle2, Circle, LayoutTemplate, ListChecks } from 'lucide-react';
 import { hapticLight } from '@/lib/haptics';
+import { toast } from 'sonner';
 import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 
 function getCoachFocus(profile, coachFocusFromAuth) {
@@ -160,13 +162,141 @@ async function fetchPeakWeekDashboard(coachId) {
       };
     });
     return { rows, checkinsByPeakWeek: latestCheckinByPeakWeek, readinessByClient: latestReadinessByClient, complianceByClient };
-  } catch (e) {
-    if (import.meta.env?.DEV) console.error('[CoachPeakWeekDashboard] fetch error', e);
-    throw e;
+  } catch (error) {
+    throw error;
   }
 }
 
-export default function CoachPeakWeekDashboard() {
+function PeakWeekDeployTemplateSheet({
+  open,
+  onClose,
+  clientId,
+  contestPrepId,
+  showDate,
+  coachId,
+  onDeployed,
+  navigate,
+}) {
+  const [templates, setTemplates] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [preview, setPreview] = React.useState(null);
+  const [deploying, setDeploying] = React.useState(false);
+  const supabase = hasSupabase ? getSupabase() : null;
+
+  React.useEffect(() => {
+    if (!open || !supabase || !coachId) return;
+    let cancelled = false;
+    setLoading(true);
+    supabase
+      .from('peak_week_templates')
+      .select('id, name, days, division')
+      .eq('coach_id', coachId)
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (!cancelled) setTemplates(Array.isArray(data) ? data : []);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [open, supabase, coachId]);
+
+  const handleDeploy = async () => {
+    if (!preview?.days || !supabase || !clientId || !contestPrepId || !showDate || deploying) return;
+    setDeploying(true);
+    try {
+      const { deployPeakWeekTemplateToAthlete } = await import('@/lib/peakWeekTemplateDeploy');
+      const out = await deployPeakWeekTemplateToAthlete(supabase, {
+        clientId,
+        contestPrepId,
+        showDate,
+        templateDays: preview.days,
+      });
+      if (out.ok) {
+        toast.success('Peak week template deployed');
+        onDeployed?.();
+        onClose?.();
+      } else {
+        toast.error(out.error || 'Deploy failed');
+      }
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      style={{ background: 'rgba(2,6,23,0.65)' }}
+      role="dialog"
+      aria-modal
+    >
+      <button type="button" className="flex-1 w-full border-0 cursor-default" style={{ background: 'transparent' }} onClick={onClose} aria-label="Close" />
+      <div
+        className="rounded-t-2xl max-h-[85vh] overflow-y-auto"
+        style={{ background: colors.surface, borderTop: `1px solid ${colors.border}` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-4 pb-6">
+          <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>Deploy peak week template</p>
+          {loading ? (
+            <p className="text-xs" style={{ color: colors.muted }}>Loading templates…</p>
+          ) : templates.length === 0 ? (
+            <div className="space-y-3">
+              <p className="text-sm" style={{ color: colors.muted }}>No templates yet.</p>
+              <Button variant="default" className="w-full" onClick={() => { hapticLight(); onClose?.(); navigate?.('/peak-week-templates'); }}>
+                Create your first peak week template
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2 mb-4 max-h-40 overflow-y-auto">
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="w-full text-left rounded-lg border p-3 text-sm"
+                    style={{
+                      borderColor: preview?.id === t.id ? colors.primary : colors.border,
+                      background: preview?.id === t.id ? colors.primarySubtle : colors.surface2,
+                      color: colors.text,
+                    }}
+                    onClick={() => setPreview(t)}
+                  >
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+              {preview && Array.isArray(preview.days) && (
+                <div className="mb-4">
+                  <p className="text-xs font-semibold uppercase mb-2" style={{ color: colors.muted }}>7-day preview</p>
+                  <ul className="space-y-2 text-xs" style={{ color: colors.text }}>
+                    {preview.days.slice(0, 7).map((d, i) => (
+                      <li key={i} className="rounded border p-2" style={{ borderColor: colors.border }}>
+                        <span className="font-medium">{d.label || `Day ${d.day}`}</span>
+                        {d.carbs_g != null && <span className="ml-2" style={{ color: colors.muted }}>C {d.carbs_g}g</span>}
+                        {d.water_litres != null && <span className="ml-2" style={{ color: colors.muted }}>W {d.water_litres}L</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
+                <Button className="flex-1" disabled={!preview || deploying} onClick={handleDeploy}>
+                  {deploying ? 'Deploying…' : 'Deploy to athlete'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function CoachPeakWeekDashboard({ embedded = false }) {
   const navigate = useNavigate();
   const { user, profile, coachFocus: coachFocusFromAuth } = useAuth();
   const viewerWU = resolveViewerBodyweightUnit(profile);
@@ -176,6 +306,7 @@ export default function CoachPeakWeekDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [data, setData] = useState({ rows: [], checkinsByPeakWeek: {}, readinessByClient: {}, complianceByClient: {} });
+  const [deploySheet, setDeploySheet] = useState(null);
 
   const coachId = user?.id ?? null;
 
@@ -279,12 +410,14 @@ export default function CoachPeakWeekDashboard() {
   const cardStyle = { ...standardCard, padding: spacing[16] };
 
   return (
-    <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
+    <div className={embedded ? '' : 'min-h-screen pb-8'} style={{ background: colors.bg, color: colors.text }}>
       <div className="max-w-lg mx-auto" style={{ ...pageContainer, paddingBottom: spacing[32] }}>
-        <h1 className="atlas-page-title">Peak Week Dashboard</h1>
-        <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>
-          Athletes approaching show day. Open peak week plan, review check-ins, message clients.
-        </p>
+        {!embedded && <h1 className="atlas-page-title">Peak Week Dashboard</h1>}
+        {!embedded && (
+          <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>
+            Athletes approaching show day. Open peak week plan, review check-ins, message clients.
+          </p>
+        )}
 
         {loading ? (
           <PeakWeekDashboardSkeleton />
@@ -369,7 +502,7 @@ export default function CoachPeakWeekDashboard() {
                               variant="secondary"
                               size="sm"
                               className="inline-flex items-center gap-1.5"
-                              onClick={() => { hapticLight(); navigate(`/messages/${row.client_id}`); }}
+                              onClick={() => { hapticLight(); navigateToThread(navigate, row.client_id); }}
                             >
                               <MessageSquare size={14} /> Message client
                             </Button>
@@ -377,7 +510,7 @@ export default function CoachPeakWeekDashboard() {
                               variant="secondary"
                               size="sm"
                               className="inline-flex items-center gap-1.5"
-                              onClick={() => { hapticLight(); navigate(`/clients/${row.client_id}/peak-week`); }}
+                              onClick={() => { hapticLight(); navigate(`/clients/${row.client_id}/peak-week-editor`); }}
                             >
                               <Calendar size={14} /> Open day
                             </Button>
@@ -482,7 +615,7 @@ export default function CoachPeakWeekDashboard() {
                               variant="secondary"
                               size="sm"
                               className="inline-flex items-center gap-1.5"
-                              onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week`); }}
+                              onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week-editor`); }}
                             >
                               <ClipboardList size={14} /> Review Check-In
                             </Button>
@@ -490,10 +623,37 @@ export default function CoachPeakWeekDashboard() {
                               variant="secondary"
                               size="sm"
                               className="inline-flex items-center gap-1.5"
-                              onClick={() => { hapticLight(); navigate(`/messages/${r.client_id}`); }}
+                              onClick={() => { hapticLight(); navigateToThread(navigate, r.client_id); }}
                             >
                               <MessageSquare size={14} /> Message Client
                             </Button>
+                            {r.contest_prep_id && r.show_date && (
+                              <>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="inline-flex items-center gap-1.5"
+                                  onClick={() => {
+                                    hapticLight();
+                                    setDeploySheet({
+                                      clientId: r.client_id,
+                                      contestPrepId: r.contest_prep_id,
+                                      showDate: r.show_date,
+                                    });
+                                  }}
+                                >
+                                  <LayoutTemplate size={14} /> Deploy template
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="inline-flex items-center gap-1.5"
+                                  onClick={() => { hapticLight(); navigate(`/prep/${r.contest_prep_id}/show-checklist`); }}
+                                >
+                                  <ListChecks size={14} /> Show day checklist
+                                </Button>
+                              </>
+                            )}
                           </div>
                         </Card>
                       </li>
@@ -505,6 +665,16 @@ export default function CoachPeakWeekDashboard() {
           </>
         )}
       </div>
+      <PeakWeekDeployTemplateSheet
+        open={!!deploySheet}
+        onClose={() => setDeploySheet(null)}
+        clientId={deploySheet?.clientId}
+        contestPrepId={deploySheet?.contestPrepId}
+        showDate={deploySheet?.showDate}
+        coachId={coachId}
+        navigate={navigate}
+        onDeployed={refetch}
+      />
     </div>
   );
 }

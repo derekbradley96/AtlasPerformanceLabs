@@ -2,27 +2,22 @@
  * Guided Workout Player — one exercise at a time, auto set flow, rest timer, Supabase persistence.
  * Clients: coach notes from program. Personal: no coach notes; week X of Y when program exists; plan edit links.
  */
+// TODO(refactor): Extract useWorkoutSessionData hook.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Activity,
-  CheckCircle2,
-  ChevronRight,
   Clock,
   Dumbbell,
   ListOrdered,
-  Pause,
   Play,
-  SkipForward,
-  Timer,
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { isClient, isPersonal } from '@/lib/roles';
 import { PERSONAL_PROGRAM_BUILDER } from '@/lib/personalBuilderNav';
-import { getMyClientProfile } from '@/lib/clientProfiles';
-import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
+import { useWorkoutSessionData } from '@/hooks/useWorkoutSessionData';
 import { generateTrainingAdjustmentRecommendation, getAdjustmentSummary } from '@/lib/adaptiveTrainingEngine';
 import { clampFatigue0to10, sanitizeFiniteNumber } from '@/lib/progressMetricsValidation';
 import {
@@ -35,19 +30,14 @@ import { getSupabase, hasSupabase as hasSupabaseConfigured } from '@/lib/supabas
 import {
   completeSession,
   ensureSetsForExercises,
-  getInProgressSession,
   getOrCreateInProgressSession,
-  getPreviousExercisePerformance,
-  getSetsForSession,
   parsePrescribedRepsForStorage,
+  updateSessionReadiness,
   upsertSet,
 } from '@/lib/workoutSessionApi';
-import { impactLight, impactMedium, notificationSuccess } from '@/lib/haptics';
+import { hapticAchievement, hapticNavigation, hapticSuccess, impactLight, impactMedium } from '@/lib/haptics';
+import { trackEvent, EVENTS } from '@/lib/analytics';
 import {
-  fetchTodayPersonalCheckinInputs,
-  fetchTodayReadinessCheckin,
-  fetchRecentReadinessScores,
-  getLocalDayBoundsISO,
   getLocalDateKey,
   getReadinessSkipStorageKey,
 } from '@/lib/readinessCheckinApi';
@@ -55,11 +45,9 @@ import { colors, shell, spacing, radii, touchTargetMin } from '@/ui/tokens';
 import { standardCard } from '@/ui/pageLayout';
 import Card from '@/ui/Card';
 import { PageLoader } from '@/components/ui/LoadingState';
+import EmptyState from '@/components/ui/EmptyState';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { getWeeklyWorkoutConsistencyStreak } from '@/lib/retentionHabitService';
-import { getPostWorkoutNextAction } from '@/lib/programAssignments';
-import PostWorkoutCompletion from '@/components/workout/PostWorkoutCompletion';
 import {
   canShowPersonalUpgradePrompt,
   canUsePersonalFeature,
@@ -78,23 +66,27 @@ import {
   personalSetProgressionFeedback,
   personalRestCompleteToastEnhanced,
 } from '@/lib/personalWorkoutLoggingUx';
+import ReadinessCheckSheet from '@/components/workout/ReadinessCheckSheet';
+import ExerciseSetLogger from '@/components/workout/ExerciseSetLogger';
+import TempoMetronome, { parseTempo } from '@/components/workout/TempoMetronome';
+import WorkoutSessionHeader from '@/components/workout/WorkoutSessionHeader';
+import WorkoutRestTimer from '@/components/workout/WorkoutRestTimer';
+import WorkoutSessionSummary from '@/components/workout/WorkoutSessionSummary';
 import { deriveSessionModeState } from '@/lib/sessionMode';
+import { getCoachReferralLink } from '@/lib/referrals';
+import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';
+import { evaluateUserMilestones } from '@/lib/milestoneEngine';
 import {
-  loadUnitShortLabel,
   parseTrainingLoadInputToKg,
   resolveViewerLoadUnit,
   trainingLoadKgToInputValue,
 } from '@/lib/trainingLoadUnits';
 import { atlasMigrationDataAttributes, deriveWorkoutPlayerRouteState } from '@/lib/atlasMigrationPhases';
+import { getPrepEducationEntry } from '@/lib/prepEducationContent';
+import { generateWarmupSetsForWeight } from '@/lib/warmupSetGenerator';
+import { incrementReviewActionCount, maybeRequestReview } from '@/lib/appReview';
 
 const pagePadding = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
-
-function formatClock(totalSeconds) {
-  const safe = Math.max(0, Number(totalSeconds) || 0);
-  const mins = Math.floor(safe / 60);
-  const secs = safe % 60;
-  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
 
 function normaliseExercise(ex) {
   return { ...ex, name: ex.name ?? ex.exercise_name ?? '' };
@@ -151,7 +143,7 @@ export default function WorkoutPlayerPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { user, profile: authProfile, effectiveRole } = useAuth();
+  const { user, profile: authProfile, effectiveRole, prepContext, isCompPrepClient } = useAuth();
   const clientMode = isClient(effectiveRole);
   const canUseEnhancedGuidance = clientMode
     ? true
@@ -166,6 +158,9 @@ export default function WorkoutPlayerPage() {
   const personalBasicWorkout = isPersonalWorkout && !canUseEnhancedGuidance;
   const personalEnhancedWorkout = isPersonalWorkout && canUseEnhancedGuidance;
   const [phase, setPhase] = useState(() => (searchParams.get('resume') === '1' ? 'playing' : 'entry'));
+  const [readinessSheetOpen, setReadinessSheetOpen] = useState(false);
+  const [readinessSaving, setReadinessSaving] = useState(false);
+  const [pendingReadinessSessionId, setPendingReadinessSessionId] = useState(null);
   const personalUpgradeCopy = getPersonalUpgradeCopy('post_workout');
   const showPostWorkoutUpgradePrompt =
     !clientMode
@@ -174,6 +169,7 @@ export default function WorkoutPlayerPage() {
     && canShowPersonalUpgradePrompt(PERSONAL_UPGRADE_PROMPT_TYPES.POST_WORKOUT, Date.now(), authProfile);
 
   const viewerLoadUnit = useMemo(() => resolveViewerLoadUnit(authProfile), [authProfile?.load_unit, authProfile]);
+  const workoutGoal = authProfile?.goal || authProfile?.personal_goal || '';
 
   useEffect(() => {
     if (!showPostWorkoutUpgradePrompt) return;
@@ -195,32 +191,79 @@ export default function WorkoutPlayerPage() {
   const [completingSet, setCompletingSet] = useState(false);
   const restIntervalRef = useRef(null);
   const [setDrafts, setSetDrafts] = useState({});
+  /** @type {null | { exerciseId: string; targetSetNumber: number; suggestion: { type: string; displayKg: number | null; headline: string; detail?: string } }} */
+  const [loadProgressionHint, setLoadProgressionHint] = useState(null);
+  const [achievementRecord, setAchievementRecord] = useState(null);
+  const [firstSessionCelebration, setFirstSessionCelebration] = useState(null);
+  const firstSessionHandledRef = useRef(false);
   const setDraftsRef = useRef(setDrafts);
   setDraftsRef.current = setDrafts;
   const [sessionImprovement, setSessionImprovement] = useState({ beatSets: 0, matchedSets: 0 });
   const [sessionDurationMinutes, setSessionDurationMinutes] = useState(null);
   const [enhancedNudgeDismissed, setEnhancedNudgeDismissed] = useState(false);
+  const [warmupDismissedMap, setWarmupDismissedMap] = useState({});
+  const [completedWarmups, setCompletedWarmups] = useState({});
+  const [rpeSaving, setRpeSaving] = useState(false);
+  const [showPreviousSession, setShowPreviousSession] = useState(false);
   const exerciseChipsRef = useRef(null);
   const activeChipRef = useRef(null);
   const sessionStartedAtRef = useRef(null);
 
-  const { data: profile, isLoading: profileLoading } = useQuery({
-    queryKey: ['workout-player-profile', user?.id],
-    queryFn: () => getMyClientProfile(user?.id),
-    enabled: !!user?.id && clientMode,
-  });
-
-  const clientId = clientMode ? profile?.id : null;
   const profileId = !clientMode ? user?.id ?? null : null;
+  const [queryExerciseId, setQueryExerciseId] = useState(null);
+  const todayKey = useMemo(() => getLocalDateKey(), []);
 
-  const { data: assignedWorkout, isLoading: workoutLoading } = useQuery({
-    queryKey: ['workout-player-assigned', clientId, profileId, clientMode ? 'client' : 'personal'],
-    queryFn: () =>
-      clientMode
-        ? getAssignedWorkoutForToday({ role: 'client', clientId })
-        : getAssignedWorkoutForToday({ role: 'personal', profileId }),
-    enabled: !!user?.id && (clientMode ? !!clientId : !!profileId),
+  const {
+    profile,
+    profileLoading,
+    clientId,
+    coachAchievementProfile,
+    assignedWorkout,
+    workoutLoading,
+    appliedClientAdjustmentRaw,
+    clientState,
+    workoutSession,
+    sessionId,
+    sessionSets,
+    previousExercisePerf,
+    weeklyConsistency,
+    postWorkoutNext,
+    todayReadiness,
+    recentReadiness,
+    todayCheckinInputs,
+  } = useWorkoutSessionData({
+    userId: user?.id ?? null,
+    clientMode,
+    profileId,
+    phase,
+    currentExerciseId: queryExerciseId,
+    todayKey,
   });
+
+  const maybeTrackFirstSession = useCallback(async () => {
+    if (clientMode || !profileId || firstSessionHandledRef.current) return;
+    firstSessionHandledRef.current = true;
+    if (authProfile?.first_session_at) return;
+    if (!hasSupabaseConfigured) return;
+    const sb = getSupabase();
+    if (!sb) return;
+    const nowIso = new Date().toISOString();
+    const { error } = await sb
+      .from('profiles')
+      .update({ first_session_at: nowIso })
+      .eq('id', profileId)
+      .is('first_session_at', null);
+    if (error) return;
+    const durationMinutes = sessionStartedAtRef.current
+      ? Math.max(1, Math.round((Date.now() - new Date(sessionStartedAtRef.current).getTime()) / 60000))
+      : null;
+    setFirstSessionCelebration({
+      exercises: exercisesForSession.length,
+      sets: totalSets,
+      minutes: durationMinutes,
+    });
+    queryClient.invalidateQueries({ queryKey: ['auth-profile'] });
+  }, [clientMode, profileId, authProfile?.first_session_at, exercisesForSession.length, totalSets, queryClient]);
 
   const exercises = useMemo(
     () => (assignedWorkout?.exercises ?? []).map(normaliseExercise),
@@ -241,50 +284,17 @@ export default function WorkoutPlayerPage() {
   const todayDay = assignedWorkout?.day ?? null;
   const week = assignedWorkout?.week ?? null;
   const block = assignedWorkout?.block ?? null;
+  const sessionDisplayName =
+    assignedWorkout?.assignment?.client_display_name
+    || todayDay?.title
+    || block?.title
+    || "Today's session";
   const weekProgressLabel =
     week && block ? `Week ${week.week_number} of ${Math.max(1, Number(block.total_weeks) || 1)}` : null;
-
-  const todayKey = useMemo(() => getLocalDateKey(), []);
-
-  const { data: appliedClientAdjustmentRaw } = useQuery({
-    queryKey: ['applied-adaptive-recommendation', clientId, todayKey],
-    queryFn: async () => {
-      if (!clientMode || !clientId || !hasSupabaseConfigured) return null;
-      const supabase = getSupabase();
-      if (!supabase) return null;
-      const { startISO, endISO } = getLocalDayBoundsISO();
-      const { data, error } = await supabase
-        .from('adjustment_suggestions')
-        .select('id, suggestion_type, payload, reason, created_at, status')
-        .eq('client_id', clientId)
-        .in('status', ['applied', 'modified'])
-        .gte('created_at', startISO)
-        .lte('created_at', endISO)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) return null;
-      return data ?? null;
-    },
-    enabled: Boolean(clientMode && clientId && hasSupabaseConfigured),
-  });
-
-  const { data: clientState } = useQuery({
-    queryKey: ['client-state-workout-player', clientId],
-    queryFn: async () => {
-      if (!clientMode || !clientId || !hasSupabaseConfigured) return null;
-      const supabase = getSupabase();
-      if (!supabase) return null;
-      const { data, error } = await supabase
-        .from('client_state')
-        .select('fatigue_score, performance_trend, adherence_score, last_updated')
-        .eq('client_id', clientId)
-        .maybeSingle();
-      if (error) return null;
-      return data ?? null;
-    },
-    enabled: Boolean(clientMode && clientId && hasSupabaseConfigured),
-  });
+  const prepHeaderLine =
+    clientMode && isCompPrepClient && prepContext?.weeksOut != null && prepContext?.daysOut != null
+      ? `Week ${prepContext.weeksOut + 1} of prep · ${prepContext.daysOut} days out`
+      : null;
 
   const personalAdjustment = useMemo(() => {
     if (clientMode || !user?.id) return null;
@@ -340,6 +350,25 @@ export default function WorkoutPlayerPage() {
     () => exercisesForSession.reduce((acc, ex) => acc + Math.max(1, Number(ex.sets) || 1), 0),
     [exercisesForSession]
   );
+  const supersetGroups = useMemo(() => {
+    const groups = {};
+    exercisesForSession.forEach((ex, idx) => {
+      if (ex?.superset_group) {
+        const key = String(ex.superset_group).trim().toUpperCase();
+        if (!groups[key]) groups[key] = [];
+        groups[key].push({ ...ex, indexInSession: idx });
+      }
+    });
+    return groups;
+  }, [exercisesForSession]);
+  const isInSuperset = useCallback(
+    (ex) => !!(ex?.superset_group && supersetGroups[String(ex.superset_group).trim().toUpperCase()]?.length > 1),
+    [supersetGroups],
+  );
+  const getSupersetPartner = useCallback((ex) => {
+    if (!isInSuperset(ex)) return null;
+    return supersetGroups[String(ex.superset_group).trim().toUpperCase()].find((e) => e.id !== ex.id) || null;
+  }, [isInSuperset, supersetGroups]);
 
   const estimatedMinutes = useMemo(() => {
     if (!exercisesForSession.length) return 30;
@@ -351,21 +380,6 @@ export default function WorkoutPlayerPage() {
     }
     return Math.max(15, Math.round(sec / 60));
   }, [exercisesForSession]);
-
-  const { data: workoutSession } = useQuery({
-    queryKey: ['workout-session-in-progress-player', clientId, profileId],
-    queryFn: () =>
-      clientMode ? getInProgressSession({ clientId }) : getInProgressSession({ profileId }),
-    enabled: !!user?.id && (clientMode ? !!clientId : !!profileId),
-  });
-
-  const sessionId = workoutSession?.id;
-
-  const { data: sessionSets = [] } = useQuery({
-    queryKey: ['workout-session-sets', sessionId],
-    queryFn: () => getSetsForSession(sessionId),
-    enabled: !!sessionId,
-  });
 
   const dedupedSessionSets = useMemo(() => {
     const byKey = new Map();
@@ -392,6 +406,10 @@ export default function WorkoutPlayerPage() {
   const currentExercise = position != null ? exercisesForSession[position.exerciseIndex] : null;
   const currentSetNumber = position?.setNumber ?? 1;
 
+  useEffect(() => {
+    setQueryExerciseId(currentExercise?.id ?? null);
+  }, [currentExercise?.id]);
+
   const prescribedRepsNum = useMemo(
     () => (currentExercise ? parsePrescribedRepsForStorage(currentExercise.reps) : null),
     [currentExercise]
@@ -414,6 +432,29 @@ export default function WorkoutPlayerPage() {
       (s) => s.exercise_id === currentExercise.id && s.set_number === currentSetNumber
     );
   }, [dedupedSessionSets, currentExercise, currentSetNumber]);
+  const currentTempoParsed = useMemo(() => parseTempo(currentExercise?.tempo), [currentExercise?.tempo]);
+  const isActiveSet = !restState.active && !currentSetRow?.completed;
+  const restTimerActive = restState.active;
+  const sessionComplete = phase === 'complete';
+  const tempoIsActive = isActiveSet && !restTimerActive && !sessionComplete;
+  const currentSupersetPartner = useMemo(() => getSupersetPartner(currentExercise), [currentExercise, getSupersetPartner]);
+  const currentSupersetLabel = currentExercise?.superset_group ? String(currentExercise.superset_group).trim().toUpperCase() : null;
+  const warmupSets = useMemo(() => {
+    if (!currentExercise?.is_warmup_parent) return [];
+    if (warmupDismissedMap[currentExercise.id]) return [];
+    const parsedSetsConfig = (() => {
+      if (!currentExercise?.sets_config) return null;
+      if (Array.isArray(currentExercise.sets_config)) return currentExercise.sets_config;
+      try {
+        const parsed = JSON.parse(currentExercise.sets_config);
+        return Array.isArray(parsed) ? parsed : null;
+      } catch {
+        return null;
+      }
+    })();
+    const workingWeight = parsedSetsConfig?.[0]?.weight_kg ?? currentExercise?.weight_kg;
+    return generateWarmupSetsForWeight(Number(workingWeight));
+  }, [currentExercise, warmupDismissedMap]);
 
   const setRowsForExercise = useMemo(() => {
     if (!currentExercise) return [];
@@ -428,6 +469,7 @@ export default function WorkoutPlayerPage() {
         completed: !!row?.completed,
         repsDone: row?.reps_done ?? '',
         weightDone: row?.weight_done ?? '',
+        loadSuggestion: row?.loadSuggestion ?? null,
       };
     });
   }, [currentExercise, dedupedSessionSets]);
@@ -440,23 +482,30 @@ export default function WorkoutPlayerPage() {
     [currentExercise, dedupedSessionSets]
   );
 
-  const { data: previousExercisePerf } = useQuery({
-    queryKey: ['prev-exercise-perf', sessionId, currentExercise?.id, clientId, profileId],
-    queryFn: () =>
-      getPreviousExercisePerformance({
-        clientId,
-        profileId,
-        exerciseId: currentExercise.id,
-        excludeSessionId: sessionId,
-      }),
-    enabled:
-      !!sessionId &&
-      !!currentExercise?.id &&
-      !!(clientId || profileId) &&
-      phase === 'playing',
-  });
+  const previousPerf =
+    previousExercisePerf?.[currentSetNumber]
+    ?? previousExercisePerf?.[String(currentSetNumber)]
+    ?? null;
+  const lastSessionDate = previousExercisePerf ? Object.values(previousExercisePerf)[0]?.session_date : null;
 
-  const previousPerf = previousExercisePerf?.[currentSetNumber] ?? null;
+  useEffect(() => {
+    if (!sessionId || typeof sessionStorage === 'undefined') return;
+    const key = `atlas_workout_last_session_overlay_${sessionId}`;
+    const stored = sessionStorage.getItem(key);
+    setShowPreviousSession(stored === '1');
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || typeof sessionStorage === 'undefined') return;
+    const key = `atlas_workout_last_session_overlay_${sessionId}`;
+    sessionStorage.setItem(key, showPreviousSession ? '1' : '0');
+  }, [sessionId, showPreviousSession]);
+
+  useEffect(() => {
+    if (showPreviousSession && (!previousExercisePerf || Object.keys(previousExercisePerf).length === 0)) {
+      setShowPreviousSession(false);
+    }
+  }, [showPreviousSession, previousExercisePerf]);
 
   /** Prefill empty drafts from last session or prescription — fewer taps for Basic and Enhanced. */
   useEffect(() => {
@@ -469,7 +518,9 @@ export default function WorkoutPlayerPage() {
     setSetDrafts((cur) => {
       const d = cur[dk] || { reps: '', weight: '' };
       if (d.reps !== '' || d.weight !== '') return cur;
-      const prev = previousExercisePerf?.[currentSetNumber];
+      const prev =
+        previousExercisePerf?.[currentSetNumber]
+        ?? previousExercisePerf?.[String(currentSetNumber)];
       const repsNext =
         prev?.reps_done != null
           ? String(prev.reps_done)
@@ -493,39 +544,6 @@ export default function WorkoutPlayerPage() {
     currentExercise,
     viewerLoadUnit,
   ]);
-
-  const { data: weeklyConsistency } = useQuery({
-    queryKey: ['weekly-workout-consistency', clientId, profileId],
-    queryFn: () => getWeeklyWorkoutConsistencyStreak({ clientId, profileId, weeklyTarget: 4 }),
-    enabled: phase === 'complete' && !!(clientId || profileId),
-  });
-
-  const { data: postWorkoutNext } = useQuery({
-    queryKey: ['post-workout-next', clientId, profileId],
-    queryFn: () =>
-      getPostWorkoutNextAction({
-        role: clientMode ? 'client' : 'personal',
-        clientId,
-        profileId,
-      }),
-    enabled: phase === 'complete' && !!(clientId || profileId),
-  });
-
-  const { data: todayReadiness } = useQuery({
-    queryKey: ['readiness-checkin-today', clientId, profileId, todayKey],
-    queryFn: () => fetchTodayReadinessCheckin({ clientId, profileId }),
-    enabled: !!user?.id && !!(clientId || profileId) && hasSupabaseConfigured,
-  });
-  const { data: recentReadiness = [] } = useQuery({
-    queryKey: ['readiness-recent-player', clientId, profileId, todayKey],
-    queryFn: () => fetchRecentReadinessScores({ clientId, profileId, limit: 8 }),
-    enabled: !!user?.id && !!(clientId || profileId) && hasSupabaseConfigured,
-  });
-  const { data: todayCheckinInputs } = useQuery({
-    queryKey: ['readiness-inputs-player', clientId, profileId, todayKey],
-    queryFn: () => (clientMode ? null : fetchTodayPersonalCheckinInputs({ profileId })),
-    enabled: !clientMode && !!profileId && hasSupabaseConfigured,
-  });
 
   const personalDerivedRecommendation = useMemo(() => {
     if (clientMode || !canUseEnhancedGuidance) return null;
@@ -627,7 +645,7 @@ export default function WorkoutPlayerPage() {
     const next = {};
     for (let sn = 1; sn <= target; sn++) {
       const row = sessionSetsForCurrentExercise.find((s) => s.set_number === sn);
-      const prev = previousExercisePerf?.[sn];
+      const prev = previousExercisePerf?.[sn] ?? previousExercisePerf?.[String(sn)];
       const reps =
         row?.reps_done != null && row.reps_done !== ''
           ? String(row.reps_done)
@@ -665,7 +683,6 @@ export default function WorkoutPlayerPage() {
       queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress-personal'] });
       queryClient.invalidateQueries({ queryKey: ['active-workout'] });
       queryClient.invalidateQueries({ queryKey: ['workout-session-sets'] });
-      setPhase('playing');
     },
   });
 
@@ -686,7 +703,23 @@ export default function WorkoutPlayerPage() {
       queryClient.invalidateQueries({ queryKey: ['weekly-workout-consistency'] });
       queryClient.invalidateQueries({ queryKey: ['post-workout-next'] });
       setPhase('complete');
+      const sessionDurationSeconds = sessionStartedAtRef.current
+        ? Math.max(0, Math.round((Date.now() - new Date(sessionStartedAtRef.current).getTime()) / 1000))
+        : 0;
+      trackEvent(EVENTS.WORKOUT_COMPLETED, {
+        exercise_count: exercisesForSession.length,
+        duration_seconds: sessionDurationSeconds,
+      });
+      const count = incrementReviewActionCount();
+      void maybeRequestReview(count);
+      const unlocked = evaluateUserMilestones(user?.id, [], { workoutCount: 1 });
+      if (unlocked) setAchievementRecord(unlocked);
       toast.success('Saved successfully');
+      if (data?.id) {
+        void maybeTrackFirstSession();
+        const goalParam = workoutGoal ? `&goal=${encodeURIComponent(String(workoutGoal))}` : '';
+        navigate(`/workoutsummary?sessionId=${encodeURIComponent(data.id)}${goalParam}`);
+      }
     },
     onError: (e) => {
       console.error('[WorkoutPlayerPage] completeSession failed', e);
@@ -727,8 +760,8 @@ export default function WorkoutPlayerPage() {
             clearInterval(restIntervalRef.current);
             restIntervalRef.current = null;
           }
-          impactLight();
-          notificationSuccess();
+          hapticNavigation();
+          hapticSuccess();
           if (showAdaptiveWorkoutCopy) {
             toast.message(
               personalEnhancedWorkout ? personalRestCompleteToastEnhanced() : 'Rest complete — ready for your next set'
@@ -744,7 +777,7 @@ export default function WorkoutPlayerPage() {
 
   const skipRest = useCallback(() => {
     clearRestInterval();
-    impactLight();
+    hapticNavigation();
     setRestState((prev) => ({ ...prev, remaining: 0, showStartNext: true }));
   }, [clearRestInterval]);
 
@@ -793,7 +826,10 @@ export default function WorkoutPlayerPage() {
     const prescribedRest =
       Number(currentExercise.rest_seconds) > 0 ? Number(currentExercise.rest_seconds) : null;
 
-    const prev = previousExercisePerf?.[currentSetNumber] ?? null;
+    const prev =
+      previousExercisePerf?.[currentSetNumber]
+      ?? previousExercisePerf?.[String(currentSetNumber)]
+      ?? null;
 
     setCompletingSet(true);
     try {
@@ -806,7 +842,7 @@ export default function WorkoutPlayerPage() {
           weight_done: wClamped,
         });
       }
-      await upsertSet(sessionId, {
+      const saved = await upsertSet(sessionId, {
         exercise_id: currentExercise.id,
         set_number: currentSetNumber,
         completed: true,
@@ -816,10 +852,22 @@ export default function WorkoutPlayerPage() {
         prescribed_rest_seconds: prescribedRest,
       });
 
+      const nextSetN = currentSetNumber + 1;
+      const maxSetsHere = Math.max(1, Number(currentExercise.sets) || 1);
+      if (saved?.loadSuggestion && nextSetN <= maxSetsHere) {
+        setLoadProgressionHint({
+          exerciseId: currentExercise.id,
+          targetSetNumber: nextSetN,
+          suggestion: saved.loadSuggestion,
+        });
+      } else {
+        setLoadProgressionHint(null);
+      }
+
       queryClient.invalidateQueries({ queryKey: ['workout-session-sets', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['prev-exercise-perf', sessionId, currentExercise.id] });
 
-      await impactMedium();
+      await hapticAchievement();
 
       const targetSetsForExercise = Math.max(1, Number(currentExercise.sets) || 1);
       const finishedFirstExercise = position.exerciseIndex === 0 && currentSetNumber === targetSetsForExercise;
@@ -853,31 +901,10 @@ export default function WorkoutPlayerPage() {
 
       const last = isLastSetOfWorkout(position.exerciseIndex, currentSetNumber, exercisesForSession);
       if (last) {
-        setPhase('complete');
+        setPhase('session_rpe');
+        const unlocked = evaluateUserMilestones(user?.id, [], { workoutCount: 1 });
+        if (unlocked) setAchievementRecord(unlocked);
         dismissRest();
-        try {
-          const completed = await completeSession(sessionId);
-          if (import.meta.env.DEV) {
-            console.info('[WorkoutPlayerPage] session complete UI state (last set)', { completed });
-          }
-        } catch (e) {
-          console.error(e);
-          toast.error('Something went wrong');
-          setPhase('playing');
-          setSetFeedback('Could not finish session. Try again.');
-          return;
-        }
-        queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress-player'] });
-        queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress'] });
-        queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress-personal'] });
-        queryClient.invalidateQueries({ queryKey: ['active-workout'] });
-        queryClient.invalidateQueries({ queryKey: ['workout-session-sets'] });
-        queryClient.invalidateQueries({ queryKey: ['personal-home-recent-workouts'] });
-        queryClient.invalidateQueries({ queryKey: ['personal-home-active-workout'] });
-        queryClient.invalidateQueries({ queryKey: ['recent-workouts'] });
-        queryClient.invalidateQueries({ queryKey: ['weekly-workout-consistency'] });
-        queryClient.invalidateQueries({ queryKey: ['post-workout-next'] });
-        toast.success('Saved successfully');
         return;
       }
 
@@ -910,6 +937,10 @@ export default function WorkoutPlayerPage() {
     previousExercisePerf,
     showAdaptiveWorkoutCopy,
     viewerLoadUnit,
+    workoutGoal,
+    navigate,
+    maybeTrackFirstSession,
+    setLoadProgressionHint,
   ]);
 
   /** In-progress session → go straight to player (skip entry). */
@@ -951,6 +982,27 @@ export default function WorkoutPlayerPage() {
   }, [position?.exerciseIndex]);
 
   useEffect(() => {
+    setLoadProgressionHint(null);
+  }, [position?.exerciseIndex]);
+
+  const applyLoadProgressionHint = useCallback(() => {
+    if (!loadProgressionHint?.suggestion) return;
+    const kg = loadProgressionHint.suggestion.nextWeightKg ?? loadProgressionHint.suggestion.displayKg;
+    if (kg == null || !Number.isFinite(Number(kg))) {
+      setLoadProgressionHint(null);
+      return;
+    }
+    const dk = makeWorkoutDraftKey(loadProgressionHint.exerciseId, loadProgressionHint.targetSetNumber);
+    const val = trainingLoadKgToInputValue(Number(kg), viewerLoadUnit);
+    setSetDrafts((cur) => ({
+      ...cur,
+      [dk]: { ...(cur[dk] || { reps: '', weight: '' }), weight: val },
+    }));
+    setLoadProgressionHint(null);
+    hapticNavigation();
+  }, [loadProgressionHint, viewerLoadUnit]);
+
+  useEffect(() => {
     if (phase !== 'playing' || position == null) return;
     requestAnimationFrame(() => {
       activeChipRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
@@ -973,6 +1025,46 @@ export default function WorkoutPlayerPage() {
   const dashboardPath = clientMode ? '/client-dashboard' : '/solo-dashboard';
   const checkInPath = '/check-in';
 
+  const hasProgram = exercisesForSession.length > 0;
+
+  const requiresReadinessBeforeStart = useMemo(() => {
+    if (searchParams.get('resume') === '1') return false;
+    if (!hasProgram) return false;
+    if (!(clientMode || isPersonalWorkout)) return false;
+    const hasSessionReadiness = workoutSession
+      && workoutSession.readiness_sleep != null
+      && workoutSession.readiness_energy != null
+      && workoutSession.readiness_soreness != null;
+    return !hasSessionReadiness;
+  }, [searchParams, hasProgram, clientMode, isPersonalWorkout, workoutSession]);
+
+  const handleEntryStart = useCallback(async () => {
+    const session = await startSessionMutation.mutateAsync();
+    if (!session?.id) return;
+    if (requiresReadinessBeforeStart) {
+      setPendingReadinessSessionId(session.id);
+      setReadinessSheetOpen(true);
+      return;
+    }
+    setPhase('playing');
+  }, [startSessionMutation, requiresReadinessBeforeStart]);
+
+  const handleReadinessSubmit = useCallback(async (ratings) => {
+    if (!pendingReadinessSessionId) return;
+    setReadinessSaving(true);
+    try {
+      await updateSessionReadiness(pendingReadinessSessionId, ratings);
+      queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress-player'] });
+      queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress'] });
+      queryClient.invalidateQueries({ queryKey: ['workout-session-in-progress-personal'] });
+      setReadinessSheetOpen(false);
+      setPendingReadinessSessionId(null);
+      setPhase('playing');
+    } finally {
+      setReadinessSaving(false);
+    }
+  }, [pendingReadinessSessionId, queryClient]);
+
   const loading =
     !user ||
     profileLoading ||
@@ -994,46 +1086,40 @@ export default function WorkoutPlayerPage() {
   if (clientMode && !clientId) {
     const wpM = deriveWorkoutPlayerRouteState({ roleView: 'client', surface: 'profile_error' });
     return (
+      <>
       <div
         {...atlasMigrationDataAttributes(wpM.phase, wpM.primary)}
         style={{ paddingTop: spacing[24], paddingBottom: `calc(${spacing[24]}px + env(safe-area-inset-bottom, 0px))`, ...pagePadding }}
       >
-        <p style={{ color: colors.muted }}>We couldn’t load your client profile.</p>
-        <button
-          type="button"
-          onClick={() => navigate('/today')}
-          style={{
-            marginTop: spacing[12],
-            color: colors.primary,
-            minHeight: touchTargetMin,
-            padding: `${spacing[8]}px 0`,
-            background: 'none',
-            border: 'none',
-            fontWeight: 600,
-            cursor: 'pointer',
-            width: '100%',
-            textAlign: 'left',
-          }}
-        >
-          Back to Today
-        </button>
+        <EmptyState
+          title="Program not available"
+          description="Your coach hasn't assigned a program yet, or your account isn't fully linked. Contact your coach if you think this is wrong."
+          actionLabel="Back to Today"
+          onAction={() => navigate('/today')}
+        />
       </div>
+      <ReadinessCheckSheet
+        open={readinessSheetOpen}
+        saving={readinessSaving}
+        onSubmit={handleReadinessSubmit}
+        onSkip={() => {
+          setReadinessSheetOpen(false);
+          if (pendingReadinessSessionId) {
+            setPendingReadinessSessionId(null);
+            setPhase('playing');
+          }
+        }}
+      />
+      </>
     );
   }
 
   const workoutPlayerRole = clientMode ? 'client' : 'personal';
 
-  const hasProgram = exercisesForSession.length > 0;
   const resumeFlow = searchParams.get('resume') === '1';
   const personalAutoAdjustOn = !clientMode && user?.id ? getPersonalAutoAdjustmentsEnabled(user.id) : true;
 
-  const needsReadinessGate =
-    hasProgram &&
-    !resumeFlow &&
-    hasSupabaseConfigured &&
-    !!(clientId || profileId) &&
-    !todayReadiness &&
-    !readinessSkipped;
+  const needsReadinessGate = requiresReadinessBeforeStart && !readinessSkipped;
   const needsPersonalChoiceGate =
     !clientMode &&
     canUseEnhancedGuidance &&
@@ -1118,12 +1204,14 @@ export default function WorkoutPlayerPage() {
           <Card style={{ ...standardCard, padding: spacing[16] }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[16] }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <h1 style={{ fontSize: 20, fontWeight: 700, color: colors.text, margin: 0 }}>Today&apos;s session</h1>
-                {weekProgressLabel && (
+                <h1 style={{ fontSize: 20, fontWeight: 700, color: colors.text, margin: 0 }}>{sessionDisplayName}</h1>
+                {prepHeaderLine ? (
+                  <p style={{ fontSize: 13, color: colors.warning, fontWeight: 700, margin: '6px 0 0' }}>{prepHeaderLine}</p>
+                ) : weekProgressLabel ? (
                   <p style={{ fontSize: 13, color: colors.primary, fontWeight: 600, margin: '6px 0 0' }}>{weekProgressLabel}</p>
-                )}
+                ) : null}
                 <p style={{ fontSize: 14, color: colors.muted, marginTop: spacing[8] }}>
-                  {hasProgram ? todayDay?.title || 'Scheduled today' : 'No workout scheduled'}
+                  {hasProgram ? sessionDisplayName : 'No workout scheduled'}
                 </p>
               </div>
               <span
@@ -1168,7 +1256,7 @@ export default function WorkoutPlayerPage() {
                       Built around your goal and setup
                     </p>
                     <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted }}>
-                      Day 1: {todayDay?.title || 'Session'}
+                      Day 1: {sessionDisplayName}
                     </p>
                     <div style={{ marginTop: spacing[6], display: 'grid', gap: spacing[4] }}>
                       {exercisesForSession.slice(0, 4).map((ex, idx) => (
@@ -1312,16 +1400,14 @@ export default function WorkoutPlayerPage() {
                         <Activity size={18} />
                       </span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>Quick daily check-in</p>
+                        <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>Pre-session readiness check</p>
                         <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
-                          A 30-second check helps training match how you feel today. You can skip if you need to get moving.
+                          You will do a 3-tap readiness check right before the first exercise loads.
                         </p>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[8], marginTop: spacing[10] }}>
                           <button
                             type="button"
-                            onClick={() =>
-                              navigate(`/readiness-checkin?return=${encodeURIComponent('/workout-player')}`)
-                            }
+                            onClick={() => setReadinessSheetOpen(true)}
                             style={{
                               width: '100%',
                               minHeight: touchTargetMin,
@@ -1335,7 +1421,7 @@ export default function WorkoutPlayerPage() {
                               cursor: 'pointer',
                             }}
                           >
-                            Log readiness
+                            Open readiness check
                           </button>
                           <button
                             type="button"
@@ -1438,8 +1524,8 @@ export default function WorkoutPlayerPage() {
               {hasProgram && (
                 <button
                   type="button"
-                  onClick={() => startSessionMutation.mutate()}
-                  disabled={startSessionMutation.isPending || needsReadinessGate || needsPersonalChoiceGate}
+                  onClick={handleEntryStart}
+                  disabled={startSessionMutation.isPending || needsPersonalChoiceGate}
                   style={{
                     width: '100%',
                     minHeight: touchTargetMin + 4,
@@ -1450,12 +1536,12 @@ export default function WorkoutPlayerPage() {
                     border: 'none',
                     fontSize: 16,
                     fontWeight: 700,
-                    cursor: startSessionMutation.isPending || needsReadinessGate || needsPersonalChoiceGate ? 'not-allowed' : 'pointer',
+                    cursor: startSessionMutation.isPending || needsPersonalChoiceGate ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 8,
-                    opacity: needsReadinessGate || needsPersonalChoiceGate ? 0.55 : 1,
+                    opacity: needsPersonalChoiceGate ? 0.55 : 1,
                   }}
                 >
                   <Play size={18} />
@@ -1507,32 +1593,116 @@ export default function WorkoutPlayerPage() {
   }
 
   /* ——— Complete ——— */
+  if (phase === 'session_rpe') {
+    const wpM = deriveWorkoutPlayerRouteState({ roleView: workoutPlayerRole, surface: 'complete' });
+    return (
+      <div {...atlasMigrationDataAttributes(wpM.phase, wpM.primary)}>
+        <WorkoutSessionSummary
+          mode="rpe"
+          saving={rpeSaving}
+          setSaving={setRpeSaving}
+          sessionId={sessionId}
+          workoutGoal={workoutGoal}
+          queryClient={queryClient}
+          onDone={() => {
+            const goalParam = workoutGoal ? `&goal=${encodeURIComponent(String(workoutGoal))}` : '';
+            navigate(`/workoutsummary?sessionId=${encodeURIComponent(sessionId)}${goalParam}`);
+          }}
+          sessionSets={dedupedSessionSets}
+          prescribedSets={todayWorkout?.exercises || []}
+          sessionRPE={null}
+          readiness={todayReadiness || null}
+          exerciseNotes={null}
+        />
+      </div>
+    );
+  }
+
   if (phase === 'complete') {
     const wpM = deriveWorkoutPlayerRouteState({ roleView: workoutPlayerRole, surface: 'complete' });
     return (
       <div {...atlasMigrationDataAttributes(wpM.phase, wpM.primary)}>
-      <PostWorkoutCompletion
-        exercisesCompleted={exercisesCompleted}
-        completedSets={completedSets}
-        sessionDurationMinutes={sessionDurationMinutes}
-        sessionImprovement={sessionImprovement}
-        showAdaptiveWorkoutCopy={showAdaptiveWorkoutCopy}
-        canUseEnhancedGuidance={canUseEnhancedGuidance}
-        clientMode={clientMode}
-        isRecoverySession={isRecoverySessionPost}
-        weeklyConsistency={weeklyConsistency}
-        nextAction={postWorkoutNext}
-        showPostWorkoutUpgradePrompt={showPostWorkoutUpgradePrompt}
-        personalUpgradeCopy={personalUpgradeCopy}
-        effectiveRuntimeRecommendation={effectiveRuntimeRecommendation}
-        dashboardPath={dashboardPath}
-        checkInPath={checkInPath}
-        showPersonalBasicCheckIn={!clientMode}
-        profileId={profileId}
-        workoutSessionId={sessionId}
-        adaptationTier={canUseEnhancedGuidance ? 'enhanced' : 'basic'}
-        personalMinimalCompletion={personalBasicWorkout}
-      />
+        <WorkoutSessionSummary
+          mode="complete"
+          sessionSets={dedupedSessionSets}
+          prescribedSets={todayWorkout?.exercises || []}
+          sessionRPE={null}
+          readiness={todayReadiness || null}
+          exerciseNotes={null}
+          completionProps={{
+            exercisesCompleted,
+            completedSets,
+            sessionDurationMinutes,
+            sessionImprovement,
+            showAdaptiveWorkoutCopy,
+            canUseEnhancedGuidance,
+            clientMode,
+            isRecoverySession: isRecoverySessionPost,
+            weeklyConsistency,
+            nextAction: postWorkoutNext,
+            showPostWorkoutUpgradePrompt,
+            personalUpgradeCopy,
+            effectiveRuntimeRecommendation,
+            dashboardPath,
+            checkInPath,
+            showPersonalBasicCheckIn: !clientMode,
+            profileId,
+            workoutSessionId: sessionId,
+            adaptationTier: canUseEnhancedGuidance ? 'enhanced' : 'basic',
+            personalMinimalCompletion: personalBasicWorkout,
+          }}
+        >
+          {achievementRecord ? (
+            <AchievementUnlockedModal
+              record={achievementRecord}
+              onClose={() => setAchievementRecord(null)}
+              coachName={coachAchievementProfile?.display_name}
+              coachMilestoneNote={coachAchievementProfile?.milestone_client_celebration_note}
+              coachReferralLink={getCoachReferralLink(coachAchievementProfile)}
+              clientFirstName={profile?.name || profile?.full_name}
+              clientId={clientId}
+            />
+          ) : null}
+          {firstSessionCelebration ? (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.55)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 60,
+                padding: spacing[16],
+              }}
+            >
+              <Card style={{ maxWidth: 420, width: '100%', padding: spacing[18], border: `1px solid ${colors.primary}` }}>
+                <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: colors.text }}>
+                  🎯 First session done
+                </p>
+                <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 14, color: colors.muted, lineHeight: 1.45 }}>
+                  {`${firstSessionCelebration.exercises} exercises, ${firstSessionCelebration.sets} sets, ${firstSessionCelebration.minutes || 1} minutes. Your progress tracking starts now.`}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFirstSessionCelebration(null)}
+                  style={{
+                    marginTop: spacing[14],
+                    width: '100%',
+                    minHeight: touchTargetMin,
+                    border: 'none',
+                    borderRadius: radii.button,
+                    background: colors.primary,
+                    color: '#fff',
+                    fontWeight: 700,
+                  }}
+                >
+                  Continue
+                </button>
+              </Card>
+            </div>
+          ) : null}
+        </WorkoutSessionSummary>
       </div>
     );
   }
@@ -1629,65 +1799,22 @@ export default function WorkoutPlayerPage() {
         ...pagePadding,
       }}
     >
-      <Card
-        style={{
-          ...standardCard,
-          padding: spacing[12],
-          marginBottom: spacing[12],
-          border: `1px solid ${colors.border}`,
+      <WorkoutSessionHeader
+        exercise={currentExercise}
+        setProgress={sessionProgressPct}
+        isSuperset={isInSuperset(currentExercise)}
+        supersetLabel={currentSupersetLabel}
+        showPreviousSession={showPreviousSession}
+        onTogglePreviousSession={() => setShowPreviousSession((prev) => !prev)}
+        coachUpdateNote={prepHeaderLine || weekProgressLabel || null}
+        onExit={() => navigate('/today')}
+        onEndWorkout={() => {
+          if (sessionId) finishSessionMutation.mutate(sessionId);
         }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing[8] }}>
-          <button
-            type="button"
-            onClick={() => navigate('/today')}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              background: 'none',
-              border: 'none',
-              color: colors.muted,
-              cursor: 'pointer',
-              minHeight: touchTargetMin,
-            }}
-          >
-            <ArrowLeft size={20} /> Exit
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (sessionId) finishSessionMutation.mutate(sessionId);
-            }}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: colors.muted,
-              fontSize: 13,
-              cursor: 'pointer',
-              minHeight: touchTargetMin,
-              padding: `0 ${spacing[8]}px`,
-              fontWeight: 600,
-            }}
-          >
-            End workout
-          </button>
-        </div>
-        {weekProgressLabel ? (
-          <p style={{ fontSize: 13, color: colors.primary, fontWeight: 700, margin: `${spacing[8]}px 0 0` }}>{weekProgressLabel}</p>
-        ) : null}
-        <p style={{ fontSize: 12, color: colors.muted, margin: `${spacing[6]}px 0 0`, fontWeight: 600 }}>
-          Session · {completedSets} / {totalSets} sets
-        </p>
-        <div style={{ margin: `${spacing[10]}px 0 0`, height: 6, borderRadius: 999, overflow: 'hidden', background: colors.surface2, width: '100%' }}>
-          <motion.div
-            initial={false}
-            animate={{ width: `${sessionProgressPct}%` }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            style={{ height: '100%', background: colors.primary, borderRadius: 999 }}
-          />
-        </div>
-      </Card>
+        sessionDisplayName={sessionDisplayName}
+        completedSets={completedSets}
+        totalSets={totalSets}
+      />
 
       <div
         ref={exerciseChipsRef}
@@ -1729,7 +1856,9 @@ export default function WorkoutPlayerPage() {
       </div>
 
       <p style={{ fontSize: 12, color: colors.muted, marginBottom: spacing[8] }}>
-        Exercise {position.exerciseIndex + 1} of {exercisesForSession.length} · Set {currentSetNumber} of {targetSets}
+        {isInSuperset(currentExercise)
+          ? `SUPERSET ${currentSupersetLabel} · Round ${currentSetNumber} of ${targetSets}`
+          : `Exercise ${position.exerciseIndex + 1} of ${exercisesForSession.length} · Set ${currentSetNumber} of ${targetSets}`}
       </p>
       <div
         style={{
@@ -1779,6 +1908,16 @@ export default function WorkoutPlayerPage() {
             <h2 style={{ fontSize: 22, fontWeight: 700, color: colors.text, margin: 0, lineHeight: 1.2 }}>
               {currentExercise.name}{isRecoveryVariation ? ' (Recovery variation)' : ''}
             </h2>
+            {showPreviousSession ? (
+              <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                Last session: {lastSessionDate ? new Date(lastSessionDate).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }) : 'No previous session for this exercise'}
+              </p>
+            ) : null}
+            {currentTempoParsed ? (
+              <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                Tempo: {currentExercise.tempo} ({currentTempoParsed.eccentric}s down, {currentTempoParsed.pause}s hold, {currentTempoParsed.concentric}s up)
+              </p>
+            ) : null}
             <p style={{ fontSize: 15, color: colors.muted, marginTop: spacing[8] }}>
               Target {targetSets} sets × {prescribedRepsLabel || prescribedRepsNum || '—'} reps
               {Number(currentExercise.rest_seconds) > 0 ? ` · ${currentExercise.rest_seconds}s rest` : ` · ${defaultRestSeconds}s rest`}
@@ -1850,6 +1989,37 @@ export default function WorkoutPlayerPage() {
               >
                 <p style={{ fontSize: 12, color: colors.muted, margin: 0, marginBottom: 4 }}>Coach notes</p>
                 <p style={{ fontSize: 14, color: colors.text, margin: 0 }}>{currentExercise.notes}</p>
+                {(() => {
+                  const edu = getPrepEducationEntry(currentExercise.prep_instruction_explanation_key);
+                  if (!edu) return null;
+                  const open = openPrepWhyExerciseId === currentExercise.id;
+                  return (
+                    <div style={{ marginTop: spacing[8] }}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenPrepWhyExerciseId(open ? null : currentExercise.id)}
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: colors.primary,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        Why?
+                      </button>
+                      {open ? (
+                        <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.textSecondary, lineHeight: 1.45 }}>
+                          <span style={{ fontWeight: 700, color: colors.text }}>{edu.title}</span>
+                          {' '}
+                          {edu.explanation}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1858,267 +2028,216 @@ export default function WorkoutPlayerPage() {
             )}
 
             <div style={{ marginTop: spacing[18] }}>
+              {isInSuperset(currentExercise) && currentSupersetPartner ? (
+                <div
+                  style={{
+                    marginBottom: spacing[10],
+                    borderRadius: radii.card,
+                    border: `1px solid ${colors.border}`,
+                    background: colors.surface2,
+                    padding: spacing[10],
+                    display: 'grid',
+                    gap: spacing[6],
+                  }}
+                >
+                  <p style={{ margin: 0, fontSize: 11, letterSpacing: '0.06em', fontWeight: 700, color: colors.warning }}>
+                    SUPERSET {currentSupersetLabel}
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing[8] }}>
+                    <div style={{ border: `1px solid ${colors.primary}`, borderRadius: 10, background: colors.primarySubtle, padding: spacing[8] }}>
+                      <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: colors.text }}>A1: {currentExercise.name}</p>
+                      <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.textSecondary }}>Active - log now</p>
+                    </div>
+                    <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, background: colors.surface1, padding: spacing[8], opacity: 0.7 }}>
+                      <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: colors.text }}>A2: {currentSupersetPartner.name}</p>
+                      <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>Complete A1 first.</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {currentExercise?.tempo ? (
+                <TempoMetronome
+                  tempo={currentExercise.tempo}
+                  isActive={tempoIsActive}
+                  onPhaseChange={(phase) => {
+                    if (phase === 'eccentric') void impactMedium();
+                    if (phase === 'concentric') void impactLight();
+                  }}
+                />
+              ) : null}
               <p style={{ fontSize: 12, color: colors.muted, fontWeight: 700, margin: `0 0 ${spacing[8]}px` }}>
-                {clientMode
-                  ? 'Sets — tap weight or reps to tweak, then tap the check to log (no separate save)'
-                  : personalPlaySetHint(personalBasicWorkout)}
+                {clientMode ? 'Coach target on the left, your log on the right.' : personalPlaySetHint(personalBasicWorkout)}
               </p>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '40px 1fr 1fr 52px',
-                  gap: spacing[6],
-                  alignItems: 'center',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: colors.muted,
-                  marginBottom: spacing[6],
+              <ExerciseSetLogger
+                exercise={currentExercise}
+                sessionId={sessionId}
+                sets={dedupedSessionSets}
+                warmupSets={warmupSets}
+                warmupDismissed={!!warmupDismissedMap[currentExercise?.id]}
+                completedWarmups={completedWarmups}
+                showPreviousSession={showPreviousSession}
+                viewerLoadUnit={viewerLoadUnit}
+                onWarmupDismiss={() => {
+                  if (currentExercise?.id) {
+                    setWarmupDismissedMap((prev) => ({ ...prev, [currentExercise.id]: true }));
+                  }
                 }}
-              >
-                <span>#</span>
-                <span style={{ textAlign: 'center' }}>{loadUnitShortLabel(viewerLoadUnit)}</span>
-                <span style={{ textAlign: 'center' }}>Reps</span>
-                <span style={{ textAlign: 'center' }}>Done</span>
-              </div>
-              <div style={{ display: 'grid', gap: spacing[8] }}>
-                {setRowsForExercise.map((row) => {
-                  const dk = makeWorkoutDraftKey(currentExercise.id, row.setNumber);
-                  const draft = setDrafts[dk] || { reps: '', weight: '' };
-                  const isActiveRow = row.setNumber === currentSetNumber && !row.completed;
-                  const canTapDone = isActiveRow && !restState.active && !completingSet;
-                  return (
-                    <motion.div
-                      key={row.setNumber}
-                      layout
-                      initial={false}
-                      transition={{ duration: 0.2 }}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '40px 1fr 1fr 52px',
-                        gap: spacing[6],
-                        alignItems: 'center',
-                        padding: `${spacing[8]}px ${spacing[6]}px`,
-                        borderRadius: radii.sm,
-                        border: `1px solid ${isActiveRow ? colors.primary : colors.border}`,
-                        background: isActiveRow
-                          ? colors.primarySubtle
-                          : row.completed
-                            ? colors.surface2
-                            : colors.surface1,
-                      }}
-                    >
-                      <span style={{ fontSize: 14, fontWeight: 700, color: colors.text }}>{row.setNumber}</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        disabled={row.completed}
-                        value={draft.weight}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setSetDrafts((cur) => ({
-                            ...cur,
-                            [dk]: { ...draft, weight: next },
-                          }));
-                        }}
-                        placeholder="—"
-                        aria-label={`Set ${row.setNumber} weight`}
-                        style={{
-                          padding: `${spacing[10]}px ${spacing[6]}px`,
-                          borderRadius: radii.sm,
-                          border: `1px solid ${colors.border}`,
-                          background: row.completed ? colors.surface2 : colors.surface2,
-                          color: colors.text,
-                          textAlign: 'center',
-                          fontSize: 16,
-                          fontWeight: 600,
-                          minHeight: touchTargetMin - 4,
-                        }}
-                      />
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        disabled={row.completed}
-                        value={draft.reps}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) => {
-                          const next = e.target.value.replace(/[^0-9]/g, '');
-                          setSetDrafts((cur) => ({
-                            ...cur,
-                            [dk]: { ...draft, reps: next },
-                          }));
-                        }}
-                        placeholder="—"
-                        aria-label={`Set ${row.setNumber} reps`}
-                        style={{
-                          padding: `${spacing[10]}px ${spacing[6]}px`,
-                          borderRadius: radii.sm,
-                          border: `1px solid ${colors.border}`,
-                          background: colors.surface2,
-                          color: colors.text,
-                          textAlign: 'center',
-                          fontSize: 16,
-                          fontWeight: 600,
-                          minHeight: touchTargetMin - 4,
-                        }}
-                      />
-                      <div style={{ display: 'flex', justifyContent: 'center' }}>
-                        {row.completed ? (
-                          <motion.span
-                            initial={{ scale: 0.85 }}
-                            animate={{ scale: 1 }}
-                            style={{ color: colors.primary }}
-                            aria-label="Set complete"
-                          >
-                            <CheckCircle2 size={26} strokeWidth={2.25} />
-                          </motion.span>
-                        ) : (
-                          <motion.button
-                            type="button"
-                            disabled={!canTapDone}
-                            onClick={onCompleteSet}
-                            whileTap={canTapDone ? { scale: 0.92 } : undefined}
-                            aria-label={`Complete set ${row.setNumber}`}
-                            style={{
-                              minWidth: 44,
-                              minHeight: 44,
-                              borderRadius: radii.button,
-                              border: `2px solid ${canTapDone ? colors.primary : colors.border}`,
-                              background: canTapDone ? colors.primarySubtle : colors.surface2,
-                              color: canTapDone ? colors.primary : colors.muted,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              cursor: canTapDone ? 'pointer' : 'not-allowed',
-                              opacity: canTapDone ? 1 : 0.45,
-                            }}
-                          >
-                            <CheckCircle2 size={22} strokeWidth={2} />
-                          </motion.button>
-                        )}
-                      </div>
-                    </motion.div>
+                onCompleteWarmup={(setNumber) => {
+                  if (!currentExercise?.id) return;
+                  hapticSuccess();
+                  setCompletedWarmups((prev) => ({
+                    ...prev,
+                    [`${currentExercise.id}_${setNumber}`]: true,
+                  }));
+                }}
+                previousExercisePerf={previousExercisePerf || {}}
+                onSetComplete={() => {
+                  queryClient.invalidateQueries({ queryKey: ['workout-session-sets', sessionId] });
+                  if (!isInSuperset(currentExercise)) {
+                    startRest(currentSetRow?.prescribed_rest_seconds ?? defaultRestSeconds);
+                    return;
+                  }
+                  const partner = getSupersetPartner(currentExercise);
+                  if (!partner) {
+                    startRest(currentSetRow?.prescribed_rest_seconds ?? defaultRestSeconds);
+                    return;
+                  }
+                  const partnerDoneThisRound = dedupedSessionSets.some(
+                    (s) => s.exercise_id === partner.id && Number(s.set_number) === Number(currentSetNumber) && s.completed,
                   );
-                })}
-              </div>
+                  if (partnerDoneThisRound) {
+                    startRest(currentSetRow?.prescribed_rest_seconds ?? defaultRestSeconds);
+                  } else {
+                    dismissRest();
+                  }
+                }}
+                onAllSetsComplete={() => {
+                  dismissRest();
+                }}
+              />
+              {setRowsForExercise.map((set) => (
+                <React.Fragment key={`set-load-suggestion-${currentExercise?.id || 'ex'}-${set.setNumber}`}>
+                  {isPersonal(effectiveRole) && getPersonalAutoAdjustmentsEnabled(user?.id) && set.completed && set.loadSuggestion?.suggested_weight != null && (
+                    <p style={{ margin: '2px 0 8px', fontSize: 11, color: 'rgba(148,163,184,0.8)', paddingLeft: 4 }}>
+                      Next session: try {set.loadSuggestion.suggested_weight}{viewerLoadUnit === 'lb' ? 'lb' : 'kg'} — {getTrainingAdjustmentWhySentence(set.loadSuggestion) || AUTO_ADJUSTMENT_EXPLANATION}
+                    </p>
+                  )}
+                  {isPersonal(effectiveRole) && getPersonalAutoAdjustmentsEnabled(user?.id) && set.completed && !set.loadSuggestion?.suggested_weight && set.loadSuggestion?.description && (
+                    <p style={{ margin: '2px 0 8px', fontSize: 11, color: 'rgba(148,163,184,0.8)', paddingLeft: 4 }}>
+                      {set.loadSuggestion.description}
+                    </p>
+                  )}
+                </React.Fragment>
+              ))}
+              {loadProgressionHint
+                && loadProgressionHint.exerciseId === currentExercise.id
+                && loadProgressionHint.targetSetNumber >= 1
+                && loadProgressionHint.targetSetNumber <= Math.max(1, Number(currentExercise.sets) || 1) ? (
+                  <button
+                    type="button"
+                    onClick={applyLoadProgressionHint}
+                    style={{
+                      marginTop: spacing[10],
+                      width: '100%',
+                      textAlign: 'left',
+                      borderRadius: radii.card,
+                      border: `1px solid ${
+                        loadProgressionHint.suggestion.type === 'increase'
+                          ? `${colors.success}99`
+                          : loadProgressionHint.suggestion.type === 'reduce'
+                            ? `${colors.warning}aa`
+                            : colors.border
+                      }`,
+                      background:
+                        loadProgressionHint.suggestion.type === 'increase'
+                          ? `${colors.success}18`
+                          : loadProgressionHint.suggestion.type === 'reduce'
+                            ? `${colors.warning}14`
+                            : colors.surface2,
+                      padding: `${spacing[10]}px ${spacing[12]}px`,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>
+                      {loadProgressionHint.suggestion.headline}
+                    </p>
+                    {loadProgressionHint.suggestion.detail ? (
+                      <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.4 }}>
+                        {loadProgressionHint.suggestion.detail}
+                      </p>
+                    ) : null}
+                    <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 11, fontWeight: 700, color: colors.primary }}>
+                      Tap to pre-fill set {loadProgressionHint.targetSetNumber} weight · override anytime
+                    </p>
+                  </button>
+                ) : null}
             </div>
           </Card>
         </motion.div>
       </AnimatePresence>
 
-      <AnimatePresence>
-        {restState.active && (
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 16 }}
-            style={{
-              marginTop: spacing[16],
-              padding: spacing[16],
-              borderRadius: radii.card,
-              border: `1px solid ${colors.border}`,
-              background: colors.surface1,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[10] }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: colors.text }}>
-                <Timer size={18} /> Rest
-              </span>
-              <span style={{ fontSize: 28, fontWeight: 800, color: colors.primary }}>{formatClock(restState.remaining)}</span>
-            </div>
-            {!restState.showStartNext && restState.remaining > 0 && (
-              <div style={{ height: 8, borderRadius: 4, overflow: 'hidden', background: colors.surface2, marginBottom: spacing[12] }}>
-                <motion.div
-                  initial={false}
-                  animate={{ width: `${restElapsedPct}%` }}
-                  transition={{ duration: 0.35, ease: 'linear' }}
-                  style={{
-                    height: '100%',
-                    background: colors.primary,
-                  }}
-                />
-              </div>
-            )}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing[8] }}>
-              <button
-                type="button"
-                onClick={skipRest}
-                style={{
-                  flex: 1,
-                  minWidth: 90,
-                  minHeight: touchTargetMin,
-                  borderRadius: radii.button,
-                  border: `1px solid ${colors.border}`,
-                  background: colors.surface2,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                <SkipForward size={16} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-                Skip
-              </button>
-              <button
-                type="button"
-                onClick={addRest15}
-                style={{
-                  flex: 1,
-                  minWidth: 90,
-                  minHeight: touchTargetMin,
-                  borderRadius: radii.button,
-                  border: `1px solid ${colors.border}`,
-                  background: colors.surface2,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                +15s
-              </button>
-              <button
-                type="button"
-                onClick={togglePauseRest}
-                style={{
-                  flex: 1,
-                  minWidth: 90,
-                  minHeight: touchTargetMin,
-                  borderRadius: radii.button,
-                  border: `1px solid ${colors.border}`,
-                  background: colors.surface2,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {restState.paused ? <Play size={16} style={{ verticalAlign: 'middle' }} /> : <Pause size={16} style={{ verticalAlign: 'middle' }} />}
-                {restState.paused ? ' Resume' : ' Pause'}
-              </button>
-            </div>
-            {restState.showStartNext && (
-              <button
-                type="button"
-                onClick={dismissRest}
-                style={{
-                  width: '100%',
-                  marginTop: spacing[12],
-                  minHeight: touchTargetMin + 4,
-                  borderRadius: radii.button,
-                  background: colors.primary,
-                  color: '#fff',
-                  border: 'none',
-                  fontWeight: 700,
-                  fontSize: 16,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                }}
-              >
-                Start next set
-                <ChevronRight size={18} />
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <WorkoutRestTimer
+        active={restState.active}
+        restSeconds={restState.remaining}
+        onSkip={skipRest}
+        nextSetPreview={restState.showStartNext ? 'Ready for the next set' : null}
+        paused={restState.paused}
+        showStartNext={restState.showStartNext}
+        elapsedPct={restElapsedPct}
+        onAdd15={addRest15}
+        onTogglePause={togglePauseRest}
+        onStartNext={dismissRest}
+      />
+      {achievementRecord ? (
+        <AchievementUnlockedModal
+          record={achievementRecord}
+          onClose={() => setAchievementRecord(null)}
+          coachName={coachAchievementProfile?.display_name}
+          coachMilestoneNote={coachAchievementProfile?.milestone_client_celebration_note}
+          coachReferralLink={getCoachReferralLink(coachAchievementProfile)}
+          clientFirstName={profile?.name || profile?.full_name}
+          clientId={clientId}
+        />
+      ) : null}
+      {firstSessionCelebration ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 60,
+            padding: spacing[16],
+          }}
+        >
+          <Card style={{ maxWidth: 420, width: '100%', padding: spacing[18], border: `1px solid ${colors.primary}` }}>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: colors.text }}>
+              🎯 First session done
+            </p>
+            <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 14, color: colors.muted, lineHeight: 1.45 }}>
+              {`${firstSessionCelebration.exercises} exercises, ${firstSessionCelebration.sets} sets, ${firstSessionCelebration.minutes || 1} minutes. Your progress tracking starts now.`}
+            </p>
+            <button
+              type="button"
+              onClick={() => setFirstSessionCelebration(null)}
+              style={{
+                marginTop: spacing[14],
+                width: '100%',
+                minHeight: touchTargetMin,
+                border: 'none',
+                borderRadius: radii.button,
+                background: colors.primary,
+                color: '#fff',
+                fontWeight: 700,
+              }}
+            >
+              Continue
+            </button>
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 }

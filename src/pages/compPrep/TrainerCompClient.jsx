@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getClientById, getClientCheckIns } from '@/data/selectors';
+import { useQuery } from '@tanstack/react-query';
+import { useData } from '@/data/useData';
 import {
   getClientCompProfile,
   upsertClientCompProfile,
@@ -17,6 +18,7 @@ import Button from '@/ui/Button';
 import HealthBreakdownSheet from '@/components/health/HealthBreakdownSheet';
 import { getPhaseAwareHealthResult } from '@/lib/intelligence/healthScoreEngineBridge';
 import { colors, spacing } from '@/ui/tokens';
+import { toPoseLibraryDivisionTags } from '@/lib/compPrep/poseSets';
 
 async function lightHaptic() {
   try {
@@ -33,7 +35,21 @@ const PHASES = ['OFFSEASON', 'PREP', 'PEAK_WEEK', 'SHOW_DAY', 'POST_SHOW'];
 export default function TrainerCompClient() {
   const { id: clientId } = useParams();
   const navigate = useNavigate();
-  const client = useMemo(() => (clientId ? getClientById(clientId) : null), [clientId]);
+  const data = useData();
+  const { data: client = null, isLoading: clientLoading } = useQuery({
+    queryKey: ['comp-client', clientId],
+    queryFn: () => (clientId ? data.getClient(clientId) : Promise.resolve(null)),
+    enabled: Boolean(clientId),
+  });
+  const { data: checkIns = [] } = useQuery({
+    queryKey: ['comp-client-checkins', clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
+      const list = await data.listCheckInsForClient(clientId);
+      return Array.isArray(list) ? list.slice(0, 5) : [];
+    },
+    enabled: Boolean(clientId),
+  });
   const profile = useMemo(() => (clientId ? getClientCompProfile(clientId) : null), [clientId]);
   const mediaList = useMemo(() => (clientId ? listMedia(clientId) : []), [clientId]);
   const allPoses = useMemo(() => getAllPoses(), []);
@@ -48,7 +64,6 @@ export default function TrainerCompClient() {
   const [reviewComment, setReviewComment] = useState('');
   const [healthSheetOpen, setHealthSheetOpen] = useState(false);
 
-  const checkIns = useMemo(() => (clientId ? getClientCheckIns(clientId) : []), [clientId]);
   const healthResult = useMemo(
     () => (client && clientId ? getPhaseAwareHealthResult(client, checkIns) : null),
     [clientId, client, checkIns]
@@ -58,7 +73,10 @@ export default function TrainerCompClient() {
 
   const mandatoryPosesForDivision = useMemo(() => {
     if (!division) return [];
-    return allPoses.filter((p) => p.divisions.includes(division) && p.isMandatory);
+    const divisionTags = toPoseLibraryDivisionTags(division);
+    return allPoses.filter(
+      (p) => p.isMandatory && divisionTags.some((t) => p.divisions.includes(t))
+    );
   }, [division, allPoses]);
 
   const submittedPoseIds = useMemo(() => new Set(mediaList.filter((m) => m.poseId).map((m) => m.poseId)), [mediaList]);
@@ -106,6 +124,14 @@ export default function TrainerCompClient() {
     impactLight();
     toast.success('Request sent. (Inbox task hook coming later.)');
   };
+
+  if (clientLoading) {
+    return (
+      <div className="app-screen p-4" style={{ background: colors.bg, color: colors.muted }}>
+        <p>Loading client…</p>
+      </div>
+    );
+  }
 
   if (!client) {
     return (

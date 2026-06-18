@@ -3,8 +3,10 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { getClientByUserId } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getSandboxClientByUserId } from '@/lib/linkedClientFromUserId';
 import { getClientGym, setClientGym, EQUIPMENT_LABELS } from '@/lib/gymEquipmentStore';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
@@ -15,9 +17,26 @@ import { toast } from 'sonner';
 export default function ClientEquipment() {
   const navigate = useNavigate();
   const { user, isDemoMode } = useAuth();
+  const supabase = getSupabase();
   const userId = isDemoMode ? 'demo-client' : user?.id ?? null;
-  const client = userId ? getClientByUserId(userId) : null;
-  const clientId = client?.id ?? null;
+
+  const { data: linkedClient } = useQuery({
+    queryKey: ['client-by-user', userId],
+    queryFn: async () => {
+      if (!userId) return null;
+      if (supabase) {
+        const { data, error } = await supabase.from('clients').select('id').eq('user_id', userId).maybeSingle();
+        if (error) return null;
+        return data;
+      }
+      const c = getSandboxClientByUserId(userId);
+      return c?.id ? { id: c.id } : null;
+    },
+    enabled: !!userId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const clientId = linkedClient?.id ?? null;
 
   const [gymName, setGymName] = useState('');
   const [rack, setRack] = useState(false);

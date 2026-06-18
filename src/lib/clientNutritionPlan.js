@@ -11,7 +11,9 @@ export async function getClientNutritionSnapshot(clientId) {
 
   const { data: plans, error: plansError } = await supabase
     .from('nutrition_plans')
-    .select('id, client_id, calories, protein, carbs, fats, phase, notes, is_active, created_at')
+    .select(
+      'id, client_id, calories, protein, carbs, fats, phase, notes, is_active, created_at, diet_type, prep_instruction_explanation_key, intake_metrics',
+    )
     .eq('client_id', clientId)
     .order('created_at', { ascending: false });
   if (plansError || !Array.isArray(plans) || plans.length === 0) return null;
@@ -60,6 +62,14 @@ export async function getClientNutritionSnapshot(clientId) {
       ? Math.round((Number(resolvedProtein) * 4) + (Number(resolvedCarbs) * 4) + (Number(resolvedFats) * 9))
       : calories;
 
+  const im = plan?.intake_metrics && typeof plan.intake_metrics === 'object' ? plan.intake_metrics : {};
+  const weekCoachInstructions = Array.isArray(im.nutrition_week_instructions)
+    ? im.nutrition_week_instructions.map((x) => String(x).trim()).filter(Boolean)
+    : [];
+  const supplementRecommendations = Array.isArray(im.supplement_recommendations)
+    ? im.supplement_recommendations.map((x) => String(x).trim()).filter(Boolean)
+    : [];
+
   return {
     ...plan,
     phase: latestWeek?.phase ?? plan.phase ?? null,
@@ -69,6 +79,9 @@ export async function getClientNutritionSnapshot(clientId) {
     carbs: resolvedCarbs,
     fats: resolvedFats,
     peak_week_override: Boolean(peakWeekOverride),
+    prep_instruction_explanation_key: plan.prep_instruction_explanation_key ?? null,
+    week_coach_instructions: weekCoachInstructions,
+    supplement_recommendations: supplementRecommendations,
     // Compatibility aliases used by existing cards.
     calorie_target: resolvedCalories,
     protein_g: resolvedProtein,

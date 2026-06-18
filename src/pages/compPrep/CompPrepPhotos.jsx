@@ -1,7 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Plus, ImageIcon } from 'lucide-react';
-import { getClientById, getClientPhotos } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
+import * as sandbox from '@/lib/sandboxStore';
+import { getClientPhotosOverride } from '@/lib/compPrepStore';
 import { addClientPhoto } from '@/lib/compPrepStore';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
@@ -16,8 +19,39 @@ export default function CompPrepPhotos() {
   const { clientId } = useParams();
   const navigate = useNavigate();
   const [refresh, setRefresh] = useState(0);
-  const client = useMemo(() => (clientId ? getClientById(clientId) : null), [clientId]);
-  const photos = useMemo(() => (clientId ? getClientPhotos(clientId) : []), [clientId, refresh]);
+  const supabase = getSupabase();
+
+  const { data: client = null, isLoading: clientLoading } = useQuery({
+    queryKey: ['comp-client', clientId],
+    queryFn: async () => {
+      if (!clientId) return null;
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name, user_id, coach_id, trainer_id')
+          .eq('id', clientId)
+          .maybeSingle();
+        if (error) return null;
+        if (!data) return null;
+        return { ...data, full_name: data.name ?? data.full_name };
+      }
+      const c = sandbox.getClientById(clientId);
+      if (!c) return null;
+      return { ...c, full_name: c.full_name ?? c.name };
+    },
+    enabled: !!clientId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const { data: photos = [] } = useQuery({
+    queryKey: ['comp-photos', clientId, refresh],
+    queryFn: () => {
+      const list = getClientPhotosOverride(clientId);
+      return Array.isArray(list) ? list : [];
+    },
+    enabled: !!clientId,
+    staleTime: 0,
+  });
 
   const [filterType, setFilterType] = useState('');
   const [compareIds, setCompareIds] = useState([]);
@@ -42,9 +76,17 @@ export default function CompPrepPhotos() {
   const handleAddPhoto = () => {
     if (!clientId) return;
     const url = 'https://placehold.co/400x600/1e293b/94a3b8?text=Photo';
-    addClientPhoto(clientId, { type: 'checkin', image_url: url, notes: '' }, () => getClientPhotos(clientId));
+    addClientPhoto(clientId, { type: 'checkin', image_url: url, notes: '' }, () => getClientPhotosOverride(clientId) ?? []);
     setRefresh((r) => r + 1);
   };
+
+  if (clientLoading) {
+    return (
+      <div className="app-screen p-4" style={{ background: colors.bg, color: colors.muted }}>
+        <p>Loading…</p>
+      </div>
+    );
+  }
 
   if (!client) {
     return (

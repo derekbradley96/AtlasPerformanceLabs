@@ -18,16 +18,27 @@ export function normalizeClientJourneyType(client) {
 }
 
 /**
+ * Prep athlete: active contest prep row (authoritative). Supports DB `is_active` or legacy `status === 'active'`.
+ * @param {Record<string, unknown> | null | undefined} client
+ */
+export function isPrepAthleteFromRow(client) {
+  const arr = client?.contest_preps;
+  if (Array.isArray(arr)) {
+    return arr.some((p) => p?.is_active === true || String(p?.status || '').toLowerCase() === 'active');
+  }
+  const raw = String(client?.client_type ?? '').toLowerCase().trim();
+  const hasShow = Boolean(client?.show_date ?? client?.showDate);
+  if (raw === 'competition' || hasShow) return true;
+  return false;
+}
+
+/**
  * Two-lane bucket for integrated coach UI: "prep" vs "lifestyle".
  * @param {Record<string, unknown> | null | undefined} client
  * @returns {'prep' | 'lifestyle'}
  */
 export function journeyRosterBucket(client) {
-  const raw = String(client?.client_type ?? '')
-    .toLowerCase()
-    .trim();
-  const hasShow = Boolean(client?.show_date ?? client?.showDate);
-  if (raw === 'competition' || hasShow) return 'prep';
+  if (isPrepAthleteFromRow(client)) return 'prep';
   return 'lifestyle';
 }
 

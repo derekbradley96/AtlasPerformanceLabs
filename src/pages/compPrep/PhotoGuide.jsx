@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { Camera, Sun, Ruler, Clock, User, Sparkles } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
-import { getClientByUserId } from '@/data/selectors';
+import { useQuery } from '@tanstack/react-query';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getSandboxClientByUserId } from '@/lib/linkedClientFromUserId';
 import { getClientCompProfile } from '@/lib/repos/compPrepRepo';
 import { getPhotoGuideUnderstood, setPhotoGuideUnderstood } from '@/lib/repos/compPrepRepo';
 import { impactLight, notificationSuccess } from '@/lib/haptics';
@@ -78,13 +80,26 @@ const SECTIONS = [
 
 export default function PhotoGuide() {
   const { user, role } = useAuth();
+  const supabase = getSupabase();
   const userId = user?.id ?? '';
 
-  const clientId = useMemo(() => {
-    if (role !== 'client' || !user?.id) return null;
-    const c = getClientByUserId(user.id);
-    return c?.id ?? null;
-  }, [role, user?.id]);
+  const { data: linkedClient } = useQuery({
+    queryKey: ['client-by-user', userId],
+    queryFn: async () => {
+      if (!userId) return null;
+      if (supabase) {
+        const { data, error } = await supabase.from('clients').select('id, name').eq('user_id', userId).maybeSingle();
+        if (error) return null;
+        return data;
+      }
+      const c = getSandboxClientByUserId(userId);
+      return c?.id ? { id: c.id, name: c.full_name ?? c.name } : null;
+    },
+    enabled: role === 'client' && !!userId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const clientId = role === 'client' && userId ? linkedClient?.id ?? null : null;
   const profile = useMemo(() => (clientId ? getClientCompProfile(clientId) : null), [clientId]);
   const currentPhase = profile?.prepPhase ?? null;
 

@@ -21,6 +21,15 @@ import { getPendingInvite, clearPendingInvite, setPendingInvite } from '@/pages/
 import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { deriveAuthScreenSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { resolvePostSessionDestination } from '@/lib/auth/postAuthNavigation';
+import { resolveContinueFromPublicAuth } from '@/lib/auth/postAuthNavigation';
+import {
+  authenticateWithBiometric,
+  checkBiometricAvailability,
+  disableBiometric,
+  getBiometricEmail,
+  isBiometricEnabled,
+} from '@/lib/biometricAuth';
+import { AFFILIATE_REF_SESSION_KEY } from '@/lib/affiliateProgramme';
 
 const ATLAS_BLUE = colors.brand;
 
@@ -73,7 +82,21 @@ const SIGNUP_STAGE = /** @type {const} */ ({
 export default function AuthScreen() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { signIn, signUp, isLoadingAuth, supabaseUser, profile, role, isHydratingAppState, profileLoadError, logout } = useAuth();
+  const {
+    signIn,
+    signInWithProvider,
+    signUp,
+    isLoadingAuth,
+    supabaseUser,
+    profile,
+    role,
+    isHydratingAppState,
+    profileLoadError,
+    signOut,
+    showBiometricSetupPrompt,
+    enableBiometricSetup,
+    dismissBiometricSetup,
+  } = useAuth();
   const paramMode = searchParams.get('mode');
   const paramAccount = searchParams.get('account');
   /** From marketing links: keep user on email/password screen (do not auto-route to onboarding). */
@@ -98,6 +121,17 @@ export default function AuthScreen() {
   const referralCodeFromUrl = (searchParams.get('ref') ?? '').trim() || null;
   const inviteCodeFromUrl = (searchParams.get('invite') ?? '').trim();
 
+  /** Gym/studio affiliate programme: `aff` wins over `ref` when both present (coach referrals also use `ref`). */
+  useEffect(() => {
+    if (typeof sessionStorage === 'undefined') return;
+    const aff = (searchParams.get('aff') ?? '').trim();
+    const ref = (searchParams.get('ref') ?? '').trim();
+    const affiliateCode = aff || ref;
+    if (affiliateCode) {
+      sessionStorage.setItem(AFFILIATE_REF_SESSION_KEY, affiliateCode);
+    }
+  }, [searchParams]);
+
   const [coachCode, setCoachCode] = useState('');
   const [codeLoading, setCodeLoading] = useState(false);
   const [codeError, setCodeError] = useState('');
@@ -109,13 +143,25 @@ export default function AuthScreen() {
   const [errorVisible, setErrorVisible] = useState(false);
   const [postAuthRouting, setPostAuthRouting] = useState(false);
   const [accountSwitchBusy, setAccountSwitchBusy] = useState(false);
+  const [biometricType, setBiometricType] = useState(null);
+  const publicEntryResetAttemptedRef = useRef(false);
+  const authSubmitStartedRef = useRef(false);
 
   const isLogin = mode === 'login';
+  const isNativePlatform = Capacitor?.isNativePlatform?.() ?? false;
 
   useEffect(() => {
     if (paramMode === 'signup') setMode('signup');
     else if (paramMode === 'login') setMode('login');
   }, [paramMode]);
+
+  /** Fresh login entry should never inherit a stale client invite/onboarding redirect from prior attempts. */
+  useEffect(() => {
+    if (mode !== 'login') return;
+    clearPendingInvite();
+    setCoachCode('');
+    setCodeError('');
+  }, [mode]);
 
   /** URL deep links: /auth?mode=signup&account=client — code first unless already validated */
   useEffect(() => {
@@ -156,6 +202,7 @@ export default function AuthScreen() {
       setCodeLoading(true);
       setCodeError('');
       try {
+        // TODO: This Edge Function may not be deployed — verify or replace with direct Supabase query
         const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
         if (cancelled) return;
         if (result.error || !result.data?.valid) {
@@ -210,7 +257,7 @@ export default function AuthScreen() {
       profile,
       role,
       profileLoadError,
-      isPublicAuthEntry: false,
+      isPublicAuthEntry,
       getPendingInvite,
     });
     if (!dest) return;
@@ -225,8 +272,31 @@ export default function AuthScreen() {
     isLoadingAuth,
     isHydratingAppState,
     profileLoadError,
+    isPublicAuthEntry,
     navigate,
   ]);
+
+  /**
+   * Public auth entry from marketing should behave like a fresh browser login.
+   * If a session exists, proactively sign out once so the form can load cleanly.
+   */
+  useEffect(() => {
+    if (!isPublicAuthEntry) {
+      publicEntryResetAttemptedRef.current = false;
+      authSubmitStartedRef.current = false;
+      return;
+    }
+    if (!supabaseUser?.id) return;
+    if (authSubmitStartedRef.current) return;
+    if (publicEntryResetAttemptedRef.current) return;
+    publicEntryResetAttemptedRef.current = true;
+    setAccountSwitchBusy(true);
+    setError('');
+    clearPendingInvite();
+    Promise.resolve(signOut(LOGIN_PUBLIC_PATH)).finally(() => {
+      setAccountSwitchBusy(false);
+    });
+  }, [isPublicAuthEntry, supabaseUser?.id, signOut]);
 
   useEffect(() => {
     if (error) setErrorVisible(true);
@@ -238,6 +308,17 @@ export default function AuthScreen() {
       setSignupStage(SIGNUP_STAGE.PICK_ROLE);
     }
   }, [isLogin, signupStage]);
+
+  useEffect(() => {
+    if (!isLogin || !isBiometricEnabled()) {
+      setBiometricType(null);
+      return;
+    }
+    checkBiometricAvailability().then((r) => {
+      if (r?.isAvailable) setBiometricType(r.biometryType || 'faceId');
+      else setBiometricType(null);
+    });
+  }, [isLogin]);
 
   /** Focus email when landing on account step */
   useEffect(() => {
@@ -285,7 +366,7 @@ export default function AuthScreen() {
       setAccountSwitchBusy(true);
       setError('');
       try {
-        await logout(false);
+        await signOut();
       } catch (_) {
         /* ignore */
       } finally {
@@ -344,6 +425,7 @@ export default function AuthScreen() {
     await lightHaptic();
     setCodeLoading(true);
     try {
+      // TODO: This Edge Function may not be deployed — verify or replace with direct Supabase query
       const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
       if (result.error || !result.data?.valid) {
         const msg = result.data?.error || result.error || 'Invalid coach code';
@@ -366,6 +448,7 @@ export default function AuthScreen() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    authSubmitStartedRef.current = true;
     if (!isLogin && signupStage !== SIGNUP_STAGE.ACCOUNT) return;
 
     setError('');
@@ -413,6 +496,9 @@ export default function AuthScreen() {
       }
       if (isLogin) {
         toast.success('Signed in');
+        if (isPublicAuthEntry) {
+          navigate('/auth?mode=login', { replace: true });
+        }
         return;
       }
       if (result?.data?.session) {
@@ -435,6 +521,20 @@ export default function AuthScreen() {
       setLoading(false);
     }
   };
+
+  async function handleBiometricLogin() {
+    const biometricEmail = getBiometricEmail();
+    if (!biometricEmail) {
+      disableBiometric();
+      setBiometricType(null);
+      return;
+    }
+    const result = await authenticateWithBiometric('Sign in to your Atlas account');
+    if (!result.success) return;
+    setEmail(biometricEmail);
+    passwordRef.current?.focus();
+    toast.success('Identity confirmed — enter your password');
+  }
 
   const goToClientSignup = useCallback(async () => {
     await lightHaptic();
@@ -531,37 +631,12 @@ export default function AuthScreen() {
     );
   }
 
-  if (isPublicAuthEntry && supabaseUser) {
-    if (isHydratingAppState || isLoadingAuth || accountSwitchBusy) {
-      const m = deriveAuthScreenSurfaceState({ isLogin, signupStage: SIGNUP_STAGE.PICK_ROLE });
-      return (
-        <div
-          className="min-h-screen flex flex-col items-center justify-center p-6"
-          {...atlasMigrationDataAttributes(m.phase, m.primary)}
-          style={{
-            background: colors.bg,
-            paddingTop: 'max(env(safe-area-inset-top), 24px)',
-            paddingBottom: 'max(env(safe-area-inset-bottom), 24px)',
-          }}
-        >
-          <AtlasLogo variant="auth" />
-          <p className="mt-6 text-sm font-medium" style={{ color: colors.muted }}>
-            {accountSwitchBusy ? 'Switching account…' : 'Loading session…'}
-          </p>
-          <div
-            className="mt-4 rounded-full border-2 border-white/20 border-t-white"
-            style={{ width: 24, height: 24, animation: 'spin 0.7s linear infinite' }}
-            aria-hidden
-          />
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
-      );
-    }
-    const sm = deriveAuthScreenSurfaceState({ isLogin: true, signupStage: SIGNUP_STAGE.PICK_ROLE });
+  if (isPublicAuthEntry && (isHydratingAppState || isLoadingAuth || accountSwitchBusy)) {
+    const m = deriveAuthScreenSurfaceState({ isLogin, signupStage: SIGNUP_STAGE.PICK_ROLE });
     return (
       <div
         className="min-h-screen flex flex-col items-center justify-center p-6"
-        {...atlasMigrationDataAttributes(sm.phase, sm.primary)}
+        {...atlasMigrationDataAttributes(m.phase, m.primary)}
         style={{
           background: colors.bg,
           paddingTop: 'max(env(safe-area-inset-top), 24px)',
@@ -569,29 +644,14 @@ export default function AuthScreen() {
         }}
       >
         <AtlasLogo variant="auth" />
-        <p className="mt-6 text-center text-base font-semibold" style={{ color: colors.text }}>
-          Taking you in…
-        </p>
-        <p className="mt-2 text-center text-sm max-w-xs" style={{ color: colors.muted }}>
-          Redirecting to onboarding or your home screen.
+        <p className="mt-6 text-sm font-medium" style={{ color: colors.muted }}>
+          {accountSwitchBusy ? 'Switching account…' : 'Loading session…'}
         </p>
         <div
-          className="mt-6 rounded-full border-2 border-white/20 border-t-white"
-          style={{ width: 28, height: 28, animation: 'spin 0.7s linear infinite' }}
+          className="mt-4 rounded-full border-2 border-white/20 border-t-white"
+          style={{ width: 24, height: 24, animation: 'spin 0.7s linear infinite' }}
           aria-hidden
         />
-        <button
-          type="button"
-          className="mt-8 text-sm font-medium underline-offset-2"
-          style={{ color: colors.muted, background: 'none', border: 'none' }}
-          onClick={async () => {
-            await lightHaptic();
-            await logout(false);
-            navigate(LOGIN_PUBLIC_PATH, { replace: true });
-          }}
-        >
-          Use a different account
-        </button>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
@@ -695,6 +755,126 @@ export default function AuthScreen() {
         >
           {isLogin && (
             <form onSubmit={handleSubmit}>
+              {biometricType && isBiometricEnabled() ? (
+                <button
+                  type="button"
+                  onClick={handleBiometricLogin}
+                  style={{
+                    width: '100%',
+                    height: 52,
+                    borderRadius: radii.lg,
+                    border: `1px solid ${colors.border}`,
+                    background: colors.surface1,
+                    color: colors.text,
+                    fontSize: 15,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: spacing[10],
+                    marginBottom: spacing[16],
+                  }}
+                >
+                  <span style={{ fontSize: 22 }}>
+                    {biometricType === 'faceId' ? '🔒' : '👆'}
+                  </span>
+                  Sign in with {biometricType === 'faceId'
+                    ? 'Face ID' : 'Touch ID'}
+                </button>
+              ) : null}
+
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: spacing[8],
+                  marginBottom: spacing[16],
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await signInWithProvider('google');
+                    } catch (e) {
+                      if (import.meta.env.DEV) console.warn('[Auth] Google OAuth', e);
+                      toast.error('Could not sign in with Google — try email instead');
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    height: 48,
+                    borderRadius: radii.lg,
+                    border: `1px solid ${colors.border}`,
+                    background: colors.surface1,
+                    color: colors.text,
+                    fontSize: 15,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: spacing[10],
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+                    <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
+                    <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853" />
+                    <path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05" />
+                    <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335" />
+                  </svg>
+                  Continue with Google
+                </button>
+
+                {(isNativePlatform || /iPhone|iPad|iPod|Mac/.test(navigator.userAgent || '')) ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await signInWithProvider('apple');
+                      } catch (e) {
+                        if (import.meta.env.DEV) console.warn('[Auth] Apple OAuth', e);
+                        toast.error('Could not sign in with Apple — try email instead');
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      height: 48,
+                      borderRadius: radii.lg,
+                      border: `1px solid ${colors.border}`,
+                      background: colors.surface1,
+                      color: colors.text,
+                      fontSize: 15,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: spacing[10],
+                    }}
+                  >
+                    <svg width="16" height="18" viewBox="0 0 814 1000" aria-hidden>
+                      <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 405.4 10.4 300.5 10.4 219c0-232.3 149.5-355.3 296.6-355.3 79.8 0 146.3 52.6 196.3 52.6 48 0 123.3-55.4 213.8-55.4 34.2 0 142.5 3.2 214.8 138.9zm-175-133.2c-25.9 36.2-73.9 62.8-117.2 62.8-3.2 0-6.4-.3-9.6-.7 0-68.5 44.4-133.4 75.3-162.7 35.8-33.5 91.8-59.8 139.5-62.2.6 4.5.9 9 .9 12.8 0 64.2-41.6 132.1-88.9 150z" fill="currentColor" />
+                    </svg>
+                    Continue with Apple
+                  </button>
+                ) : null}
+
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: spacing[10],
+                    margin: `${spacing[4]}px 0`,
+                  }}
+                >
+                  <div style={{ flex: 1, height: 1, background: colors.border }} />
+                  <span style={{ fontSize: 12, color: colors.muted }}>or</span>
+                  <div style={{ flex: 1, height: 1, background: colors.border }} />
+                </div>
+              </div>
+
               <label htmlFor="auth-email-input" className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>
                 Email
               </label>
@@ -1079,6 +1259,64 @@ export default function AuthScreen() {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
+      {isLogin && showBiometricSetupPrompt ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: colors.overlay,
+            zIndex: 80,
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'center',
+            padding: spacing[12],
+          }}
+        >
+          <Card style={{ width: '100%', maxWidth: 560, padding: spacing[16] }}>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: colors.text }}>
+              Use Face ID next time?
+            </p>
+            <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 14, color: colors.muted }}>
+              Sign in instantly without typing your password.
+            </p>
+            <div style={{ display: 'grid', gap: spacing[10], marginTop: spacing[14] }}>
+              <button
+                type="button"
+                onClick={() => {
+                  enableBiometricSetup(email || supabaseUser?.email || '');
+                  toast.success('Biometric sign-in enabled');
+                }}
+                style={{
+                  minHeight: touchTargetMin,
+                  borderRadius: radii.button,
+                  border: 'none',
+                  background: colors.primary,
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: 15,
+                }}
+              >
+                Enable Face ID
+              </button>
+              <button
+                type="button"
+                onClick={dismissBiometricSetup}
+                style={{
+                  minHeight: touchTargetMin,
+                  borderRadius: radii.button,
+                  border: `1px solid ${colors.border}`,
+                  background: colors.surface1,
+                  color: colors.muted,
+                  fontWeight: 600,
+                  fontSize: 13,
+                }}
+              >
+                Not now
+              </button>
+            </div>
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -6,7 +6,8 @@ import { getRetentionStreaks } from '@/lib/retentionHabitService';
 import { fetchMergedPersonalNutritionTargets } from '@/lib/personalNutritionProfile';
 import { computeNutrition7DaySignals, fetchPersonalTrainingSignals } from '@/lib/personalAdaptationSignals';
 import { getLocalDateKey } from '@/lib/readinessCheckinApi';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
+import { listMealLogs } from '@/lib/mealLogsService';
 
 function clampPct(n) {
   if (n == null || !Number.isFinite(Number(n))) return null;
@@ -106,10 +107,11 @@ export async function fetchWeeklyAutoAdherencePersonal(profileId) {
   };
 }
 
-async function fetchClientMealsForDay(userId, mealDate) {
+async function fetchClientMealsForDay(clientId, mealDate) {
   try {
-    const { data } = await invokeSupabaseFunction('meal-log-list', { user_id: userId, meal_date: mealDate });
-    return Array.isArray(data) ? data : [];
+    const supabase = getSupabase();
+    if (!supabase || !clientId) return [];
+    return await listMealLogs({ supabase, clientId, logDate: mealDate });
   } catch {
     return [];
   }
@@ -163,7 +165,7 @@ export async function fetchWeeklyAutoAdherenceClient({ userId, profileId, nutrit
   const dates = [];
   for (let i = 0; i < 7; i += 1) dates.push(addDaysISO(anchor, -i));
 
-  const mealsByDay = await Promise.all(dates.map((d) => fetchClientMealsForDay(userId, d)));
+  const mealsByDay = await Promise.all(dates.map((d) => fetchClientMealsForDay(profileId, d)));
 
   mealsByDay.forEach((meals) => {
     if (meals.length > 0) daysWithLog += 1;

@@ -1,8 +1,10 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { getClientById, getClientCheckIns } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
+import * as sandbox from '@/lib/sandboxStore';
 import { safeDate } from '@/lib/format';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
@@ -25,15 +27,110 @@ function formatShortDate(iso) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function getMissingColumnNameFromError(error) {
+  const message = String(error?.message || '');
+  const m1 = message.match(/Could not find the ['"]([a-zA-Z0-9_]+)['"] column/i);
+  if (m1?.[1]) return m1[1];
+  const m2 = message.match(/column\s+["']?([a-zA-Z0-9_.]+)["']?/i);
+  if (m2?.[1]) {
+    const parts = m2[1].split('.');
+    return parts[parts.length - 1] || null;
+  }
+  return null;
+}
+
 export default function ClientCheckInDetail() {
   const { id: clientId, checkinId } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
   const viewerWU = resolveViewerBodyweightUnit(profile);
-  const client = clientId ? getClientById(clientId) : null;
-  const checkInsListRaw = clientId ? getClientCheckIns(clientId) : [];
+  const supabase = getSupabase();
+
+  const { data: client = null, isLoading: clientLoading } = useQuery({
+    queryKey: ['comp-client', clientId],
+    queryFn: async () => {
+      if (!clientId) return null;
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name, user_id, coach_id, trainer_id')
+          .eq('id', clientId)
+          .maybeSingle();
+        if (error || !data) return null;
+        return { ...data, full_name: data.name ?? data.full_name };
+      }
+      const c = sandbox.getClientById(clientId);
+      return c ? { ...c, full_name: c.full_name ?? c.name } : null;
+    },
+    enabled: !!clientId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const { data: checkInsListRaw = [], isLoading: checkinsLoading } = useQuery({
+    queryKey: ['comp-checkins', clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
+      if (supabase) {
+        let selectColumns = [
+          'id',
+          'submitted_at',
+          'created_at',
+          'checkin_date',
+          'week_start',
+          'weight_kg',
+          'weight',
+          'steps',
+          'adherence_pct',
+          'nutrition_adherence',
+          'notes',
+          'photos',
+        ];
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const { data, error } = await supabase
+            .from('checkins')
+            .select(selectColumns.join(', '))
+            .eq('client_id', clientId)
+            .order('submitted_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+            .limit(50);
+          if (!error) {
+            const rows = Array.isArray(data) ? data : [];
+            return rows.map((row) => ({
+              ...row,
+              status: row?.status ?? (row?.reviewed_at || row?.reviewed_by ? 'reviewed' : 'submitted'),
+              adherence_pct: row?.adherence_pct ?? row?.nutrition_adherence ?? null,
+              created_date:
+                row?.created_date ??
+                row?.created_at ??
+                row?.submitted_at ??
+                row?.checkin_date ??
+                row?.week_start ??
+                null,
+            }));
+          }
+          const missing = getMissingColumnNameFromError(error);
+          if (!missing || !selectColumns.includes(missing)) return [];
+          selectColumns = selectColumns.filter((c) => c !== missing);
+          if (selectColumns.length === 0) return [];
+        }
+        return [];
+      }
+      return sandbox.listCheckIns(clientId) ?? [];
+    },
+    enabled: !!clientId,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const checkInsList = Array.isArray(checkInsListRaw) ? checkInsListRaw : [];
   const checkIn = checkinId ? checkInsList.find((c) => c?.id === checkinId) : null;
+
+  if (clientLoading || checkinsLoading) {
+    return (
+      <div className="min-w-0 max-w-full px-4 py-8" style={{ background: colors.bg, color: colors.muted }}>
+        <p className="text-sm">Loading…</p>
+      </div>
+    );
+  }
 
   if (!client || !checkIn) {
     return (

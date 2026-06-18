@@ -132,3 +132,161 @@ function formatKg(value) {
   const n = Number(value);
   return n % 1 === 0 ? `${n}kg` : `${n.toFixed(1)}kg`;
 }
+
+/**
+ * Next-set / next-session load hint from logged performance (RIR when present, else reps vs prescribed).
+ * @param {{
+ *   supabase?: import('@supabase/supabase-js').SupabaseClient | null;
+ *   exerciseId: string;
+ *   profileId?: string | null;
+ *   clientId?: string | null;
+ *   currentWeight: number | null;
+ *   currentReps: number | null;
+ *   rir?: number | null;
+ *   prescribedReps?: number | null;
+ * }} args
+ * @returns {Promise<{ type: 'increase'|'maintain'|'reduce'; nextWeightKg: number | null; displayKg: number | null; headline: string; detail?: string } | null>}
+ */
+export async function suggestNextLoad(args = {}) {
+  const {
+    supabase = null,
+    exerciseId,
+    profileId = null,
+    clientId = null,
+    currentWeight,
+    currentReps,
+    rir = null,
+    prescribedReps = null,
+  } = args;
+  if (!exerciseId || (profileId == null && clientId == null)) return null;
+  const w = Number(currentWeight);
+  const r = Number(currentReps);
+  if (!Number.isFinite(w) || w <= 0 || !Number.isFinite(r) || r < 0) return null;
+
+  const rirN = rir === '' || rir == null ? null : Number(rir);
+  const presc = prescribedReps != null && prescribedReps !== '' ? Number(prescribedReps) : null;
+
+  const roundInc = (v) => roundToIncrement(v, DEFAULT_LOAD_INCREMENT_KG);
+
+  if (Number.isFinite(rirN) && rirN <= 0.5) {
+    const nw = Math.max(0, roundInc(w - DEFAULT_LOAD_INCREMENT_KG));
+    if (nw > 0 && nw < w - 0.25) {
+      return {
+        type: 'reduce',
+        nextWeightKg: nw,
+        displayKg: nw,
+        headline: `↓ Consider ${nw}kg`,
+        detail: 'RPE was very high — ease back slightly next set.',
+      };
+    }
+    return {
+      type: 'reduce',
+      nextWeightKg: null,
+      displayKg: null,
+      headline: '↓ Consider same or lighter load',
+      detail: 'RPE looked very high — finish the session clean.',
+    };
+  }
+
+  const crushedReps = presc != null && r > presc;
+  const hitTarget = presc != null && r >= presc;
+  const easyByRir = Number.isFinite(rirN) && rirN >= RIR_THRESHOLD_FOR_INCREASE;
+  if (easyByRir || crushedReps) {
+    const nw = roundInc(w + DEFAULT_LOAD_INCREMENT_KG);
+    return {
+      type: 'increase',
+      nextWeightKg: nw,
+      displayKg: nw,
+      headline: `↑ Try ${nw}kg next set`,
+      detail: easyByRir ? 'You left reps in the tank — add a small bump.' : 'You hit all reps easily — nudge load up.',
+    };
+  }
+
+  if (hitTarget || (Number.isFinite(rirN) && rirN >= 1)) {
+    return {
+      type: 'maintain',
+      nextWeightKg: w,
+      displayKg: w,
+      headline: '✓ Good — same weight next set',
+      detail: 'Solid execution at this load.',
+    };
+  }
+
+  if (presc != null && r < Math.max(1, presc * 0.85)) {
+    const nw = Math.max(0, roundInc(w - DEFAULT_LOAD_INCREMENT_KG));
+    if (nw > 0 && nw < w - 0.25) {
+      return {
+        type: 'reduce',
+        nextWeightKg: nw,
+        displayKg: nw,
+        headline: `↓ Consider ${nw}kg`,
+        detail: 'Reps were below target — keep quality up.',
+      };
+    }
+  }
+
+  return {
+    type: 'maintain',
+    nextWeightKg: w,
+    displayKg: w,
+    headline: '✓ Good — same weight next set',
+    detail: 'Hold this load until reps feel solid.',
+  };
+}
+
+/**
+ * Post-workout lines for the *next* session (per exercise, last set of this session).
+ * @param {{
+ *   supabase: import('@supabase/supabase-js').SupabaseClient;
+ *   session: { profile_id?: string|null; client_id?: string|null };
+ *   sets: Array<{ exercise_id?: string; set_number?: number; completed?: boolean; weight_done?: number|null; reps_done?: number|null; rir_done?: number|null; prescribed_reps?: number|null }>;
+ *   exerciseNameById: Map<string, string>;
+ * }} args
+ * @returns {Promise<string[]>}
+ */
+export async function buildNextSessionLoadPreviewLines({ supabase, session, sets, exerciseNameById }) {
+  const profileId = session?.profile_id ?? null;
+  const clientId = session?.client_id ?? null;
+  if (!supabase || (!profileId && !clientId) || !Array.isArray(sets) || sets.length === 0) return [];
+
+  const lastByExercise = new Map();
+  for (const s of sets) {
+    if (!s?.completed || !s.exercise_id) continue;
+    const sn = Number(s.set_number) || 1;
+    const prev = lastByExercise.get(s.exercise_id);
+    if (!prev || sn > prev.setNumber) {
+      lastByExercise.set(s.exercise_id, {
+        setNumber: sn,
+        weight: s.weight_done,
+        reps: s.reps_done,
+        rir: s.rir_done,
+        prescribed: s.prescribed_reps,
+      });
+    }
+  }
+
+  const lines = [];
+  for (const [exId, perf] of lastByExercise) {
+    const name = exerciseNameById.get(exId) || 'Exercise';
+    const sug = await suggestNextLoad({
+      supabase,
+      exerciseId: exId,
+      profileId,
+      clientId,
+      currentWeight: perf.weight != null ? Number(perf.weight) : null,
+      currentReps: perf.reps != null ? Number(perf.reps) : null,
+      rir: perf.rir,
+      prescribedReps: perf.prescribed,
+    });
+    if (!sug) continue;
+    const prevW = Number(perf.weight);
+    if (sug.type === 'increase' && sug.displayKg != null) {
+      lines.push(`${name}: try ${sug.displayKg}kg next session (up from ${Number.isFinite(prevW) ? prevW : '—'}kg)`);
+    } else if (sug.type === 'reduce' && sug.displayKg != null) {
+      lines.push(`${name}: try ${sug.displayKg}kg next session — quality dipped today`);
+    } else {
+      lines.push(`${name}: maintain ${Number.isFinite(prevW) ? `${prevW}kg` : 'load'} — execution was right at the edge today`);
+    }
+  }
+  return lines.slice(0, 8);
+}

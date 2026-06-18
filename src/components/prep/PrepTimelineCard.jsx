@@ -4,6 +4,8 @@
  */
 import React, { useState, useEffect } from 'react';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 import { Calendar, Zap, TrendingUp } from 'lucide-react';
@@ -28,6 +30,8 @@ async function fetchPrepTimeline(clientId) {
 }
 
 export default function PrepTimelineCard({ clientId }) {
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const [data, setData] = useState({ header: null, metrics: null });
 
   useEffect(() => {

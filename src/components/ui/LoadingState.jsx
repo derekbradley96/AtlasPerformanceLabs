@@ -88,7 +88,7 @@ export function TrendSectionSkeleton({ height = 180 }) {
 }
 
 /** Client list: card with row-shaped skeletons (avatar + 2 lines). Used on Clients.jsx while loading. */
-export function ClientListSkeleton({ count = 6 }) {
+export function ClientListSkeleton({ count = 3 }) {
   return (
     <div className="overflow-hidden" style={{ ...standardCard }}>
       {Array.from({ length: count }).map((_, i) => (
@@ -606,16 +606,99 @@ export function CoachMarketplaceSetupSkeleton() {
   );
 }
 
+/** Client Today tab: hero card + session row placeholders (matches TodayPage client layout). */
+export function TodayClientSurfaceSkeleton({ paddingStyle = {} }) {
+  return (
+    <div style={{ paddingTop: spacing[12], paddingBottom: spacing[28], ...paddingStyle }}>
+      <div className="animate-pulse" style={{ marginBottom: spacing[12] }}>
+        <div style={{ height: 14, width: 80, background: colors.surface2, borderRadius: 6, marginBottom: spacing[8] }} />
+        <div style={{ height: 18, width: '70%', background: colors.surface2, borderRadius: 6 }} />
+      </div>
+      <div
+        className="animate-pulse"
+        style={{
+          background: colors.card,
+          border: `1px solid ${colors.border}`,
+          borderRadius: shell.cardRadius,
+          padding: spacing[16],
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: spacing[10] }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ height: 10, width: 100, background: colors.surface2, borderRadius: 4, marginBottom: spacing[8] }} />
+            <div style={{ height: 22, width: '85%', background: colors.surface2, borderRadius: 6, marginBottom: spacing[8] }} />
+            <div style={{ height: 14, width: '100%', background: colors.surface2, borderRadius: 4 }} />
+          </div>
+          <div style={{ width: 34, height: 34, borderRadius: 12, background: colors.surface2, flexShrink: 0 }} />
+        </div>
+        <div style={{ marginTop: spacing[10], display: 'grid', gap: spacing[6] }}>
+          <div style={{ height: 14, width: '75%', background: colors.surface2, borderRadius: 4 }} />
+          <div style={{ height: 14, width: '60%', background: colors.surface2, borderRadius: 4 }} />
+          <div style={{ height: 14, width: '55%', background: colors.surface2, borderRadius: 4 }} />
+        </div>
+        <div style={{ height: 48, width: '100%', background: colors.surface2, borderRadius: 12, marginTop: spacing[14] }} />
+      </div>
+      <div
+        className="animate-pulse"
+        style={{
+          marginTop: spacing[12],
+          background: colors.card,
+          border: `1px solid ${colors.border}`,
+          borderRadius: shell.cardRadius,
+          padding: spacing[14],
+          minHeight: 88,
+        }}
+      >
+        <div style={{ height: 12, width: 90, background: colors.surface2, borderRadius: 4, marginBottom: spacing[8] }} />
+        <div style={{ height: 16, width: '55%', background: colors.surface2, borderRadius: 4, marginBottom: spacing[6] }} />
+        <div style={{ height: 14, width: '90%', background: colors.surface2, borderRadius: 4 }} />
+      </div>
+    </div>
+  );
+}
+
+/** Client nutrition loading: calorie ring shell at 0% with brand tint (perceived instant layout). */
+export function NutritionCalorieRingSkeleton() {
+  const ring = 132;
+  return (
+    <div style={{ minHeight: '100vh', background: colors.bg, padding: shell.pagePaddingH, paddingTop: spacing[24] }}>
+      <div className="animate-pulse" style={{ height: 18, width: 160, background: colors.surface2, borderRadius: 6, marginBottom: spacing[16] }} />
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: spacing[20] }}>
+        <div
+          className="animate-pulse"
+          style={{
+            width: ring,
+            height: ring,
+            borderRadius: '50%',
+            border: `14px solid ${colors.surface2}`,
+            borderTopColor: `${colors.primary}55`,
+            background: colors.surface1,
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
+      <div className="animate-pulse rounded-2xl" style={{ background: colors.card, border: `1px solid ${colors.border}`, padding: spacing[16], marginBottom: spacing[12] }}>
+        <div style={{ height: 12, width: '40%', background: colors.surface2, borderRadius: 4, marginBottom: spacing[10] }} />
+        <div style={{ height: 20, width: '30%', background: colors.surface2, borderRadius: 6 }} />
+      </div>
+      <div className="animate-pulse rounded-2xl" style={{ background: colors.card, border: `1px solid ${colors.border}`, padding: spacing[14], minHeight: 120 }}>
+        <div style={{ height: 14, width: '50%', background: colors.surface2, borderRadius: 4, marginBottom: spacing[12] }} />
+        <div style={{ height: 40, width: '100%', background: colors.surface2, borderRadius: 10 }} />
+      </div>
+    </div>
+  );
+}
+
 /** Re-export standardised empty state (card, icon container, muted text). Accepts action (node) or actionLabel+onAction. */
 export { default as EmptyState } from '@/components/ui/EmptyState';
 
-export function ErrorState({ message = 'Something went wrong', onRetry }) {
+export function ErrorState({ message = 'Could not load this content. Check your connection and tap to retry.', onRetry }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
       <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center mb-4">
         <span className="text-3xl">⚠️</span>
       </div>
-      <h3 className="text-lg font-semibold text-white mb-2">Oops!</h3>
+      <h3 className="text-lg font-semibold text-white mb-2">Could not load</h3>
       <p className="text-slate-400 text-sm max-w-sm mb-6">{message}</p>
       {onRetry && (
         <button

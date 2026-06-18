@@ -3,8 +3,10 @@
  */
 import React from 'react';
 import { Check } from 'lucide-react';
-import { Hero, Features, SocialProof, CTA } from './MarketingSections';
+import { Hero, Features, Testimonials, CTA } from './MarketingSections';
+import { FOR_COACHES_TESTIMONIALS } from './marketingTestimonialsData';
 import { SIGNUP_PUBLIC_PATH } from '@/lib/publicAuthPaths';
+import { usePageMeta } from '@/lib/usePageMeta';
 import { colors } from '@/ui/tokens';
 
 const REPLACES = [
@@ -162,6 +164,13 @@ function OutcomesListSection() {
 }
 
 export default function ForCoachesPage() {
+  usePageMeta({
+    title: 'Coaching Software for Online Fitness Coaches',
+    description:
+      'Run your coaching business without spreadsheets. Build programs, set nutrition, review check-ins, track clients, and grow your roster — all in one system.',
+    canonical: 'https://atlasperformancelabs.co.uk/for-coaches',
+  });
+
   return (
     <>
       <Hero
@@ -182,10 +191,9 @@ export default function ForCoachesPage() {
       />
       <OutcomesListSection />
       <Features title="Make more from every client" items={BUSINESS_OUTCOMES} />
-      <SocialProof
+      <Testimonials
         title="Built for real coaches"
-        quote="I stopped juggling tools. I coach faster, and clients stay more consistent."
-        attribution="Online transformation coach"
+        testimonials={FOR_COACHES_TESTIMONIALS}
       />
       <CTA
         title="Serious coaching needs a serious system"

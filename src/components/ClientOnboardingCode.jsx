@@ -1,3 +1,9 @@
+/*
+LEGACY — not reachable from active routing. Uses
+invokeSupabaseFunction which may reference undeployed Edge
+Functions. Safe to delete after confirming no active path
+reaches this component.
+*/
 import React, { useState } from 'react';
 import { ArrowRight, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';

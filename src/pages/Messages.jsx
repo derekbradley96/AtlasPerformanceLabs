@@ -1,14 +1,14 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { atlasMigrationDataAttributes, deriveMessagesListRouteState } from '@/lib/atlasMigrationPhases';
 import { useNavigate, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Pin, PinOff, Trash2, MessageSquare, Search, Plus, ChevronRight } from 'lucide-react';
+import { Pin, PinOff, Trash2, MessageSquare, Search, Plus, ChevronRight, Send } from 'lucide-react';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { normalizeRole } from '@/lib/roles';
-import { formatRelativeDate } from '@/lib/format';
 import { getPinnedIds, togglePinned, removeFromPinned } from '@/lib/pinsStore';
 import { getDeletedIds, addDeletedId } from '@/lib/deletedThreadsStore';
 import { sortThreadsWithPinned } from '@/lib/messagesThreadsSelectors';
@@ -18,10 +18,14 @@ import EmptyState from '@/components/ui/EmptyState';
 import { MessagesListSkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import BroadcastMessageSheet from '@/components/messages/BroadcastMessageSheet';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
 import { colors, spacing, shell, touchTargetMin } from '@/ui/tokens';
 import { sectionLabel, desktopRhythm } from '@/ui/pageLayout';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { toast } from 'sonner';
+import { getMessagesListPath, navigateToThread } from '@/lib/messagesPath';
 
 const PIN_BG = colors.primary;
 const UNPIN_BG = colors.surface2;
@@ -41,16 +45,46 @@ async function heavyHaptic() {
   } catch (e) {}
 }
 
+function formatThreadTime(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const diff = now - d;
+  const oneDay = 86400000;
+  const oneWeek = 7 * oneDay;
+
+  if (diff < oneDay && d.getDate() === now.getDate()) {
+    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  }
+  if (diff < 2 * oneDay) return 'Yesterday';
+  if (diff < oneWeek) {
+    return d.toLocaleDateString('en-GB', { weekday: 'short' });
+  }
+  return d.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+  });
+}
+
 export default function Messages() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const { user, authReady, effectiveRole } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { user, authReady, effectiveRole, clientLinkedRow } = useAuth();
   const role = normalizeRole(effectiveRole ?? user?.role ?? null);
+  const isCoachView = role === 'coach';
   const isClientView = role === 'client';
   const filterUnread = searchParams.get('filter') === 'unread';
-  const isListPage = location.pathname === '/messages' || location.pathname === '/trainer/messages' || location.pathname.endsWith('/messages');
+  const isListPage = location.pathname === '/messages';
   const data = useData();
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    if (!isCoachView) return;
+    if (typeof data?.ensureThreadForClient === 'function' && typeof data?.sendMessage === 'function') return;
+    if (import.meta.env.DEV) console.warn('[BroadcastMessageSheet] data methods missing');
+  }, [data?.ensureThreadForClient, data?.sendMessage, isCoachView]);
   const { isDesktopWeb } = usePresentationMode();
   const rhythm = desktopRhythm(isDesktopWeb);
   const rowPadY = isDesktopWeb ? 16 : 14;
@@ -66,58 +100,81 @@ export default function Messages() {
   const [openRowId, setOpenRowId] = useState(null);
   const [openSide, setOpenSide] = useState(null);
   const [startConversationOpen, setStartConversationOpen] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [clientIdToDelete, setClientIdToDelete] = useState(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
+  /** Inbox and other entry points: `/messages?compose=1` opens the same client picker as the FAB. */
+  useEffect(() => {
+    if (!isCoachView || !isListPage) return;
+    const compose = searchParams.get('compose');
+    const wantsCompose =
+      compose === '1' ||
+      compose === 'true' ||
+      searchParams.get('new') === '1';
+    if (!wantsCompose) return;
+    setStartConversationOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('compose');
+    next.delete('new');
+    setSearchParams(next, { replace: true });
+  }, [isCoachView, isListPage, searchParams, setSearchParams]);
+
+  const { pullY, refreshing, handlers, scrollElRef } = usePullToRefresh({
+    disabled: isDesktopWeb,
+    onRefresh: async () => {
+      loadData();
+      setRefreshKey((k) => k + 1);
+    },
+  });
+
+  useEffect(() => {
+    document.title = 'Messages — Atlas';
+  }, []);
+
+  const {
+    data: supabaseThreads = [],
+    isLoading: threadsLoading,
+    refetch: refetchThreads,
+    isError: threadsError,
+  } = useQuery({
+    queryKey: ['threads', user?.id, role],
+    queryFn: () => data.listThreads(),
+    enabled: !!user?.id,
+    staleTime: 30000,
+  });
+
   const loadData = useCallback(() => {
     if (!isClientView && typeof data?.listClients === 'function') {
       data.listClients().then((c) => setClientsState(Array.isArray(c) ? c : []));
     }
-    if (typeof data?.listThreads === 'function') {
-      data.listThreads().then((th) => setThreadsState(Array.isArray(th) ? th : []));
-    }
-  }, [data, isClientView]);
+    void refetchThreads();
+  }, [data, isClientView, refetchThreads]);
 
   useEffect(() => {
-    if (hasSupabase && !authReady) {
+    // Guard only while auth is truly unresolved (no user yet).
+    // In some client sessions, authReady can lag while user is already available.
+    // If we keep forcing dataLoading=true in that state, the list skeleton can stick forever.
+    if (hasSupabase && !authReady && !user?.id) {
       setDataLoading(true);
       setLoadError(false);
       return;
     }
     const listClients = data?.listClients;
-    const listThreads = data?.listThreads;
-    if (typeof listThreads !== 'function' || (!isClientView && typeof listClients !== 'function')) {
+    if ((!isClientView && typeof listClients !== 'function')) {
       setDataLoading(true);
       setLoadError(false);
       return;
     }
     let cancelled = false;
-    setDataLoading(true);
-    setLoadError(false);
-    const listClientsPromise = isClientView ? Promise.resolve([]) : listClients();
-    Promise.all([listClientsPromise, listThreads()])
-      .then(([c, th]) => {
-        if (!cancelled) {
-          setClientsState(Array.isArray(c) ? c : []);
-          setThreadsState(Array.isArray(th) ? th : []);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setClientsState([]);
-          setThreadsState([]);
-          setLoadError(true);
-          toast.error('Failed to load conversations');
-          if (import.meta.env?.DEV) console.error('[Messages] load error', err);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setDataLoading(false);
-      });
-    const onUpdate = () => { if (!cancelled) loadData(); };
+    loadData();
+    const onUpdate = () => {
+      if (cancelled) return;
+      loadData();
+    };
     window.addEventListener('atlas-sandbox-updated', onUpdate);
     window.addEventListener('atlas-messaging-updated', onUpdate);
     return () => {
@@ -125,10 +182,25 @@ export default function Messages() {
       window.removeEventListener('atlas-sandbox-updated', onUpdate);
       window.removeEventListener('atlas-messaging-updated', onUpdate);
     };
-  }, [authReady, data, loadData, refreshKey, isClientView]);
+  }, [authReady, data, loadData, isClientView, user?.id]);
+
+  useEffect(() => {
+    setThreadsState(Array.isArray(supabaseThreads) ? supabaseThreads : []);
+    setLoadError(Boolean(threadsError));
+    setDataLoading(Boolean(threadsLoading));
+  }, [supabaseThreads, threadsError, threadsLoading]);
 
   useEffect(() => {
     if (isListPage) loadData();
+  }, [isListPage, loadData]);
+
+  useEffect(() => {
+    if (!isListPage) return undefined;
+    const intervalId = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      loadData();
+    }, 30000);
+    return () => clearInterval(intervalId);
   }, [isListPage, loadData]);
 
   useEffect(() => {
@@ -160,8 +232,7 @@ export default function Messages() {
         return id && !deletedSet.has(id);
       });
     if (filterUnread) list = list.filter((item) => (item.thread?.unread_count ?? 0) > 0);
-    if (filterUnread) list.sort((a, b) => (b.thread?.unread_count ?? 0) - (a.thread?.unread_count ?? 0));
-    else list = sortThreadsWithPinned(list, pinnedIds);
+    list = sortThreadsWithPinned(list, pinnedIds);
     return list;
   }, [clients, threads, filterUnread, deletedSet, pinnedIds]);
 
@@ -195,14 +266,23 @@ export default function Messages() {
   }, [setHeaderRight, totalUnread, data.markAllThreadsRead, loadData]);
 
   const handleRow = useCallback(
-    async (clientId) => {
+    async (clientId, threadId, clientName) => {
       if (openRowId != null) return;
       if (openRowId === clientId) return;
       if (deletingId === clientId) return;
       await lightHaptic();
-      navigate(`/messages/${clientId}`);
+      const readTarget = threadId ?? clientId;
+      if (readTarget) {
+        try {
+          data.markThreadRead?.(readTarget);
+        } catch (_) {}
+      }
+      const name = (clientName ?? '').trim();
+      navigateToThread(navigate, clientId, {
+        state: name ? { clientName: name } : undefined,
+      });
     },
-    [navigate, openRowId, deletingId]
+    [navigate, openRowId, deletingId, data]
   );
 
   const handleDeleteRequest = useCallback((clientId) => {
@@ -275,7 +355,13 @@ export default function Messages() {
       await data.ensureThreadForClient(client.id);
     }
     loadData();
-    navigate(`/messages/${client.id}`, { state: { from: '/messages' } });
+    const clientName = (client?.full_name ?? client?.name ?? '').trim();
+    navigateToThread(navigate, client.id, {
+      state: {
+        from: getMessagesListPath(),
+        ...(clientName ? { clientName } : {}),
+      },
+    });
   }, [navigate, loadData, data]);
 
   const filteredClients = useMemo(() => {
@@ -303,8 +389,10 @@ export default function Messages() {
   return (
     <div
       {...atlasMigrationDataAttributes(messagesListMigration.phase, messagesListMigration.primary)}
+      {...handlers}
       className="app-screen min-w-0 max-w-full overflow-x-hidden flex-1 min-h-0 flex flex-col"
       style={{
+        position: 'relative',
         background: colors.bg,
         maxWidth: isDesktopWeb ? 1240 : undefined,
         margin: '0 auto',
@@ -312,6 +400,7 @@ export default function Messages() {
         paddingTop: rhythm.top,
       }}
     >
+      <PullToRefreshIndicator pullY={pullY} refreshing={refreshing} />
       {dataLoading ? (
         <div className="flex-1 min-h-0 overflow-auto">
           <MessagesListSkeleton count={6} />
@@ -325,20 +414,149 @@ export default function Messages() {
           />
         </div>
       ) : threadList.length === 0 ? (
-        <div className="flex-1 min-h-0 flex flex-col justify-center" style={{ paddingLeft: spacing[16], paddingRight: spacing[16] }}>
-          <EmptyState
-            title={isClientView ? "You don't have any messages yet" : "No conversations yet"}
-            description={isClientView
-              ? "Your thread with your coach will appear here once you or your coach sends a message. Say hi to get started."
-              : "Start a conversation by choosing a client below. You can also open a client profile and tap Message."}
-            icon={MessageSquare}
-            actionLabel={isClientView ? undefined : 'New message'}
-            onAction={isClientView ? undefined : () => { lightHaptic(); setStartConversationOpen(true); }}
-          />
+        <div className="flex-1 min-h-0 overflow-auto" style={{ paddingLeft: spacing[16], paddingRight: spacing[16] }}>
+          {isCoachView && clients.length > 0 ? (
+            <div style={{ padding: `${spacing[16]}px` }}>
+              <p style={{ fontSize: 13, color: colors.muted, marginBottom: spacing[12] }}>
+                Start a conversation with a client:
+              </p>
+              {clients.map((client) => (
+                <button
+                  key={client.id}
+                  type="button"
+                  onClick={() => {
+                    const clientName = (client?.full_name ?? client?.name ?? '').trim();
+                    navigateToThread(navigate, client.id, {
+                      state: clientName ? { clientName } : undefined,
+                    });
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: spacing[12],
+                    width: '100%',
+                    padding: `${spacing[12]}px`,
+                    marginBottom: spacing[8],
+                    background: colors.surface1,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '50%',
+                      background: colors.primarySubtle,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: colors.primary,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {(client.full_name || client.name || 'C')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 14, fontWeight: 500, color: colors.text, margin: 0 }}>
+                      {client.full_name || client.name}
+                    </p>
+                    <p style={{ fontSize: 12, color: colors.muted, margin: 0 }}>
+                      Tap to start conversation
+                    </p>
+                  </div>
+                  <ChevronRight size={16} style={{ marginLeft: 'auto', color: colors.muted }} />
+                </button>
+              ))}
+            </div>
+          ) : isClientView ? (
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: `${spacing[32]}px ${spacing[16]}px`,
+                textAlign: 'center',
+                gap: spacing[16],
+              }}
+            >
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: '50%',
+                  background: colors.primarySubtle,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <MessageSquare size={24} style={{ color: colors.primary }} />
+              </div>
+              <div>
+                <p style={{
+                  fontSize: 17,
+                  fontWeight: 600,
+                  color: colors.text,
+                  margin: 0,
+                  marginBottom: spacing[6],
+                }}>
+                  Message your coach
+                </p>
+                <p style={{
+                  fontSize: 14,
+                  color: colors.muted,
+                  margin: 0,
+                  lineHeight: 1.5,
+                  maxWidth: 260,
+                }}>
+                  Send a message to your coach. They'll reply here.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  const rosterId = clientLinkedRow?.id;
+                  if (!rosterId) return;
+                  if (typeof data?.ensureConversation === 'function') {
+                    await data.ensureConversation(rosterId);
+                  }
+                  navigateToThread(navigate, rosterId);
+                }}
+                style={{
+                  padding: `${spacing[12]}px ${spacing[24]}px`,
+                  background: colors.primary,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 12,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Send first message →
+              </button>
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 flex flex-col justify-center">
+              <EmptyState
+                title="No messages yet"
+                description="This is where your client conversations appear. Your clients can message you from their app."
+                icon={MessageSquare}
+              />
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col relative">
           <div
+            ref={scrollElRef}
             className="flex-1 min-h-0 overflow-y-auto"
             style={{
               WebkitOverflowScrolling: 'touch',
@@ -351,8 +569,30 @@ export default function Messages() {
               width: '100%',
             }}
           >
-            <div style={{ marginBottom: isDesktopWeb ? spacing[10] : shell.sectionLabelMarginBottom }}>
+            <div
+              className="flex items-center justify-between gap-2"
+              style={{ marginBottom: isDesktopWeb ? spacing[10] : shell.sectionLabelMarginBottom }}
+            >
               <span style={sectionLabel}>{isClientView ? 'Messages' : 'Conversations'}</span>
+              {isCoachView ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    lightHaptic();
+                    setBroadcastOpen(true);
+                  }}
+                  className="rounded-lg p-2 active:opacity-80"
+                  style={{
+                    border: `1px solid ${colors.border}`,
+                    background: colors.surface1,
+                    color: colors.text,
+                  }}
+                  aria-label="Message all clients"
+                  title="Message all clients"
+                >
+                  <Send size={16} />
+                </button>
+              ) : null}
             </div>
 
             {Array.isArray(threadList) ? threadList.map(({ client, thread }) => {
@@ -363,10 +603,10 @@ export default function Messages() {
                 : (client?.full_name ?? thread?.name ?? '') || 'Client';
               const lastMessageAt = thread?.last_message_at ?? thread?.lastMessageAt ?? null;
               const previewRaw = (thread?.last_message_preview ?? thread?.lastMessage ?? '').trim();
-              const lastMessage = previewRaw || 'Tap to start a conversation';
+              const lastMessage = previewRaw || 'No messages yet';
               const unreadCount = Number(thread?.unread_count ?? thread?.unreadCount ?? 0) || 0;
               const clientId = client?.id ?? thread?.client_id;
-              const timeLabel = lastMessageAt ? formatRelativeDate(lastMessageAt) : '';
+              const timeLabel = formatThreadTime(lastMessageAt);
 
               const stopActionEvent = (e) => {
                 e.preventDefault();
@@ -436,16 +676,33 @@ export default function Messages() {
                   aria-label={`Open chat with ${name}`}
                   className="flex items-center gap-3 active:opacity-90 transition-opacity w-full text-left"
                   style={{
-                    paddingVertical: rowPadY,
-                    paddingHorizontal: rowPadX,
+                    paddingTop: rowPadY,
+                    paddingBottom: rowPadY,
+                    paddingLeft: rowPadX,
+                    paddingRight: rowPadX,
                     minHeight: isDesktopWeb ? 80 : 76,
+                    borderLeft: unreadCount > 0 ? `3px solid ${colors.primary}` : '3px solid transparent',
                   }}
                 >
                   <div
-                    className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-semibold"
-                    style={{ background: 'rgba(255,255,255,0.08)', color: colors.muted }}
+                    className="flex-shrink-0 flex-shrink-0"
+                    style={{ width: 44, height: 44, borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}
                   >
-                    {(name || '?').slice(0, 2).toUpperCase()}
+                    {client?.profiles?.avatar_url || client?.avatar_url ? (
+                      <img
+                        src={client.profiles?.avatar_url ?? client.avatar_url}
+                        alt={name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full flex items-center justify-center text-[14px] font-semibold"
+                        style={{ background: 'rgba(255,255,255,0.08)', color: colors.muted }}
+                      >
+                        {(name || '?').slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0 flex flex-col justify-center gap-1.5">
                     <div className="flex items-center gap-2 min-w-0">
@@ -457,12 +714,12 @@ export default function Messages() {
                         {name}
                       </span>
                       {unreadCount > 0 && (
-                        <span
-                          className="flex-shrink-0 min-w-[18px] h-[18px] rounded-full flex items-center justify-center text-[10px] font-bold"
-                          style={{ background: colors.primary, color: '#fff' }}
+                        <div
+                          className="flex-shrink-0 flex items-center justify-center rounded-full text-[11px] font-bold"
+                          style={{ width: 20, height: 20, minWidth: 20, background: colors.primary, color: '#fff' }}
                         >
-                          {unreadCount > 99 ? '99+' : unreadCount}
-                        </span>
+                          {unreadCount > 9 ? '9+' : unreadCount}
+                        </div>
                       )}
                     </div>
                     <p
@@ -491,7 +748,7 @@ export default function Messages() {
                   onOpenRight={handleOpenRight}
                   onClose={handleClose}
                   onSwipeStart={handleSwipeStart}
-                  onRowPress={() => handleRow(clientId)}
+                  onRowPress={() => handleRow(clientId, thread?.id, name)}
                   leftActions={isClientView ? null : leftActions}
                   rightActions={isClientView ? null : rightActions}
                   isDeleting={deletingId === threadId}
@@ -513,27 +770,29 @@ export default function Messages() {
               );
             }) : null}
           </div>
-          {!isClientView && (
-          <button
-            type="button"
-            onClick={() => { lightHaptic(); setStartConversationOpen(true); }}
-            className="fixed flex items-center justify-center rounded-full shadow-lg active:opacity-90 transition-opacity"
-            style={{
-              width: 56,
-              height: 56,
-              right: 16,
-              bottom: `calc(88px + env(safe-area-inset-bottom, 0px))`,
-              background: colors.primary,
-              color: '#fff',
-              border: 'none',
-              zIndex: 30,
-            }}
-            aria-label="New message"
-          >
-            <Plus size={24} strokeWidth={2.5} />
-          </button>
-          )}
         </div>
+      )}
+
+      {/* Always show compose button for coaches */}
+      {isCoachView && !startConversationOpen && (
+        <button
+          type="button"
+          onClick={() => { lightHaptic(); setStartConversationOpen(true); }}
+          className="fixed flex items-center justify-center rounded-full shadow-lg active:opacity-90 transition-opacity"
+          style={{
+            width: 56,
+            height: 56,
+            right: 16,
+            bottom: `calc(88px + env(safe-area-inset-bottom, 0px))`,
+            background: colors.primary,
+            color: '#fff',
+            border: 'none',
+            zIndex: 30,
+          }}
+          aria-label="New message"
+        >
+          <Plus size={24} strokeWidth={2.5} />
+        </button>
       )}
 
       {startConversationOpen && (
@@ -635,6 +894,19 @@ export default function Messages() {
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
       />
+      {isCoachView && (
+        <BroadcastMessageSheet
+          open={broadcastOpen}
+          onOpenChange={setBroadcastOpen}
+          clients={clients}
+          ensureThreadForClient={data?.ensureThreadForClient}
+          sendMessage={data?.sendMessage}
+          onSent={() => {
+            loadData();
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -8,11 +8,48 @@
 
 import { getSupabase } from '@/lib/supabaseClient';
 import { markWorkoutCompletedToday } from '@/lib/retentionHabitService';
+import { queueOfflineOperation } from '@/lib/offlineWorkoutQueue';
+import { suggestNextLoad } from '@/lib/programProgression';
 
 function clampNumber(value, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   return Math.min(max, Math.max(min, n));
+}
+
+function getAuthUserIdForOfflineQueue() {
+  try {
+    const sb = getSupabase();
+    return sb?.auth?.getSession?.()?.data?.session?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadSuggestionAfterCompletedSet(sessionId, row, payload) {
+  if (!row.completed || !row.exercise_id) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const { data: sess } = await supabase
+    .from('workout_sessions')
+    .select('profile_id, client_id')
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (!sess?.profile_id && !sess?.client_id) return null;
+  try {
+    return await suggestNextLoad({
+      supabase,
+      exerciseId: row.exercise_id,
+      profileId: sess.profile_id ?? null,
+      clientId: sess.client_id ?? null,
+      currentWeight: row.weight_done,
+      currentReps: row.reps_done,
+      rir: row.rir_done,
+      prescribedReps: payload.prescribed_reps ?? row.prescribed_reps ?? null,
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** Lower bound of a rep range for DB (e.g. "8-12" → 8). Null if unparseable. */
@@ -128,7 +165,7 @@ export async function getSetsForSession(sessionId) {
 
 /**
  * @param {string} sessionId
- * @param {{ exercise_id: string, set_number: number, completed?: boolean, reps_done?: number | null, weight_done?: number | null, rir_done?: number | null, notes?: string | null, prescribed_reps?: number | null, prescribed_rest_seconds?: number | null }} payload
+ * @param {{ exercise_id: string, set_number: number, completed?: boolean, reps_done?: number | null, weight_done?: number | null, rir_done?: number | null, notes?: string | null, prescribed_reps?: number | null, prescribed_reps_raw?: string | null, prescribed_weight?: number | null, prescribed_rir?: number | null, prescribed_rest_seconds?: number | null, client_notes?: string | null }} payload
  */
 export async function upsertSet(sessionId, payload) {
   const supabase = getSupabase();
@@ -146,7 +183,11 @@ export async function upsertSet(sessionId, payload) {
     rir_done: rirClamped,
     notes: payload.notes ?? null,
     prescribed_reps: payload.prescribed_reps ?? null,
+    prescribed_reps_raw: payload.prescribed_reps_raw ?? null,
+    prescribed_weight: payload.prescribed_weight ?? null,
+    prescribed_rir: payload.prescribed_rir ?? null,
     prescribed_rest_seconds: payload.prescribed_rest_seconds ?? null,
+    client_notes: payload.client_notes ?? null,
   };
   if (import.meta.env.DEV) {
     console.info('[workoutSessionApi] upsertSet payload', { sessionId, exercise_id: row.exercise_id, set_number: setNum, completed: row.completed });
@@ -168,6 +209,11 @@ export async function upsertSet(sessionId, payload) {
           weight_done: row.weight_done,
           rir_done: row.rir_done,
           notes: row.notes,
+          prescribed_reps: row.prescribed_reps,
+          prescribed_reps_raw: row.prescribed_reps_raw,
+          prescribed_weight: row.prescribed_weight,
+          prescribed_rir: row.prescribed_rir,
+          client_notes: row.client_notes,
         })
         .eq('id', existing.id)
         .select()
@@ -176,7 +222,20 @@ export async function upsertSet(sessionId, payload) {
         console.info('[workoutSessionApi] upsertSet update response', { data: data ?? null, error: error ?? null });
       }
       if (error) throw error;
-      return data;
+      if (row.completed) {
+        const mergedRow = {
+          ...data,
+          exercise_id: data?.exercise_id ?? row.exercise_id,
+          set_number: data?.set_number ?? row.set_number,
+          weight_done: data?.weight_done ?? row.weight_done,
+          reps_done: data?.reps_done ?? row.reps_done,
+          rir_done: data?.rir_done ?? row.rir_done,
+          prescribed_reps: data?.prescribed_reps ?? row.prescribed_reps,
+        };
+        const loadSuggestion = await loadSuggestionAfterCompletedSet(sessionId, mergedRow, payload);
+        return { ...data, loadSuggestion };
+      }
+      return { ...data, loadSuggestion: null };
     }
     const insertRow = {
       session_id: row.session_id,
@@ -188,14 +247,19 @@ export async function upsertSet(sessionId, payload) {
       rir_done: row.rir_done,
       notes: row.notes,
       prescribed_reps: row.prescribed_reps,
+      prescribed_reps_raw: row.prescribed_reps_raw,
+      prescribed_weight: row.prescribed_weight,
+      prescribed_rir: row.prescribed_rir,
       prescribed_rest_seconds: row.prescribed_rest_seconds,
+      client_notes: row.client_notes,
     };
     const { data, error } = await supabase.from('workout_session_sets').insert(insertRow).select().single();
     if (import.meta.env.DEV) {
       console.info('[workoutSessionApi] upsertSet insert response', { data: data ?? null, error: error ?? null });
     }
     if (error) throw error;
-    return data;
+    const loadSuggestion = await loadSuggestionAfterCompletedSet(sessionId, row, payload);
+    return { ...data, loadSuggestion };
   }
   const key = getStorageSetsKey(sessionId);
   let sets = [];
@@ -215,7 +279,13 @@ export async function upsertSet(sessionId, payload) {
   else sets.push(newSet);
   sets.sort((a, b) => (a.exercise_id || '').localeCompare(b.exercise_id || '') || a.set_number - b.set_number);
   sessionStorage.setItem(key, JSON.stringify(sets));
-  return newSet;
+  const setPayload = newSet;
+  queueOfflineOperation({
+    type: 'upsert_set',
+    payload: setPayload,
+    ts: Date.now(),
+  });
+  return { ...newSet, loadSuggestion: null };
 }
 
 /**
@@ -363,11 +433,104 @@ export async function getPreviousExercisePerformance(opts) {
       map[Number(r.set_number)] = {
         reps_done: r.reps_done != null ? Number(r.reps_done) : null,
         weight_done: r.weight_done != null ? Number(r.weight_done) : null,
+        session_date: s.completed_at || null,
       };
     }
     return map;
   }
   return null;
+}
+
+/**
+ * Latest logged performance by exercise name from a user's/ client's completed sessions.
+ * Returns a normalized-name map:
+ * { [exercise_name_lower_trim]: { weight: number|null, reps: number|null, date: string|null } }
+ * @param {{ clientId?: string | null, profileId?: string | null, exerciseNames?: string[] }} opts
+ */
+export async function getLatestExercisePerformanceByName(opts = {}) {
+  const supabase = getSupabase();
+  const { clientId, profileId } = opts;
+  const requestedNames = Array.isArray(opts.exerciseNames)
+    ? opts.exerciseNames.map((n) => String(n || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  if (!supabase || (!clientId && !profileId) || requestedNames.length === 0) return {};
+
+  let q = supabase
+    .from('workout_sessions')
+    .select('id, completed_at')
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(60);
+  if (clientId) q = q.eq('client_id', clientId);
+  else q = q.eq('profile_id', profileId);
+
+  const { data: sessions, error: sessionsError } = await q;
+  if (sessionsError || !sessions?.length) return {};
+  const sessionIds = sessions.map((s) => s.id);
+  const sessionDateById = new Map(sessions.map((s) => [s.id, s.completed_at || null]));
+
+  const { data: setRows, error: setError } = await supabase
+    .from('workout_session_sets')
+    .select('session_id, exercise_id, set_number, reps_done, weight_done')
+    .in('session_id', sessionIds)
+    .eq('completed', true)
+    .not('exercise_id', 'is', null);
+  if (setError || !setRows?.length) return {};
+
+  const exerciseIds = Array.from(new Set(setRows.map((r) => r.exercise_id).filter(Boolean)));
+  if (!exerciseIds.length) return {};
+  const { data: exerciseRows, error: exerciseError } = await supabase
+    .from('program_exercises')
+    .select('id, exercise_name')
+    .in('id', exerciseIds);
+  if (exerciseError || !exerciseRows?.length) return {};
+  const exerciseNameById = new Map(
+    exerciseRows.map((row) => [row.id, String(row.exercise_name || '').trim().toLowerCase()]),
+  );
+
+  const requestedSet = new Set(requestedNames);
+  const setRowsBySession = new Map();
+  for (const row of setRows) {
+    const list = setRowsBySession.get(row.session_id) || [];
+    list.push(row);
+    setRowsBySession.set(row.session_id, list);
+  }
+
+  const out = {};
+  for (const s of sessions) {
+    const rows = setRowsBySession.get(s.id) || [];
+    if (!rows.length) continue;
+
+    const bestByName = new Map();
+    for (const row of rows) {
+      const normalizedName = exerciseNameById.get(row.exercise_id);
+      if (!normalizedName || !requestedSet.has(normalizedName)) continue;
+      const current = bestByName.get(normalizedName);
+      const nextWeight = row.weight_done != null ? Number(row.weight_done) : null;
+      const nextReps = row.reps_done != null ? Number(row.reps_done) : null;
+      if (!current) {
+        bestByName.set(normalizedName, { weight: nextWeight, reps: nextReps });
+        continue;
+      }
+      const curWeight = current.weight != null ? Number(current.weight) : null;
+      if (nextWeight != null && (curWeight == null || nextWeight > curWeight)) {
+        bestByName.set(normalizedName, { weight: nextWeight, reps: nextReps });
+      }
+    }
+
+    for (const [normalizedName, perf] of bestByName.entries()) {
+      if (out[normalizedName]) continue;
+      out[normalizedName] = {
+        weight: perf.weight ?? null,
+        reps: perf.reps ?? null,
+        date: sessionDateById.get(s.id) || null,
+      };
+    }
+
+    if (Object.keys(out).length >= requestedSet.size) break;
+  }
+
+  return out;
 }
 
 /** @param {string} sessionId */
@@ -404,7 +567,129 @@ export async function completeSession(sessionId) {
       session.status = 'completed';
       session.completed_at = completed_at;
       sessionStorage.setItem(sessionKey, JSON.stringify(session));
+      queueOfflineOperation({
+        type: 'complete_session',
+        payload: { id: sessionId, completed_at },
+        userId: getAuthUserIdForOfflineQueue(),
+      });
       trackWorkoutLogged(sessionId, session);
     } catch {}
   }
+}
+
+export async function updateSessionReadiness(sessionId, readiness = {}) {
+  const supabase = getSupabase();
+  if (!supabase || !sessionId) return null;
+  const payload = {
+    readiness_sleep: readiness.sleep ?? null,
+    readiness_energy: readiness.energy ?? null,
+    readiness_soreness: readiness.soreness ?? null,
+  };
+  const { data, error } = await supabase
+    .from('workout_sessions')
+    .update(payload)
+    .eq('id', sessionId)
+    .select('id, readiness_sleep, readiness_energy, readiness_soreness')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateSessionRpe(sessionId, sessionRpe) {
+  const supabase = getSupabase();
+  if (!supabase || !sessionId) return null;
+  const { data, error } = await supabase
+    .from('workout_sessions')
+    .update({ session_rpe: sessionRpe ?? null })
+    .eq('id', sessionId)
+    .select('id, session_rpe')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Rows shaped like the legacy `workout-list` Edge Function for dashboards / Progress / Workout pages.
+ * Includes personal sessions (profile_id) and coached-client sessions (clients.user_id → client_id).
+ * @param {string} authUserId - Same as profiles.id / auth user id
+ * @param {{ status?: 'completed' | 'in_progress' | null, limit?: number }} [opts]
+ * @returns {Promise<Array<{ id: string, name: string, completed_at: string, duration_minutes: number, total_sets: number, total_volume: number, status?: string }>>}
+ */
+function mapWorkoutSessionToListRow(row) {
+  const sets = Array.isArray(row?.workout_session_sets) ? row.workout_session_sets : [];
+  const completedSets = sets.filter((s) => s?.completed);
+  const total_sets = completedSets.length;
+  let total_volume = 0;
+  for (const s of completedSets) {
+    const w = Number(s.weight_done) || 0;
+    const r = Number(s.reps_done) || 0;
+    total_volume += w * r;
+  }
+  const pd = row.program_days;
+  const title = (pd && (pd.title || pd.name)) ? String(pd.title || pd.name) : '';
+  const started = row.started_at ? new Date(row.started_at).getTime() : NaN;
+  const completed = row.completed_at ? new Date(row.completed_at).getTime() : NaN;
+  const duration_minutes =
+    Number.isFinite(started) && Number.isFinite(completed)
+      ? Math.max(1, Math.round((completed - started) / 60000))
+      : 0;
+  return {
+    id: row.id,
+    name: title || 'Workout',
+    completed_at: row.completed_at || row.started_at,
+    status: row.status,
+    duration_minutes,
+    total_sets,
+    total_volume,
+  };
+}
+
+export async function fetchWorkoutListRowsForUser(authUserId, opts = {}) {
+  const supabase = getSupabase();
+  if (!supabase || !authUserId) return [];
+  const status = opts.status ?? null;
+  const limit = Math.min(100, Math.max(1, Number(opts.limit) || 50));
+
+  let clientRosterId = null;
+  try {
+    const { data: crow } = await supabase.from('clients').select('id').eq('user_id', authUserId).maybeSingle();
+    clientRosterId = crow?.id ?? null;
+  } catch (_) {
+    /* ignore */
+  }
+
+  const orParts = [`profile_id.eq.${authUserId}`];
+  if (clientRosterId) orParts.push(`client_id.eq.${clientRosterId}`);
+
+  const selectRich =
+    'id, status, started_at, completed_at, session_rpe, program_day_id, client_id, profile_id, '
+    + 'workout_session_sets(id, exercise_id, set_number, weight_done, reps_done, rir_done, completed), '
+    + 'program_days(title)';
+
+  let q = supabase
+    .from('workout_sessions')
+    .select(selectRich)
+    .or(orParts.join(','))
+    .order('started_at', { ascending: false })
+    .limit(limit);
+  if (status) q = q.eq('status', status);
+
+  let { data, error } = await q;
+  if (error) {
+    let q2 = supabase
+      .from('workout_sessions')
+      .select('id, status, started_at, completed_at, program_day_id, client_id, profile_id, workout_session_sets(*)')
+      .or(orParts.join(','))
+      .order('started_at', { ascending: false })
+      .limit(limit);
+    if (status) q2 = q2.eq('status', status);
+    const res = await q2;
+    data = res.data;
+    error = res.error;
+  }
+  if (error) {
+    console.error('[fetchWorkoutListRowsForUser]', error);
+    return [];
+  }
+  return (Array.isArray(data) ? data : []).map(mapWorkoutSessionToListRow);
 }

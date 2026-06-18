@@ -6,6 +6,7 @@
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import TopBar from '@/components/ui/TopBar';
@@ -23,7 +24,10 @@ import {
   addPoseConditioningNote,
   removePoseConditioningNote,
   POSE_CONDITIONING_TAGS,
+  uploadPoseCheckAnnotatedPng,
 } from '@/lib/poseChecks';
+import { getCriteriaForDivision } from '@/lib/divisionJudgingCriteria';
+import PoseAnnotationCanvas from '@/components/posing/PoseAnnotationCanvas';
 import { useAuth } from '@/lib/AuthContext';
 import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
@@ -71,10 +75,13 @@ export default function PoseCheckReviewDetailPage() {
       setPoseCheck(row);
       setItems(Array.isArray(itemRows) ? itemRows : []);
       const edits = {};
+      const annDrafts = {};
       (itemRows || []).forEach((i) => {
         edits[i.id] = { coach_rating: i.coach_rating, coach_notes: i.coach_notes ?? '' };
+        annDrafts[i.id] = Array.isArray(i.coach_annotations) ? [...i.coach_annotations] : [];
       });
       setItemEdits(edits);
+      setItemAnnotationDrafts(annDrafts);
       if (row) {
         setOverallCoachNotes(row.coach_notes ?? '');
         if (row.photos && Array.isArray(row.photos) && row.photos.length > 0) {
@@ -204,6 +211,12 @@ export default function PoseCheckReviewDetailPage() {
     enabled: !!supabase && !!clientId,
   });
 
+  const judgingCriteria = useMemo(
+    () => getCriteriaForDivision(activePrep?.division || activePrep?.division_key || ''),
+    [activePrep?.division, activePrep?.division_key]
+  );
+  const divisionLabel = activePrep?.division || activePrep?.division_key || 'this division';
+
   const prepDataForInsight = useMemo(() => {
     if (!metrics?.has_active_prep) return null;
     return {
@@ -272,6 +285,11 @@ export default function PoseCheckReviewDetailPage() {
   const [activePoseIndex, setActivePoseIndex] = useState(null);
   const [compareWeekMode, setCompareWeekMode] = useState(false);
   const [touchStartX, setTouchStartX] = useState(null);
+  const [judgingOpen, setJudgingOpen] = useState(false);
+  const [judgingTab, setJudgingTab] = useState('front');
+  const [itemAnnotationDrafts, setItemAnnotationDrafts] = useState({});
+  const [savingAnnotationsId, setSavingAnnotationsId] = useState(null);
+  const annotCanvasRefs = React.useRef({});
 
   const setItemEdit = (itemId, field, value) => {
     setItemEdits((prev) => ({
@@ -328,6 +346,43 @@ export default function PoseCheckReviewDetailPage() {
     } else toast.error('Could not remove tag');
   };
 
+  const saveItemAnnotations = async (item) => {
+    if (!clientId || !poseCheckId || savingAnnotationsId) return;
+    setSavingAnnotationsId(item.id);
+    try {
+      const draft = itemAnnotationDrafts[item.id] ?? [];
+      const canvasRef = annotCanvasRefs.current[item.id];
+      let path = null;
+      if (draft.length && canvasRef?.exportPngBlob) {
+        const blob = await canvasRef.exportPngBlob();
+        if (blob) {
+          path = await uploadPoseCheckAnnotatedPng({
+            clientId,
+            poseCheckId,
+            itemId: item.id,
+            blob,
+          });
+        }
+      }
+      const ok = await updatePoseCheckItem(item.id, {
+        coach_annotations: draft,
+        ...(path ? { annotated_image_path: path } : {}),
+      });
+      if (ok) {
+        toast.success('Annotations saved');
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === item.id
+              ? { ...i, coach_annotations: draft, annotated_image_path: path ?? i.annotated_image_path }
+              : i
+          )
+        );
+      } else toast.error('Could not save annotations');
+    } finally {
+      setSavingAnnotationsId(null);
+    }
+  };
+
   const handleSaveReview = async (e) => {
     e?.preventDefault();
     if (!poseCheckId || saving) return;
@@ -349,6 +404,12 @@ export default function PoseCheckReviewDetailPage() {
         if (rating !== item.coach_rating || notes !== (item.coach_notes ?? null)) {
           await updatePoseCheckItem(item.id, { coach_rating: Number.isNaN(rating) ? null : rating, coach_notes: notes });
         }
+        const draftAnn = itemAnnotationDrafts[item.id];
+        const prevAnn = JSON.stringify(item.coach_annotations ?? []);
+        const nextAnn = JSON.stringify(Array.isArray(draftAnn) ? draftAnn : []);
+        if (draftAnn != null && prevAnn !== nextAnn) {
+          await updatePoseCheckItem(item.id, { coach_annotations: draftAnn });
+        }
       }
       const ok = await savePoseCheckReview(poseCheckId, {
         coach_notes: overallCoachNotes.trim() || null,
@@ -361,7 +422,11 @@ export default function PoseCheckReviewDetailPage() {
         setItems((prev) =>
           prev.map((i) => {
             const e = itemEdits[i.id];
-            return e ? { ...i, coach_rating: e.coach_rating, coach_notes: e.coach_notes } : i;
+            const ann = itemAnnotationDrafts[i.id];
+            let next = { ...i };
+            if (e) next = { ...next, coach_rating: e.coach_rating, coach_notes: e.coach_notes };
+            if (ann != null) next = { ...next, coach_annotations: ann };
+            return next;
           })
         );
       } else {
@@ -373,7 +438,7 @@ export default function PoseCheckReviewDetailPage() {
   };
 
   const handleMessageClient = () => {
-    if (clientId) navigate(`/messages/${clientId}`);
+    if (clientId) navigateToThread(navigate, clientId);
     else toast.error('Client not found');
   };
 
@@ -509,6 +574,47 @@ export default function PoseCheckReviewDetailPage() {
             <p className="text-xs mb-3" style={{ color: colors.muted }}>
               This week vs previous submission (same pose) when available — quick scan for progression.
             </p>
+            {judgingCriteria && (
+              <Card style={{ marginBottom: spacing[16], padding: spacing[12], border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between gap-2 text-left"
+                  onClick={() => setJudgingOpen((o) => !o)}
+                  style={{ color: colors.text }}
+                >
+                  <span className="text-sm font-semibold">Judging criteria for {divisionLabel}</span>
+                  {judgingOpen ? <ChevronUp size={18} style={{ color: colors.muted }} /> : <ChevronDown size={18} style={{ color: colors.muted }} />}
+                </button>
+                {judgingOpen && (
+                  <div className="mt-3">
+                    <div className="flex gap-1 mb-2">
+                      {['front', 'back', 'common_mistakes'].map((tab) => (
+                        <button
+                          key={tab}
+                          type="button"
+                          className="text-xs font-semibold px-2 py-1 rounded-md capitalize"
+                          style={{
+                            background: judgingTab === tab ? colors.primarySubtle : 'transparent',
+                            color: judgingTab === tab ? colors.primary : colors.muted,
+                          }}
+                          onClick={() => setJudgingTab(tab)}
+                        >
+                          {tab === 'common_mistakes' ? 'Common mistakes' : tab}
+                        </button>
+                      ))}
+                    </div>
+                    <ul className="text-sm space-y-1 pl-4 list-disc" style={{ color: colors.text }}>
+                      {(judgingTab === 'front' ? judgingCriteria.front : judgingTab === 'back' ? judgingCriteria.back : judgingCriteria.common_mistakes).map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                    <p className="text-xs mt-3 pt-2" style={{ borderTop: `1px solid ${colors.border}`, color: colors.muted }}>
+                      Peak conditioning target: {judgingCriteria.peak_conditioning}
+                    </p>
+                  </div>
+                )}
+              </Card>
+            )}
             <div className="space-y-4">
               {items.map((item) => {
                 const edit = itemEdits[item.id] || {};
@@ -578,6 +684,31 @@ export default function PoseCheckReviewDetailPage() {
                           )}
                         </div>
                       </div>
+                      {imageUrl && (
+                        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${colors.border}` }}>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Photo markup</p>
+                          <PoseAnnotationCanvas
+                            ref={(r) => {
+                              annotCanvasRefs.current[item.id] = r;
+                            }}
+                            imageUrl={imageUrl}
+                            initialAnnotations={itemAnnotationDrafts[item.id] || []}
+                            onAnnotationsChange={(next) =>
+                              setItemAnnotationDrafts((p) => ({ ...p, [item.id]: next }))
+                            }
+                          />
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="mt-2"
+                            disabled={savingAnnotationsId === item.id}
+                            onClick={() => saveItemAnnotations(item)}
+                          >
+                            {savingAnnotationsId === item.id ? 'Saving…' : 'Save annotations'}
+                          </Button>
+                        </div>
+                      )}
                       <div className="flex flex-col sm:flex-row gap-4 pt-2" style={{ borderTop: `1px solid ${colors.border}` }}>
                         <div className="flex-1 min-w-0">
                           <p className="text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Conditioning tags</p>

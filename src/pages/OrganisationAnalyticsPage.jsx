@@ -468,9 +468,9 @@ export default function OrganisationAnalyticsPage() {
                   <p className="text-sm" style={{ color: colors.muted }}>
                     Expected monthly revenue:{' '}
                     {moneyTotals.expectedRevenue > 0
-                      ? new Intl.NumberFormat(undefined, {
+                      ? new Intl.NumberFormat('en-GB', {
                           style: 'currency',
-                          currency: 'USD',
+                          currency: 'GBP',
                           minimumFractionDigits: 0,
                           maximumFractionDigits: 0,
                         }).format(moneyTotals.expectedRevenue)

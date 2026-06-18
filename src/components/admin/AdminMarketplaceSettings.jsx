@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,8 +8,7 @@ import { CardSkeleton } from '@/components/ui/LoadingState';
 import { toast } from 'sonner';
 import { Save, Plus, X } from 'lucide-react';
 
-export default function AdminMarketplaceSettings({ adminEmail }) {
-  const isAdmin = adminEmail?.toLowerCase() === 'derekbradley96@gmail.com';
+export default function AdminMarketplaceSettings({ isAdmin, adminEmail }) {
 
   const queryClient = useQueryClient();
 

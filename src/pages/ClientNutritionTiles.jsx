@@ -238,7 +238,7 @@ export default function ClientNutritionTiles() {
               </span>
             </div>
           </div>
-          <Button variant="secondary" onClick={() => navigate(`/trainer/nutrition/${clientId}`)} style={{ marginTop: spacing[12] }}>
+          <Button variant="secondary" onClick={() => navigate(`/coach/nutrition/${clientId}`)} style={{ marginTop: spacing[12] }}>
             Edit plan
           </Button>
         </Card>

@@ -8,6 +8,7 @@ import { getPersonalMoreHubCopy, resolvePersonalUXContext } from '@/lib/personal
 /** @param {{ profile: object|null, user: object|null }} p */
 export function personalPlanBadgeLabel({ profile, user }) {
   const tier = resolvePersonalPlanTier(profile, user);
+  if (tier === 'free') return 'Free';
   if (tier === 'enhanced') return 'Enhanced';
   return 'Basic';
 }

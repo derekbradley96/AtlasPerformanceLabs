@@ -256,6 +256,8 @@ export function mapLegacyMarketplaceProfileToDiscoveryRow(legacyRow, nav = {}) {
     pricing_from_amount: numAmt,
     pricing_currency: '$',
     pricing_mode: numAmt != null && numAmt > 0 ? 'listed' : undefined,
+    avg_pillars: legacyRow.avg_pillars ?? null,
+    review_count: legacyRow.review_count ?? 0,
     accepts_transformation,
     accepts_competition,
   };
@@ -282,6 +284,9 @@ export function mapDiscoveryRowToCoachCardData(row, { entrySource, userGoal, isP
     coachName: row.display_name || 'Coach',
     coachHeadline: deriveCoachHeadline(row),
     coachAvatarUrl: row.avatar_url || row.coach_avatar_url || null,
+    avgPillars: row.avg_pillars == null ? null : Number(row.avg_pillars),
+    reviewCount: Number(row.review_count) || 0,
+    planTier: (row.plan_tier ?? '').toString().toLowerCase() || null,
     tags: deriveCoachTags(row),
     matchReason,
     trustItems: buildCoachTrustItems(row),

@@ -2,7 +2,7 @@
  * Get or ensure the authenticated coach has a referral code. User id is derived from JWT only.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
 /** Short, uppercase, easy to type; stable once stored on profiles.referral_code. */
@@ -14,7 +14,7 @@ function randomCode() {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -35,12 +35,12 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (profileError || !profile) {
-      return new Response(JSON.stringify({ error: "Profile not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Profile not found" }), { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const existing = (profile as { referral_code?: string }).referral_code?.trim();
     if (existing) {
-      return new Response(JSON.stringify({ code: existing }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ code: existing }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     let code: string | null = null;
@@ -56,9 +56,9 @@ Deno.serve(async (req) => {
       }
     }
     if (!code) {
-      return new Response(JSON.stringify({ error: "Failed to generate unique code" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Failed to generate unique code" }), { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
-    return new Response(JSON.stringify({ code }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ code }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (err) {
     console.error("generateInviteCode:", err);
     return jsonError("Request failed", 500);

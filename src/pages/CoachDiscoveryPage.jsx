@@ -41,7 +41,7 @@ async function fetchDiscoveryCoaches(supabase) {
   const { data: rows, error } = await supabase
     .from('coach_marketplace_profiles')
     .select(
-      'id, coach_id, display_name, slug, headline, bio, location, pricing_summary, accepts_transformation, accepts_competition, accepts_personal_transitions, is_public'
+      'id, coach_id, display_name, slug, headline, bio, location, pricing_summary, accepts_transformation, accepts_competition, accepts_personal_transitions, avg_pillars, review_count, is_public, divisions'
     )
     .eq('is_public', true)
     .order('updated_at', { ascending: false });
@@ -53,7 +53,7 @@ async function fetchDiscoveryCoaches(supabase) {
   const coachIds = [...new Set(list.map((r) => r.coach_id).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, coach_focus, referral_code, avatar_url, coaching_style')
+    .select('id, coach_focus, referral_code, avatar_url, coaching_style, plan_tier')
     .in('id', coachIds);
 
   const profileMap = new Map();
@@ -62,12 +62,16 @@ async function fetchDiscoveryCoaches(supabase) {
   const merged = list.map((row) => {
     const prof = profileMap.get(row.coach_id) || {};
     const strength = computeCoachProfileStrength({ listing: row, profile: prof });
+    const tierRaw = (prof.plan_tier ?? 'basic').toString().toLowerCase();
+    const listingPriority = tierRaw === 'elite' ? 0 : tierRaw === 'pro' ? 1 : 2;
     return {
       ...row,
       coach_focus: prof.coach_focus ?? null,
       referral_code: prof.referral_code ?? null,
       avatar_url: prof.avatar_url ?? null,
       coaching_style: prof.coaching_style ?? null,
+      plan_tier: tierRaw,
+      listing_priority: listingPriority,
       _strengthPercent: strength.percent,
       _strengthEligibleBestMatch: strength.eligibleForBestMatch,
     };
@@ -108,6 +112,24 @@ export default function CoachDiscoveryPage() {
   const [priceBand, setPriceBand] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
+  useEffect(() => {
+    if (searchParams.get('type') === 'competition') {
+      setCoachType('competition');
+      return;
+    }
+    const raw = (searchParams.get('goal') || '').trim().toLowerCase();
+    if (!raw) return;
+    if (raw === 'lose_fat' || raw.includes('lose') || raw.includes('fat') || raw.includes('cut')) {
+      setCoachType('transformation');
+      return;
+    }
+    if (raw === 'build_muscle' || raw.includes('muscle') || raw.includes('bulk') || raw.includes('build')) {
+      setCoachType('integrated');
+    }
+  }, [searchParams]);
+
+  const divisionFilter = (searchParams.get('division') || '').trim().toLowerCase();
+
   const { data, isLoading } = useQuery({
     queryKey: ['coach-discovery-marketplace'],
     queryFn: () => fetchDiscoveryCoaches(supabase),
@@ -123,6 +145,11 @@ export default function CoachDiscoveryPage() {
     const q = searchQuery.trim().toLowerCase();
     return profiles.filter((p) => {
       if (coachType && (p.coach_focus || '').toLowerCase() !== coachType) return false;
+      if (divisionFilter) {
+        const divs = Array.isArray(p.divisions) ? p.divisions : [];
+        const hit = divs.some((d) => String(d).toLowerCase().includes(divisionFilter));
+        if (!hit && divs.length > 0) return false;
+      }
       if (priceBand === 'has_pricing' && !(p.pricing_summary && p.pricing_summary.trim())) return false;
       if (priceBand === 'contact' && (p.pricing_summary && p.pricing_summary.trim())) return false;
       if (!coachMatchesExperienceBand(p, experienceBand)) return false;
@@ -135,14 +162,29 @@ export default function CoachDiscoveryPage() {
       }
       return true;
     });
-  }, [profiles, coachType, priceBand, searchQuery, experienceBand]);
+  }, [profiles, coachType, priceBand, searchQuery, experienceBand, divisionFilter]);
 
   const sortedFilteredProfiles = useMemo(() => {
-    return [...filteredProfiles].sort(
-      (a, b) =>
+    return [...filteredProfiles].sort((a, b) => {
+      const pa = Number(a.listing_priority);
+      const pb = Number(b.listing_priority);
+      const ta = Number.isFinite(pa) ? pa : 2;
+      const tb = Number.isFinite(pb) ? pb : 2;
+      if (ta !== tb) return ta - tb;
+      const aRated = a.avg_pillars != null ? 0 : 1;
+      const bRated = b.avg_pillars != null ? 0 : 1;
+      if (aRated !== bRated) return aRated - bRated;
+      const aAvg = Number(a.avg_pillars) || 0;
+      const bAvg = Number(b.avg_pillars) || 0;
+      if (aAvg !== bAvg) return bAvg - aAvg;
+      const aCount = Number(a.review_count) || 0;
+      const bCount = Number(b.review_count) || 0;
+      if (aCount !== bCount) return bCount - aCount;
+      return (
         marketplaceCoachFitScore(entrySource, b, showPersonalPremium) -
         marketplaceCoachFitScore(entrySource, a, showPersonalPremium)
-    );
+      );
+    });
   }, [filteredProfiles, entrySource, showPersonalPremium]);
 
   const activeFilterCount = useMemo(() => {
@@ -327,6 +369,8 @@ export default function CoachDiscoveryPage() {
               coachName={cardData.coachName}
               coachHeadline={cardData.coachHeadline}
               coachAvatarUrl={cardData.coachAvatarUrl}
+              avgPillars={cardData.avgPillars}
+              reviewCount={cardData.reviewCount}
               tags={cardData.tags}
               matchReason={cardData.matchReason}
               trustItems={cardData.trustItems}

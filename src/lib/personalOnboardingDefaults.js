@@ -1,6 +1,6 @@
 /**
- * After personal onboarding: optional starter program (local) + macro targets — **Enhanced only**.
- * Basic tier must never call auto program or auto macro generation (manual-first).
+ * After personal onboarding: suggested macro targets only (no auto-generated programmes).
+ * Personal users build training plans manually in the programme builder.
  */
 import { generateQuickStartWeek } from '@/lib/workoutQuickStart';
 import { saveProgram, assignProgramToClient, getAssignment } from '@/lib/programsStore';
@@ -95,7 +95,10 @@ export function mapTrainingAgeIdToExperienceId(trainingAgeId) {
   return null;
 }
 
-/** @param {{ userId: string, goalId: string, daysPerWeek: number, structureType?: string }} args */
+/**
+ * Legacy helper — not used after onboarding (personal programmes are manual).
+ * @param {{ userId: string, goalId: string, daysPerWeek: number, structureType?: string }} args
+ */
 export function ensureStarterProgramForPersonal({ userId, goalId, daysPerWeek, structureType }) {
   if (!userId) return null;
   if (getAssignment(userId)) return null;
@@ -135,25 +138,20 @@ export function ensureStarterProgramForPersonal({ userId, goalId, daysPerWeek, s
   return prog;
 }
 
-/**
- * @param {'basic'|'enhanced'} tier
- * @returns {boolean}
- */
-export function personalOnboardingAllowsAutoSetup(tier) {
-  return tier === 'enhanced';
+/** @deprecated Tier-based gating removed; macros always suggested on finish. */
+export function personalOnboardingAllowsAutoSetup(_tier) {
+  return true;
 }
 
 /**
- * Enhanced-only: quick-start week + suggested macro targets in local stores.
+ * Macro targets only (no starter programme).
  * @param {{ userId: string|null, goalId: string, experienceId?: string, confidenceId?: string, trainingAgeId?: string, splitPreferenceId?: string, daysPerWeek: number, weightKg: number|null, targetWeightKg: number|null }} args
  */
 export function applyPersonalEnhancedOnboardingDefaults(args) {
-  const { userId, goalId, daysPerWeek, weightKg, targetWeightKg } = args;
+  const { userId, goalId, weightKg, targetWeightKg } = args;
   const fromAge = mapTrainingAgeIdToExperienceId(args.trainingAgeId);
   const experienceId =
-    args.experienceId
-    || fromAge
-    || mapConfidenceToExperienceId(args.confidenceId);
+    args.experienceId || fromAge || mapConfidenceToExperienceId(args.confidenceId);
   const macros = computePersonalMacroTargets({ weightKg, targetWeightKg, goalId, experienceId });
   if (macros && userId) {
     upsertPersonalNutritionTarget(userId, {
@@ -163,28 +161,39 @@ export function applyPersonalEnhancedOnboardingDefaults(args) {
       target_fats_g: macros.fats,
     });
   }
-  const freq = Math.max(2, Math.min(6, Number(daysPerWeek) || 3));
-  if (userId) {
-    ensureStarterProgramForPersonal({
-      userId,
-      goalId,
-      daysPerWeek: freq,
-      structureType: args.splitPreferenceId,
-    });
-  }
 }
 
 /**
- * Single entry from onboarding finish: Basic skips all auto-generated program / macro paths.
- * @param {{ tier: 'basic'|'enhanced', userId: string|null, goalId: string, experienceId?: string, confidenceId?: string, trainingAgeId?: string, splitPreferenceId?: string, daysPerWeek: number, weightKg: number|null, targetWeightKg: number|null }} args
+ * Onboarding finish: save suggested macro targets only (no programme assignment).
+ * @param {{ tier?: string, userId: string|null, goalId: string, experienceId?: string, confidenceId?: string, trainingAgeId?: string, splitPreferenceId?: string, daysPerWeek: number, weightKg: number|null, targetWeightKg: number|null }} args
+ * @returns {Promise<{ success: boolean, programAssigned: boolean, macros: object|null }>}
  */
-export function applyPersonalOnboardingFinish(args) {
-  const { tier } = args;
-  if (!personalOnboardingAllowsAutoSetup(tier)) return;
-  applyPersonalEnhancedOnboardingDefaults(args);
+export async function applyPersonalOnboardingFinish(args) {
+  const fromAge = mapTrainingAgeIdToExperienceId(args.trainingAgeId);
+  const experienceId =
+    args.experienceId || fromAge || mapConfidenceToExperienceId(args.confidenceId);
+  const macros = computePersonalMacroTargets({
+    weightKg: args.weightKg,
+    targetWeightKg: args.targetWeightKg,
+    goalId: args.goalId,
+    experienceId,
+  });
+  if (macros && args.userId) {
+    upsertPersonalNutritionTarget(args.userId, {
+      target_calories: macros.calories,
+      target_protein_g: macros.protein,
+      target_carbs_g: macros.carbs,
+      target_fats_g: macros.fats,
+    });
+  }
+  return {
+    success: true,
+    programAssigned: false,
+    macros: macros || null,
+  };
 }
 
-/** @deprecated Use applyPersonalOnboardingFinish({ tier: 'enhanced', ... }) */
+/** @deprecated Use applyPersonalOnboardingFinish */
 export function applyPersonalOnboardingDefaults(args) {
-  applyPersonalEnhancedOnboardingDefaults(args);
+  return applyPersonalOnboardingFinish(args);
 }

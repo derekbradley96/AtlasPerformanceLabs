@@ -200,6 +200,8 @@ export interface CheckIn {
   /** Coach reviewed; set when coach marks check-in reviewed. */
   reviewed_at?: string | null;
   reviewed_by?: string | null;
+  /** Coach-applied review tags (free text), shown on history. */
+  coach_review_tags?: string[];
   /** Supabase/local optional fields */
   updated_at?: string | null;
   calories?: number | null;

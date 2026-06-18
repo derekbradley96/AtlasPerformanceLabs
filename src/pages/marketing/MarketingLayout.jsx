@@ -6,6 +6,7 @@ import { Link, Outlet } from 'react-router-dom';
 import { colors } from '@/ui/tokens';
 import { getStandaloneScrollablePagePaddingBottom } from '@/ui/pageLayout';
 import { LOGIN_PUBLIC_PATH, SIGNUP_PUBLIC_PATH } from '@/lib/publicAuthPaths';
+import { clearAuthEntryCarryover } from '@/lib/onboardingStatus';
 import AtlasLogo from '@/components/Brand/AtlasLogo';
 
 const NAV = [
@@ -14,7 +15,11 @@ const NAV = [
   { to: '/for-clients', label: 'Clients' },
   { to: '/personal', label: 'Personal' },
   { to: '/pricing', label: 'Pricing' },
-  { to: '/marketplace', label: 'Marketplace' },
+  // Marketplace hidden until coaches are listed.
+  // Restore when is_marketplace_listed coaches exist.
+  { to: '/affiliates', label: 'Partners' },
+  { to: '/why-switch', label: 'Why Switch' },
+  { to: '/blog', label: 'Blog' },
 ];
 
 export default function MarketingLayout() {
@@ -47,6 +52,7 @@ export default function MarketingLayout() {
             </nav>
             <Link
               to={LOGIN_PUBLIC_PATH}
+              onClick={clearAuthEntryCarryover}
               className="px-3 py-2 rounded-lg text-sm font-medium transition-colors hover:bg-white/5"
               style={{ color: colors.text }}
             >
@@ -79,7 +85,12 @@ export default function MarketingLayout() {
             <Link to="/personal" style={{ color: colors.muted }}>Personal</Link>
             <Link to="/pricing" style={{ color: colors.muted }}>Pricing</Link>
             <Link to="/marketplace" style={{ color: colors.muted }}>Marketplace</Link>
-            <Link to={LOGIN_PUBLIC_PATH} style={{ color: colors.primary }}>Login</Link>
+            <Link to="/affiliates" style={{ color: colors.muted }}>Partners</Link>
+            <Link to="/why-switch" style={{ color: colors.muted }}>Why Switch</Link>
+            <Link to="/blog" style={{ color: colors.muted }}>Blog</Link>
+            <Link to="/privacy" style={{ color: colors.muted }}>Privacy Policy</Link>
+            <Link to="/terms" style={{ color: colors.muted }}>Terms of Service</Link>
+            <Link to={LOGIN_PUBLIC_PATH} onClick={clearAuthEntryCarryover} style={{ color: colors.primary }}>Login</Link>
             <Link to={SIGNUP_PUBLIC_PATH} style={{ color: colors.primary }}>Sign up</Link>
           </div>
         </div>

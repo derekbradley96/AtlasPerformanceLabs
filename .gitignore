@@ -4,6 +4,14 @@
 !.env.example
 .env.local
 .env.*.local
+# NEVER put real credentials in .env or .env.local
+# Use Vercel Dashboard environment variables for production
+# Use `supabase secrets set` for edge function secrets
+.venv-filter-repo/
+.venv/
+venv/
+.venv*/
+venv*/
 *.pem
 secrets/
 *.secret

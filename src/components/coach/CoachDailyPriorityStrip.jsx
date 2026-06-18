@@ -1,7 +1,10 @@
 import React from 'react';
 import { COACH_DAILY_STRIP } from '@/lib/coachDailyWorkflowModel';
 import { colors, spacing, radii } from '@/ui/tokens';
-import { hapticLight } from '@/lib/haptics';
+import { hapticSelection } from '@/lib/haptics';
+import { setNativePref } from '@/lib/nativePreferences';
+
+const COACH_STRIP_PREF_KEY = 'atlas_pref_coach_strip_key';
 
 /**
  * Clickable priority chips → filter coach action queue; optional second tap opens Review Center pre-filtered.
@@ -30,7 +33,8 @@ export default function CoachDailyPriorityStrip({ selectedKey, counts, onSelect,
             role="tab"
             aria-selected={active}
             onClick={() => {
-              hapticLight();
+              hapticSelection();
+              void setNativePref(COACH_STRIP_PREF_KEY, chip.key);
               onSelect(chip.key);
             }}
             className="shrink-0 rounded-full font-semibold transition-colors"

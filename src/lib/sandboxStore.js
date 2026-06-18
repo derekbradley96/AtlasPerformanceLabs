@@ -7,8 +7,16 @@
 import { safeGetJson, safeSetJson } from '@/lib/storageSafe';
 import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
+if (!import.meta.env.DEV) {
+  console.error(
+    '[AtlasSandbox] FATAL: Dev-only sandbox persistence was loaded in '
+    + 'production. It should only run in DEV. '
+    + 'Check for a static import of the sandbox module on a production code path.',
+  );
+}
+
 const SANDBOX_KEY = 'atlas_sandbox_v2';
-const LOCAL_TRAINER_ID = 'local-trainer';
+const LOCAL_TRAINER_ID = 'local-coach';
 
 function genId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -101,7 +109,7 @@ function seedState() {
     id: LOCAL_TRAINER_ID,
     full_name: 'Derek (Local)',
     email: 'local@atlas',
-    user_type: 'trainer',
+    user_type: 'coach',
     created_date: now,
   };
   return {

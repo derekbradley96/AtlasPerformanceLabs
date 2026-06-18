@@ -56,8 +56,23 @@ function toLibraryRow(exercise) {
   const equipmentSecondary = equipmentSlugs.filter((e) => e !== equipmentPrimary);
   const equipmentCategory = deriveEquipmentCategory(equipmentPrimary);
   const tagTokens = normalizeArray(exercise?.tags);
-  const compound = tagTokens.some((t) => normalizeText(t) === 'compound');
+  const tagLower = tagTokens.map((t) => normalizeText(t));
+  const compound = tagLower.includes('compound');
   const aliases = [];
+  const prepContextTags = [];
+  if (tagLower.includes('posing_conditioning') || tagLower.includes('comp_prep')) {
+    prepContextTags.push('pre_contest');
+  }
+  let programRoles = compound ? ['main_lift'] : ['accessory'];
+  let exerciseType = compound ? 'compound' : 'accessory';
+  if (tagLower.includes('cardio') || tagLower.includes('conditioning')) {
+    programRoles = ['cardio'];
+    exerciseType = 'cardio';
+  }
+  if (tagLower.includes('mobility') || tagLower.includes('flexibility') || tagLower.includes('recovery')) {
+    programRoles = ['mobility'];
+    exerciseType = 'mobility';
+  }
   const row = {
     name: String(exercise?.name || '').trim(),
     slug: slugify(exercise?.name),
@@ -80,13 +95,13 @@ function toLibraryRow(exercise) {
     stability_demand: lowerName.includes('single') ? 'high' : 'moderate',
     loading_profile: compound ? 'loadable' : 'limited_load',
     unilateral_type: lowerName.includes('single') ? 'single_side' : 'bilateral',
-    exercise_type: compound ? 'compound' : 'accessory',
-    program_roles: compound ? ['main_lift'] : ['accessory'],
+    exercise_type: exerciseType,
+    program_roles: programRoles,
     best_for_goals: ['hypertrophy', 'general_fitness'],
     best_in_session_window: compound ? ['main'] : ['secondary', 'finisher'],
     gym_context_tags: ['commercial_gym'],
     body_context_tags: [],
-    prep_context_tags: [],
+    prep_context_tags: prepContextTags,
     description: null,
     instructions: null,
     coaching_cues: null,
@@ -255,21 +270,17 @@ async function upsertSubstitutionsForSeed(supabase, libraryRows, seedRows) {
 export async function ensureAtlasExerciseLibrarySeeded() {
   const supabase = db();
   if (!supabase) return { seeded: false, reason: 'no_supabase' };
-  const { count } = await supabase
-    .from('exercise_library')
-    .select('id', { count: 'exact', head: true });
-  if ((count || 0) > 0) return { seeded: false, reason: 'already_seeded' };
   const normalizedRows = EXERCISES.map(toLibraryRow).filter((row) => row.name);
   const rows = normalizeExternalExerciseDataset(normalizedRows).map((x) => sanitizeExerciseLibraryPayload(x.library));
   if (!rows.length) return { seeded: false, reason: 'empty_seed' };
   const { data, error } = await supabase
     .from('exercise_library')
-    .upsert(rows, { onConflict: 'slug' })
+    .upsert(rows, { onConflict: 'name', ignoreDuplicates: false })
     .select('id, slug, source_external_id, aliases, source');
   if (error) return { seeded: false, reason: error.message };
   await upsertAliasesForExercises(supabase, data || []);
   await upsertSubstitutionsForSeed(supabase, data || [], normalizeExternalExerciseDataset(normalizedRows));
-  return { seeded: true, count: rows.length };
+  return { seeded: true, count: rows.length, upserted: true };
 }
 
 export async function importExternalExerciseDataset(records = [], source = 'external_seed') {

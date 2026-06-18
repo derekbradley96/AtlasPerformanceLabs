@@ -7,8 +7,25 @@ const rawMode = typeof import.meta !== 'undefined' && import.meta.env?.VITE_APP_
 const rawUrl = typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL;
 const rawAnon = typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY;
 
-/** 'demo' | 'real'. Default 'demo' if missing. */
-export const APP_MODE = (rawMode === 'real' ? 'real' : 'demo');
+const hasSupabaseCreds =
+  typeof rawUrl === 'string' && rawUrl.trim() !== ''
+  && typeof rawAnon === 'string' && rawAnon.trim() !== '';
+
+/**
+ * 'demo' | 'real'.
+ * - explicit VITE_APP_MODE wins
+ * - if mode is omitted but Supabase creds are present, infer 'real' for local QA/dev continuity
+ * - otherwise default to 'demo'
+ */
+export const APP_MODE = (
+  rawMode === 'real'
+    ? 'real'
+    : rawMode === 'demo'
+      ? 'demo'
+      : hasSupabaseCreds
+        ? 'real'
+        : 'demo'
+);
 
 /** Supabase project URL (e.g. https://xxxx.supabase.co). */
 export const SUPABASE_URL = typeof rawUrl === 'string' && rawUrl.trim() !== '' ? rawUrl.trim() : null;
@@ -23,7 +40,11 @@ const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV;
 
 if (isDev) {
   if (rawMode === undefined || rawMode === '') {
-    console.warn('[Atlas] VITE_APP_MODE is missing; defaulting to demo. Set VITE_APP_MODE=real in .env.local to use Supabase.');
+    if (APP_MODE === 'real') {
+      console.warn('[Atlas] VITE_APP_MODE is missing; inferred real mode from Supabase env vars.');
+    } else {
+      console.warn('[Atlas] VITE_APP_MODE is missing; defaulting to demo. Set VITE_APP_MODE=real in .env.local to use Supabase.');
+    }
   }
   if (APP_MODE === 'real' && !SUPABASE_URL) {
     console.warn('[Atlas] VITE_APP_MODE=real but VITE_SUPABASE_URL is missing. Set VITE_SUPABASE_URL in .env.local.');

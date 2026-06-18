@@ -8,6 +8,7 @@ import * as clientsService from '@/data/clientsService';
 import * as checkinsService from '@/data/checkInsService';
 import * as nutritionPlansService from '@/data/nutritionPlansService';
 import * as messagingService from '@/data/messagingService';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 function safeArray(x) {
   return Array.isArray(x) ? x : [];
@@ -22,6 +23,10 @@ function safeDate(x) {
   } catch {
     return null;
   }
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
 }
 
 /** Normalize client so UI always has full_name and name (Supabase has name only). */
@@ -85,6 +90,9 @@ export const repo = {
     ensureThreadForClient(clientId, trainerId) {
       return messagingService.ensureThreadForClient(clientId, trainerId ?? 'local-trainer');
     },
+    ensureConversation(clientId, trainerId, options = {}) {
+      return messagingService.ensureConversationThread(clientId, trainerId ?? 'local-trainer', options);
+    },
     async deleteByClientId(clientId, trainerId) {
       if (!clientId) return;
       await messagingService.deleteThreadByClientId(clientId, trainerId ?? 'local-trainer');
@@ -109,16 +117,55 @@ export const repo = {
     },
   },
   programs: {
-    list(trainerIdOrClientId) {
-      return Promise.resolve(safeArray(sandbox.listPrograms(trainerIdOrClientId)));
+    async list(trainerIdOrClientId) {
+      const supabase = hasSupabase ? getSupabase() : null;
+      if (supabase && isUuid(trainerIdOrClientId)) {
+        const coachId = trainerIdOrClientId;
+        const { data, error } = await supabase
+          .from('program_blocks')
+          .select('id, title, total_weeks, updated_at, created_at, client_id, goal, notes')
+          .or(`coach_id.eq.${coachId},owner_profile_id.eq.${coachId}`)
+          .order('updated_at', { ascending: false });
+        if (!error && Array.isArray(data)) {
+          return data.map((row) => ({
+            id: row.id,
+            name: row.title || 'Untitled program',
+            goal: row.goal || null,
+            duration_weeks: row.total_weeks || null,
+            version: 1,
+            updated_date: row.updated_at || row.created_at || null,
+            created_date: row.created_at || null,
+            description: row.notes || '',
+            client_id: row.client_id || null,
+          }));
+        }
+      }
+      return safeArray(sandbox.listPrograms(trainerIdOrClientId));
     },
     add(payload) {
       const program = sandbox.addProgram(payload);
       return Promise.resolve(program);
     },
-    assignToClient(clientId, programId) {
+    async assignToClient(clientId, programId) {
+      const supabase = hasSupabase ? getSupabase() : null;
+      if (supabase && isUuid(clientId) && isUuid(programId)) {
+        const { error: deactivateErr } = await supabase
+          .from('program_block_assignments')
+          .update({ is_active: false })
+          .eq('client_id', clientId);
+        if (deactivateErr) throw deactivateErr;
+        const { error: insertErr } = await supabase
+          .from('program_block_assignments')
+          .insert({
+            client_id: clientId,
+            program_block_id: programId,
+            start_date: new Date().toISOString().slice(0, 10),
+            is_active: true,
+          });
+        if (insertErr) throw insertErr;
+        return;
+      }
       sandbox.assignProgramToClient(clientId, programId);
-      return Promise.resolve();
     },
   },
   checkIns: {

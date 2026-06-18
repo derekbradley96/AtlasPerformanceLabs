@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { MessageSquare, Phone, Video, ClipboardList } from 'lucide-react';
 import { colors } from '@/ui/tokens';
 
@@ -30,7 +31,7 @@ export default function ClientActionBar({
 
   const handleAction = (key) => {
     if (key === 'message' && clientId) {
-      navigate(`/messages/${clientId}`, { state: { from: location.pathname } });
+      navigateToThread(navigate, clientId, { state: { from: location.pathname } });
       return;
     }
     if (key === 'requestCheckin' && typeof onFocusCheckins === 'function') {

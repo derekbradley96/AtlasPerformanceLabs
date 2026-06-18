@@ -86,6 +86,23 @@ export default function PoseCheckReviewPage() {
     return map;
   }, [prepHeaders]);
 
+  const { data: queuePoseItems = [] } = useQuery({
+    queryKey: ['pose-review-queue-fallback', profile?.id],
+    queryFn: async () => {
+      if (!hasSupabase || !getSupabase() || !profile?.id) return [];
+      const { data, error } = await getSupabase()
+        .from('v_coach_review_queue')
+        .select('client_id, client_name, payload, created_at, resolved_at')
+        .eq('coach_id', profile.id)
+        .eq('item_type', 'pose_check')
+        .is('resolved_at', null)
+        .order('created_at', { ascending: false });
+      if (error || !Array.isArray(data)) return [];
+      return data;
+    },
+    enabled: !!profile?.id,
+  });
+
   const enrichedRows = useMemo(() => {
     return clients.map((client) => {
       const latest = latestMap[client.id] || null;
@@ -129,6 +146,17 @@ export default function PoseCheckReviewPage() {
     return m;
   }, [enrichedRows]);
 
+  const fallbackRows = useMemo(() => {
+    if (enrichedRows.length > 0) return [];
+    return (queuePoseItems || []).map((item) => ({
+      id: item?.payload?.pose_check_id || `${item.client_id}-${item.created_at}`,
+      clientName: item?.client_name || 'Client',
+      clientId: item?.client_id || null,
+      poseCheckId: item?.payload?.pose_check_id || null,
+      submittedAt: item?.payload?.submitted_at || item?.created_at || null,
+    }));
+  }, [enrichedRows.length, queuePoseItems]);
+
   if (loading) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
@@ -158,10 +186,52 @@ export default function PoseCheckReviewPage() {
           </p>
         </Card>
 
-        {enrichedRows.length === 0 ? (
+        {enrichedRows.length === 0 && fallbackRows.length === 0 ? (
           <Card style={{ padding: spacing[24], textAlign: 'center' }}>
             <p style={{ color: colors.muted }}>No clients yet.</p>
           </Card>
+        ) : enrichedRows.length === 0 && fallbackRows.length > 0 ? (
+          <section style={{ marginBottom: spacing[20] }}>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertCircle size={18} style={{ color: colors.primary }} />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide" style={{ color: colors.text }}>Review now</p>
+                <p className="text-[11px]" style={{ color: colors.muted }}>
+                  Items from your review queue · {fallbackRows.length} client{fallbackRows.length === 1 ? '' : 's'}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {fallbackRows.map((row) => (
+                <Card
+                  key={row.id}
+                  style={{
+                    padding: spacing[14],
+                    cursor: row.poseCheckId ? 'pointer' : 'default',
+                    borderLeft: `4px solid ${colors.primary}`,
+                  }}
+                  onClick={() => row.poseCheckId && navigate(`/review-center/pose-checks/${row.poseCheckId}`)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate" style={{ color: colors.text }}>
+                        {row.clientName}
+                      </p>
+                      <p className="text-sm" style={{ color: colors.primary }}>
+                        Needs your review
+                      </p>
+                      {row.submittedAt && (
+                        <p className="text-[11px] mt-1" style={{ color: colors.muted }}>
+                          Submitted {new Date(row.submittedAt).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    {row.poseCheckId && <ChevronRight size={20} style={{ color: colors.muted, flexShrink: 0 }} />}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </section>
         ) : (
           SECTIONS.map(({ tier, title, subtitle, Icon, border }) => {
             const list = byTier[tier] || [];

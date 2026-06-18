@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { ArrowLeft, MessageSquare, CreditCard, Camera, Calendar, ClipboardList, CheckCircle } from 'lucide-react';
 import { getInterventionSnapshot } from '@/lib/intervention/interventionService';
 import { setRetentionAcknowledged } from '@/lib/retention/retentionRepo';
@@ -82,6 +83,8 @@ export default function Intervention() {
         <div style={{ height: 24, width: 80, background: 'rgba(255,255,255,0.08)', borderRadius: 4, marginBottom: spacing[16] }} />
         <SkeletonCard style={{ marginBottom: spacing[12] }} />
         <SkeletonCard style={{ marginBottom: spacing[12] }} />
+        <SkeletonCard style={{ marginBottom: spacing[12] }} />
+        <SkeletonCard style={{ marginBottom: spacing[12] }} />
         <SkeletonCard />
       </div>
     );
@@ -90,10 +93,22 @@ export default function Intervention() {
   if (!snapshot) {
     return (
       <div className="app-screen" style={{ padding: spacing[16], background: colors.bg, color: colors.text }}>
-        <p style={{ color: colors.muted }}>Could not load intervention data.</p>
-        <button type="button" onClick={() => navigate(clientId ? `/clients/${clientId}` : -1)} className="text-[15px] font-medium mt-4" style={{ color: colors.accent }}>
-          Back
-        </button>
+        <p style={{ color: colors.text, fontWeight: 600, marginBottom: spacing[8] }}>
+          Could not load client data. Check your connection and try again.
+        </p>
+        <div className="flex flex-wrap gap-3 mt-2">
+          <button
+            type="button"
+            onClick={() => loadSnapshot()}
+            className="text-[15px] font-medium py-2 px-4 rounded-lg border-none"
+            style={{ color: '#fff', background: colors.accent }}
+          >
+            Retry
+          </button>
+          <button type="button" onClick={() => navigate(clientId ? `/clients/${clientId}` : -1)} className="text-[15px] font-medium py-2 px-4 rounded-lg" style={{ color: colors.accent, background: 'transparent', border: `1px solid ${colors.border}` }}>
+            Back
+          </button>
+        </div>
       </div>
     );
   }
@@ -103,7 +118,7 @@ export default function Intervention() {
   const reasons = (retention?.reasons?.length ? retention.reasons.map((r) => r.detail) : health.reasons).slice(0, 5);
 
   const openMessagesWithPrefill = (template) => {
-    navigate(`/messages/${clientId}`, { state: { prefilledMessage: template } });
+    navigateToThread(navigate, clientId, { state: { prefilledMessage: template } });
   };
 
   const handlePaymentReminder = async () => {
@@ -113,7 +128,7 @@ export default function Intervention() {
     const until = new Date();
     until.setHours(until.getHours() + 48);
     setQueueItemState(dedupeKey, { status: 'WAITING', snoozedUntil: until.toISOString() });
-    openMessagesWithPrefill(getTemplate('payment_reminder'));
+    openMessagesWithPrefill(getTemplate('payment_reminder', undefined, client.name));
     toast.success('Reminder template ready. Edit and send when ready.');
   };
 
@@ -213,6 +228,11 @@ export default function Intervention() {
             <p>Adherence: last 2 avg {trends.adherence.last2Avg != null ? `${Math.round(trends.adherence.last2Avg)}%` : '—'} · last 4 avg {trends.adherence.last4Avg != null ? `${Math.round(trends.adherence.last4Avg)}%` : '—'}</p>
           )}
           <p>Last check-in {formatDaysAgo(trends.checkins.lastSubmittedAt) ?? '—'}</p>
+          {trends.interpretation ? (
+            <p className="text-[13px] mt-2 pt-2 border-t" style={{ borderColor: colors.border, color: colors.muted }}>
+              {trends.interpretation}
+            </p>
+          ) : null}
         </div>
       </Card>
 
@@ -232,7 +252,7 @@ export default function Intervention() {
       <div className="space-y-2">
         <button
           type="button"
-          onClick={async () => { await impactLight(); openMessagesWithPrefill(getCheckinNudgeTemplate(client.phase)); }}
+          onClick={async () => { await impactLight(); openMessagesWithPrefill(getCheckinNudgeTemplate(client.phase, client.name)); }}
           className="flex items-center gap-3 w-full text-left rounded-xl border-none py-3 px-4 active:opacity-90"
           style={{ background: colors.card, color: colors.text, border: `1px solid ${colors.border}` }}
         >
@@ -251,7 +271,7 @@ export default function Intervention() {
         {client.compProfile && (
           <button
             type="button"
-            onClick={async () => { await impactLight(); openMessagesWithPrefill(getTemplate('posing_request')); }}
+            onClick={async () => { await impactLight(); openMessagesWithPrefill(getTemplate('posing_request', undefined, client.name)); }}
             className="flex items-center gap-3 w-full text-left rounded-xl border-none py-3 px-4 active:opacity-90"
             style={{ background: colors.card, color: colors.text, border: `1px solid ${colors.border}` }}
           >

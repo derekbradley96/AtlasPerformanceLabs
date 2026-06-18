@@ -3,7 +3,7 @@
  * Feeds health score modifiers and intervention recovery section. Never writes training plans.
  */
 import { listLogs, getRollingAverage } from './energyRepo';
-import { getClientById, getClientCheckIns } from '@/data/selectors';
+import * as sandbox from '@/lib/sandboxStore';
 import { getClientPhase } from '@/lib/clientPhaseStore';
 import { getHealthScoreConfig } from '@/lib/intelligence/healthScoreConfig';
 import { getStrengthTrendFromCheckins } from '@/lib/intelligence/healthScore';
@@ -25,6 +25,14 @@ export interface FatigueResult {
 
 export interface FatigueContext {
   now?: Date;
+  /** When set (e.g. from intervention / health score), avoids sandbox-only reads. */
+  client?: unknown;
+  checkIns?: Array<{
+    status: string;
+    submitted_at?: string | null;
+    created_date?: string | null;
+    weight_kg?: number | null;
+  }>;
 }
 
 const ROLLING_DAYS = 7;
@@ -49,15 +57,17 @@ export function evaluateFatigue(clientId: string, context: FatigueContext = {}):
   const { energyAvg, sleepAvg, count: logCount } = getRollingAverage(clientId, ROLLING_DAYS);
   const logs = listLogs(clientId, ROLLING_DAYS);
 
-  const client = getClientById(clientId);
+  const client = (context.client ?? sandbox.getClientById(clientId)) as
+    | { baselineStrength?: Record<string, number> }
+    | null
+    | undefined;
   const phase = normalizePhase(getClientPhase(clientId, client));
   const config = getHealthScoreConfig();
   const toleranceCut = config.strengthDropToleranceCut;
   const toleranceBulk = config.strengthDropToleranceBulk;
 
-  const submitted = (client ? getClientCheckIns(clientId) : []).filter(
-    (c: { status: string }) => c.status === 'submitted'
-  );
+  const rawCheckIns = context.checkIns ?? (client ? (sandbox.listCheckIns(clientId) ?? []) : []);
+  const submitted = rawCheckIns.filter((c: { status: string }) => c.status === 'submitted');
   const strength = client
     ? getStrengthTrendFromCheckins(
         { baselineStrength: (client.baselineStrength ?? undefined) as Record<string, number> | undefined },

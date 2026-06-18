@@ -1,12 +1,14 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { navigateToThread } from '@/lib/messagesPath';
 import { ClipboardList, Award, Image, MessageSquare, Check, ChevronRight, DollarSign, FileText } from 'lucide-react';
-import { getClientById } from '@/data/selectors';
-import { getClientPhase } from '@/lib/clientPhaseStore';
-import { getClientReviewFeed } from '@/features/reviewEngine/getClientReviewFeed';
-import { getClients } from '@/data/clientsService';
+import { useData } from '@/data/useData';
 import { getLatestByClientIds } from '@/data/checkInsService';
 import { safeFormatDate } from '@/lib/format';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getClientReviewFeed } from '@/features/reviewEngine/getClientReviewFeed';
+import { getClientPhase } from '@/lib/clientPhaseStore';
 import SegmentedControl from '@/ui/SegmentedControl';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
@@ -64,40 +66,55 @@ function groupByDate(items) {
 }
 
 function ReviewCenterAll({ navigate, userId }) {
+  const data = useData();
   const trainerId = userId || 'local-trainer';
-  const [clientsList, setClientsList] = useState([]);
+  const supabase = getSupabase();
   const [latestCheckinsMap, setLatestCheckinsMap] = useState({});
-  const [loadingClients, setLoadingClients] = useState(true);
   const [stripeItems, setStripeItems] = useState([]);
   const [loadingStripe, setLoadingStripe] = useState(!!userId);
 
+  const { data: clientsList = [], isLoading: loadingClients } = useQuery({
+    queryKey: ['review-center-clients', userId],
+    queryFn: async () => {
+      if (supabase && userId && userId !== 'local-trainer' && userId !== 'demo-trainer') {
+        const { data: rows, error } = await supabase
+          .from('clients')
+          .select('id, full_name, user_id, coach_id, trainer_id, status, name')
+          .or(`coach_id.eq.${userId},trainer_id.eq.${userId}`)
+          .order('full_name', { ascending: true });
+        if (!error && Array.isArray(rows)) {
+          return rows.map((r) => ({
+            ...r,
+            full_name: r.full_name ?? r.name ?? 'Client',
+          }));
+        }
+      }
+      const list = await data.listClients();
+      return Array.isArray(list) ? list : [];
+    },
+    enabled: !!userId,
+    staleTime: 2 * 60 * 1000,
+  });
+
   useEffect(() => {
     let cancelled = false;
-    setLoadingClients(true);
+    const ids = (Array.isArray(clientsList) ? clientsList : []).map((c) => c?.id).filter(Boolean);
+    if (ids.length === 0) {
+      setLatestCheckinsMap({});
+      return undefined;
+    }
     (async () => {
       try {
-        const clients = await getClients(trainerId);
-        const list = Array.isArray(clients) ? clients : [];
-        if (cancelled) return;
-        setClientsList(list);
-        const ids = list.map((c) => c?.id).filter(Boolean);
-        if (ids.length === 0) {
-          setLatestCheckinsMap({});
-          return;
-        }
         const map = await getLatestByClientIds(trainerId, ids);
         if (!cancelled) setLatestCheckinsMap(typeof map === 'object' && map !== null ? map : {});
       } catch {
-        if (!cancelled) {
-          setClientsList([]);
-          setLatestCheckinsMap({});
-        }
-      } finally {
-        if (!cancelled) setLoadingClients(false);
+        if (!cancelled) setLatestCheckinsMap({});
       }
     })();
-    return () => { cancelled = true; };
-  }, [trainerId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [trainerId, clientsList]);
 
   useEffect(() => {
     if (!userId) {
@@ -168,7 +185,7 @@ function ReviewCenterAll({ navigate, userId }) {
                   {item.client_id && (
                     <Button
                       variant="secondary"
-                      onClick={async () => { await impactLight(); navigate(`/messages/${item.client_id}`); }}
+                      onClick={async () => { await impactLight(); navigateToThread(navigate, item.client_id); }}
                     >
                       <MessageSquare size={14} style={{ marginRight: 6 }} /> Send reminder
                     </Button>
@@ -311,8 +328,11 @@ export default function ReviewCenter() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user, isDemoMode, profile, hasCompetitionPrep } = useAuth();
+  const data = useData();
+  const supabase = getSupabase();
   const viewerWU = resolveViewerBodyweightUnit(profile);
   const userId = isDemoMode ? 'demo-trainer' : (user?.id ?? '');
+  const coachUserId = user?.id ?? '';
   const filterFromUrl = searchParams.get('filter');
   const [segment, setSegment] = useState('active');
   const [filterType, setFilterType] = useState(() => filterFromUrl || null);
@@ -324,7 +344,31 @@ export default function ReviewCenter() {
     if (!hasCompetitionPrep && filterType === 'posing') setFilterType(null);
   }, [hasCompetitionPrep, filterType]);
 
-  const client = clientId ? getClientById(clientId) : null;
+  const { data: coachClients = [], isLoading: coachClientsLoading } = useQuery({
+    queryKey: ['review-center-coach-clients', coachUserId, isDemoMode, clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
+      if (supabase && coachUserId && !isDemoMode) {
+        const { data: rows, error } = await supabase
+          .from('clients')
+          .select('id, full_name, user_id, coach_id, trainer_id, status, name')
+          .or(`coach_id.eq.${coachUserId},trainer_id.eq.${coachUserId}`)
+          .order('full_name', { ascending: true });
+        if (!error && Array.isArray(rows)) {
+          return rows.map((r) => ({
+            ...r,
+            full_name: r.full_name ?? r.name ?? 'Client',
+          }));
+        }
+      }
+      const list = await data.listClients();
+      return Array.isArray(list) ? list : [];
+    },
+    enabled: !!clientId,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const client = clientId ? coachClients.find((c) => c?.id === clientId) ?? null : null;
   const phase = clientId && client ? getClientPhase(clientId, client) : (client?.phase || '—');
   const statusPillLabel = phase === 'PEAK_WEEK' || (client?.prepPhase === 'PEAK_WEEK') ? 'Peak week' : client?.status === 'at_risk' || client?.status === 'attention' ? 'At risk' : 'On track';
   const statusPillColor = statusPillLabel === 'Peak week' ? '#8B5CF6' : statusPillLabel === 'At risk' ? '#EF4444' : '#22C55E';
@@ -355,7 +399,7 @@ export default function ReviewCenter() {
   );
   const handleMessage = useCallback(
     (item) => {
-      navigate(`/messages/${item.clientId}`, { state: { prefilledMessage: '' } });
+      navigateToThread(navigate, item.clientId, { state: { prefilledMessage: '' } });
     },
     [navigate]
   );
@@ -369,6 +413,16 @@ export default function ReviewCenter() {
   // Global Review Center (no clientId): list clients with review items + payment/intake
   if (!clientId) {
     return <ReviewCenterAll navigate={navigate} userId={userId} />;
+  }
+
+  if (clientId && coachClientsLoading) {
+    return (
+      <PageShell showTabBar variant="compact">
+        <div className="min-w-0 max-w-full app-screen" style={{ background: colors.bg, color: colors.muted }}>
+          <PageHeader title="Review" subtitle="Loading client…" marginBottom={spacing[16]} />
+        </div>
+      </PageShell>
+    );
   }
 
   if (!client) {

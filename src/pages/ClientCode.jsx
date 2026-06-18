@@ -89,6 +89,7 @@ export default function ClientCode() {
     setLoading(true);
     setError('');
     try {
+      // TODO: This Edge Function may not be deployed — verify or replace with direct Supabase query
       const result = await invokeSupabaseFunction('validateInviteCode', { code: normalized });
       if (result.error || !result.data?.valid) {
         setLoading(false);

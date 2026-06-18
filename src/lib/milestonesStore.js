@@ -21,6 +21,11 @@ function safeSet(value) {
 
 /** Milestone definitions: id, title, description, category (weight | streak | loyalty | time | strength | adherence) */
 export const MILESTONE_DEFS = [
+  { id: 'first_checkin_submitted', title: 'First check-in submitted', description: 'You submitted your first check-in.', category: 'adherence' },
+  { id: 'first_workout_logged', title: 'First workout logged', description: 'You completed your first workout in Atlas.', category: 'strength' },
+  { id: 'first_pose_check_submitted', title: 'First pose check submitted', description: 'You submitted your first pose check.', category: 'adherence' },
+  { id: 'show_weight_target_reached', title: 'Show weight target reached', description: 'You reached your show weight target.', category: 'weight' },
+  { id: 'first_peak_week_complete', title: 'First peak week complete', description: 'You completed your first week in peak week.', category: 'time' },
   { id: 'weight_2_5', title: 'Weight shift (±2.5)', description: 'Meaningful bodyweight change from baseline.', category: 'weight' },
   { id: 'weight_5', title: 'Weight shift (±5)', description: 'Strong bodyweight change from baseline.', category: 'weight' },
   { id: 'weight_10', title: 'Weight shift (±10)', description: 'Major bodyweight change from baseline.', category: 'weight' },

@@ -2,7 +2,7 @@
 // Atlas commission from coach_subscription_tiers; fee from invoice.amount_paid (never from client).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { isWebhookReplaySafe, safeLogWebhook } from "../_shared/stripe.ts";
 import {
@@ -28,7 +28,7 @@ function calculatePlatformFee(amountPaidCents: number, commissionRate: number): 
 }
 
 function jsonResp(body: unknown, status: number) {
-  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(body), { status, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
 }
 
 async function resolveCoachProfileId(
@@ -114,7 +114,7 @@ async function syncCoachBillingState(
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   const raw = await req.text();
   const sig = req.headers.get("stripe-signature");

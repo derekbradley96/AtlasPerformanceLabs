@@ -14,12 +14,15 @@ import { hasRole, Roles } from '@/lib/roles';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getActiveNutritionPlan, upsertNutritionPlan } from '@/data/nutritionPlansService';
 import { trackFirstNutritionPlanCreated } from '@/services/firstSessionTracker';
+import { PREP_EDUCATION_OPTIONS } from '@/lib/prepEducationContent';
+import CoachFreeTextInput from '@/components/ui/CoachFreeTextInput';
+import { colors } from '@/ui/tokens';
 
 export default function NutritionBuilder() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, effectiveRole } = useAuth();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const clientId = searchParams.get('clientId');
   const trainerId = user?.id ?? null;
 
@@ -40,11 +43,19 @@ export default function NutritionBuilder() {
     fats_g: '',
     fats_percent: 30,
     trainer_notes: '',
+    prep_instruction_explanation_key: '',
   });
 
   const planHydratedRef = useRef(false);
+  const suggestFromCheckinRef = useRef(false);
+  const [supplementRecommendations, setSupplementRecommendations] = useState([]);
+  const [nutritionWeekInstructions, setNutritionWeekInstructions] = useState([]);
+
   useEffect(() => {
     planHydratedRef.current = false;
+    suggestFromCheckinRef.current = false;
+    setSupplementRecommendations([]);
+    setNutritionWeekInstructions([]);
   }, [clientId]);
 
   const { data: clientRow, isLoading: clientLoading, error: clientError } = useQuery({
@@ -61,6 +72,13 @@ export default function NutritionBuilder() {
       if (error) throw error;
       if (!data) return null;
       const mine = data.trainer_id === trainerId || data.coach_id === trainerId;
+      if (import.meta.env.DEV && !mine) {
+        console.warn('[NutritionBuilder] coach ownership check failed', {
+          data_trainer_id: data.trainer_id,
+          data_coach_id: data.coach_id,
+          trainerId,
+        });
+      }
       if (!mine) throw new Error('This client is not on your roster.');
       return data;
     },
@@ -75,6 +93,7 @@ export default function NutritionBuilder() {
 
   useEffect(() => {
     if (!activePlan || planHydratedRef.current) return;
+    if (searchParams.get('suggestCalories')) return;
     planHydratedRef.current = true;
     const im =
       activePlan.intake_metrics && typeof activePlan.intake_metrics === 'object'
@@ -102,7 +121,39 @@ export default function NutritionBuilder() {
       plan_type: typeof im.plan_type === 'string' ? im.plan_type : prev.plan_type,
       experience_level: typeof im.experience_level === 'string' ? im.experience_level : prev.experience_level,
     }));
-  }, [activePlan]);
+    const supps = Array.isArray(im.supplement_recommendations)
+      ? im.supplement_recommendations.map((x) => String(x).trim()).filter(Boolean)
+      : [];
+    const weekInst = Array.isArray(im.nutrition_week_instructions)
+      ? im.nutrition_week_instructions.map((x) => String(x).trim()).filter(Boolean)
+      : [];
+    setSupplementRecommendations(supps);
+    setNutritionWeekInstructions(weekInst);
+  }, [activePlan, searchParams]);
+
+  useEffect(() => {
+    const sc = searchParams.get('suggestCalories');
+    if (!sc || !clientId || suggestFromCheckinRef.current) return;
+    suggestFromCheckinRef.current = true;
+    planHydratedRef.current = true;
+    const sp = searchParams.get('suggestProtein_g');
+    const sca = searchParams.get('suggestCarbs_g');
+    const sf = searchParams.get('suggestFats_g');
+    setFormData((prev) => ({
+      ...prev,
+      target_calories: String(Math.round(Number(sc))),
+      protein_g: sp != null && sp !== '' ? String(Math.round(Number(sp))) : prev.protein_g,
+      carbs_g: sca != null && sca !== '' ? String(Math.round(Number(sca))) : prev.carbs_g,
+      fats_g: sf != null && sf !== '' ? String(Math.round(Number(sf))) : prev.fats_g,
+    }));
+    toast.message('Suggested targets from Atlas check-in review — review and save.');
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('suggestCalories');
+    next.delete('suggestProtein_g');
+    next.delete('suggestCarbs_g');
+    next.delete('suggestFats_g');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, clientId, setSearchParams]);
 
   const clientDisplayName =
     clientRow?.full_name?.trim() || clientRow?.name?.trim() || (clientId ? 'Client' : '');
@@ -198,7 +249,12 @@ export default function NutritionBuilder() {
       }
       const phase =
         formData.goal === 'cut' ? 'Cut' : formData.goal === 'bulk' ? 'Bulk' : 'Maintenance';
+      const prevIm =
+        activePlan?.intake_metrics && typeof activePlan.intake_metrics === 'object'
+          ? { ...activePlan.intake_metrics }
+          : {};
       const intake_metrics = {
+        ...prevIm,
         plan_type: formData.plan_type,
         experience_level: formData.experience_level,
         sex: formData.sex,
@@ -211,6 +267,8 @@ export default function NutritionBuilder() {
         carbs_percent: formData.carbs_percent,
         fats_percent: formData.fats_percent,
         saved_at: new Date().toISOString(),
+        supplement_recommendations: supplementRecommendations,
+        nutrition_week_instructions: nutritionWeekInstructions,
       };
       return upsertNutritionPlan({
         id: planId,
@@ -224,6 +282,7 @@ export default function NutritionBuilder() {
         phase,
         diet_type: formData.goal,
         intake_metrics,
+        prep_instruction_explanation_key: (formData.prep_instruction_explanation_key || '').trim() || null,
       });
     },
     onSuccess: () => {
@@ -233,8 +292,8 @@ export default function NutritionBuilder() {
       queryClient.invalidateQueries({ queryKey: ['today-active-nutrition-plan'] });
       queryClient.invalidateQueries({ queryKey: ['client-nutrition'] });
       if (trainerId) trackFirstNutritionPlanCreated(trainerId, { client_id: clientId });
-      toast.success('Nutrition plan saved');
-      if (clientId) navigate(`/clients/${clientId}`);
+      toast.success('Nutrition plan saved — client can now see their targets');
+      if (clientId) navigate(`/clients/${clientId}?tab=nutrition`);
       else navigate(-1);
     },
     onError: (e) => {
@@ -571,6 +630,100 @@ export default function NutritionBuilder() {
           </div>
         ) : null}
 
+        {clientId ? (
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 space-y-8">
+            <div>
+              <h2 className="text-lg font-semibold text-white mb-1">Supplement recommendations</h2>
+              <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+                Stage supplements below, then confirm. Your list saves with the plan when you tap Save plan.
+              </p>
+              <CoachFreeTextInput
+                category="supplement"
+                placeholder="Type a supplement, e.g. zinc, creatine, vitamin D…"
+                label="Supplements"
+                allowMultiple
+                onConfirm={(terms) => {
+                  setSupplementRecommendations((prev) => [...new Set([...prev, ...terms])]);
+                }}
+              />
+              {supplementRecommendations.length > 0 ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {supplementRecommendations.map((s) => (
+                    <div
+                      key={s}
+                      className="inline-flex items-center gap-1 rounded-full border text-sm"
+                      style={{
+                        borderColor: colors.border,
+                        background: colors.surface1,
+                        color: colors.text,
+                        padding: '6px 12px',
+                        minHeight: 44,
+                      }}
+                    >
+                      <span>{s}</span>
+                      <button
+                        type="button"
+                        className="text-slate-400 hover:text-white px-1"
+                        aria-label={`Remove ${s}`}
+                        onClick={() =>
+                          setSupplementRecommendations((prev) => prev.filter((x) => x !== s))
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white mb-1">Instructions for this week</h2>
+              <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+                Short prep-specific notes (clients see them on Today under macros). Confirms here update your saved
+                term memory; Save plan writes the active targets.
+              </p>
+              <CoachFreeTextInput
+                category="nutrition_note"
+                placeholder="Type an instruction, e.g. no dairy this week, high sodium day, refeed…"
+                label="Instructions for this week"
+                allowMultiple
+                onConfirm={(terms) => {
+                  setNutritionWeekInstructions((prev) => [...new Set([...prev, ...terms])]);
+                }}
+              />
+              {nutritionWeekInstructions.length > 0 ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {nutritionWeekInstructions.map((s) => (
+                    <div
+                      key={s}
+                      className="inline-flex items-center gap-1 rounded-full border text-sm"
+                      style={{
+                        borderColor: colors.border,
+                        background: colors.surface1,
+                        color: colors.text,
+                        padding: '6px 12px',
+                        minHeight: 44,
+                      }}
+                    >
+                      <span>{s}</span>
+                      <button
+                        type="button"
+                        className="text-slate-400 hover:text-white px-1"
+                        aria-label={`Remove ${s}`}
+                        onClick={() =>
+                          setNutritionWeekInstructions((prev) => prev.filter((x) => x !== s))
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         {/* Trainer Notes */}
         <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4">Notes for client</h2>
@@ -581,6 +734,29 @@ export default function NutritionBuilder() {
             className="bg-slate-900/50 border-slate-700"
             rows={4}
           />
+          {clientId ? (
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-slate-300 mb-2">Add reason for this change (optional)</label>
+              <Select
+                value={formData.prep_instruction_explanation_key ? formData.prep_instruction_explanation_key : '_none'}
+                onValueChange={(v) =>
+                  setFormData({ ...formData, prep_instruction_explanation_key: v === '_none' ? '' : v })
+                }
+              >
+                <SelectTrigger className="bg-slate-900/50 border-slate-700 text-white">
+                  <SelectValue placeholder="Link an educational note" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">No linked explanation</SelectItem>
+                  {PREP_EDUCATION_OPTIONS.map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {k.replace(/_/g, ' ')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

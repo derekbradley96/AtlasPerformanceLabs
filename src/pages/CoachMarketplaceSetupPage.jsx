@@ -276,6 +276,9 @@ export default function CoachMarketplaceSetupPage() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!supabase || !coachId) throw new Error('Not signed in');
+      const slugFromListing = listing?.slug && String(listing.slug).trim();
+      const slugFromReferral = authProfile?.referral_code && String(authProfile.referral_code).trim();
+      const resolvedSlug = slugFromListing || slugFromReferral || null;
       const payload = {
         coach_id: coachId,
         display_name: displayName.trim(),
@@ -287,6 +290,7 @@ export default function CoachMarketplaceSetupPage() {
         accepts_competition: acceptsCompetition,
         accepts_personal_transitions: acceptsPersonalTransitions,
         listing_details: listingDetailsPayload,
+        ...(resolvedSlug ? { slug: resolvedSlug } : {}),
       };
       if (listing?.id) {
         const { error } = await supabase
@@ -301,6 +305,7 @@ export default function CoachMarketplaceSetupPage() {
             accepts_competition: payload.accepts_competition,
             accepts_personal_transitions: payload.accepts_personal_transitions,
             listing_details: payload.listing_details,
+            ...(resolvedSlug ? { slug: resolvedSlug } : {}),
           })
           .eq('id', listing.id)
           .eq('coach_id', coachId);

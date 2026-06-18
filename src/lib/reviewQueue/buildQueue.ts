@@ -8,13 +8,16 @@ import { computeReviewPriorityScore, normalizeClientPhaseForPriority } from '@/l
 import type { HealthRiskLevel } from '@/lib/intelligence/reviewPriority';
 import { getPhaseAwareHealthResult } from '@/lib/intelligence/healthScoreEngineBridge';
 import { getEffectiveStatus } from './queueStateRepo';
-import { getClients, getNeedsReviewCheckIns, getThreadsForTrainer, getThreadByClientId, getPaymentsForClient } from '@/data/selectors';
+import { getClients } from '@/data/clientsService';
+import { listForTrainer as listCheckinsForTrainer } from '@/data/checkInsService';
+import type { CheckIn } from '@/data/models';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getThreadsForUser } from '@/lib/messaging/supabaseMessaging';
 import { getClientMarkedPaid } from '@/lib/clientDetailStorage';
 import { getClientHealthScoreSnapshot } from '@/lib/healthScoreService';
 import { getLeadsForTrainer } from '@/lib/leadsStore';
 import { buildCompPrepInboxItems } from '@/lib/inbox/compPrepInbox';
 import { listCompClientsForTrainer, getMediaLogsForClients, getClientCompProfile, listMedia } from '@/lib/repos/compPrepRepo';
-import { getClientCheckIns } from '@/data/selectors';
 import { getAllPoses, getPoseById } from '@/lib/repos/poseLibraryRepo';
 import { evaluateRetentionRisk } from '@/lib/retention/retentionRules';
 import type { EvaluateRetentionRiskInput } from '@/lib/retention/retentionRules';
@@ -27,6 +30,7 @@ import {
 import { evaluateFatigue } from '@/lib/energy/fatigueRules';
 import { listSubmissionsNeedingReview } from '@/lib/intake/intakeSubmissionRepo';
 import { getClientPhase } from '@/lib/clientPhaseStore';
+import { getMessagesThreadPath } from '@/lib/messagesPath';
 import { buildCoachCheckinReviewUrl } from '@/lib/coachReviewRoutes';
 
 function weekStartMonday(iso: string): string {
@@ -38,28 +42,114 @@ function weekStartMonday(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+type ClientPaymentRow = { id?: string; amount?: number | null; status?: string | null; client_id?: string | null; created_at?: string | null };
+
+/** Batch-load client_payments for many roster clients (one round-trip). */
+async function fetchPaymentsByClientIds(clientIds: string[]): Promise<Map<string, ClientPaymentRow[]>> {
+  const map = new Map<string, ClientPaymentRow[]>();
+  const ids = [...new Set(clientIds.filter(Boolean))];
+  if (ids.length === 0) return map;
+  const supabase = getSupabase();
+  if (!supabase) return map;
+  const { data, error } = await supabase
+    .from('client_payments')
+    .select('id, amount, status, created_at, client_id')
+    .in('client_id', ids)
+    .order('created_at', { ascending: false });
+  if (error || !Array.isArray(data)) return map;
+  for (const row of data as ClientPaymentRow[]) {
+    const cid = row?.client_id != null ? String(row.client_id) : '';
+    if (!cid) continue;
+    if (!map.has(cid)) map.set(cid, []);
+    map.get(cid)!.push(row);
+  }
+  return map;
+}
+
 export interface BuildTrainerQueueInput {
   trainerId: string;
   now?: Date;
 }
 
-function buildItems(trainerId: string, now: Date): QueueItem[] {
-  const rawClients = getClients();
-  const clients = Array.isArray(rawClients) ? rawClients.filter((c) => c?.trainer_id === trainerId) : [];
-  const clientIds = new Set((clients || []).map((c) => c?.id).filter(Boolean));
+type QueueClient = {
+  id?: string;
+  full_name?: string;
+  name?: string;
+  payment_overdue?: boolean;
+  trainer_id?: string;
+  coach_id?: string;
+  [key: string]: unknown;
+};
+
+async function loadTrainerQueueData(trainerId: string): Promise<{
+  clients: QueueClient[];
+  clientIds: Set<string>;
+  checkinsByClientId: Map<string, CheckIn[]>;
+  needsReviewCheckins: CheckIn[];
+}> {
+  const rawClients = (await getClients(trainerId).catch(() => [])) as QueueClient[];
+  const clients = Array.isArray(rawClients) ? rawClients.filter((c) => c && c.id) : [];
+  const clientIds = new Set(clients.map((c) => String(c.id)).filter(Boolean));
+  let allCheckins: CheckIn[] = [];
+  try {
+    allCheckins = await listCheckinsForTrainer(trainerId);
+  } catch {
+    allCheckins = [];
+  }
+  const checkinsByClientId = new Map<string, CheckIn[]>();
+  for (const row of allCheckins) {
+    if (!row?.client_id) continue;
+    const cid = String(row.client_id);
+    if (!checkinsByClientId.has(cid)) checkinsByClientId.set(cid, []);
+    checkinsByClientId.get(cid)!.push(row);
+  }
+  const needsReviewCheckins = allCheckins
+    .filter((c) => {
+      if (!c?.client_id || !clientIds.has(String(c.client_id))) return false;
+      const st = String(c.status || '').toLowerCase();
+      if (st !== 'submitted') return false;
+      const coachRev = (c as { coach_reviewed_at?: string | null }).coach_reviewed_at;
+      if (c.reviewed_at || coachRev) return false;
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        new Date(String(b.submitted_at || b.created_date || b.created_at || 0)).getTime()
+        - new Date(String(a.submitted_at || a.created_date || a.created_at || 0)).getTime(),
+    );
+  return { clients, clientIds, checkinsByClientId, needsReviewCheckins };
+}
+
+async function buildItems(trainerId: string, now: Date): Promise<QueueItem[]> {
+  const { clients, clientIds, checkinsByClientId, needsReviewCheckins } = await loadTrainerQueueData(trainerId);
+  const checkInsFor = (id: string) => checkinsByClientId.get(id) ?? [];
+
+  const supabase = getSupabase();
+  const useLiveMessaging = !!(supabase && trainerId && trainerId !== 'local-trainer');
+  let coachThreads: Array<{ id?: string; client_id?: string; unread_count?: number; last_message_at?: string | null }> = [];
+  if (useLiveMessaging) {
+    try {
+      coachThreads = (await getThreadsForUser(supabase, trainerId, 'coach')) as typeof coachThreads;
+    } catch {
+      coachThreads = [];
+    }
+  }
+  const paymentsByClientId = await fetchPaymentsByClientIds([...clientIds]);
+
   const healthByClient = new Map<string, { score: number; risk: HealthRiskLevel }>();
   (clients || []).forEach((c) => {
     if (!c?.id) return;
-    const checkIns = getClientCheckIns(c.id);
+    const id = String(c.id);
+    const checkIns = checkInsFor(id);
     const result = getPhaseAwareHealthResult(c, checkIns ?? []);
-    healthByClient.set(c.id, { score: result.score, risk: result.risk });
+    healthByClient.set(id, { score: result.score, risk: result.risk });
   });
-  const clientName = (id: string) => clients?.find((x) => x?.id === id)?.full_name ?? 'Client';
+  const clientName = (id: string) => clients?.find((x) => x?.id === id)?.full_name ?? clients?.find((x) => x?.id === id)?.name ?? 'Client';
 
   const items: QueueItem[] = [];
 
   // CHECKIN_REVIEW
-  const needsReview = (getNeedsReviewCheckIns() ?? []).filter((c) => clientIds.has(c?.client_id));
+  const needsReview = needsReviewCheckins.filter((c) => c?.client_id && clientIds.has(String(c.client_id)));
   for (const c of needsReview) {
     if (!c?.client_id) continue;
     const submitted = c.submitted_at || c.created_date;
@@ -106,7 +196,7 @@ function buildItems(trainerId: string, now: Date): QueueItem[] {
   const compClients = (clients || []).filter((c) => c?.id && compClientIds.includes(c.id)).map((c) => ({ id: c!.id, full_name: c?.full_name ?? 'Client' }));
   const today = now.toISOString().slice(0, 10);
   const hasCheckinToday = (clientId: string) =>
-    (getClientCheckIns(clientId) ?? []).some((c) => ((c?.submitted_at || c?.created_date) || '').toString().slice(0, 10) === today);
+    (checkInsFor(clientId) ?? []).some((c) => ((c?.submitted_at || c?.created_date) || '').toString().slice(0, 10) === today);
   const compPrepInbox = buildCompPrepInboxItems({
     trainerId,
     clients: compClients,
@@ -256,7 +346,9 @@ function buildItems(trainerId: string, now: Date): QueueItem[] {
   }
 
   // UNREAD_MESSAGES
-  const threads = (getThreadsForTrainer(trainerId) ?? []).filter((t) => (t?.unread_count ?? 0) > 0);
+  const threads: Array<{ id?: string; client_id?: string; unread_count?: number; last_message_at?: string | null }> = Array.isArray(coachThreads)
+    ? coachThreads
+    : [];
   for (const t of threads) {
     const cid = t?.client_id;
     if (!cid || !clientIds.has(cid)) continue;
@@ -275,7 +367,7 @@ function buildItems(trainerId: string, now: Date): QueueItem[] {
       subtitle: `${unread} unread`,
       why: `${unread} unread message(s)`,
       ctaLabel: 'Open',
-      route: `/messages/${cid}`,
+      route: getMessagesThreadPath(cid),
       priorityScore: 0,
       createdAt: t.last_message_at ?? new Date().toISOString(),
       meta: { unreadCount: unread, healthScore: health.score, healthRisk: health.risk },
@@ -374,9 +466,9 @@ function buildItems(trainerId: string, now: Date): QueueItem[] {
     const healthSnap = getClientHealthScoreSnapshot(c.id);
     const health: number = phaseHealth?.score ?? (typeof healthSnap?.score === 'number' ? healthSnap.score : 100);
     const prevHealth = getPreviousHealthForRetention(c.id);
-    const checkins = getClientCheckIns(c.id);
-    const payments = getPaymentsForClient(c.id);
-    const thread = getThreadByClientId(c.id);
+    const checkins = checkInsFor(String(c.id));
+    const payments = paymentsByClientId.get(String(c.id)) ?? [];
+    const thread = coachThreads.find((t) => t.client_id === c.id) ?? null;
     const profile = getClientCompProfile(c.id);
     const mediaLogs = listMedia(c.id, { category: 'posing' });
     const hasPosingInLast7Days: boolean = Array.isArray(mediaLogs)
@@ -475,7 +567,7 @@ function consolidateQueueItems(items: QueueItem[]): QueueItem[] {
 export async function buildTrainerQueue(input: BuildTrainerQueueInput): Promise<QueueItem[]> {
   const { trainerId, now: inputNow } = input;
   const now = inputNow ?? new Date();
-  const raw = buildItems(trainerId, now);
+  const raw = await buildItems(trainerId, now);
   const consolidated = consolidateQueueItems(raw);
 
   const withStatus: QueueItem[] = consolidated.map((item) => {

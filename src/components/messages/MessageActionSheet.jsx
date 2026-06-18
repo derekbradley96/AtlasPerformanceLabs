@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Copy, Reply, Trash2, X } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { Copy, Pencil, Reply, Trash2, X } from 'lucide-react';
 import { colors } from '@/ui/tokens';
 
 const BORDER = colors.border;
@@ -7,21 +7,40 @@ const TEXT = colors.text;
 const MUTED = colors.muted;
 const DANGER = colors.danger ?? '#EF4444';
 
+function ActionButton({ icon: Icon, label, onClick, danger = false }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-3 py-3.5 px-4 text-left active:bg-white/5 transition-colors"
+      style={{ color: danger ? DANGER : TEXT, fontSize: 16 }}
+    >
+      <Icon size={20} style={{ color: danger ? DANGER : MUTED, flexShrink: 0 }} />
+      {label}
+    </button>
+  );
+}
+
 /**
- * Premium bottom sheet for message actions: Copy, Reply, Delete (for me), Delete for everyone (conditional), Cancel.
- * Prevents iOS selection/callout; use with long-press on bubble.
+ * Message actions: Reply, Copy, Edit/Delete (own + unread). App: bottom sheet. Web desktop: anchored menu.
  */
 export default function MessageActionSheet({
   message,
   timestamp,
   onCopy,
   onReply,
+  onEdit,
   onDelete,
-  onDeleteForEveryone,
-  showDelete,
-  showDeleteForEveryone,
+  showCopy = true,
+  showReply = true,
+  showEdit = false,
+  showDelete = false,
+  isDesktopWeb = false,
+  anchor = null,
   onCancel,
 }) {
+  const menuRef = useRef(null);
+
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key === 'Escape') onCancel?.();
@@ -30,25 +49,63 @@ export default function MessageActionSheet({
     return () => window.removeEventListener('keydown', handleKey);
   }, [onCancel]);
 
-  const handleCopy = () => {
-    onCopy?.();
-    onCancel?.();
-  };
+  useEffect(() => {
+    if (!isDesktopWeb || !anchor) return undefined;
+    const handlePointer = (e) => {
+      if (menuRef.current?.contains(e.target)) return;
+      onCancel?.();
+    };
+    window.addEventListener('pointerdown', handlePointer, true);
+    return () => window.removeEventListener('pointerdown', handlePointer, true);
+  }, [isDesktopWeb, anchor, onCancel]);
 
-  const handleReply = () => {
-    onReply?.();
-    onCancel?.();
-  };
+  const actions = (
+    <div className="py-1">
+      {showReply && <ActionButton icon={Reply} label="Reply" onClick={() => { onReply?.(); onCancel?.(); }} />}
+      {showCopy && <ActionButton icon={Copy} label="Copy" onClick={() => { onCopy?.(); onCancel?.(); }} />}
+      {showEdit && <ActionButton icon={Pencil} label="Edit" onClick={() => { onEdit?.(); onCancel?.(); }} />}
+      {showDelete && (
+        <>
+          <ActionButton icon={Trash2} label="Delete" danger onClick={() => { onDelete?.(); onCancel?.(); }} />
+          <p className="px-4 pb-2 text-[12px]" style={{ color: MUTED }}>
+            Only available before the other person reads it
+          </p>
+        </>
+      )}
+    </div>
+  );
 
-  const handleDelete = () => {
-    onDelete?.();
-    onCancel?.();
-  };
-
-  const handleDeleteForEveryone = () => {
-    onDeleteForEveryone?.();
-    onCancel?.();
-  };
+  if (isDesktopWeb && anchor) {
+    const menuWidth = 220;
+    const left = Math.min(Math.max(12, anchor.x), window.innerWidth - menuWidth - 12);
+    const top = Math.min(Math.max(12, anchor.y), window.innerHeight - 280);
+    return (
+      <>
+        <div role="presentation" className="fixed inset-0 z-[100]" style={{ background: 'transparent' }} onClick={onCancel} />
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label="Message actions"
+          className="fixed z-[101] rounded-xl overflow-hidden shadow-lg border"
+          style={{
+            left,
+            top,
+            width: menuWidth,
+            background: colors.surface1,
+            borderColor: BORDER,
+            boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+          }}
+        >
+          {timestamp ? (
+            <div className="py-2 px-3 border-b text-[12px]" style={{ borderColor: BORDER, color: MUTED }}>
+              {timestamp}
+            </div>
+          ) : null}
+          {actions}
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
@@ -66,7 +123,6 @@ export default function MessageActionSheet({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="message-action-sheet-title"
         className="fixed left-0 right-0 z-[101] rounded-t-[24px] overflow-hidden"
         style={{
           bottom: 0,
@@ -76,67 +132,17 @@ export default function MessageActionSheet({
           boxShadow: '0 -8px 32px rgba(0,0,0,0.35)',
         }}
       >
-        {timestamp && (
-          <div
-            id="message-action-sheet-title"
-            className="py-3 px-4 border-b text-center"
-            style={{ borderColor: BORDER, color: MUTED, fontSize: 13 }}
-          >
+        {timestamp ? (
+          <div className="py-3 px-4 border-b text-center text-[13px]" style={{ borderColor: BORDER, color: MUTED }}>
             {timestamp}
           </div>
-        )}
-        <div className="py-2">
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="w-full flex items-center gap-3 py-3.5 px-4 text-left active:bg-white/5 transition-colors"
-            style={{ color: TEXT, fontSize: 16 }}
-          >
-            <Copy size={20} style={{ color: MUTED, flexShrink: 0 }} />
-            Copy
-          </button>
-          <button
-            type="button"
-            onClick={handleReply}
-            className="w-full flex items-center gap-3 py-3.5 px-4 text-left active:bg-white/5 transition-colors"
-            style={{ color: TEXT, fontSize: 16 }}
-          >
-            <Reply size={20} style={{ color: MUTED, flexShrink: 0 }} />
-            Reply
-          </button>
-          {showDelete && (
-            <button
-              type="button"
-              onClick={handleDelete}
-              className="w-full flex items-center gap-3 py-3.5 px-4 text-left active:bg-white/5 transition-colors"
-              style={{ color: DANGER, fontSize: 16 }}
-            >
-              <Trash2 size={20} style={{ flexShrink: 0 }} />
-              Delete for me
-            </button>
-          )}
-          {showDeleteForEveryone && (
-            <div>
-              <button
-                type="button"
-                onClick={handleDeleteForEveryone}
-                className="w-full flex items-center gap-3 py-3.5 px-4 text-left active:bg-white/5 transition-colors"
-                style={{ color: DANGER, fontSize: 16 }}
-              >
-                <Trash2 size={20} style={{ flexShrink: 0 }} />
-                Delete for everyone
-              </button>
-              <p className="px-4 pb-1 text-[12px]" style={{ color: MUTED }}>
-                Available until read
-              </p>
-            </div>
-          )}
-        </div>
+        ) : null}
+        {actions}
         <div className="border-t py-1" style={{ borderColor: BORDER }}>
           <button
             type="button"
             onClick={onCancel}
-            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 font-semibold active:bg-white/5 transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 font-semibold active:bg-white/5"
             style={{ color: MUTED, fontSize: 16 }}
           >
             <X size={18} />

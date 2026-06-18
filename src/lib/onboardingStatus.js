@@ -39,6 +39,15 @@ export function clearPendingClientInviteStorage() {
   } catch (_) {}
 }
 
+/** Clear stale auth-entry carryover before opening fresh login from marketing pages. */
+export function clearAuthEntryCarryover() {
+  clearPendingClientInviteStorage();
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem('atlas_client_code');
+  } catch (_) {}
+}
+
 /**
  * Single place to interpret profiles.onboarding_complete for routing gates.
  * Be defensive: some paths may surface string/boolean inconsistently.
@@ -51,8 +60,6 @@ export function isProfileOnboardingComplete(profile) {
   return false;
 }
 
-const MIN_COACH_REFERRAL_LEN = 4;
-
 /**
  * Coach may use the main app without being forced through setup when the profile flag is set
  * or when prior wizard work is clearly present (avoids trapping coaches after refresh when DB flag lagged).
@@ -61,28 +68,35 @@ export function isCoachMainAppUnblocked(profile) {
   if (!profile?.id) return false;
   if (normalizeRole(profile.role) !== 'coach') return false;
   if (isProfileOnboardingComplete(profile)) return true;
-  const code = (profile.referral_code ?? '').toString().trim();
   const focus = (profile.coach_focus ?? '').toString().trim();
-  if (code.length >= MIN_COACH_REFERRAL_LEN && focus.length > 0) return true;
+  const ps = (profile.onboarding_plan_status ?? '')
+    .toString().toLowerCase();
+  const established = ps === 'active' || ps === 'trialing'
+    || ps === 'completed' || ps === 'paid';
+  return focus.length > 0 && established;
+}
+
+export function isCoachOnboardingInProgress(profile) {
+  if (!profile?.id) return false;
+  if (normalizeRole(profile.role) !== 'coach') return false;
+  if (isProfileOnboardingComplete(profile)) return false;
+  // Has started onboarding (coach_focus set) but not finished.
+  const focus = (profile.coach_focus ?? '').toString().trim();
   const ps = (profile.onboarding_plan_status ?? '').toString().toLowerCase();
-  if (
-    code.length >= MIN_COACH_REFERRAL_LEN &&
-    (ps === 'active' || ps === 'trialing' || ps === 'completed' || ps === 'paid')
-  ) {
-    return true;
-  }
-  return false;
+  return focus.length > 0 && (ps === 'pending' || ps === 'selected' || ps === 'plan_not_selected');
 }
 
-/** Personal / solo: explicit Basic vs Enhanced must be chosen before the question flow. */
+/** Personal / solo: tier choice removed — everyone enters the unified question flow. */
 export function hasPersonalPlanTierSelected(profile) {
+  if (!profile?.id) return false;
+  const role = normalizeRole(profile.role);
+  if (role === 'personal') return true;
   const t = (profile?.personal_plan_tier ?? '').toString().toLowerCase().trim();
-  return t === 'basic' || t === 'enhanced';
+  return t === 'free' || t === 'basic' || t === 'enhanced';
 }
 
-/** First stop for incomplete Personal onboarding (tier gate → questions). */
-export function getPersonalOnboardingEntryPath(profile) {
-  if (!hasPersonalPlanTierSelected(profile)) return '/personal-onboarding-tier';
+/** First stop for incomplete Personal onboarding (single flow). */
+export function getPersonalOnboardingEntryPath() {
   return '/personal-onboarding-flow';
 }
 

@@ -2,30 +2,46 @@ import React, { useRef, useCallback, useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { getRouteTitle, isTabRoute, getTabRoutesForRole } from '@/lib/routeMeta';
+import { useInboxBadgeCount } from '@/hooks/useInboxBadgeCount';
 import { DEFAULT_ROLE } from '@/lib/roles';
 import { useSwipeBack } from '@/hooks/useSwipeBack';
-import { ChevronLeft, Home, Users, MessageSquare, MoreHorizontal, HelpCircle } from 'lucide-react';
+import { ChevronLeft, Home, Users, MessageSquare, MoreHorizontal, HelpCircle, Inbox, Crosshair, Dumbbell, ClipboardList, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { colors } from '@/ui/tokens';
+import AdminImpersonationBanner from '@/components/system/AdminImpersonationBanner';
 
-const ICONS = { Home, Users, MessageSquare, MoreHorizontal };
+const ICONS = { Home, Users, MessageSquare, MoreHorizontal, Inbox, Crosshair, Dumbbell, ClipboardList, Calendar };
 const FALLBACK_ICON = HelpCircle;
 
 export default function MobileAppShell({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { effectiveRole, role, isDemoMode, exitDemo } = useAuth();
+  const { effectiveRole, role, coachFocus, resolvedAccess, linkedCoachFocus, isDemoMode, exitDemo } = useAuth();
+  const inboxBadgeCount = useInboxBadgeCount();
   const shellRole = effectiveRole ?? role ?? DEFAULT_ROLE;
   const contentRef = useRef(null);
 
   useSwipeBack(contentRef);
 
   const pathname = location.pathname?.toLowerCase() ?? '';
-  const tabRoutes = useMemo(() => getTabRoutesForRole(effectiveRole), [effectiveRole]);
+  const tabRoutes = useMemo(
+    () =>
+      getTabRoutesForRole(effectiveRole, coachFocus, {
+        clientDeliveryContext: resolvedAccess?.clientDeliveryContext,
+        hasCompetitionPrep: resolvedAccess?.hasCompetitionPrep === true,
+        linkedCoachFocus,
+      }),
+    [effectiveRole, coachFocus, resolvedAccess?.clientDeliveryContext, resolvedAccess?.hasCompetitionPrep, linkedCoachFocus]
+  );
   const showBack = !isTabRoute(pathname, shellRole);
   const title = getRouteTitle(location.pathname);
 
   const homePath = (() => {
-    const tr = getTabRoutesForRole(shellRole);
+    const tr = getTabRoutesForRole(shellRole, coachFocus, {
+      clientDeliveryContext: resolvedAccess?.clientDeliveryContext,
+      hasCompetitionPrep: resolvedAccess?.hasCompetitionPrep === true,
+      linkedCoachFocus,
+    });
     return tr[0]?.path ?? '/home';
   })();
 
@@ -55,6 +71,7 @@ export default function MobileAppShell({ children }) {
         paddingRight: 'env(safe-area-inset-right, 0)',
       }}
     >
+      <AdminImpersonationBanner />
       {/* Sticky TopBar with blur */}
       <header
         className="sticky top-0 left-0 right-0 z-50 flex-shrink-0 backdrop-blur-md"
@@ -158,17 +175,44 @@ export default function MobileAppShell({ children }) {
         {tabRoutes.map(({ path, label, iconKey }) => {
           const Icon = ICONS[iconKey] ?? FALLBACK_ICON;
           const active = pathname === path || (path === homePath && (pathname === '/' || pathname === homePath));
+          const isMessages = path === '/messages';
           return (
             <Link
               key={path}
               to={path}
               className="flex flex-col items-center justify-center gap-0.5 transition-colors active:opacity-80"
               style={{
+                position: 'relative',
                 minHeight: 44,
                 color: active ? 'var(--app-accent)' : 'var(--app-muted)',
               }}
             >
-              <Icon className="w-6 h-6 flex-shrink-0" strokeWidth={active ? 2.5 : 2} />
+              <span className="flex-shrink-0 inline-flex" style={{ position: 'relative' }}>
+                <Icon className="w-6 h-6" strokeWidth={active ? 2.5 : 2} />
+                {isMessages && inboxBadgeCount > 0 && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: 4,
+                      right: '50%',
+                      transform: 'translateX(calc(50% + 10px))',
+                      minWidth: 16,
+                      height: 16,
+                      borderRadius: 8,
+                      background: colors.danger || '#EF4444',
+                      color: '#fff',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '0 4px',
+                    }}
+                  >
+                    {inboxBadgeCount > 9 ? '9+' : inboxBadgeCount}
+                  </span>
+                )}
+              </span>
               <span className="text-[10px] font-medium">{label}</span>
             </Link>
           );

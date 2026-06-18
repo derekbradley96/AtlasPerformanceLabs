@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { isInternalAdmin } from '@/lib/internalAccess';
 import { useAlertStatus } from '@/components/hooks/useAlertStatus';
-import { UserCircle, MessageSquare, Palette, HelpCircle, Trophy, Phone, Link2, Users, CheckSquare, Award, BarChart3, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Store, Inbox, Bell, Gift, Calendar, Building2, Activity, LayoutDashboard, ChevronRight, UtensilsCrossed, Crosshair, UserPlus, Send, ClipboardList, Dumbbell, LineChart, Target, Share2 } from 'lucide-react';
+import { UserCircle, Palette, HelpCircle, Trophy, Phone, Users, CheckSquare, Award, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Store, Bell, Gift, Calendar, Building2, LayoutDashboard, ChevronRight, UtensilsCrossed, Crosshair, UserPlus, ClipboardList, Dumbbell, LineChart, Target, Share2, UserMinus, Clock } from 'lucide-react';
 import { seedIfEmpty, resetSandbox, addClient } from '@/lib/sandboxStore';
 import { getTrainerId } from '@/lib/getTrainerId';
-import { getClientByUserId, getClientCheckIns } from '@/data/selectors';
 import { getTrainerProfile } from '@/lib/trainerFoundation/trainerProfileRepo';
-import { PLANS, PLAN_TIER_IDS } from '@/config/plans';
+import { PLANS, PLAN_TIER_IDS, isEliteTier, resolveCoachPlanTier } from '@/config/plans';
 import { getAchievementsList, getShownAchievementIds } from '@/lib/milestonesStore';
 import { evaluateUserMilestones } from '@/lib/milestoneEngine';
 import {
@@ -18,7 +18,7 @@ import {
   shouldShowMilestone,
 } from '@/lib/milestoneDismissedStore';
 import { useTrainerPermissions } from '@/components/hooks/useTrainerPermissions';
-import { isCoach, isClient, isPersonal } from '@/lib/roles';
+import { isCoach, isClient, isPersonal, displayRoleLabel } from '@/lib/roles';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
@@ -35,6 +35,22 @@ import { usePresentationMode } from '@/lib/presentationMode';
 import PersonalMoreDesktopLayout from '@/components/personal/PersonalMoreDesktopLayout';
 import { deriveMorePageSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { showCoachManualClientAcquisitionTools } from '@/lib/coachClientAcquisition';
+import { copyReferralLinkToClipboard, getCoachClientJoinLinkPrimary } from '@/lib/referrals';
+import * as atlasRepo from '@/data/repos/atlasRepo';
+import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
+import { leaveCoach } from '@/lib/clientCoachRelationship';
+
+const CLIENT_LEAVE_REASON_OPTIONS = [
+  "I've completed my goals with this coach",
+  'I want to find a different coach',
+  "I'm taking a break from coached training",
+  "The coaching style isn't right for me",
+  "I can't afford coaching right now",
+  'I had a negative experience',
+  'Other',
+];
+
+const MORE_SCROLL_KEY = 'atlas_more_scroll_pos';
 
 /** Local error boundary: captures and shows the real error so we can fix it. */
 class MoreErrorBoundary extends React.Component {
@@ -242,31 +258,39 @@ function SandboxToolsSheet({ onClose, onAdded, getTrainerId, addClient: addClien
 function MoreContent() {
   const navigate = useNavigate();
   const location = useLocation();
+  const scrollRef = useRef(null);
+  const queryClient = useQueryClient();
   const { openFeedback, openSupport } = useFeedbackModal();
   const {
     user: authUser,
     profile,
-    logout,
+    signOut,
     role: authRole,
     effectiveRole,
-    setRole,
+    selectRole,
     setFakeSession,
     supabaseSession,
     resolvedAccess,
-    supabaseUser,
+    isAdmin,
     isDemoMode,
     isAdminBypass,
+    clientLinkedRow,
+    refreshProfile,
   } = useAuth();
   const showManualClientTools = showCoachManualClientAcquisitionTools({
     isDemoMode,
     isAdminBypass,
     profile,
-    supabaseUser,
+    isAdmin,
   });
-  const isPlatformAdmin = isInternalAdmin(supabaseUser);
+  const isPlatformAdmin = isAdmin;
   const [achievementModalRecord, setAchievementModalRecord] = useState(null);
   const [consultationModalOpen, setConsultationModalOpen] = useState(false);
   const [sandboxToolsOpen, setSandboxToolsOpen] = useState(false);
+  const [leaveCoachSheetOpen, setLeaveCoachSheetOpen] = useState(false);
+  const [leaveCoachReason, setLeaveCoachReason] = useState('');
+  const [leaveCoachReasonDetail, setLeaveCoachReasonDetail] = useState('');
+  const [isLeavingCoach, setIsLeavingCoach] = useState(false);
   const shownThisSessionRef = useRef(new Set());
   const dismissedMapRef = useRef(loadDismissedMilestones());
   const markAlertsSeenCalledRef = useRef(false);
@@ -275,15 +299,75 @@ function MoreContent() {
   const userId = displayUser?.id ?? null;
   const trainerProfile = (isCoach(authRole) && userId) ? getTrainerProfile(userId) : null;
   const { canAccessTeam, isAssistant } = useTrainerPermissions();
-  const clientForUser = userId ? getClientByUserId(userId) : null;
   const planId = resolvedAccess?.coachPlanTier || 'basic';
   const fallbackPlan = PLANS.find((p) => p.id === 'pro') || PLANS[0] || { id: 'pro', name: 'Pro', price: 0, commission: null };
   const currentPlan = PLANS.find((p) => p.id === planId) || fallbackPlan;
-  const checkInsForUser = clientForUser ? getClientCheckIns(clientForUser.id) : [];
+  const rosterClientId = clientLinkedRow?.id ?? null;
+  const { data: checkInsForUser = [] } = useQuery({
+    queryKey: ['more-my-checkins', rosterClientId],
+    queryFn: async () => {
+      if (!hasSupabase || !rosterClientId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase
+        .from('checkins')
+        .select('id, submitted_at, status, coach_reviewed_at')
+        .eq('client_id', rosterClientId)
+        .order('submitted_at', { ascending: false })
+        .limit(10);
+      if (error) return [];
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: Boolean(hasSupabase && rosterClientId && !isCoach(authRole)),
+    staleTime: 5 * 60 * 1000,
+  });
   const achievements = userId ? getAchievementsList(userId, { byUser: true }) : [];
   const shownIds = getShownAchievementIds();
 
   const { markAlertsSeen } = useAlertStatus(authUser);
+  const linkedCoachId = clientLinkedRow?.coach_id || clientLinkedRow?.trainer_id || null;
+  const linkedClientId = clientLinkedRow?.id || null;
+  const { data: linkedCoachProfile } = useQuery({
+    queryKey: ['linked-coach-profile', linkedCoachId],
+    queryFn: async () => {
+      if (!hasSupabase || !linkedCoachId) return null;
+      const supabase = getSupabase();
+      if (!supabase) return null;
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, display_name')
+        .eq('id', linkedCoachId)
+        .maybeSingle();
+      return data ?? null;
+    },
+    enabled: Boolean(linkedCoachId),
+  });
+  const linkedCoachName = linkedCoachProfile?.full_name || linkedCoachProfile?.display_name || 'your coach';
+  const leaveReasonNeedsDetails = leaveCoachReason === 'Other' || leaveCoachReason === 'I had a negative experience';
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      sessionStorage.setItem(MORE_SCROLL_KEY, String(el.scrollTop));
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      handleScroll();
+      el.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem(MORE_SCROLL_KEY);
+    if (!saved || !scrollRef.current) return;
+    const pos = Number(saved);
+    if (Number.isFinite(pos) && pos > 0) {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ top: pos });
+      });
+    }
+  }, [location.key]);
 
   // Mark alerts seen once when we have a display user. Ref avoids re-running when markAlertsSeen identity changes.
   useEffect(() => {
@@ -324,7 +408,7 @@ function MoreContent() {
   }, [userId, authRole, checkInsForUser.length]);
 
   const { isWideWeb } = usePresentationMode();
-  const roleLabel = isCoach(effectiveRole) ? 'Coach' : isClient(effectiveRole) ? 'Client' : 'Personal';
+  const roleLabel = displayRoleLabel(effectiveRole);
   const isTrainer = resolvedAccess?.isCoach ?? isCoach(effectiveRole);
   const isSolo = resolvedAccess?.isPersonal ?? isPersonal(effectiveRole);
   const showContent = !!displayUser;
@@ -349,8 +433,43 @@ function MoreContent() {
 
   const handleDevRoleChange = (newRole) => {
     if (newRole !== 'coach' && newRole !== 'client' && newRole !== 'personal') return;
-    setRole(newRole);
+    selectRole(newRole);
     setFakeSession(newRole, displayUser?.email || '');
+  };
+
+  const handleCoachQuickShareReferralLink = async () => {
+    const coachId = displayUser?.id;
+    if (!coachId) {
+      toast.error('Sign in as a coach first');
+      return;
+    }
+    try {
+      const code = await atlasRepo.ensureCoachInviteCode(coachId, !!isDemoMode, { retries: 5 });
+      const link = getCoachClientJoinLinkPrimary(code, coachId);
+      if (!link) {
+        toast.error('Referral link not ready yet');
+        return;
+      }
+      const message = `I'm using Atlas Performance Labs to manage my coaching business — check it out: ${link}`;
+      if (Capacitor.isNativePlatform()) {
+        const { Share } = await import(/* @vite-ignore */ '@capacitor/share');
+        await Share.share({
+          title: 'Atlas Performance Labs',
+          text: message,
+          dialogTitle: 'Share your referral link',
+        });
+        toast.success('Share sheet opened');
+        return;
+      }
+      const copied = await copyReferralLinkToClipboard(link);
+      if (!copied) {
+        toast.error('Could not copy link');
+        return;
+      }
+      toast.success('Link copied to clipboard!');
+    } catch {
+      toast.error('Could not share link');
+    }
   };
 
 
@@ -393,121 +512,101 @@ function MoreContent() {
     );
 
     if (activePreviewRole === 'coach') {
-      const prepCoachSurfaces =
-        isPlatformAdmin && previewRole === 'coach'
-          ? previewCoachSubtype === 'competition' || previewCoachSubtype === 'integrated'
-          : !!resolvedAccess?.hasCompetitionPrep;
+      const coachSubtype = isPlatformAdmin && previewRole === 'coach'
+        ? previewCoachSubtype
+        : String(coachFocusEffective || 'transformation');
+      const includePrepTools = coachSubtype === 'competition' || coachSubtype === 'integrated';
       return (
-        <>
-          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
-            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
-              Growth
-            </p>
-          </Card>
-          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-            {menuRow(<UserPlus size={20} style={{ color: colors.muted }} />, 'Get Clients', 'Invite link, code, and pending joins', '/get-clients')}
-            {menuRow(<Store size={20} style={{ color: colors.muted }} />, 'Marketplace Setup', 'Discovery profile, pricing, go public', '/marketplace-setup')}
-            {menuRow(<Link2 size={20} style={{ color: colors.muted }} />, 'Onboarding link', 'Coach signup and onboarding entry', '/onboarding-link')}
-            {menuRow(<Send size={20} style={{ color: colors.muted }} />, 'Public link', 'Shareable entry without full onboarding', '/public-link')}
-            {menuRow(<Inbox size={20} style={{ color: colors.muted }} />, 'Enquiries', 'Inbound questions from athletes', '/enquiries')}
-            {menuRow(<Share2 size={20} style={{ color: colors.muted }} />, 'Referrals', 'Share Atlas and track referrals', '/referrals')}
-            {menuRow(<Image size={20} style={{ color: colors.muted }} />, 'Result stories', 'Before/after and social proof', '/results-stories/new')}
-            {showManualClientTools
-              ? menuRow(
-                  <Package size={20} style={{ color: colors.muted }} />,
-                  'Client import (dev / admin)',
-                  'CSV migration — not a production roster path',
-                  '/import-clients'
-                )
-              : null}
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>Community</p>
+            </Card>
+            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+              {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'Community room', 'Group space for your clients', '/community')}
+            </div>
+          </div>
+          <div>
+            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>BUILD</p>
+            </Card>
+            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+              {menuRow(<FileText size={20} style={{ color: colors.muted }} />, 'Programs', 'Build and assign training plans', '/programs')}
+              {menuRow(<Package size={20} style={{ color: colors.muted }} />, 'Methodology packages', 'Save and deploy your coaching system', '/methodology-packages')}
+              {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition plans', 'Create per-client nutrition plans', '/coach/nutrition')}
+              {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Check-in templates', 'Design reusable client check-ins', '/checkintemplates')}
+              {menuRow(<Phone size={20} style={{ color: colors.muted }} />, 'Services', 'Define your offers and pricing', '/services')}
+              {includePrepTools ? menuRow(<Award size={20} style={{ color: colors.muted }} />, 'Pose library', 'Competition posing references', '/comp-prep/pose-library') : null}
+              {includePrepTools ? menuRow(<Crosshair size={20} style={{ color: colors.muted }} />, 'Prep tools', 'Peak week and prep command tools', '/prep-dashboard') : null}
+            </div>
           </div>
 
-          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
-            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
-              Coaching
-            </p>
-          </Card>
-          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-            {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Review Queue', 'Prioritized triage, filters, and sort', '/review-center')}
-            {menuRow(<FileText size={20} style={{ color: colors.muted }} />, 'Programs', 'Program library and templates', '/programs')}
-            {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition plans', 'Per-client nutrition plans', '/trainer/nutrition')}
-            {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Check-in templates', 'Templates coaches send to clients', '/checkintemplates')}
-            {menuRow(<Phone size={20} style={{ color: colors.muted }} />, 'Services', 'Offers and service packages', '/services')}
-            {menuRow(<Zap size={20} style={{ color: colors.muted }} />, 'Training Intelligence', 'Workload and automation signals', '/trainingintelligence')}
-            {menuRow(<Activity size={20} style={{ color: colors.muted }} />, 'Capacity', 'Roster load and limits', '/capacity')}
+          <div>
+            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>GROW</p>
+            </Card>
+            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+              {menuRow(<UserPlus size={20} style={{ color: colors.muted }} />, 'Get clients', 'Invite link, code, and client joins', '/get-clients')}
+              {menuRow(<Store size={20} style={{ color: colors.muted }} />, 'Marketplace', 'Public profile and marketplace settings', '/marketplace-setup')}
+              {menuRow(<Share2 size={20} style={{ color: colors.muted }} />, 'Referrals', 'Share links and referral tracking', '/referrals')}
+              {menuRow(<Image size={20} style={{ color: colors.muted }} />, 'Result stories', 'Before/after proof for growth', '/results-gallery')}
+            </div>
           </div>
 
-          {prepCoachSurfaces ? (
-            <>
-              <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
-                <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
-                  Comp prep
-                </p>
-              </Card>
-              <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-                {menuRow(<Award size={20} style={{ color: colors.muted }} />, 'Prep command center', 'Roster prep overview and timeline', '/prep-dashboard')}
-                {menuRow(<Crosshair size={20} style={{ color: colors.muted }} />, 'Prep library & tools', 'Poses, photo guide, media, reviews', '/comp-prep')}
-                {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Peak Week', 'Command center and dashboards', '/peak-week-dashboard')}
-                {menuRow(<LineChart size={20} style={{ color: colors.muted }} />, 'Prep comparison', 'Side-by-side prep views', '/prep-comparison')}
-                {menuRow(<LayoutDashboard size={20} style={{ color: colors.muted }} />, 'Peak Week command center', 'Peak-week operations hub', '/peak-week-command-center')}
-              </div>
-            </>
-          ) : null}
-
-          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
-            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
-              Business
-            </p>
-          </Card>
-          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-            {menuRow(<CreditCard size={20} style={{ color: colors.muted }} />, 'Earnings', 'Subscriptions, payouts, invoices', '/earnings')}
-            {menuRow(<TrendingUp size={20} style={{ color: colors.muted }} />, 'Revenue', 'Expected and collected revenue', '/revenue')}
-            {menuRow(<LineChart size={20} style={{ color: colors.muted }} />, 'Revenue analytics', 'Trends and cohort views', '/revenue-analytics')}
-            {menuRow(<BarChart3 size={20} style={{ color: colors.muted }} />, 'Analytics', 'Coaching and roster signals', '/analytics')}
-            {menuRow(<Building2 size={20} style={{ color: colors.muted }} />, 'Organisation', 'Org dashboard and setup', '/organisation')}
-            {menuRow(<UsersRound size={20} style={{ color: colors.muted }} />, 'Team', 'Seats and permissions', '/team')}
-            {menuRow(<Gift size={20} style={{ color: colors.muted }} />, 'Plan & billing', 'Subscription and upgrades', '/plan')}
-            {menuRow(<Inbox size={20} style={{ color: colors.muted }} />, 'Leads', 'Lead pipeline', '/leads')}
-            {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Consultations', 'Booking and consult offers', '/consultations')}
+          <div>
+            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>BUSINESS</p>
+            </Card>
+            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+              {menuRow(<CreditCard size={20} style={{ color: colors.muted }} />, 'Earnings', 'Payouts, subscriptions, and invoices', '/earnings')}
+              {menuRow(<Clock size={20} style={{ color: colors.muted }} />, 'Time report', 'Estimated coaching time vs client value', '/time-report')}
+              {menuRow(<LineChart size={20} style={{ color: colors.muted }} />, 'Revenue analytics', 'Revenue trends and forecasting', '/revenue-analytics')}
+              {menuRow(<Gift size={20} style={{ color: colors.muted }} />, 'Plan & billing', 'Manage subscription and billing', '/plan')}
+              {isEliteTier(resolveCoachPlanTier(profile, displayUser))
+                ? menuRow(<Zap size={20} style={{ color: colors.muted }} />, 'Client branding', 'Elite white-label and custom join page', '/settings/branding')
+                : null}
+              {menuRow(<UsersRound size={20} style={{ color: colors.muted }} />, 'Team', 'Seats, members, and permissions', '/team')}
+            </div>
           </div>
 
-          <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
-            <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
-              Account
-            </p>
-          </Card>
-          <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-            {menuRow(<UserCircle size={20} style={{ color: colors.muted }} />, 'Profile', 'Photo, name, and preferences', '/profile-account')}
-            {menuRow(<Palette size={20} style={{ color: colors.muted }} />, 'Settings', 'Account, appearance, and security', '/settings/account')}
-            {menuRow(<Bell size={20} style={{ color: colors.muted }} />, 'Notifications', 'Alerts and delivery settings', '/notifications')}
-            {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help & support', 'Get help and contact support', '/helpsupport')}
+          <div>
+            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>ACCOUNT</p>
+            </Card>
+            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+              {menuRow(<UserCircle size={20} style={{ color: colors.muted }} />, 'Profile', 'Photo, name, and coach details', '/profile-account')}
+              {menuRow(<Palette size={20} style={{ color: colors.muted }} />, 'Settings', 'Account, app, and privacy settings', '/settings/account')}
+              {menuRow(<Bell size={20} style={{ color: colors.muted }} />, 'Notifications', 'Manage alerts and delivery', '/notifications')}
+              {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help', 'Support docs and contact support', '/helpsupport')}
+            </div>
           </div>
-        </>
+        </div>
       );
     }
     if (activePreviewRole === 'client') {
+      const clientSubtype = isPlatformAdmin && previewRole === 'client'
+        ? previewClientSubtype
+        : String(resolvedAccess?.clientDeliveryContext || 'transformation');
+      const showPoseLibrary = clientSubtype === 'competition' || resolvedAccess?.hasCompetitionPrep === true;
       return (
         <>
           <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
             <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
-              Coaching
+              Community
             </p>
           </Card>
           <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-            {menuRow(<Dumbbell size={20} style={{ color: colors.muted }} />, 'Training plan', 'Your assigned program', '/myprogram')}
-            {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition plan', 'Targets and daily fuel', '/nutrition')}
-            {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Check-ins', 'Submit and review check-ins', '/clientcheckin')}
-            {menuRow(<TrendingUp size={20} style={{ color: colors.muted }} />, 'Progress', 'Trends and milestones', '/progress')}
-            {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Habits', 'Daily habit tracking', '/habits-daily')}
+            {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'Community room', "Connect with your coach's community", '/community')}
           </div>
           <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
             <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
-              Communication
+              My Coaching
             </p>
           </Card>
           <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-            {menuRow(<MessageSquare size={20} style={{ color: colors.muted }} />, 'Messages', 'Chat with your coach', '/messages')}
-            {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'My coach', 'Coach relationship and contact', '/my-trainer')}
+            {menuRow(<Image size={20} style={{ color: colors.muted }} />, 'Progress photos', 'Track visual changes over time', '/progressphotos')}
+            {showPoseLibrary ? menuRow(<Award size={20} style={{ color: colors.muted }} />, 'Pose library', 'Prep posing references and cues', '/comp-prep/pose-library') : null}
+            {menuRow(<Trophy size={20} style={{ color: colors.muted }} />, 'Milestones', 'Wins and long-term consistency markers', '/achievements')}
           </div>
           <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
             <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
@@ -518,6 +617,7 @@ function MoreContent() {
             {menuRow(<UserCircle size={20} style={{ color: colors.muted }} />, 'Profile', 'Your profile and preferences', '/profile-account')}
             {menuRow(<Palette size={20} style={{ color: colors.muted }} />, 'Settings', 'Account and app settings', '/settings/account')}
             {menuRow(<Bell size={20} style={{ color: colors.muted }} />, 'Notifications', 'Alerts and delivery settings', '/notifications')}
+            {menuRow(<CreditCard size={20} style={{ color: colors.muted }} />, 'Payment', 'Billing and payment details', '/settings/account')}
           </div>
           <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
             <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
@@ -525,9 +625,34 @@ function MoreContent() {
             </p>
           </Card>
           <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-            {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help & support', 'Get help and contact support', '/helpsupport')}
-            {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Check-in preferences', 'Daily check-in settings', '/check-in')}
+            {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help', 'Get help and contact support', '/helpsupport')}
+            {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'My coach profile', 'View your coach information', '/my-trainer')}
           </div>
+          {!isPlatformAdmin ? (
+            <>
+              <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+                <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+                  Coaching
+                </p>
+              </Card>
+              <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+                <Row
+                  left={<UserMinus size={20} style={{ color: colors.danger }} />}
+                  title="Leave my coach"
+                  subtitle="End your coaching relationship"
+                  titleColor={colors.danger}
+                  showChevron
+                  onPress={() => {
+                    if (!linkedClientId || !linkedCoachId) {
+                      toast.error('No active coaching relationship found.');
+                      return;
+                    }
+                    setLeaveCoachSheetOpen(true);
+                  }}
+                />
+              </div>
+            </>
+          ) : null}
         </>
       );
     }
@@ -561,6 +686,7 @@ function MoreContent() {
         <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
           {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition', 'Logging and daily fuel', '/nutrition')}
           {menuRow(<Target size={20} style={{ color: colors.muted }} />, 'Nutrition targets', 'Calories and macros', '/nutrition-targets')}
+          {menuRow(<RefreshCw size={20} style={{ color: colors.muted }} />, 'Import from MyFitnessPal', 'Bring your diary history into Atlas', '/import/mfp')}
         </div>
         <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
           <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
@@ -590,6 +716,53 @@ function MoreContent() {
     );
   };
 
+  const handleConfirmLeaveCoach = async () => {
+    if (!linkedClientId || !linkedCoachId || !leaveCoachReason) return;
+    const supabase = getSupabase();
+    if (!supabase) {
+      toast.error('Leave-coach flow is unavailable right now.');
+      return;
+    }
+    try {
+      setIsLeavingCoach(true);
+      const result = await leaveCoach({
+        supabase,
+        clientId: linkedClientId,
+        coachId: linkedCoachId,
+        reason: leaveCoachReason,
+        reasonDetail: leaveCoachReasonDetail,
+      });
+      if (!result?.ok) {
+        throw new Error(result?.error || 'Could not leave coach right now.');
+      }
+      toast.success(
+        `You've left ${linkedCoachName}'s coaching. Your training history and progress data are still yours.`
+      );
+      setLeaveCoachSheetOpen(false);
+      setLeaveCoachReason('');
+      setLeaveCoachReasonDetail('');
+      await queryClient.invalidateQueries({ queryKey: ['auth-profile'] });
+      await queryClient.invalidateQueries({ queryKey: ['client-profile'] });
+      await queryClient.invalidateQueries({ queryKey: ['today-workout'] });
+      await queryClient.invalidateQueries({ queryKey: ['today-page'] });
+      await queryClient.invalidateQueries({ queryKey: ['coach-connection'] });
+      await queryClient.invalidateQueries({ queryKey: ['program-assignments'] });
+      await queryClient.invalidateQueries({ queryKey: ['nutrition-targets'] });
+      await queryClient.invalidateQueries({ queryKey: ['habit-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['linked-coach-profile'] });
+      await queryClient.invalidateQueries({ queryKey: ['clients'] });
+      await queryClient.invalidateQueries({ queryKey: ['profile'] });
+      if (typeof refreshProfile === 'function') {
+        await refreshProfile();
+      }
+      navigate('/today');
+    } catch (err) {
+      toast.error(err?.message || 'Could not leave coach right now.');
+    } finally {
+      setIsLeavingCoach(false);
+    }
+  };
+
   const moreMigration = useMemo(
     () =>
       deriveMorePageSurfaceState({
@@ -603,6 +776,7 @@ function MoreContent() {
   // Single stable root: sign-in prompt when no user, content when ready. Never swap root tree.
   return (
     <div
+      ref={scrollRef}
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
       {...atlasMigrationDataAttributes(moreMigration.phase, moreMigration.primary)}
       style={showContent ? pageContainer : undefined}
@@ -854,7 +1028,7 @@ function MoreContent() {
           previewModeActive={previewModeActive}
           navigate={navigate}
           onOpenConsultation={() => setConsultationModalOpen(true)}
-          onLogout={logout}
+          onLogout={() => signOut('/login')}
         />
       ) : null}
 
@@ -902,7 +1076,7 @@ function MoreContent() {
         <div className="app-card overflow-hidden">
           <button
             type="button"
-            onClick={() => logout(true)}
+            onClick={() => signOut('/login')}
             className="w-full flex items-center justify-between text-left active:opacity-90"
             style={{
               minHeight: 68,
@@ -957,9 +1131,134 @@ function MoreContent() {
           userEmail={displayUser?.email ?? displayUser?.user_metadata?.email}
         />
       )}
+      <LeaveCoachSheet
+        open={leaveCoachSheetOpen}
+        coachName={linkedCoachName}
+        reason={leaveCoachReason}
+        setReason={setLeaveCoachReason}
+        reasonDetail={leaveCoachReasonDetail}
+        setReasonDetail={setLeaveCoachReasonDetail}
+        reasonNeedsDetails={leaveReasonNeedsDetails}
+        isSubmitting={isLeavingCoach}
+        onLeaveReview={() => {
+          if (!linkedCoachId) {
+            toast.error('Coach profile unavailable for review.');
+            return;
+          }
+          navigate(`/review/coach/${linkedCoachId}`);
+        }}
+        onCancel={() => {
+          if (isLeavingCoach) return;
+          setLeaveCoachSheetOpen(false);
+        }}
+        onConfirm={handleConfirmLeaveCoach}
+      />
         </>
         </PersonalSurface>
       )}
+    </div>
+  );
+}
+
+function LeaveCoachSheet({
+  open,
+  coachName,
+  reason,
+  setReason,
+  reasonDetail,
+  setReasonDetail,
+  reasonNeedsDetails,
+  isSubmitting,
+  onLeaveReview,
+  onCancel,
+  onConfirm,
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-end justify-center sm:items-center p-0 sm:p-4"
+      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)' }}
+      role="dialog"
+      aria-modal="true"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-xl rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto"
+        style={{ background: colors.bg }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: colors.border }}>
+          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Leave my coach</h2>
+          <button type="button" onClick={onCancel} className="text-sm" style={{ color: colors.accent }}>Cancel</button>
+        </div>
+        <div style={{ padding: spacing[16] }}>
+          <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>Why do you want to leave your coach?</p>
+          <div className="flex flex-col gap-2" style={{ marginBottom: spacing[14] }}>
+            {CLIENT_LEAVE_REASON_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setReason(option)}
+                className="w-full text-left rounded-xl px-3 py-2.5"
+                style={{
+                  border: `1px solid ${reason === option ? colors.primary : colors.border}`,
+                  background: reason === option ? colors.primarySubtle : colors.surface1,
+                  color: colors.text,
+                }}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+
+          {reasonNeedsDetails ? (
+            <>
+              <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Tell us a bit more</label>
+              <textarea
+                value={reasonDetail}
+                onChange={(e) => setReasonDetail(e.target.value)}
+                rows={3}
+                className="w-full rounded-xl py-2.5 px-3 resize-none focus:outline-none focus:ring-1"
+                style={{ background: colors.surface1, border: `1px solid ${colors.border}`, color: colors.text }}
+                placeholder="Optional details"
+              />
+            </>
+          ) : null}
+
+          <div className="rounded-xl mt-4" style={{ padding: spacing[12], border: `1px solid ${colors.border}`, background: colors.surface2 }}>
+            <p className="text-sm font-semibold" style={{ color: colors.text, marginBottom: spacing[8] }}>Important note</p>
+            <p className="text-sm" style={{ color: colors.muted, marginBottom: spacing[6] }}>Leaving your coach will:</p>
+            <ul className="text-sm" style={{ color: colors.muted, paddingLeft: 18, display: 'grid', gap: 6 }}>
+              <li>End your current coaching programme access</li>
+              <li>Keep all your training history and progress data</li>
+              <li>Not affect your Atlas account - you can find a new coach anytime from Discover</li>
+            </ul>
+          </div>
+
+          <div className="rounded-xl mt-4" style={{ padding: spacing[12], border: `1px solid ${colors.border}`, background: colors.surface1 }}>
+            <p className="text-sm font-semibold" style={{ color: colors.text, marginBottom: spacing[6] }}>Before you go</p>
+            <p className="text-sm" style={{ color: colors.muted, marginBottom: spacing[10] }}>
+              Would you like to leave a review for your coach? It helps other athletes find the right fit.
+            </p>
+            <div className="flex gap-2">
+              <Button variant="secondary" style={{ flex: 1 }} onClick={onLeaveReview}>Leave a review</Button>
+              <Button variant="secondary" style={{ flex: 1 }} onClick={onConfirm} disabled={!reason || isSubmitting}>
+                Skip and leave
+              </Button>
+            </div>
+          </div>
+
+          <Button
+            variant="primary"
+            style={{ width: '100%', marginTop: spacing[16], background: colors.danger }}
+            onClick={onConfirm}
+            disabled={!reason || isSubmitting}
+          >
+            {isSubmitting ? 'Leaving...' : `Leave ${coachName}'s coaching`}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

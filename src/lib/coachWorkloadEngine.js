@@ -1,6 +1,7 @@
 const ACTION_TYPE_PRIORITY = {
   review_adjustment: 100,
   review_checkin: 96,
+  review_workout: 95,
   review_posing: 94,
   open_peak_week: 92,
   open_billing: 90,
@@ -20,6 +21,7 @@ const ISSUE_PRIORITIES = {
   unread_messages: 76,
   peak_week_active: 74,
   adjustment_pending: 91,
+  workout_review: 88,
 };
 
 function toPriorityLabel(score) {
@@ -152,6 +154,18 @@ export function generateCoachWorkloadQueue({
         recommended_action: 'Message client',
         action_type: 'message_client',
         issue_type: 'missed_workout',
+        source_item_type: t,
+        source_payload: item.payload || null,
+      }));
+    } else if (t === 'workout_review') {
+      out.push(mkItem({
+        client_id: item.client_id,
+        client_name: item.client_name,
+        priority_score: Number(item?.payload?.priority_score) || ISSUE_PRIORITIES.workout_review,
+        reason_summary: item?.payload?.label || `${item.client_name || 'Client'} - workout needs review`,
+        recommended_action: 'Review workout',
+        action_type: 'review_workout',
+        issue_type: 'workout_review',
         source_item_type: t,
         source_payload: item.payload || null,
       }));

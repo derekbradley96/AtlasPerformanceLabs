@@ -2,20 +2,40 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import ClientDashboard from '@/components/dashboards/ClientDashboard';
 import { getPendingInvite, clearPendingInvite } from './ClientCode';
 import { toast } from 'sonner';
+import { applyInviteCodeForUser } from '@/lib/inviteConversion';
+import { trackRecoverableError } from '@/services/frictionTracker';
 
-const DEMO_USER = { id: 'demo-user', full_name: 'Demo User', user_type: 'client', email: 'demo@atlasperformancelabs.app', isDemo: true };
+const DEMO_USER = import.meta.env.DEV
+  ? {
+      id: 'demo-user',
+      full_name: 'Demo User',
+      user_type: 'client',
+      email: 'demo@atlasperformancelabs.app',
+      isDemo: true,
+    }
+  : null;
 
 const mountTransition = { duration: 0.24, ease: 'easeOut' };
 
 export default function ClientDashboardPage() {
-  const { user: authUser, profile, isDemoMode, isAdminBypass } = useAuth();
+  const { user: authUser, profile, isDemoMode, isAdminBypass, isLoadingAuth, refreshProfile } = useAuth();
   const [applyingInvite, setApplyingInvite] = useState(false);
   const queryClient = useQueryClient();
-  const user = authUser || (isDemoMode ? DEMO_USER : null) || (isAdminBypass ? { id: 'admin', full_name: 'Admin', user_type: 'client' } : null);
+
+  if (!import.meta.env.DEV && !isLoadingAuth && !authUser?.id && !isAdminBypass) {
+    // In production, redirect to auth rather than using demo
+    // This prevents any demo user bleeding into prod sessions
+    console.error('[ClientDashboardPage] No auth user in prod');
+  }
+
+  const user =
+    authUser
+    || (isDemoMode && import.meta.env.DEV ? DEMO_USER : null)
+    || (isAdminBypass ? { id: 'admin', full_name: 'Admin', user_type: 'client' } : null);
 
   useEffect(() => {
     if (!user || user.isDemo || isAdminBypass || applyingInvite) return;
@@ -24,41 +44,21 @@ export default function ClientDashboardPage() {
     setApplyingInvite(true);
     (async () => {
       try {
-        const { data } = await invokeSupabaseFunction('validateInviteCode', { code: normalizeInviteCode(pending.code) });
-        if (!data?.valid) {
-          clearPendingInvite();
-          setApplyingInvite(false);
-          return;
-        }
-        const trainerProfileId = data.trainer_id ?? data.trainerProfileId;
-        const { data: profileList } = await invokeSupabaseFunction('client-profile-list', { user_id: user.id });
-        const clientProfiles = Array.isArray(profileList) ? profileList : [];
-        let clientProfile = clientProfiles[0];
-        if (!clientProfile) {
-          const { data: created } = await invokeSupabaseFunction('client-profile-create', {
-            user_id: user.id,
-            coach_id: trainerProfileId,
-            trainer_id: trainerProfileId,
-            subscription_status: 'pending',
-          });
-          clientProfile = created ?? {};
-        } else {
-          await invokeSupabaseFunction('client-profile-update', { id: clientProfile.id, coach_id: trainerProfileId, trainer_id: trainerProfileId });
-        }
-        if (user.user_type !== 'client' && user.role !== 'client') {
-          await invokeSupabaseFunction('user-update-role', { user_type: 'client' });
-        }
-        queryClient.invalidateQueries({ queryKey: ['client-profile'] });
+        const supabase = getSupabase();
+        await applyInviteCodeForUser({ supabase, user, inviteCode: pending.code });
+        await queryClient.invalidateQueries({ queryKey: ['client-profile'] });
+        await refreshProfile?.();
         toast.success('Joined trainer');
       } catch (e) {
-        console.error(e);
-        toast.error('Could not apply invite code');
+        trackRecoverableError('ClientDashboardPage', 'applyInviteCodeForUser', e);
+        if (import.meta.env.DEV) console.error(e);
+        toast.error(e?.message || 'Could not apply invite code');
       } finally {
         clearPendingInvite();
         setApplyingInvite(false);
       }
     })();
-  }, [user, isAdminBypass, applyingInvite, queryClient]);
+  }, [user, isAdminBypass, applyingInvite, queryClient, refreshProfile]);
 
   if (!user) {
     return (

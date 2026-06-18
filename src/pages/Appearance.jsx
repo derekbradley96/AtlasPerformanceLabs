@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import { ArrowLeft, Moon, Sun, Monitor } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
@@ -33,7 +33,14 @@ export default function Appearance() {
     }
     setSaving(true);
     try {
-      await invokeSupabaseFunction('user-update-role', { theme_preference: newTheme });
+      const supabase = getSupabase();
+      if (supabase && user?.id) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ theme_preference: newTheme })
+          .eq('id', user.id);
+        if (error) throw error;
+      }
       toast.success('Theme updated!');
     } catch (error) {
       toast.error('Failed to save theme preference');

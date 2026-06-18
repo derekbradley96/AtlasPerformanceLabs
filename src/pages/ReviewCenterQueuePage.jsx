@@ -5,6 +5,7 @@
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import TopBar from '@/components/ui/TopBar';
@@ -433,7 +434,7 @@ async function applyAdaptiveRecommendation(item, override = null) {
   if (!active?.assignment || !active?.block) return { ok: false, reason: 'no_active_assignment' };
   const week = await getCurrentProgramWeek(supabase, active.assignment, active.block, new Date());
   if (!week) return { ok: false, reason: 'no_current_week' };
-  const day = await getTodaysProgramDay(supabase, week, new Date());
+  const day = await getTodaysProgramDay(supabase, week, new Date(), active.assignment);
   if (!day?.id) return { ok: false, reason: 'no_today_day' };
 
   const { data: exercises, error: exErr } = await supabase
@@ -781,11 +782,11 @@ export default function ReviewCenterQueuePage() {
     const key = `${item.client_id}-${item.item_type}-${item.payload?.checkin_id || item.payload?.pose_check_id || ''}`;
     const resolving = resolvingId === key;
 
-    const navMessages = () => { if (clientId) navigate(`/messages/${clientId}`); else toast.error('Client not found'); };
+    const navMessages = () => { if (clientId) navigateToThread(navigate, clientId); else toast.error('Client not found'); };
     const navClient = () => { if (clientId) navigate(`/clients/${clientId}`); else toast.error('Client not found'); };
     const navCheckin = () => { if (payload.checkin_id) navigate(`/review-center/checkins/${payload.checkin_id}`); else navClient(); };
     const navPoseCheck = () => { if (payload.pose_check_id) navigate(`/review-center/pose-checks/${payload.pose_check_id}`); else navigate('/review-center/pose-checks'); };
-    const sendPaymentReminder = () => { if (clientId) navigate(`/messages/${clientId}`, { state: { prefilledMessage: PAYMENT_REMINDER_MSG } }); else toast.error('Client not found'); };
+    const sendPaymentReminder = () => { if (clientId) navigateToThread(navigate, clientId, { state: { prefilledMessage: PAYMENT_REMINDER_MSG } }); else toast.error('Client not found'); };
     const openEarnings = () => navigate('/earnings');
     const scheduleFollowUp = () => toast.info('Schedule follow-up — coming soon');
     const addFlag = () => { navClient(); toast.info('Add flag from client profile'); };

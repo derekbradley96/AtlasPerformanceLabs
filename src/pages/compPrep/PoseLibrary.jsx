@@ -1,31 +1,59 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { getClientByUserId } from '@/data/selectors';
+import { useQuery } from '@tanstack/react-query';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getSandboxClientByUserId } from '@/lib/linkedClientFromUserId';
 import { getAllPoses } from '@/lib/repos/poseLibraryRepo';
 import { listMedia } from '@/lib/repos/compPrepRepo';
 import { getClientCompProfile } from '@/lib/repos/compPrepRepo';
 import { impactLight } from '@/lib/haptics';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
+import { FEDERATIONS_POSE_LIBRARY } from '@/lib/data/poseLibraryJudgeNotes';
+import { toPoseLibraryDivisionTags } from '@/lib/compPrep/poseSets';
 
-const FEDERATIONS = ['PCA', '2BROS', 'OTHER'];
+const FEDERATIONS = [...FEDERATIONS_POSE_LIBRARY];
 const SEX_OPTIONS = [{ value: '', label: 'All' }, { value: 'MALE', label: 'Male' }, { value: 'FEMALE', label: 'Female' }];
-const DIVISIONS = ['BODYBUILDING', 'CLASSIC', 'PHYSIQUE', 'BIKINI', 'FIGURE', 'WELLNESS'];
+const DIVISIONS = [
+  'BODYBUILDING',
+  'CLASSIC',
+  'PHYSIQUE',
+  'WHEELCHAIR_OPEN',
+  'BIKINI',
+  'FIGURE',
+  'WELLNESS',
+  'WOMENS_BODYBUILDING',
+  'WOMENS_PHYSIQUE',
+  'FITNESS',
+];
 
 export default function PoseLibrary() {
   const navigate = useNavigate();
   const { role, user } = useAuth();
+  const supabase = getSupabase();
   const [federation, setFederation] = useState('');
   const [sex, setSex] = useState('');
   const [division, setDivision] = useState('');
   const [mandatoryOnly, setMandatoryOnly] = useState(false);
 
-  const clientId = useMemo(() => {
-    if (role !== 'client' || !user?.id) return null;
-    const c = getClientByUserId(user.id);
-    return c?.id ?? null;
-  }, [role, user?.id]);
+  const { data: linkedClient } = useQuery({
+    queryKey: ['client-by-user', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      if (supabase) {
+        const { data, error } = await supabase.from('clients').select('id').eq('user_id', user.id).maybeSingle();
+        if (error) return null;
+        return data;
+      }
+      const c = getSandboxClientByUserId(user.id);
+      return c?.id ? { id: c.id } : null;
+    },
+    enabled: role === 'client' && !!user?.id,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const clientId = role === 'client' && user?.id ? linkedClient?.id ?? null : null;
 
   const profile = useMemo(() => (clientId ? getClientCompProfile(clientId) : null), [clientId]);
   const effectiveFederation = federation || profile?.federation || '';
@@ -37,7 +65,10 @@ export default function PoseLibrary() {
   const filteredPoses = useMemo(() => {
     let list = allPoses;
     if (effectiveSex) list = list.filter((p) => p.sex === effectiveSex);
-    if (effectiveDivision) list = list.filter((p) => p.divisions.includes(effectiveDivision));
+    if (effectiveDivision) {
+      const divisionTags = toPoseLibraryDivisionTags(effectiveDivision);
+      list = list.filter((p) => divisionTags.some((t) => p.divisions.includes(t)));
+    }
     if (effectiveFederation) list = list.filter((p) => p.judgeNotes.some((j) => j.federation === effectiveFederation));
     if (mandatoryOnly) list = list.filter((p) => p.isMandatory);
     return [...list].sort((a, b) => (a.isMandatory === b.isMandatory ? 0 : a.isMandatory ? -1 : 1));
@@ -81,7 +112,7 @@ export default function PoseLibrary() {
         <select
           value={federation}
           onChange={(e) => setFederation(e.target.value)}
-          className="rounded-lg border bg-slate-800 text-white text-sm"
+          className="rounded-lg border bg-slate-800 text-white text-sm max-w-[min(100%,220px)]"
           style={{ padding: '8px 12px', borderColor: colors.border }}
         >
           <option value="">Federation</option>
@@ -102,7 +133,7 @@ export default function PoseLibrary() {
         <select
           value={division}
           onChange={(e) => setDivision(e.target.value)}
-          className="rounded-lg border bg-slate-800 text-white text-sm"
+          className="rounded-lg border bg-slate-800 text-white text-sm max-w-[min(100%,240px)]"
           style={{ padding: '8px 12px', borderColor: colors.border }}
         >
           <option value="">Division</option>

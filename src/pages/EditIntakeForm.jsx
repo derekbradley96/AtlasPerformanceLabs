@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { PageLoader } from '@/components/ui/LoadingState';
@@ -12,6 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Trash2, GripVertical, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { isCoach } from '@/lib/roles';
 
 export default function EditIntakeForm() {
   const navigate = useNavigate();
@@ -41,7 +42,7 @@ export default function EditIntakeForm() {
       const profiles = await base44.entities.TrainerProfile.filter({ user_id: user.id });
       return profiles[0] || null;
     },
-    enabled: !!user?.id && (user?.user_type === 'coach' || user?.user_type === 'trainer')
+    enabled: !!user?.id && isCoach(user?.user_type ?? user?.role)
   });
 
   const { data: template, isLoading } = useQuery({
@@ -80,7 +81,7 @@ export default function EditIntakeForm() {
   });
 
   if (!user) return <PageLoader />;
-  if (user.user_type !== 'coach' && user.user_type !== 'trainer') return <NotAuthorized />;
+  if (!isCoach(user?.user_type ?? user?.role)) return <NotAuthorized />;
   if (templateId && isLoading) return <PageLoader />;
 
   const addQuestion = () => {

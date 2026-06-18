@@ -2,11 +2,11 @@
  * Update a message thread. Caller must be the coach or client in the thread.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     if (error) {
       return jsonError("Request failed", 500);
     }
-    return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("conversation-update", e);
     return jsonError("Request failed", 500);

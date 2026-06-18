@@ -14,8 +14,9 @@ import { toast } from 'sonner';
 const inputClass = 'w-full rounded-xl py-3 px-4 focus:outline-none focus:ring-2 mb-4';
 const inputStyle = { background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.border}`, color: colors.text };
 
-export default function OnboardPage() {
+export default function OnboardPage({ embeddedSlug = null } = {}) {
   const { trainerSlug } = useParams();
+  const trainerSlugResolved = embeddedSlug || trainerSlug;
   const [searchParams] = useSearchParams();
   const source = searchParams.get('source') === 'solo' ? 'solo' : 'instagram';
 
@@ -38,7 +39,7 @@ export default function OnboardPage() {
       return;
     }
     createLead({
-      trainerSlug: trainerSlug || '',
+      trainerSlug: trainerSlugResolved || '',
       trainerId: null,
       name: name.trim(),
       email: email.trim(),
@@ -53,7 +54,7 @@ export default function OnboardPage() {
     toast.success("We've received your info!");
   };
 
-  if (!trainerSlug) {
+  if (!trainerSlugResolved) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4" style={{ background: colors.bg, color: colors.muted, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <p>Invalid link.</p>

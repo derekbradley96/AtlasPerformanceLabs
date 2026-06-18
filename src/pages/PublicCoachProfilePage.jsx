@@ -1,24 +1,27 @@
 /**
  * Public coach sales page at /coach/:slug (referral_code).
- * Converts visitors to signup (coach pre-linked). Data: Edge Function public-coach-profile
- * (profiles, marketplace_coach_profiles, coach_offers, client count, result stories).
+ * Converts visitors to signup (coach pre-linked). Data loaded directly from Supabase
+ * (profiles, marketplace_coach_profiles, atlas_services, client count).
  */
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { invokeSupabaseFunction } from '@/lib/supabaseStripeApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import Button from '@/ui/Button';
 import { colors, spacing, shadows } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { isPersonal } from '@/lib/roles';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { derivePublicCoachProfileSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
+import { usePageMeta } from '@/lib/usePageMeta';
 import { getCoachClientJoinLinkPrimary } from '@/lib/referrals';
 import { DEFAULT_COACH_OFFER } from '@/data/coachOffersRepo';
 import { trackPersonalSubmittedEnquiry } from '@/services/analyticsService';
 import { trackCoachConsultationFromPersonal, trackPersonalViewedCoachProfile } from '@/lib/conversionWorkflow';
 import { impactLight } from '@/lib/haptics';
 import LeadApplicationForm from '@/pages/coach/LeadApplicationForm';
+import CoachReviewsSection from '@/components/marketplace/CoachReviewsSection';
 import { User, Trophy, MessageCircle, Send, Image as ImageIcon, X, Check, ArrowRight, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -70,9 +73,84 @@ function usePublicCoachProfile(slug) {
   return useQuery({
     queryKey: ['public-coach-profile', slug],
     queryFn: async () => {
-      const { data, error } = await invokeSupabaseFunction('public-coach-profile', { slug });
-      if (error) throw new Error(error);
-      return data;
+      const supabase = getSupabase();
+      if (!supabase || !slug) return null;
+
+      // 1) Resolve coach profile by referral code
+      const { data: coachProfile, error: profileErr } = await supabase
+        .from('profiles')
+        .select(`
+          id, display_name, avatar_url, bio,
+          coach_focus, coach_tagline, referral_code,
+          role, taking_clients
+        `)
+        .eq('referral_code', slug)
+        .in('role', ['coach', 'trainer'])
+        .maybeSingle();
+      if (profileErr || !coachProfile) {
+        throw new Error(profileErr?.message || 'Coach not found');
+      }
+
+      const coachId = coachProfile.id;
+
+      // 2) Remaining reads in parallel (table names verified in remote schema)
+      const [marketplaceRes, servicesRes, clientCountRes] = await Promise.all([
+        supabase
+          .from('marketplace_coach_profiles')
+          .select('coach_id, headline, bio, specialties, coaching_focus, monthly_price_from, is_listed')
+          .eq('coach_id', coachId)
+          .eq('is_listed', true)
+          .maybeSingle(),
+        supabase
+          .from('atlas_services')
+          .select('id, name, description, price_amount, currency, interval')
+          .eq('coach_id', coachId)
+          .eq('active', true)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('clients')
+          .select('id', { count: 'exact', head: true })
+          .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`),
+      ]);
+
+      if (marketplaceRes.error || !marketplaceRes.data) {
+        throw new Error(marketplaceRes.error?.message || 'Coach not found');
+      }
+
+      const marketplace = marketplaceRes.data;
+      const monthlyPrice = Number(marketplace?.monthly_price_from);
+      const offer = Number.isFinite(monthlyPrice) && monthlyPrice > 0
+        ? {
+            name: 'Coaching package',
+            price_monthly: Math.floor(monthlyPrice),
+            currency: 'GBP',
+            includes_training: true,
+            includes_nutrition: true,
+            includes_checkins: true,
+            includes_messaging: true,
+          }
+        : null;
+
+      const coach = {
+        id: coachProfile.id,
+        name: coachProfile.display_name,
+        avatar_url: coachProfile.avatar_url,
+        bio: coachProfile.bio || marketplace?.bio || null,
+        short_bio: coachProfile.coach_tagline || marketplace?.headline || null,
+        city: null,
+        coach_focus: coachProfile.coach_focus || marketplace?.coaching_focus || 'integrated',
+        taking_clients: coachProfile.taking_clients !== false,
+        slug: coachProfile.referral_code,
+      };
+
+      return {
+        coach,
+        offer,
+        services: servicesRes.error ? [] : (servicesRes.data ?? []),
+        stories: [],
+        showcase_stats: {},
+        clients_coached_count: clientCountRes.error ? 0 : (clientCountRes.count ?? 0),
+      };
     },
     enabled: !!slug,
     staleTime: 60 * 1000,
@@ -84,6 +162,19 @@ function formatMonthlyPrice(priceMonthly, currency = 'GBP') {
   const c = String(currency || 'GBP').toUpperCase();
   if (c === 'GBP') return `£${n}/month`;
   return `${n} ${c}/month`;
+}
+
+/** Absolute URL for Open Graph / JSON-LD (Supabase often returns full https URLs). */
+function toAbsoluteMediaUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const u = url.trim();
+  if (/^https?:\/\//i.test(u)) return u;
+  const base =
+    typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL
+      ? String(import.meta.env.VITE_SUPABASE_URL).replace(/\/$/, '')
+      : '';
+  if (base && u.startsWith('/')) return `${base}${u}`;
+  return u;
 }
 
 function mergePublicOffer(offerFromApi) {
@@ -192,6 +283,8 @@ export default function PublicCoachProfilePage() {
   const coach = data?.coach ?? null;
   const offer = useMemo(() => mergePublicOffer(data?.offer), [data?.offer]);
   const stories = useMemo(() => (Array.isArray(data?.stories) ? data.stories : []), [data?.stories]);
+  const atlasServiceRows = useMemo(() => (Array.isArray(data?.services) ? data.services : []), [data?.services]);
+  const showcaseStats = data?.showcase_stats ?? {};
   const clientsCoachedCount =
     typeof data?.clients_coached_count === 'number' && data.clients_coached_count >= 0
       ? data.clients_coached_count
@@ -275,6 +368,62 @@ export default function PublicCoachProfilePage() {
   }, [coach?.id, location.state?.openEnquiry, location.hash, location.pathname, location.search, navigate]);
 
   const notFound = slug && !isLoading && (error || (data && !data.coach));
+
+  const metaReady = Boolean(slug && coach && !isLoading && !error && !notFound);
+  const coachNameForSeo = coach?.name || 'Coach';
+  const coachFocusPhrase =
+    coachFocus === 'competition'
+      ? 'competition prep coach'
+      : coachFocus === 'integrated'
+        ? 'transformation and competition prep coach'
+        : 'transformation coach';
+  const city = coach?.city || '';
+  const coachBioPlain = coach?.bio && String(coach.bio).trim() ? String(coach.bio).trim() : '';
+  const coachDesc =
+    coachBioPlain.length > 0
+      ? coachBioPlain.slice(0, 155)
+      : `Work with ${coachNameForSeo}, an online ${coachFocusPhrase} on Atlas Performance Labs. View their programmes, results, and client ratings.`;
+  const coachOgAbs = toAbsoluteMediaUrl(coach?.avatar_url) || 'https://atlasperformancelabs.co.uk/og-image.png';
+
+  usePageMeta(
+    metaReady
+      ? {
+          title: `${coachNameForSeo} — ${coachFocusPhrase}${city ? `, ${city}` : ''}`,
+          description: coachDesc,
+          canonical: `https://atlasperformancelabs.co.uk/coach/${slug}`,
+          ogImage: coachOgAbs,
+          twitterImageAlt: coachNameForSeo,
+        }
+      : {},
+  );
+
+  useEffect(() => {
+    if (!metaReady || !coach) return undefined;
+    document.getElementById('coach-schema-jsonld')?.remove();
+    const script = document.createElement('script');
+    script.type = 'application/ld+json';
+    script.id = 'coach-schema-jsonld';
+    const imageForSchema = toAbsoluteMediaUrl(coach.avatar_url);
+    const schema = {
+      '@context': 'https://schema.org',
+      '@type': 'Person',
+      name: coach.name || coachNameForSeo,
+      jobTitle: 'Fitness Coach',
+      description: String(coach.bio || coach.short_bio || '').slice(0, 800),
+      url: `https://atlasperformancelabs.co.uk/coach/${slug}`,
+      worksFor: {
+        '@type': 'Organization',
+        name: 'Atlas Performance Labs',
+        url: 'https://atlasperformancelabs.co.uk',
+      },
+    };
+    if (imageForSchema) schema.image = imageForSchema;
+    script.text = JSON.stringify(schema);
+    document.head.appendChild(script);
+    return () => {
+      document.getElementById('coach-schema-jsonld')?.remove();
+    };
+  }, [metaReady, coach?.id, coach?.name, coach?.bio, coach?.short_bio, coach?.avatar_url, slug, coachNameForSeo, coachFocus]);
 
   const handleEnquireSubmit = useCallback(
     async (e) => {
@@ -366,12 +515,21 @@ export default function PublicCoachProfilePage() {
     { on: offer.includes_messaging, label: 'Messaging' },
   ].filter((r) => r.on);
 
+  const avgTransform =
+    typeof showcaseStats?.avg_transformation_kg === 'number' && Number.isFinite(showcaseStats.avg_transformation_kg)
+      ? showcaseStats.avg_transformation_kg
+      : null;
+  const avgResponseH =
+    typeof showcaseStats?.avg_response_hours === 'number' && Number.isFinite(showcaseStats.avg_response_hours)
+      ? showcaseStats.avg_response_hours
+      : null;
+
   const socialProofLine =
     clientsCoachedCount != null && clientsCoachedCount > 0
       ? `${clientsCoachedCount} client${clientsCoachedCount === 1 ? '' : 's'} coached on Atlas`
       : 'Trusted 1:1 coaching — transformations & testimonials coming here soon.';
 
-  const startCtaLabel = `Start coaching with ${displayName}`;
+  const startCtaLabel = `Work with ${displayName}`;
 
   return (
     <div
@@ -420,6 +578,17 @@ export default function PublicCoachProfilePage() {
             >
               {focusLabel}
             </span>
+            <div className="flex flex-wrap justify-center gap-2 mb-4">
+              <span
+                className="inline-flex items-center text-[11px] font-bold uppercase tracking-wide px-3 py-1 rounded-full"
+                style={{
+                  background: coach?.taking_clients !== false ? 'rgba(16,185,129,0.18)' : 'rgba(245,158,11,0.2)',
+                  color: coach?.taking_clients !== false ? colors.success : colors.warning,
+                }}
+              >
+                {coach?.taking_clients !== false ? 'Currently taking clients' : 'Waitlist only'}
+              </span>
+            </div>
             <p className="text-[15px] leading-relaxed mb-6" style={{ color: colors.textSecondary }}>
               {tagline}
             </p>
@@ -445,12 +614,54 @@ export default function PublicCoachProfilePage() {
                   {socialProofLine}
                 </p>
                 <p className="text-xs mt-1 leading-relaxed" style={{ color: colors.muted }}>
-                  Real outcomes and member stories will appear here as your coach publishes them.
+                  {stories.length > 0
+                    ? 'Below: curated client stories and live stats from this coach’s roster on Atlas.'
+                    : 'Real outcomes and member stories will appear here as your coach publishes them.'}
                 </p>
+                {(clientsCoachedCount != null && clientsCoachedCount > 0) || avgTransform != null || avgResponseH != null ? (
+                  <ul className="mt-3 space-y-1.5 pl-4 list-disc text-xs" style={{ color: colors.textSecondary }}>
+                    {clientsCoachedCount != null && clientsCoachedCount > 0 ? (
+                      <li>Clients coached: {clientsCoachedCount}</li>
+                    ) : null}
+                    {avgTransform != null ? (
+                      <li>Avg {avgTransform.toFixed(1)}kg change (rolling 12-week window, check-in weights)</li>
+                    ) : null}
+                    {avgResponseH != null ? (
+                      <li>Check-in response time: ~{avgResponseH < 48 ? `${Math.round(avgResponseH)}h` : `${(avgResponseH / 24).toFixed(1)}d`} from submit → reviewed</li>
+                    ) : null}
+                  </ul>
+                ) : null}
               </div>
             </div>
           </CardShell>
         </motion.section>
+
+        {atlasServiceRows.length > 0 ? (
+          <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.06 }} className="mb-6">
+            <h2 className="text-lg font-semibold mb-3" style={{ color: colors.text }}>
+              Services
+            </h2>
+            <div className="space-y-3">
+              {atlasServiceRows.map((svc) => {
+                const cur = String(svc.currency || 'gbp').toUpperCase();
+                const price = Math.max(0, Math.floor(Number(svc.price_amount) || 0));
+                const priceLabel = cur === 'GBP' ? `£${price}` : `${price} ${cur}`;
+                return (
+                  <CardShell key={svc.id} style={{ padding: spacing[14], border: `1px solid ${colors.border}` }}>
+                    <p className="text-sm font-semibold m-0" style={{ color: colors.text }}>{svc.name}</p>
+                    {svc.description ? (
+                      <p className="text-xs mt-2 m-0 whitespace-pre-wrap" style={{ color: colors.muted }}>{svc.description}</p>
+                    ) : null}
+                    <p className="text-xs mt-2 m-0 font-semibold" style={{ color: colors.accent }}>
+                      {priceLabel}
+                      {svc.interval ? ` / ${String(svc.interval)}` : ''}
+                    </p>
+                  </CardShell>
+                );
+              })}
+            </div>
+          </motion.section>
+        ) : null}
 
         {/* 3 — Offer card */}
         <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.08 }} className="mb-6">
@@ -500,6 +711,8 @@ export default function PublicCoachProfilePage() {
             </p>
           </CardShell>
         </motion.section>
+
+        <CoachReviewsSection coachId={coach?.id} />
 
         {/* 5 — Process */}
         <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.12 }} className="mb-6">
@@ -717,7 +930,7 @@ export default function PublicCoachProfilePage() {
         <LeadApplicationForm
           trainerUserId={coach.id}
           trainerProfileId={coach.id}
-          services={[]}
+          services={atlasServiceRows}
           onClose={() => setApplyOpen(false)}
           onSuccess={() => setApplyOpen(false)}
         />

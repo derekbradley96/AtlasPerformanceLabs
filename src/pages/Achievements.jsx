@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { isPersonal } from '@/lib/roles';
 import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
 import { PERSONAL_MARKETPLACE_SOURCE } from '@/lib/personalMarketplaceEntry';
-import { getClientByUserId } from '@/data/selectors';
-import { getAchievementsList } from '@/lib/milestonesStore';
+import { getAchievementsList, MILESTONE_DEFS } from '@/lib/milestonesStore';
+import { buildMilestoneProgress } from '@/lib/milestoneEngine';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 import { Trophy } from 'lucide-react';
@@ -17,12 +19,82 @@ function formatDate(iso) {
 
 export default function Achievements() {
   const navigate = useNavigate();
-  const { user: authUser, effectiveRole, role, isDemoMode } = useAuth();
+  const { user: authUser, effectiveRole, role, isDemoMode, clientLinkedRow, profile } = useAuth();
   const userId = authUser?.id;
-  const clientForUser = userId ? getClientByUserId(userId) : null;
+  const rosterClientId = clientLinkedRow?.id ?? null;
+
+  const { data: clientCheckins = [] } = useQuery({
+    queryKey: ['achievements-my-checkins', rosterClientId],
+    queryFn: async () => {
+      if (!hasSupabase || !rosterClientId) return [];
+      const supabase = getSupabase();
+      if (!supabase) return [];
+      const { data, error } = await supabase
+        .from('checkins')
+        .select('id, submitted_at, status, coach_reviewed_at')
+        .eq('client_id', rosterClientId)
+        .order('submitted_at', { ascending: false })
+        .limit(10);
+      if (error) return [];
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: Boolean(hasSupabase && rosterClientId),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const byUser = true;
   const achievements = userId ? getAchievementsList(userId, { byUser }) : [];
   const showFindCoach = isPersonal(effectiveRole ?? role);
+  const checkIns = clientCheckins;
+  const checkinCount = checkIns.filter((c) => c.status === 'submitted').length;
+  const streakDays = checkinCount;
+
+  const createdSource = clientLinkedRow?.created_at ?? clientLinkedRow?.created_date ?? profile?.created_at;
+  const daysWithCoach = createdSource
+    ? Math.max(0, Math.floor((Date.now() - new Date(createdSource).getTime()) / (24 * 60 * 60 * 1000)))
+    : 0;
+  const isCompetitionClient = ['competition', 'integrated'].includes(
+    String(clientLinkedRow?.client_type ?? profile?.client_type ?? '').toLowerCase(),
+  );
+
+  const { data: activityCounts = { workoutCount: 0, poseCheckCount: 0 } } = useQuery({
+    queryKey: ['achievements-activity-counts', userId, rosterClientId],
+    enabled: !!userId && hasSupabase,
+    queryFn: async () => {
+      const supabase = getSupabase();
+      if (!supabase || !userId) return { workoutCount: 0, poseCheckCount: 0 };
+      const workoutFilter = rosterClientId
+        ? supabase.from('workout_sessions').select('id', { count: 'exact', head: true }).eq('client_id', rosterClientId).eq('status', 'completed')
+        : supabase.from('workout_sessions').select('id', { count: 'exact', head: true }).eq('profile_id', userId).eq('status', 'completed');
+      const poseFilter = rosterClientId
+        ? supabase.from('pose_checks').select('id', { count: 'exact', head: true }).eq('client_id', rosterClientId)
+        : Promise.resolve({ count: 0 });
+      const [workoutsRes, poseRes] = await Promise.all([workoutFilter, poseFilter]);
+      return {
+        workoutCount: Number(workoutsRes?.count || 0),
+        poseCheckCount: Number(poseRes?.count || 0),
+      };
+    },
+  });
+  const unlockedIds = new Set(achievements.map((a) => a.milestoneId));
+  const unlocked = achievements;
+  const locked = MILESTONE_DEFS.filter((d) => !unlockedIds.has(d.id));
+  const progressByMilestone = useMemo(
+    () =>
+      buildMilestoneProgress({
+        checkinCount,
+        streakDays,
+        workoutCount: activityCounts.workoutCount,
+        poseCheckCount: activityCounts.poseCheckCount,
+        daysWithCoach,
+        isCompetitionClient,
+      }),
+    [checkinCount, streakDays, activityCounts.workoutCount, activityCounts.poseCheckCount, daysWithCoach, isCompetitionClient],
+  );
+
+  useEffect(() => {
+    document.title = 'Achievements — Atlas';
+  }, []);
 
   return (
     <div
@@ -59,8 +131,11 @@ export default function Achievements() {
         </Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[12] }}>
-          {achievements.map((a) => (
-            <Card key={a.id} style={{ padding: spacing[16] }}>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: colors.muted }}>
+            Unlocked
+          </p>
+          {unlocked.map((a) => (
+            <Card key={a.id} style={{ padding: spacing[16], border: `1px solid ${colors.border}` }}>
               <div className="flex items-start gap-3">
                 <div
                   className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
@@ -78,6 +153,24 @@ export default function Achievements() {
               </div>
             </Card>
           ))}
+          <p className="text-xs font-semibold uppercase tracking-wide mt-2" style={{ color: colors.muted }}>
+            Locked goals
+          </p>
+          {locked.map((m) => {
+            const progress = progressByMilestone[m.id] || { current: 0, target: 1, label: 'Keep going' };
+            const pct = Math.max(0, Math.min(100, Math.round((progress.current / Math.max(1, progress.target)) * 100)));
+            return (
+              <Card key={m.id} style={{ padding: spacing[16], opacity: 0.85, border: `1px solid ${colors.border}` }}>
+                <p className="text-[15px] font-semibold" style={{ color: colors.text }}>{m.title}</p>
+                <p className="text-sm mt-0.5" style={{ color: colors.muted }}>{m.description}</p>
+                <p className="text-xs mt-2" style={{ color: colors.primary }}>{progress.label}</p>
+                <div style={{ marginTop: spacing[6], height: 8, borderRadius: 999, background: colors.surface2, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: colors.primary, borderRadius: 999 }} />
+                </div>
+                <p className="text-xs mt-2" style={{ color: colors.muted }}>You are closer than you think. Keep building momentum.</p>
+              </Card>
+            );
+          })}
           {showFindCoach && (
             <p className="text-sm text-center mt-4" style={{ color: colors.muted }}>
               Want to level up with a coach?{' '}

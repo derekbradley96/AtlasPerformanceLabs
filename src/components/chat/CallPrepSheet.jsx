@@ -51,6 +51,8 @@ export default function CallPrepSheet({
   onViewClient,
   onPaymentReminder,
   lightHaptic,
+  onStartAudioCall,
+  onStartVideoCall,
 }) {
   const [showSummaryPreview, setShowSummaryPreview] = useState(false);
   const [callError, setCallError] = useState(null);
@@ -78,6 +80,13 @@ export default function CallPrepSheet({
 
   const handleStartAudio = useCallback(() => {
     lightHaptic?.();
+    if (typeof onStartAudioCall === 'function') {
+      const handled = onStartAudioCall();
+      if (handled) {
+        onOpenChange?.(false);
+        return;
+      }
+    }
     const result = launchAudioCall(clientData);
     if (result.ok) {
       onOpenChange?.(false);
@@ -86,10 +95,17 @@ export default function CallPrepSheet({
     } else {
       setCallError(result.error ?? 'NO_PHONE');
     }
-  }, [clientData, lightHaptic, onOpenChange]);
+  }, [clientData, lightHaptic, onOpenChange, onStartAudioCall]);
 
   const handleStartVideo = useCallback(async () => {
     lightHaptic?.();
+    if (typeof onStartVideoCall === 'function') {
+      const handled = await onStartVideoCall();
+      if (handled) {
+        onOpenChange?.(false);
+        return;
+      }
+    }
     const result = await launchVideoCall(clientData);
     if (result.ok) {
       onOpenChange?.(false);
@@ -98,7 +114,7 @@ export default function CallPrepSheet({
     } else {
       setVideoError(result.error ?? 'NO_LINK');
     }
-  }, [clientData, lightHaptic, onOpenChange]);
+  }, [clientData, lightHaptic, onOpenChange, onStartVideoCall]);
 
   const handlePickAudioMethod = useCallback((picked) => {
     setAudioPickerOpen(false);
@@ -281,10 +297,22 @@ export default function CallPrepSheet({
 
               {/* Start call / Start video */}
               <div className="flex flex-col gap-2 pt-4 mt-4 border-t w-full" style={{ borderColor: colors.border }}>
-                <Button variant="primary" className="w-full" onClick={handleStartAudio} disabled={audioMethods.length === 0} style={{ borderRadius: radii.button }}>
+                <Button
+                  variant="primary"
+                  className="w-full"
+                  onClick={handleStartAudio}
+                  disabled={audioMethods.length === 0 && typeof onStartAudioCall !== 'function'}
+                  style={{ borderRadius: radii.button }}
+                >
                   Start call (audio)
                 </Button>
-                <Button variant="primary" className="w-full" onClick={handleStartVideo} disabled={videoMethods.length === 0} style={{ borderRadius: radii.button }}>
+                <Button
+                  variant="primary"
+                  className="w-full"
+                  onClick={handleStartVideo}
+                  disabled={videoMethods.length === 0 && typeof onStartVideoCall !== 'function'}
+                  style={{ borderRadius: radii.button }}
+                >
                   Start video
                 </Button>
               </div>

@@ -5,9 +5,10 @@
  */
 import React, { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useMutation } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { isCoach } from '@/lib/roles';
-import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { hasSupabase } from '@/lib/supabaseClient';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { pageContainer, standardCard } from '@/ui/pageLayout';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { hapticLight } from '@/lib/haptics';
+import { createOrganisationAsOwner } from '@/data/organisationSetupRepo';
 
 /** Generate URL-friendly slug from name. */
 function slugFromName(name) {
@@ -36,10 +38,21 @@ export default function OrganisationSetupPage() {
   const { user, effectiveRole } = useAuth();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
   const slugDerived = useMemo(() => slugFromName(name), [name]);
   const slugDisplay = slug.trim() || slugDerived;
+
+  const createOrgMutation = useMutation({
+    mutationFn: ({ trimmedName, slugValue, ownerProfileId }) =>
+      createOrganisationAsOwner({ name: trimmedName, slug: slugValue, ownerProfileId }),
+    onSuccess: () => {
+      toast.success('Organisation created.');
+      navigate('/organisation');
+    },
+    onError: (err) => {
+      toast.error(err?.message || 'Something went wrong.');
+    },
+  });
 
   const handleNameChange = useCallback(
     (e) => {
@@ -71,73 +84,14 @@ export default function OrganisationSetupPage() {
         return;
       }
 
-      setSubmitting(true);
       hapticLight();
-      const supabase = getSupabase();
-      try {
-        const ownerProfileId = user.id;
-        const slugValue = slugDisplay || null;
-
-        const { data: org, error: orgError } = await supabase
-          .from('organisations')
-          .insert({
-            name: trimmedName,
-            slug: slugValue,
-            owner_profile_id: ownerProfileId,
-          })
-          .select('id')
-          .single();
-
-        if (orgError) {
-          if (orgError.code === '23505') {
-            toast.error('That slug is already in use. Choose another.');
-          } else {
-            toast.error(orgError.message || 'Could not create organisation.');
-          }
-          setSubmitting(false);
-          return;
-        }
-
-        const orgId = org?.id;
-        if (!orgId) {
-          toast.error('Organisation was created but could not continue.');
-          setSubmitting(false);
-          return;
-        }
-
-        const { error: memberError } = await supabase.from('organisation_members').insert({
-          organisation_id: orgId,
-          profile_id: ownerProfileId,
-          role: 'owner',
-          is_active: true,
-        });
-
-        if (memberError) {
-          toast.error(memberError.message || 'Could not add you as owner.');
-          setSubmitting(false);
-          return;
-        }
-
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .update({ organisation_id: orgId })
-          .eq('id', ownerProfileId);
-
-        if (profileError) {
-          toast.error(profileError.message || 'Organisation created but profile could not be updated.');
-          setSubmitting(false);
-          return;
-        }
-
-        toast.success('Organisation created.');
-        navigate('/organisation');
-      } catch (err) {
-        toast.error(err?.message || 'Something went wrong.');
-      } finally {
-        setSubmitting(false);
-      }
+      createOrgMutation.mutate({
+        trimmedName,
+        slugValue: slugDisplay || null,
+        ownerProfileId: user.id,
+      });
     },
-    [name, slugDisplay, user?.id, effectiveRole, navigate]
+    [name, slugDisplay, user?.id, effectiveRole, createOrgMutation]
   );
 
   if (!user) {
@@ -237,11 +191,11 @@ export default function OrganisationSetupPage() {
 
           <Button
             type="submit"
-            disabled={submitting || !name?.trim()}
+            disabled={createOrgMutation.isPending || !name?.trim()}
             className="w-full"
             style={{ minHeight: 48 }}
           >
-            {submitting ? 'Creating…' : 'Create organisation'}
+            {createOrgMutation.isPending ? 'Creating…' : 'Create organisation'}
           </Button>
         </form>
       </div>

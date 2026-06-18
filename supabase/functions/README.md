@@ -1,5 +1,44 @@
 # Supabase Edge Functions
 
+## Deployed functions
+
+| Function | Purpose | Secrets needed |
+|----------|---------|----------------|
+| send-welcome-email | Welcome email after onboarding | RESEND_API_KEY |
+| send-push | Push notifications on new message | FCM_SERVER_KEY |
+| stripe-connect-link | Stripe coach onboarding | STRIPE_SECRET_KEY |
+| stripe-checkout-session | Client payment checkout | STRIPE_SECRET_KEY |
+| send-reminders | Weekly check-in reminders | none |
+| delete-account | GDPR account deletion | none |
+
+## Deployment commands
+
+Deploy all:
+
+```bash
+npx supabase functions deploy
+```
+
+Deploy one:
+
+```bash
+npx supabase functions deploy send-welcome-email
+```
+
+## Secrets
+
+Set a secret:
+
+```bash
+npx supabase secrets set RESEND_API_KEY=re_xxx
+```
+
+List secrets (names only, not values):
+
+```bash
+npx supabase secrets list
+```
+
 Deploy from the project root:
 
 ```bash

@@ -23,5 +23,6 @@ export {
   updateLeadStatus,
 } from '@/lib/leadsStore';
 
-export { getClients, getClientById } from '@/data/selectors';
+/** Async Supabase-backed (see atlasRepo); pass isDemoMode + trainerId for getClientById when scoped to coach. */
+export { getClients, getClientById } from '@/data/repos/atlasRepo';
 export { createClientStub, getStubClients } from '@/lib/clientStubStore';

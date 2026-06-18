@@ -1,11 +1,11 @@
 // Return coach row for the authenticated user only (JWT).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   try {
     const callerId = await getAuthUserId(req);
@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
       .eq("coach_id", callerId)
       .maybeSingle();
     const connected = !!(coach?.stripe_account_id);
-    return new Response(JSON.stringify({ coach: coach ?? null, billing_state: billingState ?? null, connected, charges_enabled: coach?.charges_enabled ?? false, payouts_enabled: coach?.payouts_enabled ?? false }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ coach: coach ?? null, billing_state: billingState ?? null, connected, charges_enabled: coach?.charges_enabled ?? false, payouts_enabled: coach?.payouts_enabled ?? false }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("get-coach", e);
     return jsonError("Request failed", 500);

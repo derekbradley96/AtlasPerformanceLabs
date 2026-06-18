@@ -3,22 +3,22 @@
  * Caller must be the client (clients.user_id) or the client's coach (coach_id/trainer_id).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
 import { parseCheckinTemplateAnswers } from "../_shared/checkinTemplateAnswers.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     if (!callerId) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const id = body.id ?? req.headers.get("X-Checkin-Id");
     if (!id) {
-      return new Response(JSON.stringify({ error: "id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "id required" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -33,10 +33,10 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     if (!row) {
-      return new Response(JSON.stringify(null), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(null), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const { data: clientRow } = await supabase.from("clients").select("user_id, coach_id, trainer_id").eq("id", (row as Record<string, unknown>).client_id).maybeSingle();
     const c = clientRow as Record<string, unknown> | null;
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
     const isOwner = clientUserId === callerId;
     const isCoach = coachId === callerId || trainerId === callerId;
     if (!isOwner && !isCoach) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const trainerIdOut = coachId ?? trainerId ?? null;
     const submitted = (row as Record<string, unknown>).submitted_at != null;
@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
       sleep_hours: (row as Record<string, unknown>).sleep_score,
       flags: [],
     };
-    return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(out), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("checkin-get", e);
     return jsonError("Request failed", 500);

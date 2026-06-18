@@ -1,10 +1,15 @@
+/**
+ * LEGACY — currently not mounted in active routes.
+ * Uses base44LegacyStub; keep untouched until route is re-enabled / Supabase migration.
+ */
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery } from '@tanstack/react-query';
 import { PageLoader } from '@/components/ui/LoadingState';
 import NotAuthorized from '@/components/NotAuthorized';
 import { Switch } from '@/components/ui/switch';
 import { Zap, Clock, MessageSquare, AlertCircle, TrendingUp, DollarSign } from 'lucide-react';
+import { isCoach } from '@/lib/roles';
 
 export default function Automations() {
   const [user, setUser] = useState(null);
@@ -23,11 +28,11 @@ export default function Automations() {
       const profiles = await base44.entities.TrainerProfile.filter({ user_id: user.id });
       return profiles[0] || null;
     },
-    enabled: !!user?.id && (user?.user_type === 'coach' || user?.user_type === 'trainer')
+    enabled: !!user?.id && isCoach(user?.user_type ?? user?.role)
   });
 
   if (!user) return <PageLoader />;
-  if (user.user_type !== 'coach' && user.user_type !== 'trainer') return <NotAuthorized />;
+  if (!isCoach(user?.user_type ?? user?.role)) return <NotAuthorized />;
 
   const automations = [
     {

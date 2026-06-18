@@ -4,6 +4,7 @@ import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { getSupabase } from '@/lib/supabaseClient';
+import PageMeta from '@/components/seo/PageMeta';
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -52,6 +53,10 @@ export default function ResetPassword() {
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
+      <PageMeta
+        title="Reset Password — Atlas Performance Labs"
+        description="Reset your Atlas Performance Labs password and get back to your coaching dashboard."
+      />
       <div className="w-full max-w-sm">
         <h1 className="text-xl font-bold text-center mb-2" style={{ color: colors.text }}>
           Set new password

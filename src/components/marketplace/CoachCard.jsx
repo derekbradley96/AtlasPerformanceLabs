@@ -3,7 +3,9 @@ import Button from '@/ui/Button';
 import { colors, spacing, shell, radii, touchTargetMin } from '@/ui/tokens';
 import { ChevronRight, Bookmark, MessageCircle } from 'lucide-react';
 import { coachInitials, isMarketplaceCoachSavedId, setMarketplaceCoachSaved } from '@/lib/marketplaceCoachCardModel';
+import { isEliteTier } from '@/config/plans';
 import { COACH_CARD_ACTION_STATE } from '@/lib/marketplaceCoachCardModel';
+import PillarRating from '@/components/marketplace/PillarRating';
 
 const VARIANT_SURFACE = {
   standard: {
@@ -92,6 +94,7 @@ function CoachAvatar({ url, name, size }) {
  * @param {string} props.coachName
  * @param {string} props.coachHeadline
  * @param {string|null} props.coachAvatarUrl
+ * @param {string|null} [props.planTier] - profiles.plan_tier for Elite badge
  * @param {string[]} props.tags
  * @param {string|null} props.matchReason
  * @param {{ label: string }[]} props.trustItems
@@ -111,6 +114,9 @@ export default function CoachCard({
   coachName,
   coachHeadline,
   coachAvatarUrl,
+  avgPillars = null,
+  reviewCount = 0,
+  planTier = null,
   tags = [],
   matchReason,
   trustItems = [],
@@ -194,6 +200,20 @@ export default function CoachCard({
             Best match
           </span>
         ) : null}
+        {isEliteTier(planTier) ? (
+          <span
+            className="shrink-0 text-[10px] font-bold uppercase tracking-wider"
+            style={{
+              padding: '3px 8px',
+              borderRadius: radii.pill,
+              background: 'rgba(245, 158, 11, 0.22)',
+              color: '#B45309',
+              border: '1px solid rgba(217, 119, 6, 0.45)',
+            }}
+          >
+            ⚡ Elite
+          </span>
+        ) : null}
       </div>
 
       <p
@@ -207,6 +227,15 @@ export default function CoachCard({
       >
         {coachHeadline}
       </p>
+      <div style={{ marginTop: spacing[8] }}>
+        <PillarRating
+          pillars={avgPillars ?? null}
+          reviewCount={reviewCount ?? 0}
+          size="sm"
+          showNumber={!!(avgPillars && reviewCount > 0)}
+          showCount={true}
+        />
+      </div>
 
       {tagRow.length > 0 ? (
         <div className="flex flex-wrap" style={{ marginTop: spacing[10], gap: spacing[6] }}>
@@ -396,6 +425,15 @@ export default function CoachCard({
             >
               {coachHeadline}
             </p>
+            <div style={{ marginTop: spacing[8] }}>
+              <PillarRating
+                pillars={avgPillars ?? null}
+                reviewCount={reviewCount ?? 0}
+                size="sm"
+                showNumber={!!(avgPillars && reviewCount > 0)}
+                showCount={true}
+              />
+            </div>
             {tagRow.length > 0 ? (
               <div className="flex flex-wrap" style={{ marginTop: spacing[10], gap: spacing[6] }}>
                 {tagRow.map((t) => (

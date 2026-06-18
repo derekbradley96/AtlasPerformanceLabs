@@ -7,6 +7,7 @@ import {
   missingPoseWindowByPhase,
   showProximityThresholdDays,
 } from '@/lib/inbox/compPrepConfig';
+import { toPoseLibraryDivisionTags } from '@/lib/compPrep/poseSets';
 
 /** Minimal client shape for display (id, full_name). */
 export interface InboxClient {
@@ -70,11 +71,15 @@ function getMandatoryPosesForDivision(
   sex: 'MALE' | 'FEMALE',
   division: string
 ): Pose[] {
+  const tags = toPoseLibraryDivisionTags(division);
+  if (tags.length === 0) return [];
   return (poses ?? []).filter(
     (p) =>
       p?.sex === sex &&
       p?.isMandatory &&
-      (Array.isArray(p?.divisions) ? (p.divisions as string[]).includes(division) : false)
+      (Array.isArray(p?.divisions)
+        ? (p.divisions as string[]).some((d) => tags.includes(d))
+        : false)
   );
 }
 

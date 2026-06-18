@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
+import { normalizeRole } from '@/lib/roles';
 import { 
   Home, Dumbbell, TrendingUp, MoreHorizontal, User,
   Users, MessageSquare, FileText, DollarSign, BookOpen
@@ -37,7 +38,7 @@ export default function BottomNav({ userRole }) {
     { name: 'Home', icon: Home, page: 'Home' },
     { name: 'Clients', icon: Users, page: 'Clients' },
     { name: 'Programs', icon: FileText, page: 'Programs' },
-    { name: 'Earnings', icon: DollarSign, page: 'TrainerEarnings' },
+    { name: 'Earnings', icon: DollarSign, page: 'Earnings' },
     { name: 'More', icon: MoreHorizontal, page: 'More' }
   ];
 
@@ -50,10 +51,11 @@ export default function BottomNav({ userRole }) {
     { name: 'More', icon: MoreHorizontal, page: 'More' }
   ];
 
-  const tabs = 
-    userRole === 'trainer' ? trainerTabs :
-    userRole === 'client' ? clientTabs :
-    userRole === 'solo' ? soloTabs :
+  const norm = normalizeRole(userRole);
+  const tabs =
+    norm === 'coach' ? trainerTabs :
+    norm === 'client' ? clientTabs :
+    norm === 'personal' ? soloTabs :
     generalTabs;
 
   return (

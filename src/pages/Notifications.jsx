@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
+import {
+  getNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from '@/lib/notifications';
 import { 
   Bell, Check, MessageSquare, Calendar, DollarSign, 
   Target, Dumbbell, Users, Settings
@@ -22,8 +26,17 @@ export default function Notifications() {
   const { data: notificationsData = [], isLoading } = useQuery({
     queryKey: ['notifications', displayUser?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('notification-list', { user_id: displayUser?.id });
-      return Array.isArray(data) ? data : [];
+      const rows = await getNotifications(displayUser?.id, { limit: 100 });
+      return Array.isArray(rows)
+        ? rows.map((row) => ({
+            ...row,
+            // Legacy UI expects `read`; table shape uses `is_read`.
+            read: !!row.is_read,
+            created_date: row.created_at,
+            link_page: row?.data?.link_page || null,
+            link_params: row?.data?.link_params || '',
+          }))
+        : [];
     },
     enabled: !!displayUser?.id && !isDemoMode
   });
@@ -31,21 +44,28 @@ export default function Notifications() {
 
   const markAsReadMutation = useMutation({
     mutationFn: async (notificationId) => {
-      await invokeSupabaseFunction('notification-update', { id: notificationId, read: true });
+      const ok = await markNotificationRead(notificationId);
+      if (!ok) throw new Error('Failed to mark notification read');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    }
+    },
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
   });
 
   const markAllAsReadMutation = useMutation({
     mutationFn: async () => {
-      const unreadNotifs = notifications.filter(n => !n.read);
-      await Promise.all(unreadNotifs.map(n => invokeSupabaseFunction('notification-update', { id: n.id, read: true })));
+      const ok = await markAllNotificationsRead(displayUser?.id);
+      if (!ok) throw new Error('Failed to mark all notifications read');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
-    }
+    },
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
   });
 
   if (!displayUser) return <PageLoader />;

@@ -2,10 +2,10 @@
  * List coaches available for discovery (marketplace). Uses marketplace_coach_profiles + profiles.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -15,11 +15,11 @@ Deno.serve(async (req) => {
       .eq("is_listed", true);
 
     if (mErr) {
-      return new Response(JSON.stringify([]), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify([]), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const list = Array.isArray(marketplaceRows) ? marketplaceRows : [];
     if (list.length === 0) {
-      return new Response(JSON.stringify([]), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify([]), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const coachIds = list.map((r: Record<string, unknown>) => r.coach_id);
@@ -49,9 +49,9 @@ Deno.serve(async (req) => {
         created_at: profile.created_at,
       };
     });
-    return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(out), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("trainer-marketplace-list", e);
-    return new Response(JSON.stringify([]), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify([]), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   }
 });

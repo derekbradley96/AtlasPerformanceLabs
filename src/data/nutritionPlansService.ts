@@ -22,6 +22,7 @@ export interface NutritionPlanRow {
   is_active?: boolean | null;
   /** BMR calculator inputs + macro split (JSON). */
   intake_metrics?: Record<string, unknown> | null;
+  prep_instruction_explanation_key?: string | null;
   created_at: string;
   [key: string]: unknown;
 }
@@ -61,6 +62,7 @@ export type UpsertNutritionPlanPayload = {
   peak_week?: boolean | null;
   checkin_adjustment?: string | null;
   intake_metrics?: Record<string, unknown> | null;
+  prep_instruction_explanation_key?: string | null;
 };
 
 export async function upsertNutritionPlan(
@@ -83,6 +85,12 @@ export async function upsertNutritionPlan(
     peak_week: payload.peak_week ?? false,
     checkin_adjustment: payload.checkin_adjustment ?? null,
   };
+  if (payload.prep_instruction_explanation_key !== undefined) {
+    row.prep_instruction_explanation_key =
+      payload.prep_instruction_explanation_key && String(payload.prep_instruction_explanation_key).trim()
+        ? String(payload.prep_instruction_explanation_key).trim()
+        : null;
+  }
   if (payload.intake_metrics !== undefined) {
     row.intake_metrics =
       payload.intake_metrics != null && typeof payload.intake_metrics === 'object'

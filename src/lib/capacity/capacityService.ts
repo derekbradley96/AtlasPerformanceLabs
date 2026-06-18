@@ -3,7 +3,7 @@
  */
 import { buildTrainerQueue } from '@/lib/reviewQueue/buildQueue';
 import { listActiveRetentionItems } from '@/lib/retention/retentionRepo';
-import { getClients } from '@/data/selectors';
+import { getClients } from '@/data/repos/atlasRepo';
 import { getClientHealthScoreSnapshot } from '@/lib/healthScoreService';
 import { getDailyAdminLimitMinutesForTrainer } from '@/lib/trainerFoundation';
 import {
@@ -46,10 +46,21 @@ export interface CapacitySnapshot {
   dailyLimitMinutes: number;
 }
 
-export async function getCapacitySnapshot(trainerId: string, now: Date = new Date()): Promise<CapacitySnapshot> {
+export async function getCapacitySnapshot(
+  trainerId: string,
+  now: Date = new Date(),
+  options?: { isDemoMode?: boolean },
+): Promise<CapacitySnapshot> {
   const queue = await buildTrainerQueue({ trainerId, now });
   const active = queue.filter((i) => i.status === 'ACTIVE');
-  const clients = getClients().filter((c) => c.trainer_id === trainerId);
+  const isDemoMode =
+    typeof options?.isDemoMode === 'boolean'
+      ? options.isDemoMode
+      : trainerId === 'demo-trainer' || trainerId === 'fake-trainer';
+  const roster = await getClients(trainerId, isDemoMode);
+  const clients = roster.filter(
+    (c) => String(c.trainer_id ?? '') === String(trainerId) || String((c as { coach_id?: string }).coach_id ?? '') === String(trainerId),
+  );
   const retentionItems = listActiveRetentionItems(trainerId, now);
 
   let atRiskClients = 0;

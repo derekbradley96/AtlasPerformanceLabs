@@ -1,8 +1,9 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import * as Sentry from '@sentry/react'
+import posthog from 'posthog-js'
 import App from '@/App.jsx'
 import '@/index.css'
-import { seedIfEmpty } from '@/lib/sandboxStore'
 import { hasSupabase } from '@/lib/supabaseClient'
 import { getRequiredEnvError } from '@/lib/envGuard'
 
@@ -16,11 +17,19 @@ if (import.meta.env.DEV) {
   console.log('[ATLAS] Booting', new Date().toISOString(), location.href);
   console.log('[Supabase]', hasSupabase ? 'configured' : 'NOT configured, using local mode');
 }
-window.__ATLAS_BOOTED__ = true
-if (!envError) seedIfEmpty()
+if (import.meta.env.DEV) {
+  window.__ATLAS_BOOTED__ = true
+}
+if (import.meta.env.DEV && !envError) {
+  import('@/lib/sandboxStore').then(({ seedIfEmpty }) => {
+    seedIfEmpty()
+  })
+}
 
 /** Last runtime error (message, stack, source, time) for dev/demo debug overlay. */
-window.__atlasLastError = null
+if (import.meta.env.DEV) {
+  window.__atlasLastError = null
+}
 
 function safeStringify(x) {
   try {
@@ -33,6 +42,7 @@ function safeStringify(x) {
 }
 
 function setAtlasLastError(message, stack, source) {
+  if (!import.meta.env.DEV) return
   try {
     window.__atlasLastError = {
       message: message ?? 'unknown',
@@ -71,6 +81,11 @@ class RootErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
+    Sentry.captureException(error, {
+      extra: {
+        componentStack: info?.componentStack,
+      },
+    })
     console.error('[RootErrorBoundary]', error?.message ?? error, info?.componentStack)
   }
 
@@ -92,8 +107,10 @@ class RootErrorBoundary extends React.Component {
             boxSizing: 'border-box',
           }}
         >
-          <p style={{ fontSize: 17, fontWeight: 600, marginBottom: 8, textAlign: 'center' }}>Something went wrong</p>
-          <p style={{ fontSize: 14, color: '#94A3B8', marginBottom: 24, textAlign: 'center', maxWidth: 320 }}>{msg}</p>
+          <p style={{ fontSize: 17, fontWeight: 600, marginBottom: 8, textAlign: 'center' }}>Could not start the app shell</p>
+          <p style={{ fontSize: 14, color: '#94A3B8', marginBottom: 24, textAlign: 'center', maxWidth: 320 }}>
+            {msg ? `Detail: ${msg}. ` : ''}This is usually temporary — reload the app or try again in a moment.
+          </p>
           <button
             type="button"
             onClick={() => window.location.reload()}
@@ -141,6 +158,52 @@ function BootContent() {
     )
   }
   return <App />
+}
+
+try {
+  Sentry.init({
+    dsn: import.meta.env.VITE_GLITCHTIP_DSN,
+    environment: import.meta.env.MODE,
+    enabled: import.meta.env.PROD,
+    /** Drop SDK user-feedback launcher (bottom-right widget); in-app feedback uses BetaFeedbackModal. */
+    integrations(defaults) {
+      const next = defaults.filter((integration) => !/feedback/i.test(String(integration?.name ?? '')))
+      if (typeof Sentry.browserTracingIntegration === 'function') {
+        next.push(Sentry.browserTracingIntegration())
+      }
+      return next
+    },
+    tracesSampleRate: 0.1,
+    autoSessionTracking: false,
+  })
+} catch (err) {
+  console.error('[Sentry.init] failed:', err)
+}
+
+const posthogKey = import.meta.env.VITE_POSTHOG_KEY
+const posthogHost = import.meta.env.VITE_POSTHOG_HOST || 'https://eu.posthog.com'
+
+if (posthogKey && !import.meta.env.DEV) {
+  try {
+    posthog.init(posthogKey, {
+      api_host: posthogHost,
+      capture_pageview: false,
+      capture_pageleave: true,
+      session_recording: {
+        maskAllInputs: true,
+        maskInputFn: (text, element) => {
+          if (element?.type === 'password') return '***'
+          if (element?.name?.toLowerCase().includes('email')) return '***'
+          return text
+        },
+      },
+      loaded: (ph) => {
+        if (import.meta.env.DEV) ph.opt_out_capturing()
+      },
+    })
+  } catch (err) {
+    console.warn('[PostHog] init failed:', err)
+  }
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

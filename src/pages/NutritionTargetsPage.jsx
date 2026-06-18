@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import TopBar from '@/components/ui/TopBar';
 import PersonalNutritionTargetsPanel from '@/components/nutrition/PersonalNutritionTargetsPanel';
@@ -9,7 +9,10 @@ import { colors, spacing } from '@/ui/tokens';
 
 export default function NutritionTargetsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
+  const suggestedCalories =
+    location.state?.suggestedCalories != null ? Number(location.state.suggestedCalories) : null;
 
   if (!user) {
     return (
@@ -35,7 +38,11 @@ export default function NutritionTargetsPage() {
             <p style={{ margin: 0, fontSize: 14, color: colors.muted, marginBottom: spacing[16] }}>
               Same editor as Nutrition — calories, presets, and macros stay in sync everywhere.
             </p>
-            <PersonalNutritionTargetsPanel user={user} variant="full" />
+            <PersonalNutritionTargetsPanel
+              user={user}
+              variant="full"
+              suggestedCalories={Number.isFinite(suggestedCalories) && suggestedCalories > 0 ? suggestedCalories : null}
+            />
             <button
               type="button"
               onClick={() => navigate('/nutrition')}

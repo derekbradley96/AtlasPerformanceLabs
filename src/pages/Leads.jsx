@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { ensureThread } from '@/lib/messaging/supabaseMessaging';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, MessageSquare, Send, UserPlus, Calendar, Banknote } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,20 +19,10 @@ import { impactLight } from '@/lib/haptics';
 export default function Leads() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user: authUser, isDemoMode, coachFocus } = useAuth();
+  const { user: authUser, profile, isDemoMode, coachFocus } = useAuth();
   const displayUser = authUser;
 
   const [newClientType, setNewClientType] = useState('general');
-
-  const { data: profile } = useQuery({
-    queryKey: ['trainer-profile', displayUser?.id],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('trainer-profile-list', { user_id: displayUser?.id });
-      const list = Array.isArray(data) ? data : [];
-      return list[0] ?? null;
-    },
-    enabled: !!displayUser?.id && (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer' || displayUser?.role === 'coach' || displayUser?.role === 'trainer') && !isDemoMode
-  });
 
   const [demoLeadsRefresh, setDemoLeadsRefresh] = useState(0);
   const trainerId = isDemoMode ? 'demo-trainer' : (profile?.id ?? displayUser?.id);
@@ -49,36 +40,96 @@ export default function Leads() {
   const { data: leadsData = [], isLoading } = useQuery({
     queryKey: ['trainer-leads', profile?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('lead-list', { trainer_id: profile?.id });
-      return Array.isArray(data) ? data : [];
+      // TODO: move to useData — leads list has no repo/useData method yet.
+      const supabase = getSupabase();
+      if (!supabase || !profile?.id) return [];
+      const { data, error } = await supabase
+        .from('leads')
+        .select(`
+          id, name, email, phone, message, goal,
+          status, source, created_at,
+          contacted_at, service_snapshot,
+          client_id, user_id
+        `)
+        .or(`coach_id.eq.${profile.id},trainer_id.eq.${profile.id}`)
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('[Leads] lead-list:', error);
+        return [];
+      }
+      return data || [];
     },
-    enabled: !!profile?.id && !isDemoMode
+    enabled: !!profile?.id && !isDemoMode && hasSupabase,
   });
   const leads = isDemoMode ? demoLeads : leadsData;
 
   const updateLeadMutation = useMutation({
-    mutationFn: async ({ leadId, data }) => {
-      await invokeSupabaseFunction('lead-update', { lead_id: leadId, ...data });
+    mutationFn: async ({ leadId, data: updateData }) => {
+      // TODO: move to useData — leads update has no repo/useData method yet.
+      const supabase = getSupabase();
+      if (!supabase || !leadId) throw new Error('Missing lead ID');
+      const { error } = await supabase
+        .from('leads')
+        .update({
+          ...updateData,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', leadId);
+      if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['trainer-leads']);
+      queryClient.invalidateQueries({ queryKey: ['trainer-leads'] });
       toast.success('Lead updated');
     }
   });
 
   const sendInviteMutation = useMutation({
     mutationFn: async (lead) => {
-      const { data: convData } = await invokeSupabaseFunction('conversation-list', { trainer_id: profile?.id, client_id: lead.user_id });
-      const conversations = Array.isArray(convData) ? convData : [];
-      let conversation = conversations[0];
-      if (!conversation) {
-        const { data: created } = await invokeSupabaseFunction('conversation-create', { trainer_id: profile?.id, client_id: lead.user_id });
-        conversation = created ?? { id: `conv-${Date.now()}` };
+      // TODO: move to useData — lead invite + messaging has no single useData method yet.
+      const sb = getSupabase();
+      if (!hasSupabase || !sb || !profile?.id) {
+        throw new Error('Messaging unavailable');
       }
+      let clientRosterId = lead.client_id ? String(lead.client_id) : null;
+      if (!clientRosterId && lead.user_id) {
+        const { data: crow } = await sb.from('clients').select('id').eq('user_id', lead.user_id).maybeSingle();
+        clientRosterId = crow?.id ? String(crow.id) : null;
+      }
+      if (!clientRosterId && lead.user_id) {
+        const { data: byPk } = await sb.from('clients').select('id').eq('id', lead.user_id).maybeSingle();
+        clientRosterId = byPk?.id ? String(byPk.id) : null;
+      }
+      if (!clientRosterId) {
+        throw new Error('No client row for this lead — add them to your roster first, then resend.');
+      }
+      const thread = await ensureThread({
+        supabase: sb,
+        coachId: profile.id,
+        clientId: clientRosterId,
+      });
       const message = `Hi ${lead.name}! 👋\n\nThanks for your interest in my coaching. I'd love to work with you!\n\nHere's your invite code: ${profile?.invite_code ?? 'N/A'}\n\nUse this code to join and we'll get started on your ${(lead.goal || '').replace('_', ' ')} journey!`;
-      await invokeSupabaseFunction('message-create', { conversation_id: conversation.id, sender_type: 'trainer', sender_id: profile?.id, text: message });
-      await invokeSupabaseFunction('conversation-update', { id: conversation.id, last_message_at: new Date().toISOString(), last_message_preview: message.substring(0, 50) });
-      await invokeSupabaseFunction('lead-update', { lead_id: lead.id, status: 'contacted', contacted_at: new Date().toISOString() });
+      const { error: msgErr } = await sb.from('message_messages').insert({
+        thread_id: thread.id,
+        sender_role: 'coach',
+        message_text: message,
+      });
+      if (msgErr) throw msgErr;
+      const { error: thrErr } = await sb
+        .from('message_threads')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', thread.id);
+      if (thrErr) throw thrErr;
+      // TODO: move to useData — same leads table; consolidate when leadsService exists.
+      const sbForUpdate = getSupabase();
+      if (sbForUpdate) {
+        await sbForUpdate
+          .from('leads')
+          .update({
+            status: 'contacted',
+            contacted_at: new Date().toISOString(),
+          })
+          .eq('id', lead.id);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['trainer-leads']);
@@ -112,28 +163,46 @@ export default function Leads() {
 
   const handleMarkContacted = (lead) => {
     impactLight();
-    updateLeadStatus(lead.id, 'contacted');
+    if (isDemoMode) {
+      updateLeadStatus(lead.id, 'contacted');
+      setDemoLeadsRefresh((n) => n + 1);
+    } else {
+      updateLeadMutation.mutate({
+        leadId: lead.id,
+        data: { status: 'contacted', contacted_at: new Date().toISOString() },
+      });
+    }
     logAuditEvent({ actorUserId: actorId, ownerTrainerUserId: ownerId, entityType: 'lead', entityId: lead.id, action: 'lead_status_changed', after: { status: 'contacted' } });
-    if (isDemoMode) setDemoLeadsRefresh((n) => n + 1);
-    else queryClient.invalidateQueries(['trainer-leads']);
     toast.success('Marked as contacted');
   };
 
   const handleBookCall = (lead) => {
     impactLight();
-    updateLeadStatus(lead.id, 'booked_call');
+    if (isDemoMode) {
+      updateLeadStatus(lead.id, 'booked_call');
+      setDemoLeadsRefresh((n) => n + 1);
+    } else {
+      updateLeadMutation.mutate({
+        leadId: lead.id,
+        data: { status: 'booked_call' },
+      });
+    }
     logAuditEvent({ actorUserId: actorId, ownerTrainerUserId: ownerId, entityType: 'lead', entityId: lead.id, action: 'lead_status_changed', after: { status: 'booked_call' } });
-    if (isDemoMode) setDemoLeadsRefresh((n) => n + 1);
-    else queryClient.invalidateQueries(['trainer-leads']);
     toast.success('Marked as booked call');
   };
 
   const handleArchive = (lead) => {
     impactLight();
-    updateLeadStatus(lead.id, 'archived');
+    if (isDemoMode) {
+      updateLeadStatus(lead.id, 'archived');
+      setDemoLeadsRefresh((n) => n + 1);
+    } else {
+      updateLeadMutation.mutate({
+        leadId: lead.id,
+        data: { status: 'archived' },
+      });
+    }
     logAuditEvent({ actorUserId: actorId, ownerTrainerUserId: ownerId, entityType: 'lead', entityId: lead.id, action: 'lead_status_changed', after: { status: 'archived' } });
-    if (isDemoMode) setDemoLeadsRefresh((n) => n + 1);
-    else queryClient.invalidateQueries(['trainer-leads']);
     toast.success('Archived');
   };
 
@@ -225,10 +294,10 @@ export default function Leads() {
                     <span className="text-slate-400">Goal:</span>
                     <span className="text-white">{(lead.goal || '').slice(0, 80)}{(lead.goal || '').length > 80 ? '…' : ''}</span>
                   </div>
-                  {lead.serviceSnapshot && (
+                  {(lead.serviceSnapshot || lead.service_snapshot) && (
                     <div className="text-sm text-slate-400">
-                      Service: {lead.serviceSnapshot.name}
-                      {lead.serviceSnapshot.priceMonthly != null && ` · £${(lead.serviceSnapshot.priceMonthly / 100).toFixed(0)}/mo`}
+                      Service: {(lead.serviceSnapshot || lead.service_snapshot).name}
+                      {(lead.serviceSnapshot || lead.service_snapshot).priceMonthly != null && ` · £${(((lead.serviceSnapshot || lead.service_snapshot).priceMonthly) / 100).toFixed(0)}/mo`}
                     </div>
                   )}
                   {lead.message && (
@@ -237,7 +306,7 @@ export default function Leads() {
                     </div>
                   )}
                   <p className="text-xs text-slate-500">
-                    Submitted {(safeDate(lead.created_date || lead.createdAt)?.toLocaleDateString?.('en-GB', {
+                    Submitted {(safeDate(lead.created_date || lead.createdAt || lead.created_at)?.toLocaleDateString?.('en-GB', {
                       day: 'numeric',
                       month: 'short',
                       hour: '2-digit',

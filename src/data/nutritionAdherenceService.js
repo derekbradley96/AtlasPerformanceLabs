@@ -84,3 +84,47 @@ export async function fetchNutritionAdherenceWeek(clientId, dayDate) {
   if (error) return [];
   return Array.isArray(data) ? data : [];
 }
+
+export async function upsertPersonalNutritionAdherence({ profileId, dayDate, target, logged }) {
+  if (!hasSupabase || !profileId || !dayDate) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const macrosHitPercent = getMacroHitPercent({ logged, target });
+  const payload = {
+    profile_id: profileId,
+    day_date: dayDate,
+    target_calories: target?.calories ?? null,
+    target_protein_g: target?.protein_g ?? null,
+    target_carbs_g: target?.carbs_g ?? null,
+    target_fats_g: target?.fats_g ?? null,
+    logged_calories: logged?.calories ?? 0,
+    logged_protein_g: logged?.protein_g ?? 0,
+    logged_carbs_g: logged?.carbs_g ?? 0,
+    logged_fats_g: logged?.fats_g ?? 0,
+    macros_hit_percent: macrosHitPercent,
+  };
+  const { error } = await supabase
+    .from('personal_nutrition_adherence')
+    .upsert(payload, { onConflict: 'profile_id,day_date' });
+  if (error) return null;
+  return payload;
+}
+
+export async function fetchPersonalNutritionAdherenceWeek(profileId, dayDate) {
+  if (!hasSupabase || !profileId || !dayDate) return [];
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  const end = new Date(`${dayDate}T12:00:00`);
+  const start = new Date(end);
+  start.setDate(start.getDate() - 6);
+  const startIso = start.toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from('personal_nutrition_adherence')
+    .select('day_date, macros_hit_percent')
+    .eq('profile_id', profileId)
+    .gte('day_date', startIso)
+    .lte('day_date', dayDate)
+    .order('day_date', { ascending: true });
+  if (error) return [];
+  return Array.isArray(data) ? data : [];
+}

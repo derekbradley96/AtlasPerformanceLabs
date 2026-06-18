@@ -334,6 +334,8 @@ export default function CoachMarketplacePage() {
                   coachName={cardData.coachName}
                   coachHeadline={cardData.coachHeadline}
                   coachAvatarUrl={cardData.coachAvatarUrl}
+                  avgPillars={cardData.avgPillars}
+                  reviewCount={cardData.reviewCount}
                   tags={cardData.tags}
                   matchReason={cardData.matchReason}
                   trustItems={cardData.trustItems}

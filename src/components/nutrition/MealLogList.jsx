@@ -35,6 +35,8 @@ export default function MealLogList({
   repeatLastDisabled,
   repeatYesterdayDisabled,
   emptyAction,
+  emptyTitle,
+  emptyDescription,
   /** When set (e.g. coach roster view), format using this profile — not the logged-in user */
   viewerProfileOverride = null,
 }) {
@@ -64,10 +66,10 @@ export default function MealLogList({
         style={{ borderColor: colors.border, background: 'rgba(15,23,42,0.4)' }}
       >
         <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>
-          Start logging your first meal
+          {emptyTitle || 'Start logging your first meal'}
         </p>
         <p className="text-xs mb-4" style={{ color: colors.muted }}>
-          Use the bar below — add, scan, or quick add in one tap.
+          {emptyDescription || 'Use the bar below — add, scan, or quick add in one tap.'}
         </p>
         {emptyAction ? (
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>

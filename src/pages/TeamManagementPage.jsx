@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner';
 import { TeamManagementSkeleton } from '@/components/ui/LoadingState';
 import EmptyState from '@/components/ui/EmptyState';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 const ROLES = [
   { value: 'admin', label: 'Admin' },
@@ -137,6 +138,7 @@ export default function TeamManagementPage() {
   const [inviteRole, setInviteRole] = useState('coach');
   const [inviteSent, setInviteSent] = useState(null);
   const [copiedToken, setCopiedToken] = useState(null);
+  const [toggleConfirmData, setToggleConfirmData] = useState(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['team_management'],
@@ -422,9 +424,7 @@ export default function TeamManagementPage() {
                               onClick={() => {
                                 const nextActive = !member.is_active;
                                 const label = nextActive ? 'reactivate' : 'deactivate';
-                                if (window.confirm(`Are you sure you want to ${label} ${member.name}?`)) {
-                                  toggleActiveMutation.mutate({ memberId: member.id, nextActive });
-                                }
+                                setToggleConfirmData({ memberId: member.id, nextActive, label, name: member.name });
                               }}
                               disabled={toggleActiveMutation.isPending}
                             >
@@ -441,6 +441,19 @@ export default function TeamManagementPage() {
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={toggleConfirmData !== null}
+        title={toggleConfirmData ? `${toggleConfirmData.label.charAt(0).toUpperCase() + toggleConfirmData.label.slice(1)} member?` : ''}
+        message={toggleConfirmData ? `Are you sure you want to ${toggleConfirmData.label} ${toggleConfirmData.name}?` : ''}
+        confirmLabel="Confirm"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          if (toggleConfirmData) toggleActiveMutation.mutate({ memberId: toggleConfirmData.memberId, nextActive: toggleConfirmData.nextActive });
+          setToggleConfirmData(null);
+        }}
+        onCancel={() => setToggleConfirmData(null)}
+      />
     </div>
   );
 }

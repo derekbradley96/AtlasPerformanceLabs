@@ -6,7 +6,7 @@ import Sidebar from '@/components/ui/Sidebar';
 import ActiveWorkoutBar from '@/components/ui/ActiveWorkoutBar';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery } from '@tanstack/react-query';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { fetchWorkoutListRowsForUser } from '@/lib/workoutSessionApi';
 
 export default function AppLayout({ children, currentPageName }) {
   const { user, isLoadingAuth } = useAuth();
@@ -17,8 +17,7 @@ export default function AppLayout({ children, currentPageName }) {
   const { data: activeWorkout } = useQuery({
     queryKey: ['active-workout', user?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-list', { user_id: user?.id, status: 'in_progress' });
-      const list = Array.isArray(data) ? data : [];
+      const list = await fetchWorkoutListRowsForUser(user?.id, { status: 'in_progress', limit: 5 });
       return list[0] || null;
     },
     enabled: !!user?.id && showShell

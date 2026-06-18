@@ -327,7 +327,7 @@ export default function CoachMarketplaceEditPage() {
               ))}
             </div>
 
-            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Monthly price from (USD)</label>
+            <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Monthly price from (GBP)</label>
             <input
               type="number"
               min={0}

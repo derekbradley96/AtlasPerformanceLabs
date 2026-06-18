@@ -79,6 +79,35 @@ function parseProductFromResponse(barcode, payload) {
   return normalized;
 }
 
+function parseOpenGroceryProduct(barcode, payload) {
+  const product = payload?.product;
+  if (!product || typeof product !== 'object') return null;
+  const nutrients = product.nutrients || {};
+  const caloriesPer100g = toFiniteNumber(nutrients.calories_per_100g);
+  const proteinPer100g = toFiniteNumber(nutrients.protein_per_100g);
+  const carbsPer100g = toFiniteNumber(nutrients.carbs_per_100g);
+  const fatsPer100g = toFiniteNumber(nutrients.fat_per_100g);
+  if (caloriesPer100g == null && proteinPer100g == null && carbsPer100g == null && fatsPer100g == null) {
+    return null;
+  }
+  return {
+    barcode: String(barcode || '').trim(),
+    name: String(product.name || '').trim() || 'Unnamed product',
+    calories_per_100g: caloriesPer100g,
+    protein_per_100g: proteinPer100g,
+    carbs_per_100g: carbsPer100g,
+    fats_per_100g: fatsPer100g,
+    calories_per_serving: null,
+    protein_per_serving: null,
+    carbs_per_serving: null,
+    fats_per_serving: null,
+    serving_size: String(product.serving_size || '').trim() || null,
+    serving_size_grams: parseServingSizeGrams(product.serving_size, product.quantity),
+    image: String(product.image || '').trim() || null,
+    brands: String(product.brand || '').trim() || null,
+  };
+}
+
 function readStoredCache() {
   try {
     const raw = sessionStorage.getItem(OFF_CACHE_KEY);
@@ -133,6 +162,48 @@ function getApiUrl(barcode) {
   return `https://world.openfoodfacts.org/api/v2/product/${clean}?fields=${encodeURIComponent(OFF_FIELDS)}`;
 }
 
+function getApiV0Url(barcode) {
+  const clean = encodeURIComponent(String(barcode || '').trim());
+  return `https://world.openfoodfacts.org/api/v0/product/${clean}.json`;
+}
+
+function getOpenGroceryUrl(barcode) {
+  const clean = encodeURIComponent(String(barcode || '').trim());
+  return `https://api.opengrocery.net/api/v1/product/barcode/${clean}`;
+}
+
+async function fetchOffProduct(code, version) {
+  const response = await fetch(version === 'v0' ? getApiV0Url(code) : getApiUrl(code), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': OFF_USER_AGENT,
+    },
+  });
+  if (!response.ok) {
+    return { ok: false, reason: 'http_error', retriableNotFound: true };
+  }
+  const payload = await response.json();
+  if (!payload || payload.status !== 1 || !payload.product) {
+    return { ok: false, reason: 'not_found', retriableNotFound: true };
+  }
+  const product = parseProductFromResponse(code, payload);
+  if (!product) return { ok: false, reason: 'not_found', retriableNotFound: true };
+  return { ok: true, product };
+}
+
+async function fetchOpenGroceryProduct(code) {
+  const response = await fetch(getOpenGroceryUrl(code), {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return { ok: false, reason: 'http_error' };
+  const payload = await response.json();
+  const product = parseOpenGroceryProduct(code, payload);
+  if (!product) return { ok: false, reason: 'not_found' };
+  return { ok: true, product };
+}
+
 export async function fetchOpenFoodFactsProduct(barcode) {
   const code = String(barcode || '').trim();
   if (!code) {
@@ -141,7 +212,7 @@ export async function fetchOpenFoodFactsProduct(barcode) {
 
   const cached = getCachedProduct(code);
   if (cached) {
-    return { ok: true, source: 'cache', barcode: code, product: cached };
+    return { ok: true, source: 'user_cache', barcode: code, product: { ...cached, source: 'user_cache' } };
   }
 
   if (pendingLookups.has(code)) {
@@ -150,30 +221,30 @@ export async function fetchOpenFoodFactsProduct(barcode) {
 
   const request = (async () => {
     try {
-      const response = await fetch(getApiUrl(code), {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': OFF_USER_AGENT,
-        },
-      });
-
-      if (!response.ok) {
-        return { ok: false, reason: 'http_error', barcode: code, product: null };
+      const offV2 = await fetchOffProduct(code, 'v2');
+      if (offV2.ok && offV2.product) {
+        const product = { ...offV2.product, source: 'off_v2' };
+        setCachedProduct(code, product);
+        return { ok: true, source: 'off_v2', barcode: code, product };
       }
 
-      const payload = await response.json();
-      if (!payload || payload.status !== 1 || !payload.product) {
-        return { ok: false, reason: 'not_found', barcode: code, product: null };
+      if (offV2.reason === 'not_found' || offV2.reason === 'http_error') {
+        const offV0 = await fetchOffProduct(code, 'v0');
+        if (offV0.ok && offV0.product) {
+          const product = { ...offV0.product, source: 'off_v0' };
+          setCachedProduct(code, product);
+          return { ok: true, source: 'off_v0', barcode: code, product };
+        }
       }
 
-      const product = parseProductFromResponse(code, payload);
-      if (!product) {
-        return { ok: false, reason: 'not_found', barcode: code, product: null };
+      const openGrocery = await fetchOpenGroceryProduct(code);
+      if (openGrocery.ok && openGrocery.product) {
+        const product = { ...openGrocery.product, source: 'open_grocery' };
+        setCachedProduct(code, product);
+        return { ok: true, source: 'open_grocery', barcode: code, product };
       }
 
-      setCachedProduct(code, product);
-      return { ok: true, source: 'network', barcode: code, product };
+      return { ok: false, reason: 'not_found', barcode: code, product: null };
     } catch {
       return { ok: false, reason: 'network_error', barcode: code, product: null };
     } finally {

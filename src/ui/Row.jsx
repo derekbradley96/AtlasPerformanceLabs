@@ -21,6 +21,7 @@ export default function Row({
   left,
   avatar,
   title,
+  titleColor,
   titleRight,
   subtitle,
   rightBadge,
@@ -60,7 +61,7 @@ export default function Row({
         {(title != null || titleRight != null) && (
           <div className="flex items-center justify-between gap-2">
             {title != null && (
-              <p className="text-[15px] font-medium truncate flex-1 min-w-0" style={{ color: colors.text }}>
+              <p className="text-[15px] font-medium truncate flex-1 min-w-0" style={{ color: titleColor || colors.text }}>
                 {title}
               </p>
             )}

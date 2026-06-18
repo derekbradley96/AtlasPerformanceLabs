@@ -9,10 +9,14 @@ const HEADER_HEIGHT = 56;
 export default function AppHeader() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isDemoMode, exitDemo, effectiveRole } = useAuth();
+  const { isDemoMode, exitDemo, effectiveRole, coachFocus, resolvedAccess, linkedCoachFocus, prepContext, isCompPrepClient } = useAuth();
 
   const pathname = location.pathname?.toLowerCase() ?? '';
-  const tabRoutes = getTabRoutesForRole(effectiveRole);
+  const tabRoutes = getTabRoutesForRole(effectiveRole, coachFocus, {
+    clientDeliveryContext: resolvedAccess?.clientDeliveryContext,
+    hasCompetitionPrep: resolvedAccess?.hasCompetitionPrep === true,
+    linkedCoachFocus,
+  });
   const homePath = tabRoutes[0]?.path ?? '/home';
   const showBack = !isTabRoute(pathname, effectiveRole);
   const title = getRouteTitle(location.pathname);
@@ -73,12 +77,17 @@ export default function AppHeader() {
             <span className="w-10" aria-hidden />
           )}
         </div>
-        <h1
-          className="absolute left-1/2 -translate-x-1/2 text-base font-semibold truncate max-w-[50%]"
-          style={{ color: '#E5E7EB' }}
-        >
-          {title}
-        </h1>
+        <div className="absolute left-1/2 -translate-x-1/2 text-center max-w-[55%]">
+          <h1 className="text-base font-semibold truncate" style={{ color: '#E5E7EB' }}>
+            {title}
+          </h1>
+          {isCompPrepClient && prepContext?.daysOut != null ? (
+            <p className="text-[11px] font-medium truncate mt-0.5" style={{ color: prepContext.urgencyColour === 'danger' ? '#FCA5A5' : prepContext.urgencyColour === 'warning' ? '#FCD34D' : '#93C5FD' }}>
+              {prepContext.daysOut === 0 ? 'Show day' : `${prepContext.daysOut}d out`}
+              {prepContext.showName ? ` · ${prepContext.showName}` : ''}
+            </p>
+          ) : null}
+        </div>
         <div className="flex items-center justify-end" style={{ minWidth: 88, minHeight: 44 }}>
           {isDemoMode ? (
             <button

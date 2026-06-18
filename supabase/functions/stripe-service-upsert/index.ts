@@ -2,7 +2,7 @@
 // Price and fee are server-resolved only; never trust client-supplied amounts for billing.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
@@ -14,7 +14,7 @@ const ALLOWED_CURRENCIES = ["gbp", "usd", "eur"];
 const ALLOWED_INTERVALS = ["month", "year"];
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   try {
     const callerId = await getAuthUserId(req);
@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
         .select("id")
         .single();
       if (insertCoachErr || !insertedCoach) {
-        return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
       }
       coach = insertedCoach;
     }
@@ -93,11 +93,11 @@ Deno.serve(async (req) => {
     if (serviceRow?.id) {
       await supabase.from(TABLE.services).update(row).eq("id", serviceRow.id);
       const { data: updated } = await supabase.from(TABLE.services).select("*").eq("id", serviceRow.id).single();
-      return new Response(JSON.stringify(updated), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(updated), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     } else {
       const { data: inserted, error } = await supabase.from(TABLE.services).insert({ ...row, created_at: now }).select("*").single();
       if (error) return jsonError("Request failed", 500);
-      return new Response(JSON.stringify(inserted), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(inserted), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
   } catch (e) {
     console.error("stripe-service-upsert", e);

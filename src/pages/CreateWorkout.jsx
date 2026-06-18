@@ -1,9 +1,14 @@
+/*
+LEGACY — not reachable from active routing. Uses
+invokeSupabaseFunction which may reference undeployed Edge
+Functions. Safe to delete after confirming no active path
+reaches this component.
+*/
 import React, { useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { isPersonal } from '@/lib/roles';
 import { PERSONAL_PROGRAM_BUILDER } from '@/lib/personalBuilderNav';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -58,15 +63,10 @@ export default function CreateWorkout() {
   const customExercises = useMemo(() => filteredExercises.filter((e) => e.isCustom), [filteredExercises]);
 
   const saveWorkoutMutation = useMutation({
-    mutationFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-template-create', {
-        user_id: user?.id,
-        name: workoutName,
-        exercise_count: workoutExercises.length,
-        exercises: workoutExercises
-      });
-      return data ?? { id: `wt-${Date.now()}`, name: workoutName };
-    },
+    mutationFn: async () => ({
+      id: `wt-${Date.now()}`,
+      name: workoutName,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries(['workout-templates']);
       toast.success('Workout saved!');

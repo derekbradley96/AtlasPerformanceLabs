@@ -5,6 +5,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import Card from '@/ui/Card';
@@ -184,7 +185,7 @@ export default function PeakWeekCommandCenter() {
                         variant="secondary"
                         size="sm"
                         className="inline-flex items-center gap-1.5"
-                        onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week`); }}
+                        onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week-editor`); }}
                       >
                         <FileCheck size={14} /> Open Protocol
                       </Button>
@@ -192,7 +193,7 @@ export default function PeakWeekCommandCenter() {
                         variant="secondary"
                         size="sm"
                         className="inline-flex items-center gap-1.5"
-                        onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week`); }}
+                        onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week-editor`); }}
                       >
                         <Pencil size={14} /> Edit Protocol
                       </Button>
@@ -200,7 +201,7 @@ export default function PeakWeekCommandCenter() {
                         variant="secondary"
                         size="sm"
                         className="inline-flex items-center gap-1.5"
-                        onClick={() => { hapticLight(); navigate(`/messages/${r.client_id}`); }}
+                        onClick={() => { hapticLight(); navigateToThread(navigate, r.client_id); }}
                       >
                         <MessageSquare size={14} /> Message Client
                       </Button>
@@ -219,9 +220,9 @@ export default function PeakWeekCommandCenter() {
                       variant="secondary"
                       size="sm"
                       className="inline-flex items-center gap-1.5"
-                      onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week`); }}
+                      onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}/peak-week-editor`); }}
                     >
-                      <Calendar size={14} /> Peak Week Builder
+                      <Calendar size={14} /> Peak Week Editor
                     </Button>
                     <Button
                       variant="secondary"
@@ -230,6 +231,14 @@ export default function PeakWeekCommandCenter() {
                       onClick={() => { hapticLight(); navigate(`/clients/${r.client_id}`); }}
                     >
                       <ClipboardList size={14} /> Adjust Plan
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="inline-flex items-center gap-1.5"
+                      onClick={() => { hapticLight(); navigate(`/prep-comparison?clientId=${encodeURIComponent(r.client_id)}&source=peak-week-command-centre`); }}
+                    >
+                      <ImageIcon size={14} /> View comparison
                     </Button>
                   </div>
                 </Card>

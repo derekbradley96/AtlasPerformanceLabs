@@ -7,7 +7,7 @@
  * matching coach-side manual add / import (`supabaseClientsRepo.createClient`).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 import { validateSelectedServiceForCoach } from "../_shared/clientSelectedService.ts";
 
@@ -55,7 +55,7 @@ async function deriveCoachOfferBillingStatus(
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
         console.error("client-profile-create insert", error);
         return new Response(
           JSON.stringify({ error: "Request failed", details: error.message, code: error.code }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       data = inserted as Record<string, unknown>;
@@ -187,7 +187,7 @@ Deno.serve(async (req) => {
     await supabase.from("profiles").update(profilePatch).eq("id", userId);
 
     const out = { ...data, subscription_status: (data.billing_status as string) ?? "active" };
-    return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(out), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("client-profile-create", e);
     return jsonError("Request failed", 500);

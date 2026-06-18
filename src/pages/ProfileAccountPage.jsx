@@ -46,6 +46,17 @@ import {
 } from '@/lib/nutritionUnits';
 import { deriveProfileAccountSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { humanizeSupabaseError } from '@/lib/supabaseErrorMessage';
+import { getNativePref, setNativePref } from '@/lib/nativePreferences';
+import { trackRecoverableError } from '@/services/frictionTracker';
+import {
+  CALL_SOUND_PREF_KEYS,
+  getCallRingbackVolume,
+  getCallSoundEnabled,
+  setCallRingbackVolume,
+  setCallSoundEnabled,
+} from '@/lib/callSoundPrefs';
+
+const WEIGHT_UNIT_PREF_KEY = 'atlas_pref_weight_unit';
 
 function FieldEditor({ title, value, onChange, type = 'text', placeholder = '', multiline = false }) {
   return (
@@ -166,12 +177,41 @@ function toDisplayValue(raw) {
   return String(raw);
 }
 
+function coachLocalDraftKey(userId) {
+  return userId ? `atlas_coach_profile_local:${userId}` : null;
+}
+
+function readCoachLocalDraft(userId) {
+  if (typeof window === 'undefined') return null;
+  const key = coachLocalDraftKey(userId);
+  if (!key) return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCoachLocalDraft(userId, draft) {
+  if (typeof window === 'undefined') return;
+  const key = coachLocalDraftKey(userId);
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(draft || {}));
+  } catch {
+    // ignore local storage failures
+  }
+}
+
 export default function ProfileAccountPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDesktopWeb } = usePresentationMode();
   const queryClient = useQueryClient();
-  const { user, profile, effectiveRole, updateProfile, refreshProfile, logout } = useAuth();
+  const { user, profile, effectiveRole, updateProfile, refreshProfile, signOut } = useAuth();
   const notificationsSectionRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -189,6 +229,8 @@ export default function ProfileAccountPage() {
     nutrition: true,
     progress_reminders: true,
   });
+  const [callSoundEnabled, setCallSoundEnabledState] = useState(true);
+  const [callRingbackVolume, setCallRingbackVolumeState] = useState(0.45);
   const [form, setForm] = useState({
     full_name: '',
     display_name: '',
@@ -204,6 +246,7 @@ export default function ProfileAccountPage() {
     coaching_style: '',
     business_name: '',
     avatar_url: '',
+    taking_clients: true,
   });
 
   const [initialSnapshot, setInitialSnapshot] = useState(null);
@@ -245,17 +288,15 @@ export default function ProfileAccountPage() {
     let cancelled = false;
     (async () => {
       if (!user?.id) return;
+      const preferredWeightUnit = await getNativePref(WEIGHT_UNIT_PREF_KEY, null);
+      const preferredCallSoundEnabled = await getNativePref(CALL_SOUND_PREF_KEYS.enabled, null);
+      const preferredCallRingbackVolume = await getNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, null);
       const supabase = hasSupabase ? getSupabase() : null;
-      let profileRow = null;
-      if (supabase) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('full_name, display_name, email, goal, training_focus, current_weight, target_weight, units, height_unit, bodyweight_unit, weight_unit, load_unit, food_quantity_unit, nutrition_label_display, water_unit, sodium_unit, coach_focus, coaching_style, business_name, avatar_url')
-          .eq('id', user.id)
-          .maybeSingle();
-        profileRow = data || null;
-      }
-      const wU = normalizeWeightUnit(profileRow?.bodyweight_unit || profileRow?.weight_unit || profileRow?.units);
+      // Use AuthContext profile as source-of-truth. It already handles legacy
+      // schema fallbacks and missing-column retries, which avoids silent resets
+      // when a direct select includes unavailable columns.
+      const profileRow = profile || null;
+      const wU = normalizeWeightUnit(preferredWeightUnit || profileRow?.bodyweight_unit || profileRow?.weight_unit || profileRow?.units);
       const loadU = profileRow?.load_unit != null && String(profileRow.load_unit).trim() !== ''
         ? normalizeLoadUnit(profileRow.load_unit)
         : normalizeLoadUnit(defaultLoadUnitForLocale());
@@ -307,7 +348,14 @@ export default function ProfileAccountPage() {
         coaching_style: profileRow?.coaching_style || profile?.coaching_style || '',
         business_name: profileRow?.business_name || '',
         avatar_url: profileRow?.avatar_url || profile?.avatar_url || '',
+        taking_clients: profileRow?.taking_clients !== false,
       };
+      const coachLocalDraft = roleType === 'coach' ? readCoachLocalDraft(user.id) : null;
+      if (coachLocalDraft) {
+        if (!base.coaching_style && coachLocalDraft.coaching_style) base.coaching_style = coachLocalDraft.coaching_style;
+        if (!base.business_name && coachLocalDraft.business_name) base.business_name = coachLocalDraft.business_name;
+        if (!base.avatar_url && coachLocalDraft.avatar_url) base.avatar_url = coachLocalDraft.avatar_url;
+      }
       let prefs = notifications;
       if (supabase) {
         if (roleType === 'client') {
@@ -323,14 +371,27 @@ export default function ProfileAccountPage() {
         if (loadedPrefs) prefs = loadedPrefs;
       }
       if (!cancelled) {
+        const resolvedCallSoundEnabled = preferredCallSoundEnabled == null
+          ? getCallSoundEnabled()
+          : (String(preferredCallSoundEnabled) === '1' || String(preferredCallSoundEnabled) === 'true');
+        const resolvedRingbackVolume = preferredCallRingbackVolume == null
+          ? getCallRingbackVolume()
+          : Math.max(0, Math.min(1, Number(preferredCallRingbackVolume) || 0.45));
         setForm(base);
         setNotifications(prefs);
-        setInitialSnapshot(JSON.stringify({ form: base, notifications: prefs }));
+        setCallSoundEnabledState(resolvedCallSoundEnabled);
+        setCallRingbackVolumeState(resolvedRingbackVolume);
+        setInitialSnapshot(JSON.stringify({
+          form: base,
+          notifications: prefs,
+          callSoundEnabled: resolvedCallSoundEnabled,
+          callRingbackVolume: resolvedRingbackVolume,
+        }));
         setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.id, profile?.full_name, profile?.display_name, profile?.email, profile?.coach_focus, profile?.coaching_style, roleType]);
+  }, [user?.id, profile, roleType]);
 
   useEffect(() => {
     if (location.state?.focus !== 'notifications') return;
@@ -359,8 +420,8 @@ export default function ProfileAccountPage() {
   };
   const hasChanges = useMemo(() => {
     if (!initialSnapshot) return false;
-    return JSON.stringify({ form, notifications }) !== initialSnapshot;
-  }, [form, notifications, initialSnapshot]);
+    return JSON.stringify({ form, notifications, callSoundEnabled, callRingbackVolume }) !== initialSnapshot;
+  }, [form, notifications, callSoundEnabled, callRingbackVolume, initialSnapshot]);
 
   const saveAll = async () => {
     if (!user?.id || !hasChanges) return;
@@ -427,20 +488,32 @@ export default function ProfileAccountPage() {
         water_unit: normalizeWaterUnit(form.water_unit),
         sodium_unit: normalizeSodiumUnit(form.sodium_unit),
       };
+      await setNativePref(WEIGHT_UNIT_PREF_KEY, wUSave);
+      const coachOptionalPatch =
+        roleType === 'coach'
+          ? {
+              business_name: form.business_name || null,
+              avatar_url: form.avatar_url || null,
+              coach_focus: form.coaching_focus || null,
+              coaching_style: form.coaching_style || null,
+              taking_clients: form.taking_clients !== false,
+            }
+          : null;
       if (roleType === 'coach') {
-        profilePatch.business_name = form.business_name || null;
-        profilePatch.avatar_url = form.avatar_url || null;
-        profilePatch.coach_focus = form.coaching_focus || null;
-        profilePatch.coaching_style = form.coaching_style || null;
+        // Keep coach optional fields out of the primary patch so missing optional
+        // columns cannot block saving core account/profile fields.
       }
-      console.info('[ProfileAccount] save payload', {
-        userId: user.id,
-        profileId: profile?.id ?? null,
-        names: { full_name: form.full_name, display_name: form.display_name },
-        profilePatch,
-      });
+      if (import.meta.env.DEV) {
+        console.info('[ProfileAccount] save payload', {
+          userId: user.id,
+          profileId: profile?.id ?? null,
+          names: { full_name: form.full_name, display_name: form.display_name },
+          profilePatch,
+        });
+      }
       let profileRes = await updateProfile(profilePatch);
-      console.info('[ProfileAccount] profile response', JSON.stringify(profileRes));
+      let optionalCoachRes = null;
+      if (import.meta.env.DEV) console.info('[ProfileAccount] profile response', JSON.stringify(profileRes));
       if (profileRes?.error && supabase) {
         // Fallback explicit update path to avoid transient context/session drift.
         const fallback = await supabase
@@ -449,11 +522,23 @@ export default function ProfileAccountPage() {
           .eq('id', user.id)
           .select()
           .single();
-        console.info('[ProfileAccount] fallback profile response', JSON.stringify(fallback));
+        if (import.meta.env.DEV) console.info('[ProfileAccount] fallback profile response', JSON.stringify(fallback));
         if (fallback.error) throw fallback.error;
         profileRes = { error: null, data: fallback.data ?? null };
       }
       if (profileRes?.error) throw profileRes.error;
+
+      if (supabase && roleType === 'coach' && coachOptionalPatch) {
+        optionalCoachRes = await supabase
+          .from('profiles')
+          .update(coachOptionalPatch)
+          .eq('id', user.id)
+          .select('business_name, avatar_url, coach_focus, coaching_style, taking_clients')
+          .maybeSingle();
+        if (optionalCoachRes?.error && import.meta.env.DEV) {
+          console.warn('[ProfileAccount] optional coach field save failed', optionalCoachRes.error);
+        }
+      }
 
       if (supabase && form.email && form.email !== (profile?.email || user?.email || '')) {
         const { error } = await supabase.auth.updateUser({ email: form.email.trim() });
@@ -491,83 +576,100 @@ export default function ProfileAccountPage() {
       }
       const notificationOk = await updateNotificationPreferences(user.id, notifications);
       if (!notificationOk) throw new Error('Failed to save notification preferences');
+      setCallSoundEnabled(callSoundEnabled);
+      setCallRingbackVolume(callRingbackVolume);
+      await setNativePref(CALL_SOUND_PREF_KEYS.enabled, callSoundEnabled ? '1' : '0');
+      await setNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, String(callRingbackVolume));
       const refreshRes = await refreshProfile();
-      if (refreshRes?.error) {
+      if (refreshRes?.error && import.meta.env.DEV) {
         console.warn('[ProfileAccount] refreshProfile failed', refreshRes.error);
       }
-      if (profileRes?.data) {
-        console.info('[ProfileAccount] local profile sync', {
-          profileId: profileRes.data.id,
-          full_name: profileRes.data.full_name ?? null,
-          display_name: profileRes.data.display_name ?? null,
-        });
+      const authoritativeProfile = refreshRes?.data || profileRes?.data || null;
+      const optionalCoachData = optionalCoachRes?.data || null;
+      if (authoritativeProfile) {
+        if (import.meta.env.DEV) {
+          console.info('[ProfileAccount] local profile sync', {
+            profileId: authoritativeProfile.id,
+            full_name: authoritativeProfile.full_name ?? null,
+            display_name: authoritativeProfile.display_name ?? null,
+          });
+        }
         setForm((prev) => ({
           ...prev,
-          full_name: profileRes.data.full_name ?? '',
-          display_name: profileRes.data.display_name ?? '',
-          goal: profileRes.data.goal ?? prev.goal,
-          training_focus: profileRes.data.training_focus ?? prev.training_focus,
+          full_name: authoritativeProfile.full_name ?? '',
+          display_name: authoritativeProfile.display_name ?? '',
+          goal: authoritativeProfile.goal ?? prev.goal,
+          training_focus: authoritativeProfile.training_focus ?? prev.training_focus,
           current_weight: (() => {
             const u = normalizeWeightUnit(
-              profileRes.data.bodyweight_unit || profileRes.data.weight_unit || profileRes.data.units
+              authoritativeProfile.bodyweight_unit || authoritativeProfile.weight_unit || authoritativeProfile.units
             );
-            const parts = weightKgToFormParts(profileCurrentWeightKg(profileRes.data), u);
+            const parts = weightKgToFormParts(profileCurrentWeightKg(authoritativeProfile), u);
             return u === 'st_lb' ? '' : (parts.primary || '');
           })(),
           target_weight: (() => {
             const u = normalizeWeightUnit(
-              profileRes.data.bodyweight_unit || profileRes.data.weight_unit || profileRes.data.units
+              authoritativeProfile.bodyweight_unit || authoritativeProfile.weight_unit || authoritativeProfile.units
             );
-            const parts = weightKgToFormParts(profileTargetWeightKg(profileRes.data), u);
+            const parts = weightKgToFormParts(profileTargetWeightKg(authoritativeProfile), u);
             return u === 'st_lb' ? '' : (parts.primary || '');
           })(),
           current_weight_st: (() => {
             const u = normalizeWeightUnit(
-              profileRes.data.bodyweight_unit || profileRes.data.weight_unit || profileRes.data.units
+              authoritativeProfile.bodyweight_unit || authoritativeProfile.weight_unit || authoritativeProfile.units
             );
-            const parts = weightKgToFormParts(profileCurrentWeightKg(profileRes.data), u);
+            const parts = weightKgToFormParts(profileCurrentWeightKg(authoritativeProfile), u);
             return u === 'st_lb' ? (parts.primary || '') : '';
           })(),
           current_weight_lbrem: (() => {
             const u = normalizeWeightUnit(
-              profileRes.data.bodyweight_unit || profileRes.data.weight_unit || profileRes.data.units
+              authoritativeProfile.bodyweight_unit || authoritativeProfile.weight_unit || authoritativeProfile.units
             );
-            const parts = weightKgToFormParts(profileCurrentWeightKg(profileRes.data), u);
+            const parts = weightKgToFormParts(profileCurrentWeightKg(authoritativeProfile), u);
             return u === 'st_lb' ? (parts.secondary || '') : '';
           })(),
           target_weight_st: (() => {
             const u = normalizeWeightUnit(
-              profileRes.data.bodyweight_unit || profileRes.data.weight_unit || profileRes.data.units
+              authoritativeProfile.bodyweight_unit || authoritativeProfile.weight_unit || authoritativeProfile.units
             );
-            const parts = weightKgToFormParts(profileTargetWeightKg(profileRes.data), u);
+            const parts = weightKgToFormParts(profileTargetWeightKg(authoritativeProfile), u);
             return u === 'st_lb' ? (parts.primary || '') : '';
           })(),
           target_weight_lbrem: (() => {
             const u = normalizeWeightUnit(
-              profileRes.data.bodyweight_unit || profileRes.data.weight_unit || profileRes.data.units
+              authoritativeProfile.bodyweight_unit || authoritativeProfile.weight_unit || authoritativeProfile.units
             );
-            const parts = weightKgToFormParts(profileTargetWeightKg(profileRes.data), u);
+            const parts = weightKgToFormParts(profileTargetWeightKg(authoritativeProfile), u);
             return u === 'st_lb' ? (parts.secondary || '') : '';
           })(),
-          units: profileRes.data.units ?? prev.units,
-          height_unit: normalizeHeightUnit(profileRes.data.height_unit ?? prev.height_unit),
+          units: authoritativeProfile.units ?? prev.units,
+          height_unit: normalizeHeightUnit(authoritativeProfile.height_unit ?? prev.height_unit),
           bodyweight_unit: normalizeWeightUnit(
-            profileRes.data.bodyweight_unit ?? profileRes.data.weight_unit ?? prev.bodyweight_unit
+            authoritativeProfile.bodyweight_unit ?? authoritativeProfile.weight_unit ?? prev.bodyweight_unit
           ),
-          load_unit: normalizeLoadUnit(profileRes.data.load_unit ?? prev.load_unit),
+          load_unit: normalizeLoadUnit(authoritativeProfile.load_unit ?? prev.load_unit),
           food_quantity_unit: normalizeFoodQuantityUnit(
-            profileRes.data.food_quantity_unit ?? prev.food_quantity_unit
+            authoritativeProfile.food_quantity_unit ?? prev.food_quantity_unit
           ),
           nutrition_label_display: normalizeNutritionLabelDisplay(
-            profileRes.data.nutrition_label_display ?? prev.nutrition_label_display
+            authoritativeProfile.nutrition_label_display ?? prev.nutrition_label_display
           ),
-          water_unit: normalizeWaterUnit(profileRes.data.water_unit ?? prev.water_unit),
-          sodium_unit: normalizeSodiumUnit(profileRes.data.sodium_unit ?? prev.sodium_unit),
-          business_name: profileRes.data.business_name ?? prev.business_name,
-          avatar_url: profileRes.data.avatar_url ?? prev.avatar_url,
-          coaching_focus: profileRes.data.coach_focus ?? prev.coaching_focus,
-          coaching_style: profileRes.data.coaching_style ?? prev.coaching_style,
+          water_unit: normalizeWaterUnit(authoritativeProfile.water_unit ?? prev.water_unit),
+          sodium_unit: normalizeSodiumUnit(authoritativeProfile.sodium_unit ?? prev.sodium_unit),
+          business_name: optionalCoachData?.business_name ?? authoritativeProfile.business_name ?? prev.business_name,
+          avatar_url: optionalCoachData?.avatar_url ?? authoritativeProfile.avatar_url ?? prev.avatar_url,
+          coaching_focus: optionalCoachData?.coach_focus ?? authoritativeProfile.coach_focus ?? prev.coaching_focus,
+          coaching_style: optionalCoachData?.coaching_style ?? authoritativeProfile.coaching_style ?? prev.coaching_style,
+          taking_clients: (optionalCoachData?.taking_clients ?? authoritativeProfile.taking_clients) !== false,
         }));
+      }
+
+      if (roleType === 'coach') {
+        writeCoachLocalDraft(user.id, {
+          business_name: form.business_name || '',
+          avatar_url: form.avatar_url || '',
+          coaching_style: form.coaching_style || '',
+        });
       }
       queryClient.invalidateQueries({ queryKey: ['client-profile', user.id] });
       queryClient.invalidateQueries({ queryKey: ['trainer-profile', user.id] });
@@ -592,9 +694,12 @@ export default function ProfileAccountPage() {
           display_name: profileRes?.data?.display_name ?? form.display_name,
         },
         notifications,
+        callSoundEnabled,
+        callRingbackVolume,
       }));
     } catch (error) {
       console.error('[ProfileAccount] save failed', error);
+      trackRecoverableError('ProfileAccountPage', 'saveProfile', error);
       const notice = humanizeSupabaseError(error);
       toast.error(notice);
       setSaveState('error');
@@ -669,6 +774,13 @@ export default function ProfileAccountPage() {
     { key: 'avatar_url', icon: Target, title: 'Profile image URL', value: toDisplayValue(form.avatar_url), type: 'text' },
   ];
   const roleRows = roleType === 'personal' ? personalTrainingRows : roleType === 'client' ? clientTrainingRows : coachTrainingRows;
+  const handleBack = () => {
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate('/more', { replace: true });
+  };
 
   const activeField = activeSheet ? roleRows.find((r) => r.key === activeSheet) || identityRows.find((r) => r.key === activeSheet) : null;
 
@@ -683,7 +795,7 @@ export default function ProfileAccountPage() {
       style={{ minHeight: '100%', background: roleType === 'personal' ? 'transparent' : colors.bg, color: colors.text }}
       {...atlasMigrationDataAttributes(profileAccountMigration.phase, profileAccountMigration.primary)}
     >
-      <TopBar title="Account" onBack={() => navigate(-1)} />
+      <TopBar title="Account" onBack={handleBack} />
       <PersonalColumn variant={roleType === 'personal' ? 'narrow' : 'default'}>
     <div
       style={
@@ -777,6 +889,7 @@ export default function ProfileAccountPage() {
               const w = normalizeWeightUnit(id);
               patch('bodyweight_unit', w);
               patch('units', w === 'lb' ? 'lb' : 'kg');
+              void setNativePref(WEIGHT_UNIT_PREF_KEY, w);
             }}
           />
         </div>
@@ -856,6 +969,37 @@ export default function ProfileAccountPage() {
             </div>
           ))}
         </div>
+        {roleType === 'coach' ? (
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: spacing[12],
+              marginTop: spacing[12],
+              paddingTop: spacing[12],
+              borderTop: `1px solid ${colors.border}`,
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: colors.text }}>Taking new clients</p>
+              <p style={{ margin: `${spacing[2]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.4 }}>
+                Public /coach page shows “currently taking clients” or waitlist-only.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={form.taking_clients !== false}
+              onChange={(e) => {
+                markEdited();
+                patch('taking_clients', e.target.checked);
+              }}
+              style={{ width: 22, height: 22, flexShrink: 0 }}
+              aria-label="Taking new clients"
+            />
+          </label>
+        ) : null}
         {roleType === 'coach' && (
           <div style={{ display: 'grid', gap: 8, marginTop: spacing[12] }}>
             <button type="button" onClick={() => navigate('/onboarding-link')} style={{ minHeight: touchTargetMin, borderRadius: radii.button, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text }}>Coach code / invite tools</button>
@@ -909,6 +1053,32 @@ export default function ProfileAccountPage() {
             />
           ))}
         </div>
+        <div style={{ marginTop: spacing[12], paddingTop: spacing[10], borderTop: `1px solid ${colors.border}` }}>
+          <CompactToggle
+            label="Call sounds"
+            checked={!!callSoundEnabled}
+            onChange={(next) => {
+              markEdited();
+              setCallSoundEnabledState(next);
+            }}
+          />
+          <div style={{ marginTop: spacing[8] }}>
+            <label style={{ display: 'block', fontSize: 12, color: colors.muted, marginBottom: 6 }}>
+              Ringback volume: {Math.round(callRingbackVolume * 100)}%
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(callRingbackVolume * 100)}
+              onChange={(e) => {
+                markEdited();
+                setCallRingbackVolumeState(Math.max(0, Math.min(1, Number(e.target.value) / 100)));
+              }}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
         </Card>
       </div>
 
@@ -925,7 +1095,7 @@ export default function ProfileAccountPage() {
         </div>
         <button
           type="button"
-          onClick={() => logout(true)}
+          onClick={() => signOut('/login')}
           style={{
             marginTop: spacing[14],
             width: '100%',

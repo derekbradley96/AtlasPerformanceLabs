@@ -13,33 +13,18 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { colors, spacing } from '@/ui/tokens';
-import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { hasSupabase } from '@/lib/supabaseClient';
 import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
-
-async function fetchCoachClients() {
-  if (!hasSupabase) return [];
-  const supabase = getSupabase();
-  if (!supabase) return [];
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.id) return [];
-  const { data, error } = await supabase
-    .from('clients')
-    .select('id, full_name, name')
-    .or(`coach_id.eq.${user.id},trainer_id.eq.${user.id}`)
-    .order('full_name');
-  if (error) return [];
-  return (data || []).map((c) => ({
-    id: c.id,
-    name: c.full_name || c.name || 'Client',
-  }));
-}
+import { fetchCoachClientsForBooking, insertCoachSessionBooking } from '@/data/coachSessionBookingRepo';
+import { useAuth } from '@/lib/AuthContext';
 
 /**
  * @param {{ open: boolean; onOpenChange: (open: boolean) => void; defaultClientId?: string | null }}
  */
 export default function SessionBookingModal({ open, onOpenChange, defaultClientId = null }) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [clientId, setClientId] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState(() => {
@@ -54,7 +39,7 @@ export default function SessionBookingModal({ open, onOpenChange, defaultClientI
 
   const { data: clients = [] } = useQuery({
     queryKey: ['coach_clients_for_booking'],
-    queryFn: fetchCoachClients,
+    queryFn: fetchCoachClientsForBooking,
     enabled: open && hasSupabase,
   });
 
@@ -70,29 +55,22 @@ export default function SessionBookingModal({ open, onOpenChange, defaultClientI
 
   const insertMutation = useMutation({
     mutationFn: async () => {
-      const supabase = getSupabase();
-      if (!supabase) throw new Error('No supabase');
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user?.id) throw new Error('Not signed in');
+      const coachId = user?.id;
+      if (!coachId) throw new Error('Not signed in');
       if (!clientId) throw new Error('Select a client');
 
       const sessionDate = new Date(`${date}T${time}:00`);
       if (Number.isNaN(sessionDate.getTime())) throw new Error('Invalid date/time');
 
       const durationMinutes = parseInt(duration, 10);
-      const payload = {
-        coach_id: user.id,
-        client_id: clientId,
-        session_type: 'in_person',
-        session_date: sessionDate.toISOString(),
-        duration_minutes: Number.isNaN(durationMinutes) ? null : durationMinutes,
+      await insertCoachSessionBooking({
+        coachId,
+        clientId,
+        sessionDate,
+        durationMinutes: Number.isNaN(durationMinutes) ? null : durationMinutes,
         location: location.trim() || null,
         notes: notes.trim() || null,
-        status: 'scheduled',
-      };
-
-      const { error } = await supabase.from('coach_sessions').insert(payload);
-      if (error) throw error;
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['coach_sessions'] });

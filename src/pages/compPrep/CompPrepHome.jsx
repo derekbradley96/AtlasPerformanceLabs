@@ -2,12 +2,17 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { Award, BookOpen, Camera, ClipboardList, ChevronRight, Upload } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getEffectiveTrainerId } from '@/data/useData';
+import { getSandboxClientByUserId } from '@/lib/linkedClientFromUserId';
+import * as sandbox from '@/lib/sandboxStore';
 import { listCompClientsForTrainer } from '@/lib/repos/compPrepRepo';
-import { getClientById } from '@/data/selectors';
-import { getClientByUserId } from '@/data/selectors';
 import { getNextShowInfo, getNextShowLabel } from '@/lib/compPrep/nextShow';
 import { impactLight } from '@/lib/haptics';
+import { isCoach, isClient, isPersonal } from '@/lib/roles';
 import Card from '@/ui/Card';
+import EmptyState from '@/ui/EmptyState';
 import { colors, spacing, shell, radii, touchTargetMin } from '@/ui/tokens';
 
 const PHASE_LABELS = {
@@ -31,17 +36,62 @@ export default function CompPrepHome() {
   const navigate = useNavigate();
   const outletContext = useOutletContext() || {};
   const { role, user } = useAuth();
+  const supabase = getSupabase();
+  const trainerTid = getEffectiveTrainerId(user?.id);
   const [search, setSearch] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const { data: linkedClient } = useQuery({
+    queryKey: ['client-by-user', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      if (supabase) {
+        const { data, error } = await supabase.from('clients').select('id, name').eq('user_id', user.id).maybeSingle();
+        if (error) return null;
+        return data;
+      }
+      const c = getSandboxClientByUserId(user.id);
+      return c?.id ? { id: c.id, name: c.full_name ?? c.name } : null;
+    },
+    enabled: isClient(role) && !!user?.id,
+    staleTime: 10 * 60 * 1000,
+  });
+
   const clientProfile = useMemo(() => {
-    if (role !== 'client' || !user?.id) return null;
-    const c = getClientByUserId(user.id);
-    return c ? { clientId: c.id, clientName: c.full_name || c.name } : null;
-  }, [role, user?.id]);
+    if (!isClient(role) || !linkedClient?.id) return null;
+    return { clientId: linkedClient.id, clientName: linkedClient.name ?? 'Client' };
+  }, [role, linkedClient]);
+
+  const { data: coachClientIndex = [] } = useQuery({
+    queryKey: ['comp-prep-coach-clients', trainerTid],
+    queryFn: async () => {
+      if (!isCoach(role) || !trainerTid || !supabase) return [];
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name')
+        .or(`coach_id.eq.${trainerTid},trainer_id.eq.${trainerTid}`);
+      if (error) return [];
+      return data || [];
+    },
+    enabled: isCoach(role) && !!trainerTid && !!supabase,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const clientNameById = useMemo(() => {
+    const m = new Map();
+    for (const row of coachClientIndex) {
+      if (row?.id) m.set(row.id, row.name ?? 'Client');
+    }
+    if (!supabase && isCoach(role) && trainerTid) {
+      for (const c of sandbox.listClients(trainerTid) ?? []) {
+        if (c?.id && !m.has(c.id)) m.set(c.id, c.full_name ?? c.name ?? 'Client');
+      }
+    }
+    return m;
+  }, [coachClientIndex, supabase, role, trainerTid]);
 
   const competingClients = useMemo(() => {
-    if (role !== 'trainer') return [];
+    if (!isCoach(role)) return [];
     return listCompClientsForTrainer();
   }, [role, refreshKey]);
 
@@ -49,11 +99,10 @@ export default function CompPrepHome() {
     if (!search.trim()) return competingClients;
     const q = search.trim().toLowerCase();
     return competingClients.filter((p) => {
-      const c = getClientById(p.clientId);
-      const name = (c?.full_name || c?.name || '').toLowerCase();
+      const name = (clientNameById.get(p.clientId) ?? '').toLowerCase();
       return name.includes(q);
     });
-  }, [competingClients, search]);
+  }, [competingClients, search, clientNameById]);
 
   const nextShow = useMemo(() => getNextShowInfo(competingClients), [competingClients]);
 
@@ -73,8 +122,8 @@ export default function CompPrepHome() {
     }
   }, [outletContext?.registerRefresh]);
 
-  const isCoach = role === 'coach' || role === 'trainer';
-  const isClient = role === 'client';
+  const coachUser = isCoach(role);
+  const clientUser = isClient(role);
 
   return (
     <div
@@ -96,18 +145,18 @@ export default function CompPrepHome() {
         Competition Prep
       </h1>
       <p className="text-sm mb-4 leading-relaxed" style={{ color: colors.muted }}>
-        {isCoach && 'Manage competing clients, posing library, and reviews.'}
-        {isClient && 'Your prep plan, poses, and media submissions.'}
-        {(role === 'personal' || role === 'solo') && 'Pose guides and local progress logging.'}
+        {coachUser && 'Manage competing clients, posing library, and reviews.'}
+        {clientUser && 'Your prep plan, poses, and media submissions.'}
+        {isPersonal(role) && 'Pose guides and local progress logging.'}
       </p>
 
-      {isCoach && nextShow != null && (
+      {coachUser && nextShow != null && (
         <p className="text-[13px] font-medium mb-3" style={{ color: colors.accent }}>
           {getNextShowLabel(nextShow.daysRemaining)}
         </p>
       )}
 
-      {isCoach && (
+      {coachUser && (
         <>
           <div className="mb-4">
             <input
@@ -189,18 +238,19 @@ export default function CompPrepHome() {
             </Card>
           )}
           {(filteredClients ?? []).length === 0 && !search.trim() && (
-            <Card style={{ marginBottom: spacing[16], padding: spacing[24], textAlign: 'center', border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
-              <Award size={32} className="mx-auto mb-3" style={{ color: colors.muted }} />
-              <p className="text-sm font-medium mb-1" style={{ color: colors.text }}>No prep athletes yet</p>
-              <p className="text-sm leading-relaxed max-w-sm mx-auto" style={{ color: colors.muted }}>
-                Invite prep athletes from <strong style={{ color: colors.textSecondary }}>Clients</strong> (they join with your link or code), then set show date / competition context on their profile; they&apos;ll appear here for posing, media, and timeline.
-              </p>
-            </Card>
+            <EmptyState
+              title="No competition clients yet"
+              description="Add a client and select Competition Prep as their journey to get started."
+              icon={Award}
+              actionLabel="Add client"
+              onAction={() => handleNav('/get-clients')}
+              className="mb-4"
+            />
           )}
         </>
       )}
 
-      {isClient && clientProfile && (
+      {clientUser && clientProfile && (
         <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
           <p className="text-sm font-medium mb-1" style={{ color: colors.muted }}>
             Your plan

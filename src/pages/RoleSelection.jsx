@@ -1,7 +1,12 @@
+/*
+LEGACY — not reachable from active routing.
+Role updates use direct `profiles` writes. Safe to delete after
+confirming no active path reaches this component.
+*/
 import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { Dumbbell, Users, User, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -77,7 +82,7 @@ function RoleRow({ icon: Icon, title, onSelect, disabled }) {
 
 export default function RoleSelection() {
   const navigate = useNavigate();
-  const { isDemoMode, setRole, exitDemo } = useAuth();
+  const { isDemoMode, selectRole, exitDemo } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const roleSelectionMigration = useMemo(
@@ -97,9 +102,15 @@ export default function RoleSelection() {
     setLoading(true);
 
     try {
-      const user_type = roleKey;
-      await invokeSupabaseFunction('user-update-role', { user_type });
-      setRole(roleKey);
+      const supabase = getSupabase();
+      if (supabase && user?.id) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ role: roleKey, user_type: roleKey })
+          .eq('id', user.id);
+        if (error) throw error;
+      }
+      selectRole(roleKey);
 
       if (roleKey === 'coach') {
         toast.success('Welcome, Coach');

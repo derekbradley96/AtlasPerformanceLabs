@@ -1,7 +1,7 @@
 export const ATLAS_PLAN_MONTHLY = {
   basic: 0,
   pro: 59,
-  elite: 79,
+  elite: 89,
 } as const;
 
 export const ATLAS_PLAN_COMMISSION = {

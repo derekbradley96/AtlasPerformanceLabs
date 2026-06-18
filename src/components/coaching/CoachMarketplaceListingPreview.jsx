@@ -1,19 +1,39 @@
-import React from 'react';
+import React, { useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import CoachCard from '@/components/marketplace/CoachCard';
 import { mapDiscoveryRowToCoachCardData } from '@/lib/marketplaceCoachCardModel';
 import { PERSONAL_MARKETPLACE_SOURCE } from '@/lib/personalMarketplaceEntry';
 import { colors, shell } from '@/ui/tokens';
 import { cardRhythm, space } from '@/ui/rhythm';
 
+function resolveMarketplaceSlugFromPreviewRow(row) {
+  if (!row || typeof row !== 'object') return '';
+  const rawSlug = row.slug != null ? String(row.slug).trim() : '';
+  if (rawSlug && rawSlug !== 'preview') return rawSlug;
+  const ref = row.referral_code != null ? String(row.referral_code).trim() : '';
+  return ref || '';
+}
+
 /**
  * Live-ish marketplace tile preview for coaches editing their listing.
  */
 export default function CoachMarketplaceListingPreview({ previewRow, strength, isWideWeb = false }) {
+  const navigate = useNavigate();
   const cardData = mapDiscoveryRowToCoachCardData(previewRow, {
     entrySource: PERSONAL_MARKETPLACE_SOURCE.FROM_GENERAL_DISCOVERY,
     userGoal: '',
     isPersonal: false,
   });
+
+  const onViewProfile = useCallback(() => {
+    const slug = resolveMarketplaceSlugFromPreviewRow(previewRow);
+    if (!slug) {
+      toast.message('Add a profile URL (slug) on your listing, or ensure your invite code is set, to open the full profile.');
+      return;
+    }
+    navigate(`/marketplace/coach/${encodeURIComponent(slug)}`);
+  }, [navigate, previewRow]);
 
   const missing = strength?.missingHints?.length
     ? `Missing: ${strength.missingHints.slice(0, 4).join(' · ')}`
@@ -35,7 +55,7 @@ export default function CoachMarketplaceListingPreview({ previewRow, strength, i
       <p className="text-xs mt-1 mb-3" style={{ color: colors.textSecondary, lineHeight: 1.45 }}>
         Approximate card athletes see in Find a coach. Match badges only apply when their journey aligns with yours.
       </p>
-      <div style={{ pointerEvents: 'none', opacity: 0.98 }}>
+      <div style={{ opacity: 0.98 }}>
         <CoachCard
           coachId={String(cardData.coachId || 'preview')}
           variant={cardData.variant}
@@ -52,7 +72,7 @@ export default function CoachMarketplaceListingPreview({ previewRow, strength, i
           isWideWeb={isWideWeb}
           showSave={false}
           showMessage={false}
-          onViewProfile={() => {}}
+          onViewProfile={onViewProfile}
         />
       </div>
       {(missing || weak) && (

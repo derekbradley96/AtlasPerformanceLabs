@@ -2,11 +2,11 @@
  * List client profile(s) for the authenticated user only (clients where user_id = caller).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       full_name: r.name ?? null,
       subscription_status: r.billing_status ?? "active",
     }));
-    return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(out), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("client-profile-list", e);
     return jsonError("Request failed", 500);

@@ -2,9 +2,9 @@
  * Prep header for clients with an active contest prep: weeks/days out, peak week badge, pose check status, quick actions.
  * Integrates Peak Week engine: active status, days out, check-in due today; Open Peak Week, Set Up Peak Week, Review Peak Check-In.
  */
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import { isCoach } from '@/lib/roles';
@@ -15,143 +15,28 @@ import { getPrepInsightSummaries } from '@/lib/prepInsights';
 import { generatePrepInsight } from '@/lib/atlasInsights';
 import InsightCard from '@/components/review/InsightCard';
 import { Calendar, ImageIcon, Zap, ClipboardList } from 'lucide-react';
-
-function toISODate(d) {
-  if (!d) return '';
-  const x = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(x.getTime())) return '';
-  return x.toISOString().slice(0, 10);
-}
-
-/** Fetch active peak_week for client and whether a peak week check-in is due today. */
-async function fetchPeakWeekStatus(clientId) {
-  if (!hasSupabase || !clientId) return { peakWeek: null, checkInDueToday: false };
-  const supabase = getSupabase();
-  if (!supabase) return { peakWeek: null, checkInDueToday: false };
-  try {
-    const { data: week } = await supabase
-      .from('peak_weeks')
-      .select('id, show_date')
-      .eq('client_id', clientId)
-      .eq('is_active', true)
-      .order('show_date', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!week) return { peakWeek: null, checkInDueToday: false };
-    const showDate = week.show_date ? new Date(week.show_date) : null;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr = toISODate(today);
-    let daysOut = null;
-    if (showDate) {
-      showDate.setHours(0, 0, 0, 0);
-      daysOut = Math.ceil((showDate - today) / (24 * 60 * 60 * 1000));
-    }
-    const inPeakWindow = daysOut != null && daysOut >= -7 && daysOut <= 0;
-    let checkInDueToday = false;
-    if (inPeakWindow) {
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = toISODate(tomorrow);
-      const { data: checkinsToday } = await supabase
-        .from('peak_week_checkins')
-        .select('id')
-        .eq('peak_week_id', week.id)
-        .gte('created_at', `${todayStr}T00:00:00`)
-        .lt('created_at', `${tomorrowStr}T00:00:00`)
-        .limit(1);
-      checkInDueToday = !(checkinsToday && checkinsToday.length > 0);
-    }
-    return { peakWeek: { ...week, days_out: daysOut }, checkInDueToday };
-  } catch (_) {
-    return { peakWeek: null, checkInDueToday: false };
-  }
-}
-
-async function fetchPrepHeader(clientId) {
-  if (!hasSupabase || !clientId) return null;
-  const supabase = getSupabase();
-  if (!supabase) return null;
-  try {
-    const { data, error } = await supabase
-      .from('v_client_prep_header')
-      .select('*')
-      .eq('client_id', clientId)
-      .maybeSingle();
-    if (error || !data) return null;
-    return data;
-  } catch (_) {
-    return null;
-  }
-}
-
-async function fetchPrepHeaderWithInsights(clientId) {
-  if (!hasSupabase || !clientId) return { header: null, metrics: null, poseChecksLast4w: 0 };
-  const supabase = getSupabase();
-  if (!supabase) return { header: null, metrics: null, poseChecksLast4w: 0 };
-  const fourWeeksAgo = new Date();
-  fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-  try {
-    const [headerRes, metricsRes, poseRes] = await Promise.all([
-      supabase.from('v_client_prep_header').select('*').eq('client_id', clientId).maybeSingle(),
-      supabase.from('v_client_progress_metrics').select('*').eq('client_id', clientId).maybeSingle(),
-      supabase.from('pose_checks').select('id', { count: 'exact', head: true }).eq('client_id', clientId).gte('submitted_at', fourWeeksAgo.toISOString()),
-    ]);
-    return {
-      header: headerRes.data ?? null,
-      metrics: metricsRes.data ?? null,
-      poseChecksLast4w: poseRes.count ?? 0,
-    };
-  } catch (_) {
-    return { header: null, metrics: null, poseChecksLast4w: 0 };
-  }
-}
+import { fetchPrepHeaderBundle } from '@/data/prepHeaderQueries';
 
 export default function PrepHeader({ clientId, showPrepInsights = false }) {
   const navigate = useNavigate();
   const { effectiveRole, profile } = useAuth();
   const viewerWU = resolveViewerBodyweightUnit(profile);
-  const [prep, setPrep] = useState(null);
-  const [insightsData, setInsightsData] = useState(null);
-  const [peakWeekStatus, setPeakWeekStatus] = useState({ peakWeek: null, checkInDueToday: false });
-  const [loading, setLoading] = useState(true);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['prep-header', clientId, showPrepInsights],
+    queryFn: () => fetchPrepHeaderBundle(clientId, showPrepInsights),
+    enabled: Boolean(clientId),
+  });
+
+  const prep = data?.prep ?? null;
+  const insightsData = data?.insightsData ?? null;
+  const peakWeekStatus = data?.peakWeekStatus ?? { peakWeek: null, checkInDueToday: false };
 
   const isCoachRole = isCoach(effectiveRole);
 
-  useEffect(() => {
-    if (!clientId) {
-      setPrep(null);
-      setInsightsData(null);
-      setPeakWeekStatus({ peakWeek: null, checkInDueToday: false });
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    if (showPrepInsights) {
-      Promise.all([fetchPrepHeaderWithInsights(clientId), fetchPeakWeekStatus(clientId)]).then(([out, pwStatus]) => {
-        if (!cancelled) {
-          setPrep(out.header);
-          setInsightsData(out);
-          setPeakWeekStatus(pwStatus);
-          setLoading(false);
-        }
-      });
-    } else {
-      Promise.all([fetchPrepHeader(clientId), fetchPeakWeekStatus(clientId)]).then(([row, pwStatus]) => {
-        if (!cancelled) {
-          setPrep(row);
-          setInsightsData(null);
-          setPeakWeekStatus(pwStatus);
-          setLoading(false);
-        }
-      });
-    }
-    return () => { cancelled = true; };
-  }, [clientId, showPrepInsights]);
-
   if (!clientId) return null;
 
-  if (loading) {
+  if (isLoading) {
     return (
       <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
         <div className="animate-pulse space-y-3" aria-hidden="true">

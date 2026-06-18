@@ -1,11 +1,10 @@
 import React from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery } from '@tanstack/react-query';
 import { Users, DollarSign, AlertCircle, Crown, Zap } from 'lucide-react';
 import { CardSkeleton } from '@/components/ui/LoadingState';
 
-export default function AdminAnalytics({ adminEmail }) {
-  const isAdmin = adminEmail?.toLowerCase() === 'derekbradley96@gmail.com';
+export default function AdminAnalytics({ isAdmin, adminEmail }) {
 
   const { data: allUsers = [], isLoading: usersLoading } = useQuery({
     queryKey: ['admin-all-users'],

@@ -1,11 +1,11 @@
 // List review items for the authenticated coach only (JWT).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   try {
     const callerId = await getAuthUserId(req);
@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
     }
     const itemsWithNames = items.map((i) => ({ ...i, client_name: i.client_id ? clientNames[i.client_id] ?? "Client" : null }));
 
-    return new Response(JSON.stringify({ items: itemsWithNames }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ items: itemsWithNames }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("list-review-items", e);
     return jsonError("Request failed", 500);

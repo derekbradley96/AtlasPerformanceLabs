@@ -94,7 +94,7 @@ export default function PeakWeekCheckinSubmitPage() {
   });
 
   const todayIso = new Date().toISOString().slice(0, 10);
-  const { data: todayPeakWeekDay } = useQuery({
+  const { data: todayPeakWeekDay, isLoading: loadingTodayPeakWeekDay } = useQuery({
     queryKey: ['peak-week-day-today', peakWeek?.id, todayIso],
     queryFn: async () => {
       if (!supabase || !peakWeek?.id) return null;
@@ -109,7 +109,7 @@ export default function PeakWeekCheckinSubmitPage() {
     enabled: !!supabase && !!peakWeek?.id,
   });
 
-  const { data: todayPeriodCheckins = [] } = useQuery({
+  const { data: todayPeriodCheckins = [], isLoading: loadingTodayPeriodCheckins } = useQuery({
     queryKey: ['peak-week-checkins-today-periods', clientId, peakWeek?.id, todayIso],
     queryFn: async () => {
       if (!supabase || !clientId || !peakWeek?.id) return [];
@@ -199,7 +199,7 @@ export default function PeakWeekCheckinSubmitPage() {
     setPhotoPaths((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const loading = loadingClient || loadingPeakWeek;
+  const loading = loadingClient || loadingPeakWeek || loadingTodayPeakWeekDay || loadingTodayPeriodCheckins;
 
   if (!user) {
     return (
@@ -268,6 +268,9 @@ export default function PeakWeekCheckinSubmitPage() {
     !uploading &&
     !(checkinPeriod === 'morning' && morningSubmitted) &&
     !(checkinPeriod === 'evening' && eveningSubmitted);
+  const allRequiredSubmitted =
+    periodSelectionRequired &&
+    availablePeriods.every((p) => (p === 'morning' ? morningSubmitted : eveningSubmitted));
   const noCheckinDueToday = !!todayPeakWeekDay && !morningRequired && !eveningRequired;
 
   return (
@@ -289,6 +292,14 @@ export default function PeakWeekCheckinSubmitPage() {
                   style={{ border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.muted }}
                 >
                   No check-in is required today. You can still submit an optional update if needed.
+                </div>
+              )}
+              {allRequiredSubmitted && (
+                <div
+                  className="rounded-lg px-3 py-2 text-xs font-medium"
+                  style={{ border: `1px solid ${colors.success}`, background: colors.successSubtle, color: colors.success }}
+                >
+                  You&apos;ve already submitted all required check-ins for today.
                 </div>
               )}
               <div>
@@ -414,7 +425,7 @@ export default function PeakWeekCheckinSubmitPage() {
               <Button
                 className="w-full mt-4"
                 onClick={() => submitMutation.mutate()}
-                disabled={submitMutation.isPending || !canSubmit}
+                disabled={submitMutation.isPending || !canSubmit || allRequiredSubmitted}
               >
                 {submitMutation.isPending ? 'Submitting...' : 'Submit check-in'}
               </Button>

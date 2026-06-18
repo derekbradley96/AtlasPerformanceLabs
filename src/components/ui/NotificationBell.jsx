@@ -1,7 +1,7 @@
 /**
  * Header notification bell: badge count + popover with Action required / Messages / Insights + deep links.
  */
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bell, ChevronRight } from 'lucide-react';
@@ -11,7 +11,7 @@ import {
   getUnreadNotificationCount,
   markNotificationRead,
 } from '@/lib/notifications';
-import { hasSupabase } from '@/lib/supabaseClient';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { colors } from '@/ui/tokens';
 import { hapticLight } from '@/lib/haptics';
 import { formatDistanceToNow } from 'date-fns';
@@ -33,27 +33,34 @@ export default function NotificationBell() {
   const queryClient = useQueryClient();
   const { user, effectiveRole } = useAuth();
   const [open, setOpen] = useState(false);
+  const [optimisticUnreadCount, setOptimisticUnreadCount] = useState(null);
+  const userId = user?.id || null;
+  const supabase = hasSupabase ? getSupabase() : null;
 
   const { data: unreadCount = 0 } = useQuery({
-    queryKey: ['notifications-unread-count', user?.id],
-    queryFn: () => getUnreadNotificationCount(user?.id),
-    enabled: !!user?.id && hasSupabase,
+    queryKey: ['notifications-unread-count', userId],
+    queryFn: () => getUnreadNotificationCount(userId),
+    enabled: !!userId && hasSupabase,
     refetchInterval: 60 * 1000,
   });
 
   const { data: notifications = [], isLoading } = useQuery({
-    queryKey: ['notifications', user?.id, 'bell'],
-    queryFn: () => getNotifications(user?.id, { limit: BELL_FETCH_LIMIT }),
-    enabled: !!user?.id && hasSupabase && open,
+    queryKey: ['notifications', userId, 'bell'],
+    queryFn: () => getNotifications(userId, { limit: BELL_FETCH_LIMIT }),
+    enabled: !!userId && hasSupabase && open,
   });
 
   const markReadMutation = useMutation({
     mutationFn: markNotificationRead,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count', userId] });
     },
   });
+
+  useEffect(() => {
+    setOptimisticUnreadCount(null);
+  }, [unreadCount]);
 
   const grouped = groupNotificationsByCategory(notifications);
 
@@ -65,11 +72,40 @@ export default function NotificationBell() {
     if (route) navigate(route);
   };
 
-  const count = Math.min(Number(unreadCount) || 0, BADGE_MAX);
+  const handleOpen = useCallback(() => {
+    setOpen(true);
+    setOptimisticUnreadCount(0);
+    if (supabase && userId) {
+      supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('profile_id', userId)
+        .eq('is_read', false)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ['notifications', userId] });
+          queryClient.invalidateQueries({ queryKey: ['notifications-unread-count', userId] });
+        });
+    }
+  }, [supabase, userId, queryClient]);
+
+  const handleOpenChange = useCallback(
+    (nextOpen) => {
+      if (nextOpen) {
+        handleOpen();
+      } else {
+        setOpen(false);
+        setOptimisticUnreadCount(null);
+      }
+    },
+    [handleOpen]
+  );
+
+  const displayCount = optimisticUnreadCount !== null ? optimisticUnreadCount : (unreadCount ?? 0);
+  const count = Math.min(Number(displayCount) || 0, BADGE_MAX);
   const showBadge = count > 0;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"

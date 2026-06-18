@@ -1,12 +1,23 @@
 /**
  * Conversion-focused pricing: plans, commission math, FAQ, CTA.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { trackPage } from '@/lib/analytics';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, HelpCircle } from 'lucide-react';
+import { Check, ChevronDown, HelpCircle, Palette, LayoutTemplate, EyeOff, Headphones, Star } from 'lucide-react';
 import { colors } from '@/ui/tokens';
 import { SIGNUP_PUBLIC_PATH } from '@/lib/publicAuthPaths';
+import { usePageMeta } from '@/lib/usePageMeta';
 import EarningsCalculator from '@/components/pricing/EarningsCalculator';
+import { PLANS as SOURCE_PLANS } from '@/config/plans';
+
+const ELITE_FEATURE_ICONS = {
+  Palette,
+  LayoutTemplate,
+  EyeOff,
+  Headphones,
+  Star,
+};
 
 const ASSUMED_LABEL = 'Example: average £100 / client / month through Atlas';
 const PERSONAL_ENHANCED_PRICE = 14.99;
@@ -15,7 +26,7 @@ const PERSONAL_ENHANCED_PRICE = 14.99;
 function planCosts(monthlyVolume) {
   const basic = 0 + monthlyVolume * 0.1;
   const pro = 59 + monthlyVolume * 0.03;
-  const elite = 79 + 0;
+  const elite = 89 + 0;
   const costs = [
     { id: 'basic', label: 'Basic', value: basic },
     { id: 'pro', label: 'Pro', value: pro },
@@ -27,10 +38,10 @@ function planCosts(monthlyVolume) {
 
 const COMPARISON_ROWS = [
   { clients: 5, volume: 500, note: 'Early stage' },
-  { clients: 10, volume: 1000, note: 'Pro crossover zone' },
-  { clients: 12, volume: 1200, note: '' },
+  { clients: 10, volume: 1000, note: 'Pro breaks even vs Basic' },
+  { clients: 12, volume: 1200, note: 'Elite breaks even' },
   { clients: 15, volume: 1500, note: 'Higher volume' },
-  { clients: 20, volume: 2000, note: 'Elite sweet spot' },
+  { clients: 20, volume: 2000, note: 'Elite clearly wins' },
   { clients: 25, volume: 2500, note: '' },
 ];
 
@@ -67,11 +78,17 @@ const PLANS = [
     id: 'elite',
     name: 'Elite',
     label: 'Scale tier',
-    monthly: 79,
+    monthly: 89,
     commission: '0%',
     commissionDetail: 'no commission on payments through Atlas',
-    note: 'Built for full rosters · if you are doing real numbers, this is a no-brainer',
-    highlights: ['Keep 100% of platform-linked revenue above the subscription', 'Predictable cost at scale', 'Built for high-output coaching operations'],
+    note: 'Built for full rosters — break-even at ~12 clients vs Pro on commission savings alone.',
+    highlights: [
+      'Zero commission — keep 100% of every client payment',
+      'White-label: your brand, not Atlas',
+      'Custom client onboarding page',
+      'Priority 4-hour support guarantee',
+      'Premium marketplace listing priority',
+    ],
     cta: 'Go Elite',
     emphasized: false,
   },
@@ -91,6 +108,60 @@ const FAQ_ITEMS = [
     a: 'Your data is yours. We use industry-standard practices, access controls, and separation between accounts. You can export key information, and we do not sell client lists.',
   },
 ];
+
+function EliteCoachFeaturesSection() {
+  const features = SOURCE_PLANS.find((p) => p.id === 'elite')?.eliteOnlyFeatures ?? [];
+  return (
+    <section className="mt-12 sm:mt-14">
+      <h2 className="text-[1.35rem] sm:text-2xl font-bold text-center mb-2" style={{ color: colors.text }}>
+        What Elite coaches get
+      </h2>
+      <p className="text-center text-base font-semibold mb-1" style={{ color: colors.text }}>
+        Everything Pro includes, plus
+      </p>
+      <p className="text-center text-sm mb-8 max-w-xl mx-auto" style={{ color: colors.muted }}>
+        Elite is the only plan with these features
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
+        {features.map((f) => {
+          const Icon = ELITE_FEATURE_ICONS[f.icon] || Check;
+          return (
+            <div
+              key={f.id}
+              className="rounded-xl p-4 border flex flex-col gap-2"
+              style={{
+                background: 'rgba(15, 23, 42, 0.55)',
+                borderColor: 'rgba(251, 191, 36, 0.35)',
+                boxShadow: '0 0 0 1px rgba(251, 191, 36, 0.08)',
+              }}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div
+                  className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                  style={{ background: 'rgba(251, 191, 36, 0.12)' }}
+                >
+                  <Icon className="w-4 h-4" style={{ color: '#fbbf24' }} aria-hidden />
+                </div>
+                <span
+                  className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0"
+                  style={{ background: 'rgba(251, 191, 36, 0.18)', color: '#fcd34d' }}
+                >
+                  Elite only
+                </span>
+              </div>
+              <p className="text-[14px] font-bold leading-snug" style={{ color: colors.text }}>
+                {f.title}
+              </p>
+              <p className="text-[13px] leading-relaxed flex-1" style={{ color: colors.muted }}>
+                {f.description}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function FaqItem({ item }) {
   const [open, setOpen] = React.useState(false);
@@ -354,6 +425,9 @@ function PersonalPricingSection() {
 }
 
 function CoachingPricingSection({ comparison }) {
+  const [hasScrolled, setHasScrolled] = useState(false);
+  const tableRef = useRef(null);
+
   return (
     <>
       {/* PART 1 — Header */}
@@ -385,11 +459,11 @@ function CoachingPricingSection({ comparison }) {
         <p className="text-center text-sm mb-8 max-w-xl mx-auto" style={{ color: colors.muted }}>
           All plans include the same core workflow—programs, check-ins, and messaging. The difference is how you pay as volume grows.
         </p>
-        <div className="grid gap-6 md:grid-cols-3 md:items-stretch">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:items-stretch">
           {PLANS.map((plan) => (
             <div
               key={plan.id}
-              className={`relative flex flex-col rounded-2xl border p-6 sm:p-8 ${plan.emphasized ? 'md:scale-[1.02] md:z-10' : ''}`}
+              className={`relative flex flex-col rounded-2xl border p-6 sm:p-8 ${plan.emphasized ? 'sm:scale-[1.02] sm:z-10' : ''}`}
               style={{
                 borderColor: plan.emphasized ? colors.primary : colors.border,
                 background: plan.emphasized ? 'rgba(59, 130, 246, 0.08)' : colors.surface1,
@@ -446,6 +520,7 @@ function CoachingPricingSection({ comparison }) {
             </div>
           ))}
         </div>
+        <EliteCoachFeaturesSection />
         <EarningsCalculator />
       </section>
 
@@ -463,61 +538,93 @@ function CoachingPricingSection({ comparison }) {
             {ASSUMED_LABEL}. Totals = monthly subscription + commission on that volume. Your real numbers may differ—use this to
             spot when upgrading saves money.
           </p>
-          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 mt-8 rounded-xl border" style={{ borderColor: colors.border }}>
-            <table className="w-full text-sm min-w-[520px]">
-              <thead>
-                <tr style={{ background: colors.surface1, borderBottom: `1px solid ${colors.border}` }}>
-                  <th className="text-left py-3 px-3 sm:px-4 font-semibold">Clients</th>
-                  <th className="text-right py-3 px-2 sm:px-3 font-semibold whitespace-nowrap">Volume / mo</th>
-                  <th className="text-right py-3 px-2 sm:px-3 font-semibold text-red-300/90 whitespace-nowrap">Commission Basic (10%)</th>
-                  <th className="text-right py-3 px-2 sm:px-3 font-semibold text-red-300/90 whitespace-nowrap">Commission Pro (3%)</th>
-                  <th className="text-right py-3 px-2 sm:px-3 font-semibold whitespace-nowrap">Total Basic</th>
-                  <th className="text-right py-3 px-2 sm:px-3 font-semibold whitespace-nowrap">Total Pro</th>
-                  <th className="text-right py-3 px-3 sm:px-4 font-semibold whitespace-nowrap">Total Elite</th>
-                  <th className="text-left py-3 px-3 font-semibold whitespace-nowrap">Lowest cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparison.map((row) => (
-                  <tr key={row.clients} style={{ borderBottom: `1px solid ${colors.border}` }}>
-                    <td className="py-3 px-3 sm:px-4 font-medium">{row.clients}</td>
-                    <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap" style={{ color: colors.muted }}>
-                      {formatMoney(row.volume)}
-                    </td>
-                    <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap" style={{ color: colors.muted }}>
-                      {formatMoney(row.commissionLostBasic)}
-                    </td>
-                    <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap" style={{ color: colors.muted }}>
-                      {formatMoney(row.commissionLostPro)}
-                    </td>
-                    <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap">{formatMoney(row.basic)}</td>
-                    <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap">{formatMoney(row.pro)}</td>
-                    <td className="text-right py-3 px-3 sm:px-4 whitespace-nowrap">{formatMoney(row.elite)}</td>
-                    <td className="py-3 px-3">
-                      <span
-                        className="inline-flex text-xs font-semibold px-2 py-0.5 rounded-md"
-                        style={{
-                          background:
-                            row.bestId === 'elite'
-                              ? 'rgba(34, 197, 94, 0.2)'
-                              : row.bestId === 'pro'
-                                ? 'rgba(59, 130, 246, 0.25)'
-                                : 'rgba(156, 163, 175, 0.2)',
-                          color: colors.text,
-                        }}
-                      >
-                        {row.bestId === 'basic' ? 'Basic' : row.bestId === 'pro' ? 'Pro' : 'Elite'}
-                      </span>
-                      {row.note && (
-                        <span className="block text-[10px] mt-1" style={{ color: colors.muted }}>
-                          {row.note}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="relative -mx-4 mt-8 sm:mx-0">
+            <div
+              ref={tableRef}
+              onScroll={() => setHasScrolled(true)}
+              className="overflow-x-auto rounded-xl border px-4 sm:px-0"
+              style={{
+                WebkitOverflowScrolling: 'touch',
+                borderColor: colors.border,
+              }}
+            >
+              <div style={{ minWidth: 700 }}>
+                <table className="w-full text-sm" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: colors.surface1, borderBottom: `1px solid ${colors.border}` }}>
+                      <th className="text-left py-3 px-3 sm:px-4 font-semibold">Clients</th>
+                      <th className="text-right py-3 px-2 sm:px-3 font-semibold whitespace-nowrap">Volume / mo</th>
+                      <th className="text-right py-3 px-2 sm:px-3 font-semibold text-red-300/90 whitespace-nowrap">Commission Basic (10%)</th>
+                      <th className="text-right py-3 px-2 sm:px-3 font-semibold text-red-300/90 whitespace-nowrap">Commission Pro (3%)</th>
+                      <th className="text-right py-3 px-2 sm:px-3 font-semibold whitespace-nowrap">Total Basic</th>
+                      <th className="text-right py-3 px-2 sm:px-3 font-semibold whitespace-nowrap">Total Pro</th>
+                      <th className="text-right py-3 px-3 sm:px-4 font-semibold whitespace-nowrap">Total Elite</th>
+                      <th className="text-left py-3 px-3 font-semibold whitespace-nowrap">Lowest cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparison.map((row) => (
+                      <tr key={row.clients} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                        <td className="py-3 px-3 sm:px-4 font-medium">{row.clients}</td>
+                        <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap" style={{ color: colors.muted }}>
+                          {formatMoney(row.volume)}
+                        </td>
+                        <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap" style={{ color: colors.muted }}>
+                          {formatMoney(row.commissionLostBasic)}
+                        </td>
+                        <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap" style={{ color: colors.muted }}>
+                          {formatMoney(row.commissionLostPro)}
+                        </td>
+                        <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap">{formatMoney(row.basic)}</td>
+                        <td className="text-right py-3 px-2 sm:px-3 whitespace-nowrap">{formatMoney(row.pro)}</td>
+                        <td className="text-right py-3 px-3 sm:px-4 whitespace-nowrap">{formatMoney(row.elite)}</td>
+                        <td className="py-3 px-3">
+                          <span
+                            className="inline-flex text-xs font-semibold px-2 py-0.5 rounded-md"
+                            style={{
+                              background:
+                                row.bestId === 'elite'
+                                  ? 'rgba(34, 197, 94, 0.2)'
+                                  : row.bestId === 'pro'
+                                    ? 'rgba(59, 130, 246, 0.25)'
+                                    : 'rgba(156, 163, 175, 0.2)',
+                              color: colors.text,
+                            }}
+                          >
+                            {row.bestId === 'basic' ? 'Basic' : row.bestId === 'pro' ? 'Pro' : 'Elite'}
+                          </span>
+                          {row.note && (
+                            <span className="block text-[10px] mt-1" style={{ color: colors.muted }}>
+                              {row.note}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {!hasScrolled && (
+              <div
+                className="pointer-events-none absolute right-0 top-0 bottom-0 flex items-center justify-end pr-1 sm:hidden"
+                style={{
+                  width: 32,
+                  background: 'linear-gradient(to right, transparent, rgba(11, 18, 32, 0.9))',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: colors.muted,
+                    transform: 'rotate(90deg)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  scroll →
+                </span>
+              </div>
+            )}
           </div>
           <div
             className="mt-6 rounded-xl p-4 sm:p-5 border text-sm leading-relaxed"
@@ -533,12 +640,13 @@ function CoachingPricingSection({ comparison }) {
                 loses more to %; Pro keeps more before the fixed fee.
               </li>
               <li>
-                <strong style={{ color: colors.text }}>Total columns</strong> add the monthly plan fee. When Elite (£79) drops
-                below Basic, the upgrade pays for itself—often as your active book passes ~20 clients at this example average.
+                <strong style={{ color: colors.text }}>Total columns</strong> add the monthly plan fee. When Elite (£89) drops
+                below Basic or Pro on all-in cost, the upgrade pays for itself—often as your active book passes ~10–12 clients at
+                this example average.
               </li>
               <li>
-                <strong style={{ color: colors.text }}>Pro vs Basic</strong> usually flips around £800–£900 monthly volume at
-                these rates—roughly the 10–15 client range in the example.
+                <strong style={{ color: colors.text }}>Crossover guide</strong> Pro vs Basic flips at ~£860 monthly volume
+                (around 9–10 clients at £100 avg). Elite vs Pro flips at ~£1,000 monthly volume (around 10–11 clients at £100 avg).
               </li>
             </ul>
             <p className="mt-3 font-medium" style={{ color: colors.text }}>
@@ -587,6 +695,13 @@ function CoachingPricingSection({ comparison }) {
 }
 
 export default function PricingPage() {
+  usePageMeta({
+    title: "Pricing — Start Free, Scale When You're Ready",
+    description:
+      'Coaches start free with 10% commission. Upgrade to Pro (£59/month) or Elite (£89/month + 0% commission). No lock-in, cancel anytime.',
+    canonical: 'https://atlasperformancelabs.co.uk/pricing',
+  });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (() => {
     const raw = String(searchParams.get('tab') || '').toLowerCase();
@@ -600,6 +715,10 @@ export default function PricingPage() {
     const raw = String(searchParams.get('tab') || '').toLowerCase();
     if (raw === 'personal' || raw === 'coaching') setTab(raw);
   }, [searchParams]);
+
+  useEffect(() => {
+    trackPage('pricing');
+  }, []);
 
   const setTabAndUrl = (next) => {
     setTab(next);

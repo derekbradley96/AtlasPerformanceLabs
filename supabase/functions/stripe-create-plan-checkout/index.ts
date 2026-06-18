@@ -1,7 +1,7 @@
 // Create Checkout Session for platform plan (Basic/Pro/Elite). Caller = coach (JWT only).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe.ts";
@@ -9,6 +9,7 @@ import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 
 const ALLOWED_PLAN_TIERS = ["basic", "pro", "elite"] as const;
+// STRIPE_PRICE_ELITE must point to the live £89/mo Elite subscription price in Stripe Dashboard.
 const PLAN_PRICES: Record<string, string> = {
   basic: Deno.env.get("STRIPE_PRICE_BASIC") ?? "",
   pro: Deno.env.get("STRIPE_PRICE_PRO") ?? "",
@@ -16,7 +17,7 @@ const PLAN_PRICES: Record<string, string> = {
 };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   try {
     const callerId = await getAuthUserId(req);
@@ -32,7 +33,7 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: coach, error: coachErr } = await supabase.from(TABLE.coaches).select("id, stripe_customer_id").eq("user_id", userId).single();
-    if (coachErr || !coach) return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (coachErr || !coach) return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
 
     const base = getAllowlistedRedirectOrigin(req) ?? FALLBACK_ORIGIN;
     const successUrl = `${base}/plan?success=1&session_id={CHECKOUT_SESSION_ID}`;
@@ -64,8 +65,8 @@ Deno.serve(async (req) => {
     });
 
     const url = session.url ?? (session as { url?: string }).url;
-    if (!url) return new Response(JSON.stringify({ error: "No checkout URL" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    return new Response(JSON.stringify({ url, session_id: session.id }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!url) return new Response(JSON.stringify({ error: "No checkout URL" }), { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ url, session_id: session.id }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("stripe-create-plan-checkout", e);
     return jsonError("Request failed", 500);

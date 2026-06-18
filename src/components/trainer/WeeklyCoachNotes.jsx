@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Textarea } from '@/components/ui/textarea';
 import { ChevronLeft, ChevronRight, Save } from 'lucide-react';

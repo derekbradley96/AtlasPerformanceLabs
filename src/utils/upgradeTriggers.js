@@ -1,4 +1,5 @@
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { CURRENCY, PLANS } from '@/config/plans';
 
 const MAJOR_SHOWN_SESSION_KEY = 'atlas_upgrade_major_prompt_shown';
 const LAST_MAJOR_AT_KEY = 'atlas_upgrade_last_major_prompt_at';
@@ -22,7 +23,173 @@ function proTotal(monthlyRevenue) {
 }
 
 function eliteTotal() {
-  return 79;
+  return Number(PLANS.find((p) => p.id === 'elite')?.price ?? 89);
+}
+
+const PRO_FLAT = () => Number(PLANS.find((p) => p.id === 'pro')?.price ?? 59);
+const ELITE_FLAT = () => Number(PLANS.find((p) => p.id === 'elite')?.price ?? 89);
+
+/**
+ * Illustration average revenue per client (GBP/mo) so "At 5 clients: Pro saves…" stays motivating when roster is empty.
+ * Chosen so 5 × illustration × (10% − 3%) − £59 ≈ £14 vs Basic commission-only at same volume.
+ */
+export const ILLUSTRATION_AVG_MONTHLY_PER_CLIENT = 210;
+
+/**
+ * Compare effective monthly cost of staying on current tier vs the next tier up.
+ * @param {{ clientCount: number, avgMonthlyRevenuePerClient?: number, currentTier?: string, monthlyRevenueEstimate?: number | null }} opts
+ */
+export function calculateUpgradeSaving({
+  clientCount,
+  avgMonthlyRevenuePerClient = 85,
+  currentTier = 'basic',
+  monthlyRevenueEstimate = null,
+}) {
+  const n = Math.max(0, Number(clientCount) || 0);
+  const fromClients = n * Number(avgMonthlyRevenuePerClient) || 0;
+  const monthlyRevenue =
+    monthlyRevenueEstimate != null &&
+    Number.isFinite(Number(monthlyRevenueEstimate)) &&
+    Number(monthlyRevenueEstimate) > 0
+      ? Number(monthlyRevenueEstimate)
+      : fromClients;
+
+  const tier = toPlan(currentTier);
+  if (tier === 'elite') return null;
+
+  if (tier === 'basic') {
+    const currentCommission = monthlyRevenue * 0.1;
+    const proCommission = monthlyRevenue * 0.03;
+    const proMonthlyCost = PRO_FLAT();
+    const currentEffectiveCost = currentCommission;
+    const proEffectiveCost = proMonthlyCost + proCommission;
+    const saving = currentEffectiveCost - proEffectiveCost;
+    return {
+      currentMonthlyCost: Math.round(currentCommission),
+      upgradeMonthlyCost: Math.round(proEffectiveCost),
+      monthlySaving: Math.round(saving),
+      breakEvenClients: 5,
+      worthUpgrading: saving > 0,
+    };
+  }
+
+  if (tier === 'pro') {
+    const proEffectiveCost = PRO_FLAT() + monthlyRevenue * 0.03;
+    const eliteMonthlyCost = ELITE_FLAT();
+    const saving = proEffectiveCost - eliteMonthlyCost;
+    return {
+      currentMonthlyCost: Math.round(proEffectiveCost),
+      upgradeMonthlyCost: eliteMonthlyCost,
+      monthlySaving: Math.round(saving),
+      breakEvenClients: 12,
+      worthUpgrading: saving > 0,
+    };
+  }
+
+  return null;
+}
+
+/** Effective platform + plan cost for one tier at a given implied monthly client payment volume (GBP). */
+export function coachPlanEffectiveMonthly(planTierId, { clientCount, avgMonthlyRevenuePerClient = 85, monthlyRevenueEstimate = null } = {}) {
+  const tier = toPlan(planTierId);
+  const n = Math.max(0, Number(clientCount) || 0);
+  const fromClients = n * Number(avgMonthlyRevenuePerClient) || 0;
+  const revenue =
+    monthlyRevenueEstimate != null &&
+    Number.isFinite(Number(monthlyRevenueEstimate)) &&
+    Number(monthlyRevenueEstimate) > 0
+      ? Number(monthlyRevenueEstimate)
+      : fromClients;
+  if (tier === 'basic') return Math.round(revenue * 0.1);
+  if (tier === 'pro') return Math.round(PRO_FLAT() + revenue * 0.03);
+  if (tier === 'elite') return Math.round(ELITE_FLAT());
+  return Math.round(revenue * 0.1);
+}
+
+/**
+ * Line under plan cards (onboarding / plan picker): concrete effective cost.
+ * @param {{ planTierId: string, clientCount: number, monthlyRevenueEstimate?: number | null }} opts
+ */
+export function formatCoachPlanCardEffectiveLine({ planTierId, clientCount, monthlyRevenueEstimate = null }) {
+  const n = Math.max(0, Number(clientCount) || 0);
+  const eff = coachPlanEffectiveMonthly(planTierId, { clientCount: n, monthlyRevenueEstimate });
+  if (n > 0) {
+    return `At your current ${n} clients: ${CURRENCY}${eff}/month effective`;
+  }
+  const basicEff = coachPlanEffectiveMonthly('basic', {
+    clientCount: 5,
+    avgMonthlyRevenuePerClient: ILLUSTRATION_AVG_MONTHLY_PER_CLIENT,
+  });
+  const proEff = coachPlanEffectiveMonthly('pro', {
+    clientCount: 5,
+    avgMonthlyRevenuePerClient: ILLUSTRATION_AVG_MONTHLY_PER_CLIENT,
+  });
+  const save = Math.max(0, basicEff - proEff);
+  return `At 5 clients: Pro saves you ${CURRENCY}${save}/month vs Basic`;
+}
+
+/**
+ * Prompt object for coach home (canonical /home). Never shown below 8 clients (Basic→Pro).
+ * Pro→Elite requires 12+ clients. Uses £85/client implied revenue unless monthlyRevenueEstimate is set.
+ * Near-miss window: show when saving > -£5 vs next tier.
+ */
+export function buildCoachHomeUpgradePrompt({ planTier, clientCount, monthlyRevenueEstimate = null, dismissedId = null }) {
+  const tier = toPlan(planTier);
+  const n = Math.max(0, Number(clientCount) || 0);
+  if (n < 8) return null;
+
+  const revInput =
+    monthlyRevenueEstimate != null &&
+    Number.isFinite(Number(monthlyRevenueEstimate)) &&
+    Number(monthlyRevenueEstimate) > 0
+      ? Number(monthlyRevenueEstimate)
+      : null;
+  const monthlyRevenue = revInput != null ? revInput : n * 85;
+
+  if (tier === 'basic') {
+    const basicCommission = monthlyRevenue * 0.1;
+    const proEffective = PRO_FLAT() + monthlyRevenue * 0.03;
+    const saving = basicCommission - proEffective;
+    if (saving <= -5) return null;
+    const prompt = {
+      id: 'basic_to_pro_savings',
+      kind: 'major',
+      variant: 'inline',
+      title: `You're paying ${CURRENCY}${Math.round(basicCommission)}/month in commission`,
+      body: `At ${n} clients, Pro costs ${CURRENCY}${Math.round(proEffective)}/month — ${
+        saving > 0 ? `saving you ${CURRENCY}${Math.round(saving)}/month` : 'nearly at the crossover point'
+      }.`,
+      ctaLabel: 'Upgrade to Pro',
+      metrics: { monthlySaving: Math.round(saving), clientCount: n, basicCommission, proEffective },
+    };
+    if (dismissedId && prompt.id === dismissedId) return null;
+    return prompt;
+  }
+
+  if (tier === 'pro' && n >= 12) {
+    const proEffective = PRO_FLAT() + monthlyRevenue * 0.03;
+    const eliteFlat = eliteTotal();
+    const eliteSaving = proEffective - eliteFlat;
+    if (eliteSaving <= -5) return null;
+    const proRounded = Math.round(proEffective);
+    const savingRounded = Math.round(eliteSaving);
+    const prompt = {
+      id: 'pro_to_elite_savings',
+      kind: 'major',
+      variant: 'inline',
+      title: 'Elite is now worth it for you',
+      body:
+        eliteSaving > 0
+          ? `At ${n} clients, Pro costs you ${CURRENCY}${proRounded}/month. Elite is ${CURRENCY}${eliteFlat} flat — saving you ${CURRENCY}${savingRounded}/month. Plus: your own brand, not ours.`
+          : `At ${n} clients, Pro costs you ${CURRENCY}${proRounded}/month. Elite is ${CURRENCY}${eliteFlat} flat — same ballpark with white-label, 0% commission, and priority support.`,
+      ctaLabel: `Upgrade to Elite — ${CURRENCY}${eliteFlat}/month`,
+      metrics: { monthlySaving: savingRounded, clientCount: n, proEffective, eliteFlat },
+    };
+    if (dismissedId && prompt.id === dismissedId) return null;
+    return prompt;
+  }
+
+  return null;
 }
 
 export function buildUpgradeInputs(raw = {}) {
@@ -46,17 +213,16 @@ export function evaluateUpgradeTriggers(raw = {}) {
   const weeklyLostVsPro = effectiveLostMonthlyVsPro / 4.33;
   const prompts = [];
 
-  if (currentPlan === 'basic' && input.clientCount >= 8) {
-    prompts.push({
-      id: 'pro_saves_money',
-      kind: 'major',
-      variant: 'banner',
-      title: "You're growing",
-      body: `You're now at the point where Pro saves money. Basic is costing ~£${Math.round(effectiveLostMonthlyVsPro)} more this month.`,
-      ctaLabel: 'See Pro',
-      metrics: { lostMonthlyVsPro: effectiveLostMonthlyVsPro },
-    });
-  }
+  const revenueForSaving =
+    monthlyRevenue > 0 ? monthlyRevenue : null;
+
+  const homePrompt = buildCoachHomeUpgradePrompt({
+    planTier: currentPlan,
+    clientCount: input.clientCount,
+    monthlyRevenueEstimate: revenueForSaving,
+    dismissedId: null,
+  });
+  if (homePrompt) prompts.push(homePrompt);
 
   if (input.lastPaymentAmount > 0 && currentPlan === 'basic') {
     const basicOnPayment = basicFees(input.lastPaymentAmount);
@@ -75,10 +241,10 @@ export function evaluateUpgradeTriggers(raw = {}) {
   if (weeklyLostVsPro > 20 && currentPlan === 'basic') {
     prompts.push({
       id: 'weekly_commission_summary',
-      kind: 'major',
+      kind: 'minor',
       variant: 'inline',
       title: 'Weekly fee summary',
-      body: `Estimated commission lost this week: ~£${Math.round(weeklyLostVsPro)}. Pro typically reduces this drag as your roster grows.`,
+      body: `Estimated commission drag this week vs Pro: ~${CURRENCY}${Math.round(weeklyLostVsPro)}. Numbers above reflect your full-month estimate when revenue is available.`,
       ctaLabel: 'Review savings',
       metrics: { weeklyLostVsPro },
     });
@@ -88,7 +254,7 @@ export function evaluateUpgradeTriggers(raw = {}) {
     const recommended = stateRecommended === 'elite' ? 'elite' : currentPlan === 'basic' ? 'pro' : 'elite';
     prompts.push({
       id: 'elite_scale_recommendation',
-      kind: 'major',
+      kind: 'minor',
       variant: 'inline',
       title: "You're growing",
       body: recommended === 'elite'
@@ -96,18 +262,6 @@ export function evaluateUpgradeTriggers(raw = {}) {
         : 'At 20+ clients, start with Pro now and move to Elite as you scale further.',
       ctaLabel: 'See plans',
       metrics: { recommended, eliteTotal: eliteTotal() },
-    });
-  }
-
-  if (stateRecommended === 'elite' && currentPlan === 'pro') {
-    prompts.push({
-      id: 'elite_cheaper_than_pro',
-      kind: 'major',
-      variant: 'inline',
-      title: 'Elite crossover reached',
-      body: 'At your current volume, Elite now costs less than Pro.',
-      ctaLabel: 'View Elite',
-      metrics: { stateRecommended },
     });
   }
 
@@ -158,7 +312,9 @@ export function resetUpgradePromptFrequencyGuards() {
 export function selectUpgradePrompt(prompts = [], { allowMajor = true } = {}) {
   if (!Array.isArray(prompts) || prompts.length === 0) return null;
   const major = prompts.find((p) => p.kind === 'major');
-  const strongerThreshold = Boolean(major?.metrics?.lostMonthlyVsPro >= 100);
+  const lost = Number(major?.metrics?.lostMonthlyVsPro) || 0;
+  const saving = Number(major?.metrics?.monthlySaving) || 0;
+  const strongerThreshold = Boolean(lost >= 100 || saving >= 120);
   if (major && allowMajor && canShowMajorPrompt(Date.now(), { strongerThreshold })) return major;
   return prompts.find((p) => p.kind !== 'major') || null;
 }

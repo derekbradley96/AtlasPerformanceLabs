@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store } from 'lucide-react';
+import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut } from 'lucide-react';
 import { getRouteTitle } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { createPageUrl } from '@/utils';
@@ -12,7 +12,7 @@ import { pageContainer, standardCard } from '@/ui/pageLayout';
 import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
 import { COACH_FOCUS_OPTIONS, coachFocusLabel } from '@/lib/data/coachTypeHelpers';
-import { normalizeRole } from '@/lib/roles';
+import { normalizeRole, isCoach } from '@/lib/roles';
 import { atlasMigrationDataAttributes, deriveAccountHubRouteState } from '@/lib/atlasMigrationPhases';
 
 /**
@@ -24,7 +24,7 @@ export default function Account() {
   const navigate = useNavigate();
   const location = useLocation();
   const { openFeedback, openSupport } = useFeedbackModal();
-  const { user: authUser, role, effectiveRole, profile, coachFocus, updateProfile, isDemoMode, isLoadingAuth, supabaseUser } = useAuth();
+  const { user: authUser, role, effectiveRole, profile, coachFocus, updateProfile, isDemoMode, isLoadingAuth, supabaseUser, signOut } = useAuth();
   const displayUser = authUser;
   const [updatingFocus, setUpdatingFocus] = useState(false);
   const canonicalRole = normalizeRole(effectiveRole ?? role ?? null);
@@ -84,7 +84,7 @@ export default function Account() {
           showChevron={true}
           onPress={() => { impactLight(); openSupport(); }}
         />
-        {(role === 'coach' || role === 'trainer') && (
+        {isCoach(role) && (
           <Row
             left={<Store size={20} style={{ color: colors.muted }} />}
             title="Marketplace listing"
@@ -110,7 +110,7 @@ export default function Account() {
           </div>
         )}
 
-        {(role === 'coach' || role === 'trainer') && (
+        {isCoach(role) && (
           <div
             style={{
               padding: spacing[16],
@@ -149,6 +149,49 @@ export default function Account() {
             </div>
           </div>
         )}
+        <Row
+          left={<LogOut size={20} style={{ color: colors.muted }} />}
+          title="Sign out"
+          showChevron={false}
+          onPress={() => { impactLight(); void signOut(); }}
+        />
+        <div
+          style={{
+            minHeight: 34,
+            display: 'flex',
+            alignItems: 'center',
+            paddingLeft: spacing[16],
+            paddingRight: spacing[16],
+            borderTop: `1px solid ${colors.border}`,
+            borderBottom: `1px solid ${colors.border}`,
+            color: colors.danger,
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}
+        >
+          Danger zone
+        </div>
+        <Row
+          left={<Trash2 size={20} style={{ color: colors.danger }} />}
+          title="Delete account"
+          subtitle="Permanently remove your account and all data"
+          titleColor={colors.danger}
+          showChevron={true}
+          onPress={() => { impactLight(); navigate('/settings/delete-account'); }}
+        />
+      </div>
+      <div
+        className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
+        style={{ paddingTop: spacing[20], paddingBottom: spacing[16] }}
+      >
+        <Link to="/privacy" className="text-sm font-medium" style={{ color: colors.primary }}>
+          Privacy Policy
+        </Link>
+        <Link to="/terms" className="text-sm font-medium" style={{ color: colors.primary }}>
+          Terms of Service
+        </Link>
       </div>
     </div>
   );

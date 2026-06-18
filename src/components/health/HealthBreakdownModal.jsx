@@ -64,6 +64,7 @@ export default function HealthBreakdownModal({
   onRequestCheckIn,
   onMessageClient,
   coachFocus = null,
+  viewerWU = 'kg',
 }) {
   const recentWeights = useMemo(() => getRecentWeights(checkIns), [checkIns]);
   const weightCurrent = recentWeights[0]?.value;

@@ -6,6 +6,7 @@ import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { toast } from 'sonner';
 import { atlasMigrationDataAttributes, deriveJoinLeadPageRouteState } from '@/lib/atlasMigrationPhases';
+import PageMeta from '@/components/seo/PageMeta';
 
 export default function JoinPage() {
   const { slug } = useParams();
@@ -50,34 +51,46 @@ export default function JoinPage() {
 
   if (!slug) {
     return (
-      <div
-        className="min-h-screen flex items-center justify-center p-4"
-        style={{ background: colors.bg, color: colors.muted }}
-        {...joinLeadMigrationAttrs}
-      >
-        <p>Invalid link.</p>
-      </div>
+      <>
+        <PageMeta
+          title="Join Atlas Performance Labs"
+          description="Join Atlas Performance Labs to start your coaching journey and connect with a competition prep coach."
+        />
+        <div
+          className="min-h-screen flex items-center justify-center p-4"
+          style={{ background: colors.bg, color: colors.muted }}
+          {...joinLeadMigrationAttrs}
+        >
+          <p>Invalid link.</p>
+        </div>
+      </>
     );
   }
 
   if (submitted) {
     return (
-      <div
-        className="min-h-screen flex flex-col items-center justify-center p-4"
-        style={{
-          background: colors.bg,
-          paddingTop: 'env(safe-area-inset-top)',
-          paddingBottom: 'env(safe-area-inset-bottom)',
-        }}
-        {...joinLeadMigrationAttrs}
-      >
-        <Card style={{ padding: spacing[24], textAlign: 'center', maxWidth: 360 }}>
-          <h1 className="text-xl font-bold mb-2" style={{ color: colors.text }}>You’re on the list</h1>
-          <p className="text-sm" style={{ color: colors.muted }}>
-            Thanks for your interest. The coach will reach out soon.
-          </p>
-        </Card>
-      </div>
+      <>
+        <PageMeta
+          title="Join Atlas Performance Labs"
+          description="Join Atlas Performance Labs to start your coaching journey and connect with a competition prep coach."
+        />
+        <div
+          className="min-h-screen flex flex-col items-center justify-center p-4"
+          style={{
+            background: colors.bg,
+            paddingTop: 'env(safe-area-inset-top)',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+          }}
+          {...joinLeadMigrationAttrs}
+        >
+          <Card style={{ padding: spacing[24], textAlign: 'center', maxWidth: 360 }}>
+            <h1 className="text-xl font-bold mb-2" style={{ color: colors.text }}>You’re on the list</h1>
+            <p className="text-sm" style={{ color: colors.muted }}>
+              Thanks for your interest. The coach will reach out soon.
+            </p>
+          </Card>
+        </div>
+      </>
     );
   }
 
@@ -91,6 +104,10 @@ export default function JoinPage() {
       }}
       {...joinLeadMigrationAttrs}
     >
+      <PageMeta
+        title="Join Atlas Performance Labs"
+        description="Join Atlas Performance Labs to start your coaching journey and connect with a competition prep coach."
+      />
       <div className="max-w-sm mx-auto w-full">
         <h1 className="text-xl font-bold text-center mb-1" style={{ color: colors.text }}>
           Join the program

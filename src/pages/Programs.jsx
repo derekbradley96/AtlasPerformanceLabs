@@ -1,21 +1,30 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Plus, Search, Copy, Edit, Dumbbell, TrendingDown, Target, Users } from 'lucide-react';
+import { Plus, Search, Copy, Edit, Dumbbell, TrendingDown, Target, Users, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { saveProgram, getAssignmentCount, getProgramById, getPrograms as getLocalPrograms } from '@/lib/programsStore';
+import {
+  saveProgram,
+  deleteProgram as deleteLocalProgram,
+  getAssignmentCount,
+  getProgramById,
+  getPrograms as getLocalPrograms,
+} from '@/lib/programsStore';
 import { logAuditEvent } from '@/lib/auditLogStore';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { ProgramsListSkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
+import EmptyState from '@/components/ui/EmptyState';
 import { captureUiError } from '@/services/errorLogger';
 import { colors, spacing } from '@/ui/tokens';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { desktopRhythm, chipPadding, cardContentRhythm } from '@/ui/pageLayout';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 async function lightHaptic() {
   try {
@@ -38,6 +47,7 @@ const goalColors = {
   fat_loss: '#22C55E',
   general_fitness: '#8B5CF6',
 };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function Programs() {
   const navigate = useNavigate();
@@ -59,6 +69,11 @@ export default function Programs() {
   const [dataLoading, setDataLoading] = useState(true);
   const [programsLoadError, setProgramsLoadError] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [programToDelete, setProgramToDelete] = useState(null);
+
+  useEffect(() => {
+    document.title = 'Programs — Atlas';
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setInitialLoad(false), 200);
@@ -73,7 +88,13 @@ export default function Programs() {
       .then((list) => {
         if (cancelled) return;
         const remote = Array.isArray(list) ? list : [];
-        // Keep local-builder programs visible even when remote list is empty/unavailable.
+        const supabaseBacked = hasSupabase && !!user?.id;
+        if (supabaseBacked) {
+          // Source-of-truth when authenticated: DB-backed list only.
+          setPrograms(remote);
+          return;
+        }
+        // Local-only mode: merge local seeded + runtime programs.
         const local = getLocalPrograms();
         const merged = [...remote];
         const seen = new Set(remote.map((p) => p?.id).filter(Boolean));
@@ -94,7 +115,7 @@ export default function Programs() {
         if (!cancelled) setDataLoading(false);
       });
     return () => { cancelled = true; };
-  }, [data, refreshKey]);
+  }, [data, refreshKey, user?.id]);
 
   useEffect(() => {
     if (!assignToClientId) {
@@ -124,8 +145,13 @@ export default function Programs() {
   const handleEdit = async (id, program) => {
     await lightHaptic();
     const clientId = program?.client_id ?? null;
-    if (clientId) {
-      navigate(`/program-builder?clientId=${encodeURIComponent(clientId)}&blockId=${encodeURIComponent(id)}`);
+    const blockId = id ?? program?.id ?? null;
+    if (blockId && clientId) {
+      navigate(`/program-builder?clientId=${encodeURIComponent(clientId)}&blockId=${encodeURIComponent(blockId)}`);
+      return;
+    }
+    if (blockId) {
+      navigate(`/program-builder?blockId=${encodeURIComponent(blockId)}`);
       return;
     }
     navigate('/program-builder');
@@ -154,6 +180,32 @@ export default function Programs() {
     toast.success(`Program assigned to ${clientForAssign?.full_name || 'client'}`);
     navigate(`/clients/${assignToClientId}`);
   };
+
+  const handleDeleteConfirmed = useCallback(async (program) => {
+    const programId = program?.id;
+    if (!programId) return;
+    await lightHaptic();
+    try {
+      const canDeleteRemoteBlock = UUID_RE.test(String(programId));
+      if (hasSupabase && canDeleteRemoteBlock) {
+        const supabase = getSupabase();
+        if (!supabase) {
+          throw new Error('Sync is still loading. Please try deleting again in a moment.');
+        }
+        const { error } = await supabase
+          .from('program_blocks')
+          .delete()
+          .eq('id', programId);
+        if (error) throw error;
+      }
+      deleteLocalProgram(programId);
+      setPrograms((prev) => (Array.isArray(prev) ? prev.filter((p) => p?.id !== programId) : prev));
+      setRefreshKey((k) => k + 1);
+      toast.success('Program deleted');
+    } catch (err) {
+      toast.error(err?.message || 'Could not delete program');
+    }
+  }, []);
 
   return (
     <div
@@ -221,22 +273,17 @@ export default function Programs() {
           onRetry={() => setRefreshKey((k) => k + 1)}
         />
       ) : !initialLoad && !dataLoading && filteredPrograms.length === 0 ? (
-        <Card style={{ padding: isDesktopWeb ? spacing[28] : spacing[24], textAlign: 'center' }}>
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(255,255,255,0.08)' }}>
-            <Dumbbell size={28} style={{ color: colors.muted }} />
-          </div>
-          <p className="text-[17px] font-semibold mb-2" style={{ color: colors.text }}>
-            {search || goalFilter !== 'all' ? 'No programs found' : 'No programs yet'}
-          </p>
-          <p className="text-sm mb-4" style={{ color: colors.muted }}>
-            {search || goalFilter !== 'all' ? 'Try adjusting your filters' : 'Create your first training program to assign to clients.'}
-          </p>
-          {!search && goalFilter === 'all' && (
-            <Button variant="primary" onClick={handleCreate}>
-              <Plus size={18} style={{ marginRight: 8 }} /> Create Program
-            </Button>
-          )}
-        </Card>
+        <EmptyState
+          icon={Dumbbell}
+          title={search || goalFilter !== 'all' ? 'No programs found' : 'No programs yet'}
+          description={
+            search || goalFilter !== 'all'
+              ? 'Try adjusting your filters to find a program.'
+              : 'Build your first program and assign it to a client.'
+          }
+          actionLabel={!search && goalFilter === 'all' ? 'Create a program' : undefined}
+          onAction={!search && goalFilter === 'all' ? () => { void handleCreate(); } : undefined}
+        />
       ) : !initialLoad && !dataLoading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: rhythm.gutter }}>
           {(filteredPrograms || []).map((program) => {
@@ -281,6 +328,15 @@ export default function Programs() {
                   >
                     <Copy size={18} style={{ color: colors.muted }} />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setProgramToDelete(program)}
+                    className="rounded-xl flex items-center justify-center"
+                    style={{ minHeight: 44, minWidth: 44, background: colors.surface1, border: `1px solid ${colors.border}` }}
+                    aria-label="Delete program"
+                  >
+                    <Trash2 size={18} style={{ color: colors.danger }} />
+                  </button>
                   {assignToClientId && (
                     <Button variant="primary" onClick={() => handleAssignToClient(program.id)}>
                       Assign to Client
@@ -302,6 +358,16 @@ export default function Programs() {
       )}
 
       <div style={{ height: spacing[16] }} />
+      <ConfirmDialog
+        open={programToDelete !== null}
+        title={`Delete "${programToDelete?.name || 'this program'}"?`}
+        message="This cannot be undone."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => { handleDeleteConfirmed(programToDelete); setProgramToDelete(null); }}
+        onCancel={() => setProgramToDelete(null)}
+      />
     </div>
   );
 }

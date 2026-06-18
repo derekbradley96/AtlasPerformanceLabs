@@ -1,12 +1,11 @@
 import React from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery } from '@tanstack/react-query';
 import { History } from 'lucide-react';
 import { CardSkeleton } from '@/components/ui/LoadingState';
 import { formatDistanceToNow } from 'date-fns';
 
-export default function AdminAuditLog({ adminEmail }) {
-  const isAdmin = adminEmail?.toLowerCase() === 'derekbradley96@gmail.com';
+export default function AdminAuditLog({ isAdmin, adminEmail }) {
 
   const { data: logs = [], isLoading } = useQuery({
     queryKey: ['audit-log'],

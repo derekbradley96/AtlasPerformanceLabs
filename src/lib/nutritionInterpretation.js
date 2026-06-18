@@ -37,6 +37,8 @@ export function deriveNutritionStatusLine({
   remaining,
   targets,
   trainingDay = false,
+  isCompPrepClient = false,
+  daysOut = null,
 }) {
   const target = Number(targetCalories) || 0;
   const consumed = Number(consumedCalories) || 0;
@@ -63,10 +65,10 @@ export function deriveNutritionStatusLine({
     else if (direction === 'over' && band === 'meaningfully_off') line = rolePhrase("Above target for today's cut, a lighter final meal would tighten the day", "Above today's cut target - a lighter final meal can tighten the day");
     else if (direction === 'under' && band !== 'on_track') line = 'Slightly under target today';
   } else if (goalKey === 'competition_prep') {
-    if (band === 'on_track') line = 'On track for prep today';
+    if (band === 'on_track') line = 'Strong protein hit — muscle preservation is on track for your prep';
     else if (direction === 'under' && band === 'slightly_off') line = 'Slightly under prep target today';
     else if (direction === 'over' && band === 'slightly_off') line = 'Slightly above prep target today';
-    else if (direction === 'under' && band === 'meaningfully_off') line = 'Meaningfully under prep target - recovery may be harder';
+    else if (direction === 'under' && band === 'meaningfully_off') line = "Deficit on track — your body is in fat-burning mode. Keep protein high to hold muscle.";
     else if (direction === 'over' && band === 'meaningfully_off') line = 'Meaningfully above prep target - tighten the final meal';
   } else {
     if (direction === 'under' && band === 'meaningfully_off') line = 'Meaningfully under target today';
@@ -76,10 +78,12 @@ export function deriveNutritionStatusLine({
 
   let suggestion = rolePhrase('Keep logging meals to stay consistent.', 'Keep logging so your coach sees a clean daily signal.');
   if (macroGap === 'protein') {
-    suggestion = rolePhrase(
-      'Protein is still the biggest gap, so make the next meal protein-forward.',
-      'Protein is still the biggest gap; prioritize protein in the next meal for better recovery.'
-    );
+    suggestion = goalKey === 'competition_prep'
+      ? 'Strong protein hit — muscle preservation is on track for your prep'
+      : rolePhrase(
+          'Protein is still the biggest gap, so make the next meal protein-forward.',
+          'Protein is still the biggest gap; prioritize protein in the next meal for better recovery.'
+        );
   } else if (macroGap === 'carbs' && trainingDay) {
     suggestion = rolePhrase(
       'Carbs are still behind on a training day, so top up with an easier-to-digest carb source.',
@@ -110,6 +114,9 @@ export function deriveNutritionStatusLine({
       'A lighter close can keep today in a tighter range.',
       'A lighter close can tighten daily adherence for review.'
     );
+  }
+  if (goalKey === 'competition_prep' && isCompPrepClient && Number(daysOut) > 0 && Number(daysOut) <= 7) {
+    suggestion = 'Peak week — hit your carb target precisely today. Every gram counts.';
   }
 
   return {

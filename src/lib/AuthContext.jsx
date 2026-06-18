@@ -1,19 +1,33 @@
 /** Production auth flow is unified through /login. Legacy role-select pages are DEV/demo only. setFakeSession is a DEV-only fallback. */
-import React, { createContext, useState, useContext, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
 import { getCoachType, normalizeCoachType } from '@/lib/data/coachProfileRepo';
 import { coachTypeToCoachFocus, coachFocusToCoachType } from '@/lib/data/coachTypeHelpers';
 import { safeGetJson } from '@/lib/storageSafe';
 import { setCurrentTrainerId } from '@/lib/sandboxTrainerId';
 import { supabase, hasSupabase } from '@/lib/supabaseClient';
+import { fetchProfile } from '@/lib/auth/fetchProfile';
+import { hydrateSessionFromSupabase, setupAuthStateListener } from '@/lib/auth/sessionHydration';
 import { getAppOrigin } from '@/lib/appOrigin';
 import { getAuthCallbackUrl, getAuthCallbackUrlForRecovery } from '@/lib/authRedirect';
 import * as storage from '@/lib/persistence/storage';
-import { normalizeRole, DEFAULT_ROLE, CANONICAL_ROLES, isCanonicalRole } from '@/lib/roles';
+import { normalizeRole, DEFAULT_ROLE, CANONICAL_ROLES, isCanonicalRole, isPersonal } from '@/lib/roles';
 import { isProfileOnboardingComplete, clearPendingClientInviteStorage } from '@/lib/onboardingStatus';
 import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { resolveAtlasAccess } from '@/lib/accessModel';
+import { getPrepContext } from '@/lib/prepContext';
 import { getMyClientProfile } from '@/lib/clientProfiles';
-import { isOwnerUser } from '@/lib/internalAccess';
+import { resolveCoachLinkId } from '@/lib/coachLink';
+import { fetchIsAdmin } from '@/lib/internalAccess';
+import {
+  BIOMETRIC_PROMPT_DISMISSED_KEY,
+  checkBiometricAvailability,
+  clearBiometricForLogout,
+  isBiometricEnabled,
+  setBiometricEnabled,
+} from '@/lib/biometricAuth';
+import { clearOfflineWorkoutQueue } from '@/lib/offlineWorkoutQueue';
+import { identifyUser, resetUser } from '@/lib/analytics';
+import { recordAffiliateReferralAfterSignup } from '@/lib/affiliateProgramme';
 
 const AuthContext = createContext();
 
@@ -24,14 +38,11 @@ const SOLO_STORAGE_KEY = 'atlas_solo';
 const FAKE_SESSION_KEY = 'atlas_fake_session';
 const DEMO_MODE_STORAGE_KEY = 'atlas_demo_mode';
 const TRAINER_ID_STORAGE_KEY = 'atlas_trainer_id';
-const ADMIN_IMPERSONATE_STORAGE_KEY = 'atlas_admin_impersonate';
+export const ADMIN_IMPERSONATE_STORAGE_KEY = 'atlas_admin_impersonate';
 const ADMIN_COACH_FOCUS_KEY = 'atlas_admin_coach_focus_override';
 const PENDING_INVITE_KEY = 'atlas_pending_invite_code';
 const PENDING_TRAINER_KEY = 'atlas_pending_trainer_id';
 const CLIENT_CODE_KEY = 'atlas_client_code';
-
-/** Back-compat export; prefer isOwnerUser()/isInternalAdmin() gates. */
-export const ADMIN_EMAIL = 'derekbradley96@gmail.com';
 
 /** Canonical: coach, client, personal. Persisted and sent as user_type in signUp. */
 const VALID_ROLES = [...CANONICAL_ROLES];
@@ -161,6 +172,8 @@ function withTimeout(promise, timeoutMs, message) {
 /** Clear all auth-related keys from localStorage so logout fully resets. */
 function clearAuthStorage() {
   if (typeof window !== 'undefined' && window.localStorage) {
+    clearBiometricForLogout();
+    clearOfflineWorkoutQueue();
     window.localStorage.removeItem(ROLE_STORAGE_KEY);
     window.localStorage.removeItem(SOLO_STORAGE_KEY);
     window.localStorage.removeItem(FAKE_SESSION_KEY);
@@ -238,6 +251,7 @@ function normalizeProfile(sessionUser, profileRow) {
     plan_tier: profileRow.plan_tier ?? undefined,
     personal_plan_tier: profileRow.personal_plan_tier ?? undefined,
     stripe_account_id: profileRow.stripe_account_id ?? undefined,
+    avatar_url: profileRow.avatar_url ?? undefined,
   };
 }
 
@@ -247,81 +261,6 @@ function buildUserFromProfile(sbUser, profile) {
   const u = normalizeProfile(sbUser, profile);
   const canonicalRole = normalizeRole(profile.role);
   return u ? { ...u, user_type: canonicalRole, role: canonicalRole } : null;
-}
-
-/** Columns for profiles select; split so we can retry if DB is behind migrations (e.g. plan_tier). */
-const PROFILE_SELECT_FULL =
-  'id, role, full_name, display_name, avatar_url, coach_type, coach_focus, plan_tier, personal_plan_tier, personal_training_equipment, personal_training_confidence, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit, food_quantity_unit, nutrition_label_display, water_unit, sodium_unit, stripe_account_id';
-const PROFILE_SELECT_WITHOUT_PLAN_TIER =
-  'id, role, full_name, display_name, avatar_url, coach_type, coach_focus, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit, food_quantity_unit, nutrition_label_display, water_unit, sodium_unit';
-/** When nutrition columns are not migrated yet */
-const PROFILE_SELECT_BODY_AND_LOAD =
-  'id, role, full_name, display_name, avatar_url, coach_type, coach_focus, plan_tier, personal_plan_tier, personal_training_equipment, personal_training_confidence, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit';
-const PROFILE_SELECT_BODY_AND_LOAD_NO_PLAN =
-  'id, role, full_name, display_name, avatar_url, coach_type, coach_focus, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit';
-/** DBs before bodyweight_unit / load_unit split (still have weight_unit). */
-const PROFILE_SELECT_LEGACY_BODY =
-  'id, role, full_name, display_name, avatar_url, coach_type, coach_focus, plan_tier, personal_plan_tier, personal_training_equipment, personal_training_confidence, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, weight_unit';
-const PROFILE_SELECT_LEGACY_BODY_NO_PLAN =
-  'id, role, full_name, display_name, avatar_url, coach_type, coach_focus, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, weight_unit';
-
-/** Map legacy profiles.weight_unit onto bodyweight_unit for in-app consistency. */
-export function normalizeFetchedProfileRow(row) {
-  if (!row || typeof row !== 'object') return row;
-  const next = { ...row };
-  if ((next.bodyweight_unit == null || next.bodyweight_unit === '') && next.weight_unit != null && next.weight_unit !== '') {
-    next.bodyweight_unit = next.weight_unit;
-  }
-  return next;
-}
-
-/** Fetch profile from public.profiles by auth uid. Returns { id, role, display_name, coach_type, coach_focus?, ... } or null. Fail-soft: never throws. */
-export async function fetchProfile(userId) {
-  if (!supabase || !userId) return null;
-  if (import.meta.env.DEV) console.log('[ATLAS] Fetching profile for', userId);
-  const selects = [
-    PROFILE_SELECT_FULL,
-    PROFILE_SELECT_WITHOUT_PLAN_TIER,
-    PROFILE_SELECT_BODY_AND_LOAD,
-    PROFILE_SELECT_BODY_AND_LOAD_NO_PLAN,
-    PROFILE_SELECT_LEGACY_BODY,
-    PROFILE_SELECT_LEGACY_BODY_NO_PLAN,
-  ];
-  try {
-    let lastError = null;
-    for (const sel of selects) {
-      const { data, error } = await supabase.from('profiles').select(sel).eq('id', userId).maybeSingle();
-      if (!error) {
-        if (import.meta.env.DEV) console.log('[AUTH] profile fetch ok?', !!data);
-        return normalizeFetchedProfileRow(data ?? null);
-      }
-      lastError = error;
-      if (
-        !/plan_tier|personal_plan_tier|personal_training_equipment|personal_training_confidence|linked_from_personal_at|height_unit|bodyweight_unit|load_unit|weight_unit|food_quantity_unit|nutrition_label_display|water_unit|sodium_unit|schema cache|PGRST204/i.test(
-          error.message || ''
-        )
-      ) {
-        break;
-      }
-    }
-    if (import.meta.env.DEV) console.log('[AUTH] profile error', lastError?.message);
-    return null;
-  } catch (e) {
-    if (import.meta.env.DEV) console.log('[AUTH] profile error', e?.message);
-    return null;
-  }
-}
-
-async function fetchProfileWithTimeout(userId, timeoutMs = 8000) {
-  try {
-    const result = await Promise.race([
-      fetchProfile(userId),
-      new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-    return result ?? null;
-  } catch {
-    return null;
-  }
 }
 
 export const AuthProvider = ({ children }) => {
@@ -346,6 +285,7 @@ export const AuthProvider = ({ children }) => {
   const [isHydratingAppState, setIsHydratingAppState] = useState(true);
   const [coachType, setCoachTypeState] = useState(null);
   const [supabaseUser, setSupabaseUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [supabaseSession, setSupabaseSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [profileLoadError, setProfileLoadError] = useState(null);
@@ -355,12 +295,40 @@ export const AuthProvider = ({ children }) => {
   /** Signed-in client: linked `clients` row + coach coach_focus for delivery_context resolution. */
   const [clientLinkedRow, setClientLinkedRow] = useState(null);
   const [linkedCoachFocus, setLinkedCoachFocus] = useState(null);
+  /** Elite coach brand for signed-in client (from coach profile). */
+  const [coachBrand, setCoachBrand] = useState(null);
   /** True after first client linked-row fetch for signed-in client (avoids prep route flash before DB resolves). */
   const [clientLinkedResolved, setClientLinkedResolved] = useState(false);
-  /** Admin bypass: dev panel (role === 'admin') or logged-in admin email (can switch trainer/client/solo). */
-  const isOwnerAccount = isOwnerUser(supabaseUser);
+  /** Active contest prep row for signed-in client (is_active), when present. */
+  const [activeContestPrep, setActiveContestPrep] = useState(null);
+  /** Count of contest_preps rows for this client with show_date strictly before today (completed / past shows). */
+  const [contestPrepPastShowCount, setContestPrepPastShowCount] = useState(0);
+  const [showBiometricSetupPrompt, setShowBiometricSetupPrompt] = useState(false);
+  /** Admin bypass: dev panel (role === 'admin') or logged-in platform admin (can switch trainer/client/solo). */
+  const isOwnerAccount = isAdmin;
   const isAdminBypass = (isDev && role === ADMIN_ROLE) || isOwnerAccount;
   const hydrationStartedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!hasSupabase || !supabase || !supabaseUser?.id) {
+      setIsAdmin(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      try {
+        const next = await fetchIsAdmin(supabase);
+        if (!cancelled) setIsAdmin(Boolean(next));
+      } catch {
+        if (!cancelled) setIsAdmin(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabaseUser?.id]);
 
   useEffect(() => {
     const id = user?.id ?? 'local-coach';
@@ -409,160 +377,32 @@ export const AuthProvider = ({ children }) => {
       }
     }, SAFETY_TIMEOUT_MS);
     let mounted = true;
-    (async () => {
-      try {
-        if (import.meta.env.DEV) console.log('[AUTH] boot start');
-        const { data } = await supabase.auth.getSession();
-        const session = data?.session;
-        if (import.meta.env.DEV) console.log('[AUTH] session', session ? 'found' : 'not found', session?.user?.id ?? '');
-        if (!mounted) return;
-        setIsHydratingSupabase(false);
-        if (!session?.user) {
-          setSupabaseSession(null);
-          setSupabaseUser(null);
-          setProfile(null);
-          setProfileLoadError(null);
-          setBootError(null);
-          setRoleState(null);
-          setUser(LOCAL_COACH_USER);
-          setIsAuthenticated(false);
-          hydrationDoneRef.current = true;
-          setIsHydratingAppState(false);
-          clearTimeout(safetyTimer);
-          if (import.meta.env.DEV) console.log('[ATLAS] boot ready (no session)');
-          return;
-        }
-        setSupabaseSession(session);
-        setSupabaseUser(session.user);
-        setProfileLoadError(null);
-        let profileRow = null;
-        try {
-          profileRow = await fetchProfileWithTimeout(session.user.id);
-        } catch (profileErr) {
-          if (import.meta.env.DEV) console.log('[AUTH] profile error', profileErr?.message);
-        }
-        if (!mounted) return;
-        if (profileRow && isValidProfileRole(profileRow.role)) {
-          setProfile(profileRow);
-          setRoleState(normalizeRole(profileRow.role));
-          const u = buildUserFromProfile(session.user, profileRow);
-          if (u) setUser(u);
-          setIsAuthenticated(true);
-          setBootError(null);
-          if (import.meta.env.DEV) {
-            console.log('[AUTH DEBUG] login', { user_type: session.user?.user_metadata?.user_type, profiles_role: profileRow?.role });
-          }
-        } else if (profileRow && profileRow.id && (profileRow.role == null || profileRow.role === '')) {
-          try {
-            await supabase.from('profiles').update({ role: 'personal' }).eq('id', session.user.id);
-          } catch (_) {}
-          const patched = { ...profileRow, role: 'personal' };
-          setProfile(patched);
-          setRoleState('personal');
-          const u = buildUserFromProfile(session.user, patched);
-          if (u) setUser(u);
-          setIsAuthenticated(true);
-          setBootError(null);
-          if (import.meta.env.DEV) console.log('[ATLAS] profile role missing, defaulted to personal');
-        } else {
-          setProfile(null);
-          setRoleState(getRoleFromAuthMetadata(session.user) ?? DEFAULT_ROLE);
-          const fallbackUser = normalizeProfile(session.user, null);
-          if (fallbackUser) setUser(fallbackUser);
-          setIsAuthenticated(true);
-          setProfileLoadError(profileRow === null ? 'PROFILE_MISSING' : null);
-          setBootError(null);
-          if (import.meta.env.DEV) {
-            console.log('[AUTH DEBUG] login (no/invalid profile)', { user_type: session.user?.user_metadata?.user_type, profiles_role: profileRow?.role, fallback_role: DEFAULT_ROLE });
-          }
-        }
-      } catch (e) {
-        const errMsg = e?.message ?? 'Session check failed';
-        if (import.meta.env.DEV) console.error('[BOOT_FAIL]', { step: 'hydration', message: errMsg, stack: e?.stack });
-        if (mounted) {
-          setBootError(errMsg);
-          setIsHydratingSupabase(false);
-          setSupabaseSession(null);
-          setSupabaseUser(null);
-          setProfile(null);
-          setProfileLoadError(null);
-          setRoleState(null);
-          setUser(LOCAL_COACH_USER);
-          setIsAuthenticated(false);
-        }
-      } finally {
-        if (mounted) {
-          hydrationDoneRef.current = true;
-          setIsHydratingAppState(false);
-        }
-        clearTimeout(safetyTimer);
-      }
-    })();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (import.meta.env.DEV) console.log('[ATLAS] Auth state:', _event, 'user id:', session?.user?.id);
-      if (!mounted) return;
-      // Guard against transient null sessions on refresh/lock contention.
-      // Only treat null as real sign-out when event is SIGNED_OUT.
-      if (!session?.user && _event !== 'SIGNED_OUT') return;
-      // Avoid async work directly inside onAuthStateChange callback.
-      // Supabase warns lock can be held too long if callback awaits.
-      setTimeout(() => {
-        void (async () => {
-          if (!mounted) return;
-          setSupabaseSession(session);
-          setSupabaseUser(session?.user ?? null);
-          setProfileLoadError(null);
-          if (session?.user) {
-            let profileRow = null;
-            try {
-              profileRow = await fetchProfileWithTimeout(session.user.id);
-            } catch (err) {
-              if (import.meta.env.DEV) console.log('[AUTH] profile error', err?.message);
-            }
-            if (!mounted) return;
-            if (profileRow && isValidProfileRole(profileRow.role)) {
-              setProfile(profileRow);
-              setRoleState(normalizeRole(profileRow.role));
-              const u = buildUserFromProfile(session.user, profileRow);
-              if (u) setUser(u);
-              setIsAuthenticated(true);
-              setBootError(null);
-              if (import.meta.env.DEV) {
-                console.log('[AUTH DEBUG] login', { user_type: session.user?.user_metadata?.user_type, profiles_role: profileRow?.role });
-              }
-            } else if (profileRow && profileRow.id && (profileRow.role == null || profileRow.role === '')) {
-              try {
-                await supabase.from('profiles').update({ role: 'personal' }).eq('id', session.user.id);
-              } catch (_) {}
-              const patched = { ...profileRow, role: 'personal' };
-              setProfile(patched);
-              setRoleState('personal');
-              const u = buildUserFromProfile(session.user, patched);
-              if (u) setUser(u);
-              setIsAuthenticated(true);
-              setBootError(null);
-            } else {
-              setProfile(null);
-              setRoleState(getRoleFromAuthMetadata(session.user) ?? DEFAULT_ROLE);
-              const fallbackUser = normalizeProfile(session.user, null);
-              if (fallbackUser) setUser(fallbackUser);
-              setIsAuthenticated(true);
-              if (!profileRow) setProfileLoadError('PROFILE_MISSING');
-              setBootError(null);
-              if (import.meta.env.DEV) {
-                console.log('[AUTH DEBUG] login (no/invalid profile)', { user_type: session.user?.user_metadata?.user_type, profiles_role: profileRow?.role });
-              }
-            }
-          } else {
-            setProfile(null);
-            setRoleState(null);
-            setUser(LOCAL_COACH_USER);
-            setIsAuthenticated(false);
-            setBootError(null);
-          }
-        })();
-      }, 0);
-    });
+    const sessionHydrationCtx = {
+      supabase,
+      isMounted: () => mounted,
+      hydrationDoneRef,
+      safetyTimer,
+      LOCAL_COACH_USER,
+      DEFAULT_ROLE,
+      setIsHydratingSupabase,
+      setSupabaseSession,
+      setSupabaseUser,
+      setIsAdmin,
+      setProfile,
+      setProfileLoadError,
+      setBootError,
+      setRoleState,
+      setUser,
+      setIsAuthenticated,
+      setIsHydratingAppState,
+      isValidProfileRole,
+      buildUserFromProfile,
+      normalizeProfile,
+      getRoleFromAuthMetadata,
+      normalizeRole,
+    };
+    void hydrateSessionFromSupabase(sessionHydrationCtx);
+    const subscription = setupAuthStateListener(sessionHydrationCtx);
     return () => {
       mounted = false;
       hydrationStartedRef.current = false;
@@ -576,6 +416,10 @@ export const AuthProvider = ({ children }) => {
     const resolvedRole = normalizeRole(role);
     if (resolvedRole !== 'client' && resolvedRole !== 'coach') return;
     if (isProfileOnboardingComplete(profile)) return;
+    // Do not auto-complete while the user is actively in an onboarding flow.
+    const isOnOnboardingPath =
+      typeof window !== 'undefined' && window.location.pathname.includes('onboarding');
+    if (isOnOnboardingPath) return;
 
     let cancelled = false;
     (async () => {
@@ -667,7 +511,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, [isDev, role]);
 
-  /** Hydrate persisted role override when logged in as admin email (so refresh keeps trainer/client/solo switch). */
+  /** Hydrate persisted role override when logged in as platform admin (so refresh keeps trainer/client/solo switch). */
   useEffect(() => {
     if (!isOwnerAccount || role === ADMIN_ROLE) return;
     const stored = getStoredAdminImpersonate();
@@ -692,8 +536,8 @@ export const AuthProvider = ({ children }) => {
     persistAdminCoachFocus(value);
   };
 
-  /** Role switcher (view as Coach / Client / Personal). Owner account only. */
-  const canUseRoleSwitcher = isOwnerAccount;
+  /** Role switcher (view as Coach / Client / Personal). Dev builds + admin accounts only; user?.email validated via isAdmin DB check. */
+  const canUseRoleSwitcher = isDev && isOwnerAccount && !!user?.email;
 
   const PROFILE_FETCH_TIMEOUT_MS = 8000;
   const AUTH_REQUEST_TIMEOUT_MS = 15000;
@@ -722,7 +566,8 @@ export const AuthProvider = ({ children }) => {
           ]);
         } catch (profileErr) {
           if (import.meta.env.DEV) console.log('[AUTH] profile error', profileErr?.message);
-          setProfileLoadError('PROFILE_MISSING');
+          const timedOut = /timeout/i.test(String(profileErr?.message || ''));
+          setProfileLoadError(timedOut ? 'PROFILE_TIMEOUT' : 'PROFILE_MISSING');
         }
         const canonicalRole = profileRow ? normalizeRole(profileRow.role) : null;
         const u = profileRow && canonicalRole && VALID_ROLES.includes(canonicalRole)
@@ -741,6 +586,25 @@ export const AuthProvider = ({ children }) => {
           setRoleState(getRoleFromAuthMetadata(data.user) ?? DEFAULT_ROLE);
           setBootError(null);
         }
+        try {
+          const dismissed = typeof window !== 'undefined'
+            ? window.localStorage.getItem(BIOMETRIC_PROMPT_DISMISSED_KEY) === '1'
+            : false;
+          if (!dismissed && !isBiometricEnabled()) {
+            const bio = await checkBiometricAvailability();
+            if (bio?.isAvailable) {
+              setShowBiometricSetupPrompt(true);
+            }
+          }
+        } catch (_) {}
+        try {
+          identifyUser(data.user.id, {
+            role: profileRow?.role ?? getRoleFromAuthMetadata(data.user) ?? undefined,
+            coach_focus: profileRow?.coach_focus,
+            plan_tier: profileRow?.plan_tier,
+            created_at: data.user?.created_at,
+          });
+        } catch (_) {}
       }
       return { data, error: null };
     } catch (err) {
@@ -748,6 +612,26 @@ export const AuthProvider = ({ children }) => {
     } finally {
       setIsLoadingAuth(false);
     }
+  };
+
+  /**
+   * OAuth (Google / Apple). Uses same redirect URL as email magic links so web + Capacitor deep link work.
+   * @param {'google' | 'apple'} provider
+   */
+  const signInWithProvider = async (provider) => {
+    if (!hasSupabase || !supabase) throw new Error('Supabase not configured');
+    const redirectTo = getAuthCallbackUrl();
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo,
+        queryParams: provider === 'google'
+          ? { access_type: 'offline', prompt: 'consent' }
+          : {},
+      },
+    });
+    if (error) throw error;
+    return data;
   };
 
   /** Normalize coach_focus to lowercase canonical value; default transformation only (never competition). */
@@ -783,10 +667,8 @@ export const AuthProvider = ({ children }) => {
       ...(roleForMetadata === 'coach' && coach_focus != null ? { coach_focus } : {}),
       ...(roleForMetadata === 'personal' && personal_goal != null ? { personal_goal } : {}),
     };
-    if (import.meta.env.DEV) {
-      console.log('[SIGNUP] start', { email, role: roleForMetadata, coach_focus: coach_focus ?? null, display_name });
-      console.log('[SIGNUP] metadata sent (no password)', dataForTrigger);
-    }
+    if (import.meta.env.DEV) console.log('[SIGNUP] start', { email, role: roleForMetadata, coach_focus: coach_focus ?? null, display_name });
+    if (import.meta.env.DEV) console.log('[SIGNUP] metadata sent (no password)', dataForTrigger);
     try {
       const { data, error } = await withTimeout(
         supabase.auth.signUp({
@@ -829,7 +711,8 @@ export const AuthProvider = ({ children }) => {
           ]);
         } catch (profileErr) {
           if (import.meta.env.DEV) console.warn('[SIGNUP] profile fetch failed (trigger may have failed)', profileErr?.message, profileErr);
-          setProfileLoadError('PROFILE_MISSING');
+          const timedOut = /timeout/i.test(String(profileErr?.message || ''));
+          setProfileLoadError(timedOut ? 'PROFILE_TIMEOUT' : 'PROFILE_MISSING');
         }
         // Allow AuthScreen auto-redirect: effect only proceeds when profile exists or PROFILE_MISSING.
         if (!profileRow) {
@@ -863,10 +746,24 @@ export const AuthProvider = ({ children }) => {
             }
           }
         }
-        if (import.meta.env.DEV) {
-          if (profileRow) console.log('[SIGNUP] profile fetch success', { role: profileRow.role, id: profileRow.id });
-          else console.warn('[SIGNUP] profile missing after signup — trigger may have failed; run migration 20260317120000_fix_profile_creation_on_signup');
+        if (profileRow && roleForMetadata === 'personal' && supabase) {
+          const pt = String(profileRow.personal_plan_tier ?? '').toLowerCase().trim();
+          if (pt !== 'free') {
+            const { error: personalTierErr } = await supabase
+              .from('profiles')
+              .update({ personal_plan_tier: 'free' })
+              .eq('id', data.user.id);
+            if (personalTierErr) {
+              if (import.meta.env.DEV) console.warn('[SIGNUP] personal_plan_tier=free update', personalTierErr.message);
+            } else {
+              const refetchedPersonal = await fetchProfile(data.user.id);
+              if (refetchedPersonal) profileRow = refetchedPersonal;
+            }
+          }
         }
+        await recordAffiliateReferralAfterSignup(supabase, data.user, roleForMetadata);
+        if (import.meta.env.DEV && profileRow) console.log('[SIGNUP] profile fetch success', { role: profileRow.role, id: profileRow.id });
+        if (import.meta.env.DEV && !profileRow) console.warn('[SIGNUP] profile missing after signup — trigger may have failed; run migration 20260317120000_fix_profile_creation_on_signup');
         if (profileRow && roleForMetadata !== (profileRow.role ?? '')) {
           if (import.meta.env.DEV) console.warn('[SIGNUP] Role mismatch: sent', roleForMetadata, 'profile has', profileRow.role);
         }
@@ -886,6 +783,14 @@ export const AuthProvider = ({ children }) => {
           setRoleState(getRoleFromAuthMetadata(data.user) ?? DEFAULT_ROLE);
           setBootError(null);
         }
+        try {
+          identifyUser(data.user.id, {
+            role: profileRow?.role ?? getRoleFromAuthMetadata(data.user) ?? roleForMetadata,
+            coach_focus: profileRow?.coach_focus ?? (roleForMetadata === 'coach' ? coach_focus : undefined),
+            plan_tier: profileRow?.plan_tier,
+            created_at: data.user?.created_at,
+          });
+        } catch (_) {}
       }
       return { data, error: null };
     } catch (err) {
@@ -898,21 +803,36 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const signOut = async () => {
+  const signOut = async (redirectTo = '/') => {
+    resetUser();
+    clearAuthStorage();
+    await clearAuthStoragePreferences();
     if (hasSupabase && supabase) {
       try {
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: 'global' });
       } catch (_) {}
     }
     setSupabaseUser(null);
     setSupabaseSession(null);
+    setIsAdmin(false);
     setProfile(null);
+    setProfileLoadError(null);
+    setBootError(null);
     clearFakeSession();
     setUser(LOCAL_COACH_USER);
     setRoleState(null);
+    setAdminImpersonateRole(null);
+    setClientLinkedRow(null);
+    setLinkedCoachFocus(null);
+    setCoachBrand(null);
+    setClientLinkedResolved(false);
+    setActiveContestPrep(null);
+    setContestPrepPastShowCount(0);
+    setIsDemoMode(false);
+    setShowBiometricSetupPrompt(false);
     setIsAuthenticated(false);
     setCurrentTrainerId('local-coach');
-    if (typeof window !== 'undefined') window.location.href = '/';
+    if (typeof window !== 'undefined') window.location.href = redirectTo;
   };
 
   const resetPassword = async (email) => {
@@ -927,29 +847,8 @@ export const AuthProvider = ({ children }) => {
   /** Alias for resetPassword: send reset email. Uses dynamic origin (getAppOrigin()), safe when !hasSupabase. */
   const sendPasswordReset = resetPassword;
 
-  const logout = async (shouldRedirect = true) => {
-    clearAuthStorage();
-    await clearAuthStoragePreferences();
-    if (hasSupabase && supabase) {
-      try {
-        await supabase.auth.signOut();
-      } catch (_) {}
-    }
-    setSupabaseUser(null);
-    setSupabaseSession(null);
-    setProfile(null);
-    setRoleState(null);
-    setAdminImpersonateRole(null);
-    setUser(LOCAL_COACH_USER);
-    setIsAuthenticated(false);
-    setIsDemoMode(false);
-    setCurrentTrainerId('local-coach');
-    if (shouldRedirect && typeof window !== 'undefined') {
-      window.location.href = LOGIN_PUBLIC_PATH;
-    }
-  };
-
   const setFakeSession = (roleValue, email) => {
+    if (!import.meta.env.DEV) return;
     if (import.meta.env.DEV) console.warn('[AUTH] setFakeSession used (DEV-only fallback)', roleValue);
     const r = VALID_ROLES_PERSISTED.includes(normalizeRole(roleValue)) ? normalizeRole(roleValue) : 'personal';
     const u = buildFakeUser(r, email);
@@ -968,14 +867,6 @@ export const AuthProvider = ({ children }) => {
     if (typeof window !== 'undefined') window.location.href = LOGIN_PUBLIC_PATH;
   };
 
-  const setRole = (nextRole) => {
-    if (supabaseUser) return;
-    const value = nextRole && VALID_ROLES_PERSISTED.includes(nextRole) ? nextRole : null;
-    setRoleState(value);
-    setAdminImpersonateRole(null);
-    persistRole(value);
-  };
-
   const selectRole = (nextRole) => {
     if (supabaseUser) return;
     const value = nextRole && VALID_ROLES_PERSISTED.includes(nextRole) ? nextRole : null;
@@ -985,6 +876,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const enterAdmin = (roleToImpersonate = 'coach') => {
+    if (!import.meta.env.DEV) return;
     if (!isDev) return;
     const r = VALID_ROLES_PERSISTED.includes(roleToImpersonate) ? roleToImpersonate : 'coach';
     setRoleState(ADMIN_ROLE);
@@ -993,15 +885,24 @@ export const AuthProvider = ({ children }) => {
   };
 
   const clearSession = () => {
+    resetUser();
     clearAuthStorage();
     setSupabaseUser(null);
     setSupabaseSession(null);
+    setIsAdmin(false);
     setProfile(null);
     setRoleState(null);
     setAdminImpersonateRole(null);
+    setClientLinkedRow(null);
+    setLinkedCoachFocus(null);
+    setCoachBrand(null);
+    setClientLinkedResolved(false);
+    setActiveContestPrep(null);
+    setContestPrepPastShowCount(0);
     setUser(LOCAL_COACH_USER);
     setIsAuthenticated(false);
     setIsDemoMode(false);
+    setShowBiometricSetupPrompt(false);
     setCurrentTrainerId('local-coach');
     if (typeof window !== 'undefined') window.location.href = '/';
   };
@@ -1112,7 +1013,10 @@ export const AuthProvider = ({ children }) => {
     if (!hasSupabase || !supabase || !supabaseUser?.id) {
       setClientLinkedRow(null);
       setLinkedCoachFocus(null);
+      setCoachBrand(null);
       setClientLinkedResolved(false);
+      setActiveContestPrep(null);
+      setContestPrepPastShowCount(0);
       return { error: null, data: null };
     }
     const eff = !isAdminBypass
@@ -1123,24 +1027,109 @@ export const AuthProvider = ({ children }) => {
     if (normalizeRole(eff) !== 'client') {
       setClientLinkedRow(null);
       setLinkedCoachFocus(null);
+      setCoachBrand(null);
       setClientLinkedResolved(false);
+      setActiveContestPrep(null);
+      setContestPrepPastShowCount(0);
       return { error: null, data: null };
     }
     const row = await getMyClientProfile(supabaseUser.id);
     setClientLinkedRow(row);
-    if (row?.coach_id) {
-      const { data } = await supabase.from('profiles').select('coach_focus').eq('id', row.coach_id).maybeSingle();
+    let prepRow = null;
+    let pastPrepCount = 0;
+    if (row?.id) {
+      try {
+        const { data: cp, error: cpErr } = await supabase
+          .from('contest_preps')
+          .select('id, show_name, show_date, is_active, federation, division, posing_target_weekly_minutes, prep_start_date, prep_start_weight_kg, target_stage_weight_kg')
+          .eq('client_id', row.id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (!cpErr && cp) prepRow = cp;
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const { count, error: pastErr } = await supabase
+          .from('contest_preps')
+          .select('id', { count: 'exact', head: true })
+          .eq('client_id', row.id)
+          .lt('show_date', todayIso);
+        if (!pastErr && typeof count === 'number') pastPrepCount = count;
+      } catch {
+        prepRow = null;
+        pastPrepCount = 0;
+      }
+    }
+    setActiveContestPrep(prepRow);
+    setContestPrepPastShowCount(pastPrepCount);
+    const coachId = resolveCoachLinkId(row);
+    if (coachId) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('coach_focus, plan_tier, brand_name, brand_logo_url, brand_accent_colour')
+        .eq('id', coachId)
+        .maybeSingle();
       setLinkedCoachFocus(data?.coach_focus ?? null);
+      const nm = (data?.brand_name ?? '').toString().trim();
+      setCoachBrand({
+        name: nm || null,
+        logoUrl: (data?.brand_logo_url ?? '').toString().trim() || null,
+        accentColour: (data?.brand_accent_colour ?? '#3B82F6').toString().trim() || '#3B82F6',
+        coachPlanTier: (data?.plan_tier ?? '').toString().trim().toLowerCase() || null,
+      });
     } else {
       setLinkedCoachFocus(null);
+      setCoachBrand(null);
     }
     setClientLinkedResolved(true);
     return { error: null, data: row };
-  }, [hasSupabase, supabaseUser?.id, role, isAdminBypass, adminImpersonateRole]);
+  }, [hasSupabase, supabase, supabaseUser?.id, role, isAdminBypass, adminImpersonateRole]);
 
   useEffect(() => {
     void refreshClientLinkedProfile();
   }, [refreshClientLinkedProfile]);
+
+  useEffect(() => {
+    if (!hasSupabase || !supabase || !profile?.id) return;
+    const eff = normalizeRole(
+      !isAdminBypass
+        ? role
+        : role === ADMIN_ROLE
+          ? (adminImpersonateRole || 'coach')
+          : (adminImpersonateRole ?? role)
+    );
+    if (eff !== 'personal') return;
+    let cancelled = false;
+    (async () => {
+      let prepRow = null;
+      try {
+        const { data: personalPrep, error: personalPrepErr } = await supabase
+          .from('personal_contest_preps')
+          .select('*')
+          .eq('profile_id', profile.id)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (!personalPrepErr && personalPrep) prepRow = personalPrep;
+      } catch {
+        prepRow = null;
+      }
+      if (!prepRow) {
+        try {
+          const { data: contestPrep } = await supabase
+            .from('contest_preps')
+            .select('id, show_name, show_date, status')
+            .eq('profile_id', profile.id)
+            .eq('status', 'active')
+            .maybeSingle();
+          if (contestPrep) prepRow = contestPrep;
+        } catch {
+          prepRow = null;
+        }
+      }
+      if (!cancelled) setActiveContestPrep(prepRow);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSupabase, supabase, profile?.id, role, isAdminBypass, adminImpersonateRole]);
 
   /** If profile row lagged on cold start, retry once when the tab becomes visible (fixes metadata vs profiles.role drift until DB catches up). */
   useEffect(() => {
@@ -1197,7 +1186,11 @@ export const AuthProvider = ({ children }) => {
     clientLinkedRow,
     linkedCoachFocus,
     clientLinkedResolved,
+    activeContestPrep,
   });
+  const isCompPrepClient = Boolean(activeContestPrep?.id);
+  const prepContext = useMemo(() => getPrepContext(activeContestPrep), [activeContestPrep]);
+  const isFirstTimeContestPrepClient = Boolean(activeContestPrep?.id) && contestPrepPastShowCount === 0;
   const coachFocus = resolvedAccess.coachFocus;
   const isTransformation = resolvedAccess.isCoachTransformation;
   const isCompetition = resolvedAccess.isCoachCompetition;
@@ -1206,6 +1199,20 @@ export const AuthProvider = ({ children }) => {
   const isTransformationCoach = isTransformation;
   const isCompetitionCoach = isCompetition;
   const isIntegratedCoach = isIntegrated;
+
+  const enableBiometricSetup = useCallback((email) => {
+    setBiometricEnabled(email || supabaseUser?.email || user?.email || '');
+    setShowBiometricSetupPrompt(false);
+  }, [supabaseUser?.email, user?.email]);
+
+  const dismissBiometricSetup = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(BIOMETRIC_PROMPT_DISMISSED_KEY, '1');
+      }
+    } catch (_) {}
+    setShowBiometricSetupPrompt(false);
+  }, []);
 
   return (
     <AuthContext.Provider value={{
@@ -1222,9 +1229,15 @@ export const AuthProvider = ({ children }) => {
       updateProfile,
       refreshProfile,
       refreshClientLinkedProfile,
+      coachBrand,
       clientLinkedRow,
       linkedCoachFocus,
       clientLinkedResolved,
+      activeContestPrep,
+      prepContext,
+      isFirstTimeContestPrepClient,
+      contestPrepPastShowCount,
+      isCompPrepClient,
       isPrepCoach,
       isFitnessCoach,
       isHybridCoach,
@@ -1238,13 +1251,14 @@ export const AuthProvider = ({ children }) => {
       isCompetitionCoach,
       isIntegratedCoach,
       isAdminBypass,
+      isAdmin,
       adminImpersonateRole,
       effectiveRole,
       setRoleOverride,
       canUseRoleSwitcher,
       setCoachFocusOverride,
       coachFocusOverride: isViewingAsCoach ? coachFocusOverride : null,
-      isSolo: normalizeRole(role) === 'personal' || normalizeRole(role) === 'solo',
+      isSolo: isPersonal(role),
       isHydratingAppState,
       authReady,
       hasSupabase,
@@ -1259,17 +1273,17 @@ export const AuthProvider = ({ children }) => {
       isSupabaseAuthed: !!supabaseUser,
       isHydratingSupabase,
       signIn,
+      signInWithProvider,
       signUp,
       signOut,
       resetPassword,
       sendPasswordReset,
-      setRole,
       selectRole,
-      setFakeSession,
-      enterAdmin,
-      logout,
       clearSession,
       navigateToLogin,
+      showBiometricSetupPrompt,
+      enableBiometricSetup,
+      dismissBiometricSetup,
       checkAppState: () => {},
       exitDemo: (cb) => { if (typeof cb === 'function') cb(); else window.location.href = '/'; },
     }}>
@@ -1290,3 +1304,5 @@ export const useSafeUser = () => {
   const { user } = useAuth();
   return user ?? SAFE_USER_STUB;
 };
+
+export { fetchProfile, fetchProfileWithTimeout, normalizeFetchedProfileRow } from '@/lib/auth/fetchProfile';

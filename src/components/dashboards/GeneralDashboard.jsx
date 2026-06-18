@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { fetchWorkoutListRowsForUser } from '@/lib/workoutSessionApi';
 import { createPageUrl } from '@/utils';
 import {
   Calendar,
@@ -85,7 +85,7 @@ export default function GeneralDashboard({ user }) {
   const rhythm = desktopRhythm(isWideWeb);
 
   const personalTier = resolvePersonalPlanTier(profile, user);
-  const isEnhanced = personalTier === 'enhanced';
+  const isEnhanced = personalTier === 'enhanced' || personalTier === 'free';
 
   const [showPersonalPostOnboarding, setShowPersonalPostOnboarding] = useState(false);
   const [personalPostOnboardingTier, setPersonalPostOnboardingTier] = useState('basic');
@@ -94,7 +94,7 @@ export default function GeneralDashboard({ user }) {
     try {
       setShowPersonalPostOnboarding(sessionStorage.getItem(PERSONAL_POST_ONBOARDING_SESSION_KEY) === '1');
       const t = sessionStorage.getItem(PERSONAL_ONBOARDING_TIER_SESSION_KEY);
-      setPersonalPostOnboardingTier(t === 'enhanced' ? 'enhanced' : 'basic');
+      setPersonalPostOnboardingTier(t === 'enhanced' || t === 'free' ? 'enhanced' : 'basic');
     } catch (_) {
       setShowPersonalPostOnboarding(false);
       setPersonalPostOnboardingTier('basic');
@@ -114,8 +114,9 @@ export default function GeneralDashboard({ user }) {
   const { data: recentWorkouts = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['personal-home-recent-workouts', user?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-list', { user_id: user?.id, status: 'completed' });
-      return Array.isArray(data) ? data.slice(0, 14) : [];
+      // TODO: Replace with direct Supabase query — see src/lib/workoutSessionApi.js
+      const rows = await fetchWorkoutListRowsForUser(user?.id, { status: 'completed', limit: 20 });
+      return Array.isArray(rows) ? rows.slice(0, 14) : [];
     },
     enabled: !!user?.id,
   });
@@ -123,8 +124,8 @@ export default function GeneralDashboard({ user }) {
   const { data: activeWorkout } = useQuery({
     queryKey: ['personal-home-active-workout', user?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-list', { user_id: user?.id, status: 'in_progress' });
-      const list = Array.isArray(data) ? data : [];
+      // TODO: Replace with direct Supabase query — see src/lib/workoutSessionApi.js
+      const list = await fetchWorkoutListRowsForUser(user?.id, { status: 'in_progress', limit: 5 });
       return list[0] || null;
     },
     enabled: !!user?.id,

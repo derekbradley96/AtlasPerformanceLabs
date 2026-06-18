@@ -1,5 +1,9 @@
 /**
- * Waitlist capture form: email + role_interest, saves to public.waitlist in Supabase.
+ * INTERNAL USE ONLY — not accessible from public nav.
+ * Used for collecting early interest during closed betas.
+ * For open signups: use SIGNUP_PUBLIC_PATH instead.
+ *
+ * Implementation: email + role_interest, saves to public.waitlist in Supabase.
  */
 import React, { useState } from 'react';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';

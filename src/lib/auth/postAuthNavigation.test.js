@@ -101,7 +101,7 @@ describe('postAuthNavigation', () => {
         supabaseUser: user({}),
         getPendingInvite: () => null,
       })
-    ).toBe('/personal-onboarding-tier');
+    ).toBe('/personal-onboarding-flow');
   });
 
   it('resolvePostSessionDestination incomplete client without pending → client flow', () => {
@@ -117,7 +117,7 @@ describe('postAuthNavigation', () => {
     ).toBe('/client-onboarding-flow');
   });
 
-  it('resolvePostSessionDestination coach with wizard signals but flag false → home', () => {
+  it('resolvePostSessionDestination coach incomplete without plan unblock → coach onboarding', () => {
     expect(
       resolvePostSessionDestination({
         supabaseUser: user({ role: 'coach' }),
@@ -133,6 +133,6 @@ describe('postAuthNavigation', () => {
         isPublicAuthEntry: false,
         getPendingInvite: () => null,
       })
-    ).toBe('/home');
+    ).toBe('/coach-onboarding-flow');
   });
 });

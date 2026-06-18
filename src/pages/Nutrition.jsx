@@ -1,12 +1,12 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useCoachNutritionCoverage, useNutritionData } from '@/hooks/useNutritionData';
 import { createPageUrl } from '@/utils';
 import { Apple, Target, MessageSquare, Scale, TrendingUp, Zap, Clock3, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
+import { PageLoader, EmptyState, NutritionCalorieRingSkeleton } from '@/components/ui/LoadingState';
 import { motion } from 'framer-motion';
 import MealLogForm from '@/components/nutrition/MealLogForm';
 import DailyNutritionProgress from '@/components/nutrition/DailyNutritionProgress';
@@ -14,30 +14,32 @@ import MealLogList from '@/components/nutrition/MealLogList';
 import { useAuth } from '@/lib/AuthContext';
 import { isClient as isClientRoleFn, isPersonal as isPersonalRoleFn, isCoach as isCoachRoleFn } from '@/lib/roles';
 import { toast } from 'sonner';
-import { colors, shell, spacing } from '@/ui/tokens';
+import { colors, radii, shell, spacing } from '@/ui/tokens';
 import Card from '@/ui/Card';
-import { getMyClientProfile } from '@/lib/clientProfiles';
-import { getClientNutritionSnapshot } from '@/lib/clientNutritionPlan';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import {
-  listPersonalMealLogs,
   addPersonalMealLog,
   deletePersonalMealLog,
   updatePersonalMealLog,
 } from '@/lib/personalNutritionStore';
+import { addMealLog, deleteMealLog, updateMealLog } from '@/lib/mealLogsService';
+import { buildMealLogInterpretation } from '@/lib/mealLogInterpretation';
 import {
-  fetchMergedPersonalNutritionTargets,
-  personalNutritionTargetsQueryKey,
-  hasPersonalNutritionTargets as hasPersonalNutritionTargetsMerged,
-} from '@/lib/personalNutritionProfile';
-import { upsertDailyNutritionAdherence, fetchNutritionAdherenceWeek, getMacroHitPercent } from '@/data/nutritionAdherenceService';
+  nutritionPlanAndTargetsQueryKey,
+  nutritionRecentFoodsQueryKey,
+  nutritionTodayQueryKey,
+  nutritionWeekStartIso,
+} from '@/lib/nutritionPageBundle';
+import {
+  upsertDailyNutritionAdherence,
+  upsertPersonalNutritionAdherence,
+} from '@/data/nutritionAdherenceService';
 import {
   markNutritionCompletedToday,
   getRetentionStreaks,
   buildCompletionMomentumFeedback,
 } from '@/lib/retentionHabitService';
 import { derivePersonalTodayStatus } from '@/lib/personalAdaptationLayer';
-import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
 import { resolvePersonalPlanTier } from '@/config/plans';
 import {
   resolvePersonalUXContext,
@@ -52,6 +54,7 @@ import {
   suggestPersonalQuickAdds,
 } from '@/lib/personalNutritionFlow';
 import PersonalNutritionTargetsPanel from '@/components/nutrition/PersonalNutritionTargetsPanel';
+import PersonalFoodPatternsSection from '@/components/personal/PersonalFoodPatternsSection';
 import PersonalMealActionBar from '@/components/nutrition/PersonalMealActionBar';
 import PersonalSurface from '@/components/personal/PersonalSurface';
 import { isNative as isNativePlatform } from '@/lib/platform';
@@ -61,6 +64,7 @@ import CoachBridgeCard from '@/components/coaching/CoachBridgeCard';
 import { deriveCoachBridgeMoment } from '@/lib/coachBridge';
 import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
 import { ANALYTICS_EVENTS, track } from '@/services/analyticsService';
+import { trackEvent, EVENTS } from '@/lib/analytics';
 import PrepPrecisionEntryCard from '@/components/nutrition/PrepPrecisionEntryCard';
 import NutritionPrepOverviewStrip from '@/components/nutrition/NutritionPrepOverviewStrip';
 import { resolveNutritionLayerContext } from '@/lib/nutritionLayers';
@@ -70,46 +74,38 @@ import {
   atlasMigrationDataAttributes,
 } from '@/lib/atlasMigrationPhases';
 import { PrepHierarchyLevel } from '@/lib/prepHierarchy';
+import { listUserBarcodeCacheEntries } from '@/lib/mealBarcodeUserCache';
+import { getPrepEducationEntry } from '@/lib/prepEducationContent';
+
+function mapMealLogDbRowToUi(row) {
+  if (!row) return row;
+  return {
+    ...row,
+    meal_date: row.log_date,
+    created_at: row.created_at || row.logged_at,
+    portion_ml: row.portion_ml ?? null,
+    household_unit: row.household_unit ?? null,
+    household_amount: row.household_amount ?? null,
+  };
+}
+
+function totalsFromMeals(meals) {
+  return (meals || []).reduce(
+    (acc, m) => ({
+      calories: acc.calories + (Number(m.calories) || 0),
+      protein_g: acc.protein_g + (Number(m.protein_g) || 0),
+      carbs_g: acc.carbs_g + (Number(m.carbs_g) || 0),
+      fats_g: acc.fats_g + (Number(m.fats_g) || 0),
+    }),
+    { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 },
+  );
+}
 
 /** Coach nutrition wrapper: shared systems + coach controls */
 function TrainerNutritionPlaceholder() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { data: nutritionCoverage, isLoading } = useQuery({
-    queryKey: ['coach-nutrition-coverage', user?.id],
-    enabled: !!user?.id && !!hasSupabase,
-    queryFn: async () => {
-      const supabase = getSupabase();
-      if (!supabase || !user?.id) return { total: 0, withTargets: 0, withoutTargets: 0, missing: [] };
-      const { data: clients } = await supabase
-        .from('clients')
-        .select('id, name')
-        .eq('coach_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      const list = Array.isArray(clients) ? clients : [];
-      if (!list.length) return { total: 0, withTargets: 0, withoutTargets: 0, missing: [] };
-      const snapshots = await Promise.all(
-        list.map(async (c) => {
-          const snap = await getClientNutritionSnapshot(c.id).catch(() => null);
-          const hasTargets =
-            Number(snap?.calories ?? snap?.target_calories) > 0 ||
-            Number(snap?.protein ?? snap?.protein_g) > 0 ||
-            Number(snap?.carbs ?? snap?.carbs_g) > 0 ||
-            Number(snap?.fats ?? snap?.fats_g) > 0;
-          return { id: c.id, name: c.name || 'Client', hasTargets };
-        })
-      );
-      const withTargets = snapshots.filter((r) => r.hasTargets).length;
-      const missing = snapshots.filter((r) => !r.hasTargets).slice(0, 6);
-      return {
-        total: snapshots.length,
-        withTargets,
-        withoutTargets: Math.max(0, snapshots.length - withTargets),
-        missing,
-      };
-    },
-  });
+  const { data: nutritionCoverage, isLoading } = useCoachNutritionCoverage(user?.id);
 
   const cards = [
     { icon: Target, title: 'Targets published', value: nutritionCoverage?.withTargets ?? 0, hint: `${nutritionCoverage?.total ?? 0} tracked clients` },
@@ -204,43 +200,86 @@ function TrainerNutritionPlaceholder() {
 
 function NutritionClientPersonal({ user, profile, effectiveRole }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { resolvedAccess, clientLinkedResolved } = useAuth();
+  const { resolvedAccess, clientLinkedResolved, prepContext, isCompPrepClient } = useAuth();
   const isPersonal = isPersonalRoleFn(effectiveRole);
   const isNativeApp = isNativePlatform();
   const { isWideWeb } = usePresentationMode();
   const [deleting, setDeleting] = useState(null);
   const [openFormSignal, setOpenFormSignal] = useState(0);
   const [openScannerSignal, setOpenScannerSignal] = useState(0);
+  const [presetMealType, setPresetMealType] = useState(null);
+  const [activeLogSection, setActiveLogSection] = useState('food');
   const [showRecentFoods, setShowRecentFoods] = useState(false);
+  const [scannerBannerVisible, setScannerBannerVisible] = useState(false);
   const [editingMeal, setEditingMeal] = useState(null);
   const [editDraft, setEditDraft] = useState({ calories: '', protein_g: '', carbs_g: '', fats_g: '' });
   const todaysNutritionRef = useRef(null);
   const quickAddSectionRef = useRef(null);
   const mealLogSectionRef = useRef(null);
+  const weightSectionRef = useRef(null);
+  const bodySectionRef = useRef(null);
+  const [weightEntry, setWeightEntry] = useState('');
+  const [bodyOpen, setBodyOpen] = useState(false);
+  const [bodyMeasures, setBodyMeasures] = useState(() => ({ chest: '', waist: '', hips: '', arms: '' }));
+  const [mealNextPrompt, setMealNextPrompt] = useState(null);
+  const mealLogInterpretCtx = useRef({
+    dailyTotals: { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 },
+    progressTarget: { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 },
+  });
   const [nutritionRevealVersion, setNutritionRevealVersion] = useState(0);
+  const [openMacroWhy, setOpenMacroWhy] = useState(false);
   const isClientRole = isClientRoleFn(effectiveRole);
 
-  // Client flow: client profile + nutrition plan (never query clients table for Personal)
-  const { data: clientProfile, isLoading: clientProfileLoading } = useQuery({
-    queryKey: ['client-profile', user?.id],
-    queryFn: async () => getMyClientProfile(user?.id),
-    enabled: !!user?.id && isClientRole,
-    retry: 2,
-    retryDelay: 500,
+  useEffect(() => {
+    document.title = 'Nutrition — Atlas';
+  }, []);
+
+  const todayDateKey = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const yesterdayDateKey = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+  }, []);
+  const weekStartIso = useMemo(() => nutritionWeekStartIso(todayDateKey), [todayDateKey]);
+
+  const {
+    nutritionBatch1,
+    nutritionBatch1Loading,
+    nutritionTodayBundle,
+    recentPersonalFoods,
+    nutritionFoodCache,
+    weeklyTrendRows,
+  } = useNutritionData({
+    userId: user?.id,
+    todayDateKey,
+    yesterdayDateKey,
+    weekStartIso,
+    isClientRole,
+    isPersonalRole: isPersonal,
   });
 
-  const { data: nutritionPlan, isLoading: nutritionPlanLoading } = useQuery({
-    queryKey: ['nutrition-plan', clientProfile?.id],
-    queryFn: async () => getClientNutritionSnapshot(clientProfile?.id),
-    enabled: !!clientProfile?.id,
-    retry: 2,
-    retryDelay: 500,
-  });
+  const clientProfile = nutritionBatch1?.clientProfile ?? null;
+  const nutritionPlan = nutritionBatch1?.nutritionPlan ?? null;
+  const personalPrimaryGoalDb = nutritionBatch1?.personalPrimaryGoalDb ?? null;
+  const soloTarget = nutritionBatch1?.soloTarget ?? null;
+  const assignedTodayPersonal = nutritionBatch1?.assignedTodayPersonal ?? null;
+  const assignedTodayClient = nutritionBatch1?.assignedTodayClient ?? null;
+  const personalNutritionRetention = nutritionBatch1?.personalNutritionRetention ?? null;
+  const personalWeight30 = nutritionBatch1?.personalWeight30 ?? [];
+  const recentCheckinWeights = nutritionBatch1?.recentCheckinWeights ?? [];
+
+  const clientProfileLoading = Boolean(isClientRole && nutritionBatch1Loading);
+  const nutritionPlanLoading = Boolean(isClientRole && nutritionBatch1Loading);
+  const soloTargetLoading = Boolean(isPersonal && nutritionBatch1Loading);
+
+  const todayMeals = nutritionTodayBundle?.mealsToday ?? [];
+  const yesterdayMeals = nutritionTodayBundle?.mealsYesterday ?? [];
 
   // Personal (solo) user flow
   const personalTier = isPersonal ? resolvePersonalPlanTier(profile, user) : 'basic';
-  const isNutritionEnhanced = personalTier === 'enhanced';
+  const isNutritionEnhanced = personalTier === 'enhanced' || personalTier === 'free';
   const personalUx = useMemo(
     () => (isPersonal ? resolvePersonalUXContext({ profile, user }) : null),
     [isPersonal, profile, user]
@@ -261,101 +300,150 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
     [personalUx]
   );
 
-  const { data: personalPrimaryGoalDb } = useQuery({
-    queryKey: ['nutrition-layer-personal-goal', user?.id],
-    enabled: Boolean(!!user?.id && isPersonal && hasSupabase),
-    queryFn: async () => {
-      const sb = getSupabase();
-      if (!sb) return null;
-      const { data, error } = await sb.from('personal').select('primary_goal').eq('user_id', user.id).maybeSingle();
-      if (error && !/primary_goal|schema cache|PGRST204/i.test(String(error.message || ''))) throw new Error(error.message);
-      return data?.primary_goal ?? null;
-    },
-  });
+  const recentBarcodeScans = useMemo(() => listUserBarcodeCacheEntries(10), [nutritionFoodCache, todayMeals]);
+  useEffect(() => {
+    const hasScans = Array.isArray(recentBarcodeScans) && recentBarcodeScans.length > 0;
+    let dismissed = false;
+    try {
+      dismissed = localStorage.getItem('atlas_scanner_banner_dismissed') === '1';
+    } catch {
+      dismissed = false;
+    }
+    setScannerBannerVisible(!dismissed && !hasScans);
+  }, [recentBarcodeScans]);
 
-  const { data: soloTarget, isLoading: soloTargetLoading } = useQuery({
-    queryKey: personalNutritionTargetsQueryKey(user?.id),
-    queryFn: () => fetchMergedPersonalNutritionTargets(user?.id),
-    enabled: !!user?.id && isPersonal,
-  });
+  const prepMacroPhaseLine = useMemo(() => {
+    if (!prepContext?.phase) return null;
+    if (prepContext.phase === 'mid_prep') return 'Mid prep — macros are key this week';
+    return `${prepContext.phaseLabel} — ${prepContext.nutritionNote}`;
+  }, [prepContext]);
 
-  const { data: assignedTodayPersonal } = useQuery({
-    queryKey: ['nutrition-personal-assigned-today', user?.id],
-    queryFn: () => getAssignedWorkoutForToday({ role: 'personal', profileId: user?.id }),
-    enabled: !!user?.id && isPersonal && !!hasSupabase,
-  });
-  const { data: assignedTodayClient } = useQuery({
-    queryKey: ['nutrition-client-assigned-today', clientProfile?.id],
-    queryFn: () => getAssignedWorkoutForToday({ role: 'client', clientId: clientProfile?.id }),
-    enabled: !!clientProfile?.id && isClientRole && !!hasSupabase,
-  });
-
-  const { data: recentPersonalFoods = [] } = useQuery({
-    queryKey: ['personal-recent-foods', user?.id],
-    queryFn: async () => {
-      const logs = listPersonalMealLogs(user?.id);
-      if (!Array.isArray(logs)) return [];
-      const map = new Map();
-      logs
-        .slice()
-        .sort((a, b) => new Date(b.logged_at || b.created_at || 0) - new Date(a.logged_at || a.created_at || 0))
-        .forEach((m) => {
-          const key = `${m.meal_type || 'snack'}|${m.calories || 0}|${m.protein_g || 0}|${m.carbs_g || 0}|${m.fats_g || 0}|${m.notes || ''}`;
-          if (!map.has(key)) map.set(key, m);
-        });
-      return Array.from(map.values()).slice(0, 8);
-    },
-    enabled: !!user?.id && isPersonal,
-  });
-
-  const { data: todayMeals = [] } = useQuery({
-    queryKey: ['today-meals', user?.id, isPersonal ? 'p' : 'c'],
-    queryFn: async () => {
-      const today = new Date().toISOString().split('T')[0];
-      if (isPersonal) {
-        return listPersonalMealLogs(user?.id, today);
-      }
-      const { data } = await invokeSupabaseFunction('meal-log-list', { user_id: user?.id, meal_date: today });
-      return Array.isArray(data) ? data : [];
-    },
-    enabled: !!user?.id && (isPersonal || isClientRole),
-  });
-
-  const { data: personalNutritionRetention } = useQuery({
-    queryKey: ['nutrition-personal-retention-streaks', user?.id],
-    queryFn: () => getRetentionStreaks({ profileId: user?.id }),
-    enabled: !!user?.id && isPersonal && !!hasSupabase,
-  });
-
-  const yesterdayDateKey = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
-  }, []);
-
-  const { data: yesterdayMeals = [] } = useQuery({
-    queryKey: ['personal-yesterday-meals', user?.id, yesterdayDateKey],
-    queryFn: () => listPersonalMealLogs(user?.id, yesterdayDateKey),
-    enabled: !!user?.id && isPersonal,
-  });
+  useEffect(() => {
+    if (searchParams.get('openScanner') === '1') {
+      setOpenScannerSignal((s) => s + 1);
+      setActiveLogSection('food');
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('openScanner');
+        return next;
+      }, { replace: true });
+    }
+    const mealTypeQuery = String(searchParams.get('meal_type') || '').toLowerCase().trim();
+    if (mealTypeQuery) {
+      setPresetMealType(mealTypeQuery);
+      setActiveLogSection('food');
+      setOpenFormSignal((s) => s + 1);
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('meal_type');
+        return next;
+      }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const logMealMutation = useMutation({
     mutationFn: async (mealData) => {
       const today = new Date().toISOString().split('T')[0];
-      if (isPersonal) {
-        return addPersonalMealLog(user?.id, today, { ...mealData, logged_at: new Date().toISOString() });
+      const loggedAt = new Date().toISOString();
+      if (hasSupabase) {
+        const sb = getSupabase();
+        if (!sb) throw new Error('Supabase not configured');
+        if (isPersonal) {
+          const row = await addMealLog({
+            supabase: sb,
+            profileId: user?.id,
+            logDate: today,
+            mealType: mealData?.meal_type,
+            foodName: mealData?.food_name || mealData?.notes || 'Meal',
+            calories: mealData?.calories,
+            protein: mealData?.protein_g,
+            carbs: mealData?.carbs_g,
+            fats: mealData?.fats_g,
+            portionGrams: mealData?.portion_grams,
+            portionUnit: mealData?.household_unit || (mealData?.portion_ml != null ? 'ml' : null),
+            barcode: mealData?.barcode,
+            notes: mealData?.notes,
+            source: mealData?.source || 'manual',
+          });
+          return mapMealLogDbRowToUi(row);
+        }
+        if (isClientRole && clientProfile?.id) {
+          const row = await addMealLog({
+            supabase: sb,
+            clientId: clientProfile.id,
+            logDate: today,
+            mealType: mealData?.meal_type,
+            foodName: mealData?.food_name || mealData?.notes || 'Meal',
+            calories: mealData?.calories,
+            protein: mealData?.protein_g,
+            carbs: mealData?.carbs_g,
+            fats: mealData?.fats_g,
+            portionGrams: mealData?.portion_grams,
+            portionUnit: mealData?.household_unit || (mealData?.portion_ml != null ? 'ml' : null),
+            barcode: mealData?.barcode,
+            notes: mealData?.notes,
+            source: mealData?.source || 'manual',
+          });
+          return mapMealLogDbRowToUi(row);
+        }
       }
-      const { data } = await invokeSupabaseFunction('meal-log-create', {
-        user_id: user?.id,
-        meal_date: today,
+      if (isPersonal) {
+        return addPersonalMealLog(user?.id, today, { ...mealData, logged_at: loggedAt });
+      }
+      throw new Error('Meal logging requires Supabase or a personal account.');
+    },
+    onMutate: async (variables) => {
+      const key = nutritionTodayQueryKey(user?.id, todayDateKey);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previousBundle = queryClient.getQueryData(key);
+      const optimisticMeal = {
+        id: `optimistic-${Date.now()}`,
+        meal_type: variables?.meal_type || 'snack',
+        food_name: variables?.food_name || variables?.notes || 'Meal',
+        calories: Number(variables?.calories || 0),
+        protein_g: Number(variables?.protein_g || 0),
+        carbs_g: Number(variables?.carbs_g || 0),
+        fats_g: Number(variables?.fats_g || 0),
         logged_at: new Date().toISOString(),
-        ...mealData
-      });
-      return data;
+      };
+      queryClient.setQueryData(key, (old) => ({
+        mealsYesterday: old?.mealsYesterday ?? [],
+        adherence: old?.adherence ?? null,
+        mealsToday: [optimisticMeal, ...(old?.mealsToday || [])],
+      }));
+      return { previousBundle, nutritionTodayKey: key };
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['today-meals'] });
-      toast.success(variables?.source === 'barcode' ? 'Food added' : 'Meal logged');
+      queryClient.invalidateQueries({ queryKey: ['meal-form-recent-foods'] });
+      queryClient.invalidateQueries({ queryKey: ['nutrition-today', user?.id] });
+      queryClient.invalidateQueries({ queryKey: nutritionRecentFoodsQueryKey(user?.id) });
+      queryClient.invalidateQueries({ queryKey: ['nutrition-weekly-trend', user?.id] });
+      const snap = mealLogInterpretCtx.current;
+      const interpretation = buildMealLogInterpretation({
+        added: {
+          calories: variables?.calories,
+          protein_g: variables?.protein_g,
+          carbs_g: variables?.carbs_g,
+          fats_g: variables?.fats_g,
+        },
+        dailyTotals: snap.dailyTotals,
+        targets: snap.progressTarget,
+      });
+      const fallbackDescription = 'Logged — tap the ring to see today\'s totals.';
+      const isPostWorkout = String(variables?.meal_type || '') === 'post_workout';
+      toast.success(
+        isPostWorkout
+          ? 'Post-workout meal logged — protein window captured 🏋️'
+          : (variables?.source === 'barcode' ? 'Food added' : 'Meal logged'),
+        { description: interpretation || fallbackDescription }
+      );
+      if (variables?.source === 'barcode' && Number(progressTarget?.protein_g) > 0 && Number(variables?.protein_g) >= 0) {
+        const nextProteinPct = Math.round(((Number(snap.dailyTotals?.protein_g || 0) + Number(variables?.protein_g || 0)) / Number(progressTarget.protein_g)) * 100);
+        toast.message(`Great protein hit — you've now hit ${Math.max(0, nextProteinPct)}% of your daily target`);
+      }
+      if (variables?.source === 'barcode') {
+        trackEvent(EVENTS.BARCODE_SCANNED);
+      }
       markNutritionCompletedToday({
         profileId: user?.id,
         clientId: isClientRole ? clientProfile?.id ?? null : null,
@@ -366,33 +454,81 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
           if (msg) toast.message(msg);
         })
         .catch(() => {});
-      queryClient.invalidateQueries({ queryKey: ['personal-recent-foods', user?.id] });
-    }
+      const nextTotals = {
+        calories: Number(snap.dailyTotals?.calories || 0) + Number(variables?.calories || 0),
+        protein_g: Number(snap.dailyTotals?.protein_g || 0) + Number(variables?.protein_g || 0),
+      };
+      const targetProtein = Number(progressTarget?.protein_g || 0);
+      const targetCalories = Number(progressTarget?.calories || 0);
+      const caloriePct = targetCalories > 0 ? Math.round((nextTotals.calories / targetCalories) * 100) : null;
+      const proteinRemaining = targetProtein > 0 ? Math.max(0, Math.round(targetProtein - nextTotals.protein_g)) : null;
+      setMealNextPrompt({
+        message: `Great. ${caloriePct != null ? `You are ${caloriePct}% to your calorie target` : 'You logged another meal'}${proteinRemaining != null ? ` with ${proteinRemaining}g protein still needed` : ''}. Your next workout is tomorrow — rest and hit your protein tonight.`,
+        cta: "See tomorrow's workout",
+      });
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.nutritionTodayKey != null && context?.previousBundle !== undefined) {
+        queryClient.setQueryData(context.nutritionTodayKey, context.previousBundle);
+      }
+      toast.error('Could not save — please try again');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['nutrition-today', user?.id] });
+    },
   });
+  const logPersonalWeight = async () => {
+    if (!isPersonal || !user?.id || !hasSupabase) return;
+    const parsed = Number(weightEntry);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    const sb = getSupabase();
+    if (!sb) return;
+    await sb.from('personal_checkins').insert({ user_id: user.id, weight: parsed, created_at: new Date().toISOString() });
+    setWeightEntry('');
+    queryClient.invalidateQueries({ queryKey: nutritionPlanAndTargetsQueryKey(user.id) });
+  };
 
   const deleteMealMutation = useMutation({
     mutationFn: async (mealId) => {
+      if (hasSupabase) {
+        const sb = getSupabase();
+        if (sb) {
+          await deleteMealLog({ supabase: sb, id: mealId });
+          return;
+        }
+      }
       if (isPersonal) {
         deletePersonalMealLog(user?.id, mealId);
         return;
       }
-      await invokeSupabaseFunction('meal-log-delete', { id: mealId });
+      throw new Error('Delete requires Supabase.');
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['today-meals'] });
-      queryClient.invalidateQueries({ queryKey: ['personal-recent-foods', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['nutrition-today', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['meal-form-recent-foods'] });
+      queryClient.invalidateQueries({ queryKey: nutritionRecentFoodsQueryKey(user?.id) });
+      queryClient.invalidateQueries({ queryKey: ['nutrition-weekly-trend', user?.id] });
       setDeleting(null);
     }
   });
 
   const editMealMutation = useMutation({
     mutationFn: async ({ id, patch }) => {
+      if (hasSupabase) {
+        const sb = getSupabase();
+        if (sb && (isPersonal || (isClientRole && clientProfile?.id))) {
+          const row = await updateMealLog({ supabase: sb, id, updates: patch });
+          return mapMealLogDbRowToUi(row);
+        }
+      }
       if (isPersonal) return updatePersonalMealLog(user?.id, id, patch);
-      throw new Error('Editing currently supported for personal meals.');
+      throw new Error('Editing requires Supabase or a personal account.');
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['today-meals'] });
-      queryClient.invalidateQueries({ queryKey: ['personal-recent-foods', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['nutrition-today', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['meal-form-recent-foods'] });
+      queryClient.invalidateQueries({ queryKey: nutritionRecentFoodsQueryKey(user?.id) });
+      queryClient.invalidateQueries({ queryKey: ['nutrition-weekly-trend', user?.id] });
       setEditingMeal(null);
       toast.success('Meal updated');
     },
@@ -401,7 +537,12 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   // Determine which data to use
   const isClient = isClientRole;
   const activeTarget = isClient ? nutritionPlan : soloTarget;
-  const hasPersonalTargets = isPersonal && hasPersonalNutritionTargetsMerged(soloTarget);
+  const hasPersonalTargets =
+    isPersonal
+    && (Number(soloTarget?.target_calories ?? soloTarget?.calories ?? 0) > 0
+      || Number(soloTarget?.target_protein_g ?? soloTarget?.protein_g ?? 0) > 0
+      || Number(soloTarget?.target_carbs_g ?? soloTarget?.carbs_g ?? 0) > 0
+      || Number(soloTarget?.target_fats_g ?? soloTarget?.fats_g ?? 0) > 0);
   const showLogging = isClient || hasPersonalTargets;
   const showPersonalMealLog = isClient || isPersonal;
   const showMobileStickyMealBar = isPersonal && hasPersonalTargets && (isNativeApp || !isWideWeb);
@@ -459,7 +600,6 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   const proteinTarget = nutritionPlan?.protein ?? nutritionPlan?.protein_g ?? null;
   const carbsTarget = nutritionPlan?.carbs ?? nutritionPlan?.carbs_g ?? null;
   const fatsTarget = nutritionPlan?.fats ?? nutritionPlan?.fats_g ?? null;
-  const todayDateKey = new Date().toISOString().split('T')[0];
 
   const goalLabels = {
     cut: 'Fat Loss',
@@ -468,25 +608,42 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   };
 
   // Calculate daily totals from logged meals
-  const dailyTotals = {
-    calories: todayMeals.reduce((sum, m) => sum + (m.calories || 0), 0),
-    protein_g: todayMeals.reduce((sum, m) => sum + (m.protein_g || 0), 0),
-    carbs_g: todayMeals.reduce((sum, m) => sum + (m.carbs_g || 0), 0),
-    fats_g: todayMeals.reduce((sum, m) => sum + (m.fats_g || 0), 0)
-  };
-  const progressTarget = isClient
-    ? {
-        calories: Number(calorieTarget) || 0,
-        protein_g: Number(proteinTarget) || 0,
-        carbs_g: Number(carbsTarget) || 0,
-        fats_g: Number(fatsTarget) || 0,
-      }
-    : {
-        calories: Number(activeTarget?.target_calories) || 0,
-        protein_g: Number(activeTarget?.target_protein_g) || 0,
-        carbs_g: Number(activeTarget?.target_carbs_g) || 0,
-        fats_g: Number(activeTarget?.target_fats_g) || 0,
-      };
+  const dailyTotals = useMemo(
+    () => ({
+      calories: todayMeals.reduce((sum, m) => sum + (m.calories || 0), 0),
+      protein_g: todayMeals.reduce((sum, m) => sum + (m.protein_g || 0), 0),
+      carbs_g: todayMeals.reduce((sum, m) => sum + (m.carbs_g || 0), 0),
+      fats_g: todayMeals.reduce((sum, m) => sum + (m.fats_g || 0), 0),
+    }),
+    [todayMeals],
+  );
+  const progressTarget = useMemo(
+    () =>
+      isClient
+        ? {
+            calories: Number(calorieTarget) || 0,
+            protein_g: Number(proteinTarget) || 0,
+            carbs_g: Number(carbsTarget) || 0,
+            fats_g: Number(fatsTarget) || 0,
+          }
+        : {
+            calories: Number(activeTarget?.target_calories) || 0,
+            protein_g: Number(activeTarget?.target_protein_g) || 0,
+            carbs_g: Number(activeTarget?.target_carbs_g) || 0,
+            fats_g: Number(activeTarget?.target_fats_g) || 0,
+          },
+    [
+      isClient,
+      calorieTarget,
+      proteinTarget,
+      carbsTarget,
+      fatsTarget,
+      activeTarget?.target_calories,
+      activeTarget?.target_protein_g,
+      activeTarget?.target_carbs_g,
+      activeTarget?.target_fats_g,
+    ],
+  );
   const remaining = {
     calories: Math.max(0, (Number(progressTarget.calories) || 0) - (Number(dailyTotals.calories) || 0)),
     protein_g: Math.max(0, (Number(progressTarget.protein_g) || 0) - (Number(dailyTotals.protein_g) || 0)),
@@ -494,8 +651,11 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
     fats_g: Math.max(0, (Number(progressTarget.fats_g) || 0) - (Number(dailyTotals.fats_g) || 0)),
   };
 
+  useEffect(() => {
+    mealLogInterpretCtx.current = { dailyTotals, progressTarget };
+  }, [dailyTotals, progressTarget]);
+
   const personalWeekMacroAdherencePct = useMemo(() => {
-    if (!isPersonal || !user?.id) return null;
     const t = {
       calories: Number(activeTarget?.target_calories) || 0,
       protein_g: Number(activeTarget?.target_protein_g) || 0,
@@ -503,36 +663,23 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
       fats_g: Number(activeTarget?.target_fats_g) || 0,
     };
     if (!(t.calories > 0 && t.protein_g > 0)) return null;
-    const hits = [];
-    for (let i = 0; i < 7; i += 1) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      const meals = listPersonalMealLogs(user.id, key);
-      if (!meals.length) continue;
-      const logged = meals.reduce(
-        (acc, m) => ({
-          calories: acc.calories + (Number(m.calories) || 0),
-          protein_g: acc.protein_g + (Number(m.protein_g) || 0),
-          carbs_g: acc.carbs_g + (Number(m.carbs_g) || 0),
-          fats_g: acc.fats_g + (Number(m.fats_g) || 0),
-        }),
-        { calories: 0, protein_g: 0, carbs_g: 0, fats_g: 0 }
-      );
-      const p = getMacroHitPercent({ logged, target: t });
-      if (p != null) hits.push(p);
-    }
+    const hits = (weeklyTrendRows || [])
+      .map((r) => Number(r.macros_hit_percent))
+      .filter((n) => Number.isFinite(n));
     if (!hits.length) return null;
     return Math.round(hits.reduce((a, b) => a + b, 0) / hits.length);
   }, [
-    isPersonal,
-    user?.id,
+    weeklyTrendRows,
     activeTarget?.target_calories,
     activeTarget?.target_protein_g,
     activeTarget?.target_carbs_g,
     activeTarget?.target_fats_g,
-    todayMeals,
   ]);
+
+  const weekAdherenceRows = isClientRole ? weeklyTrendRows : [];
+  const personalWeekAdherence = isPersonal
+    ? (weeklyTrendRows || []).map((r) => ({ day_date: r.day_date, macros_hit_percent: r.macros_hit_percent }))
+    : [];
 
   const nutritionTargetForAdherence = {
     calories: Number(isClient ? calorieTarget : activeTarget?.target_calories) || null,
@@ -566,11 +713,112 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
     nutritionTargetForAdherence.protein_g,
     todayDateKey,
   ]);
-  const { data: weekAdherenceRows = [] } = useQuery({
-    queryKey: ['nutrition-adherence-week', clientProfile?.id, todayDateKey],
-    queryFn: () => fetchNutritionAdherenceWeek(clientProfile?.id, todayDateKey),
-    enabled: !!clientProfile?.id && isClient,
-  });
+
+  useEffect(() => {
+    if (!isPersonal || !hasSupabase || !user?.id || !hasPersonalTargets) return;
+    upsertPersonalNutritionAdherence({
+      profileId: user.id,
+      dayDate: todayDateKey,
+      target: {
+        calories: nutritionTargetForAdherence.calories,
+        protein_g: nutritionTargetForAdherence.protein_g,
+        carbs_g: nutritionTargetForAdherence.carbs_g,
+        fats_g: nutritionTargetForAdherence.fats_g,
+      },
+      logged: {
+        calories: dailyTotals.calories,
+        protein_g: dailyTotals.protein_g,
+        carbs_g: dailyTotals.carbs_g,
+        fats_g: dailyTotals.fats_g,
+      },
+    }).catch(() => {});
+  }, [
+    isPersonal,
+    hasSupabase,
+    user?.id,
+    hasPersonalTargets,
+    todayDateKey,
+    dailyTotals.calories,
+    dailyTotals.carbs_g,
+    dailyTotals.fats_g,
+    dailyTotals.protein_g,
+    nutritionTargetForAdherence.calories,
+    nutritionTargetForAdherence.carbs_g,
+    nutritionTargetForAdherence.fats_g,
+    nutritionTargetForAdherence.protein_g,
+  ]);
+
+  const personalWeekConsistencyStrip = useMemo(() => {
+    if (!isPersonal || !hasPersonalTargets) return null;
+    const byDate = new Map((personalWeekAdherence || []).map((r) => [r.day_date, Number(r.macros_hit_percent)]));
+    const days = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const pct = byDate.has(key) ? byDate.get(key) : null;
+      let tone = 'empty';
+      if (pct != null && Number.isFinite(pct)) {
+        if (pct >= 78) tone = 'green';
+        else if (pct >= 60) tone = 'amber';
+        else tone = 'red';
+      }
+      days.push({
+        key,
+        label: d.toLocaleDateString(undefined, { weekday: 'short' }),
+        pct,
+        tone,
+      });
+    }
+    const strongHits = days.filter((x) => x.tone === 'green').length;
+    const tracked = days.filter((x) => x.pct != null && Number.isFinite(x.pct)).length;
+    return { days, strongHits, tracked };
+  }, [isPersonal, hasPersonalTargets, personalWeekAdherence]);
+
+  const savePersonalDayForChart = useCallback(async () => {
+    if (!user?.id || !hasSupabase || !hasPersonalTargets) return;
+    try {
+      const ok = await upsertPersonalNutritionAdherence({
+        profileId: user.id,
+        dayDate: todayDateKey,
+        target: {
+          calories: nutritionTargetForAdherence.calories,
+          protein_g: nutritionTargetForAdherence.protein_g,
+          carbs_g: nutritionTargetForAdherence.carbs_g,
+          fats_g: nutritionTargetForAdherence.fats_g,
+        },
+        logged: {
+          calories: dailyTotals.calories,
+          protein_g: dailyTotals.protein_g,
+          carbs_g: dailyTotals.carbs_g,
+          fats_g: dailyTotals.fats_g,
+        },
+      });
+      if (!ok) {
+        toast.error('Could not save day — check connection and try again.');
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ['nutrition-weekly-trend', user.id] });
+      toast.success('Today saved for your weekly chart');
+    } catch {
+      toast.error('Could not save day');
+    }
+  }, [
+    user?.id,
+    hasSupabase,
+    hasPersonalTargets,
+    todayDateKey,
+    nutritionTargetForAdherence.calories,
+    nutritionTargetForAdherence.protein_g,
+    nutritionTargetForAdherence.carbs_g,
+    nutritionTargetForAdherence.fats_g,
+    dailyTotals.calories,
+    dailyTotals.protein_g,
+    dailyTotals.carbs_g,
+    dailyTotals.fats_g,
+    queryClient,
+  ]);
+
   const weeklyConsistency = weekAdherenceRows.length
     ? Math.round(
         weekAdherenceRows
@@ -621,6 +869,8 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
           remaining,
           targets: progressTarget,
           trainingDay: Boolean(assignedTodayClient?.day),
+          isCompPrepClient: Boolean(isCompPrepClient),
+          daysOut: prepContext?.daysOut ?? null,
         })
       : null;
 
@@ -681,23 +931,6 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
         : `Weekly consistency is ${weeklyConsistency}% - tighten meal timing and portions.`
       : null,
   ].filter(Boolean);
-  const { data: recentCheckinWeights = [] } = useQuery({
-    queryKey: ['nutrition-recent-checkin-weights', clientProfile?.id],
-    queryFn: async () => {
-      if (!hasSupabase || !clientProfile?.id) return [];
-      const supabase = getSupabase();
-      if (!supabase) return [];
-      const { data, error } = await supabase
-        .from('checkins')
-        .select('submitted_at, weight')
-        .eq('client_id', clientProfile.id)
-        .not('weight', 'is', null)
-        .order('submitted_at', { ascending: false })
-        .limit(3);
-      return error ? [] : (data || []);
-    },
-    enabled: !!clientProfile?.id && isClient,
-  });
   const adaptiveNutritionSuggestion = (() => {
     if (!isClient || recentCheckinWeights.length < 3) return null;
     const w0 = Number(recentCheckinWeights[0]?.weight);
@@ -763,11 +996,8 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   if (isClientRole && (clientProfileLoading || nutritionPlanLoading)) {
     const m = nutritionRouteMigration;
     return (
-      <div
-        {...(m ? atlasMigrationDataAttributes(m.phase, m.primary) : {})}
-        style={{ minHeight: '100vh', background: colors.bg, padding: shell.pagePaddingH, paddingTop: spacing[24] }}
-      >
-        <PageLoader />
+      <div {...(m ? atlasMigrationDataAttributes(m.phase, m.primary) : {})}>
+        <NutritionCalorieRingSkeleton />
       </div>
     );
   }
@@ -861,7 +1091,7 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
     >
       <div style={{ marginBottom: shell.sectionSpacing }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: colors.text, margin: 0, marginBottom: 4 }}>
-          {isClient ? "Today's Nutrition" : 'Nutrition'}
+          {isClient ? "Today's Nutrition" : 'Log'}
         </h1>
         <p style={{ fontSize: 14, color: colors.muted, margin: 0, lineHeight: 1.45 }}>
           {isClient
@@ -870,6 +1100,45 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
               ? personalNutritionPageCopy.pageSubtitle
               : 'Targets · today’s budget · log — stay fueled for your next session.'}
         </p>
+        {scannerBannerVisible ? (
+          <div
+            style={{
+              background: colors.surface1,
+              border: `1px solid ${colors.border}`,
+              borderRadius: radii.md,
+              padding: `${spacing[10]}px ${spacing[14]}px`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: spacing[10],
+              marginTop: spacing[10],
+              marginBottom: spacing[12],
+            }}
+          >
+            <span style={{ fontSize: 20 }}>📷</span>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 500, color: colors.text, margin: 0 }}>
+                Barcode scanning is free — forever
+              </p>
+              <p style={{ fontSize: 12, color: colors.muted, margin: `${spacing[2]}px 0 0` }}>
+                Scan any packaged food instantly. No paywall, ever.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.setItem('atlas_scanner_banner_dismissed', '1');
+                } catch {
+                  // ignore
+                }
+                setScannerBannerVisible(false);
+              }}
+              style={{ marginLeft: 'auto', fontSize: 16, background: 'none', border: 'none', color: colors.muted, cursor: 'pointer' }}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
         {isPersonal && (
           <button
             type="button"
@@ -896,6 +1165,37 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
           <PrepPrecisionEntryCard />
         </div>
       )}
+      {isPersonal ? (
+        <Card style={{ padding: spacing[10], border: `1px solid ${shell.cardBorder}`, marginBottom: spacing[12] }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: spacing[8] }}>
+            {[
+              ['food', 'Food', mealLogSectionRef],
+              ['weight', 'Weight', weightSectionRef],
+              ['body', 'Body', bodySectionRef],
+            ].map(([key, label, ref]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  setActiveLogSection(key);
+                  ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                style={{
+                  minHeight: 40,
+                  borderRadius: 10,
+                  border: `1px solid ${shell.cardBorder}`,
+                  background: activeLogSection === key ? colors.primarySubtle : colors.surface1,
+                  color: colors.text,
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
       {isPersonal && !hasPersonalTargets && (
         <>
@@ -1005,6 +1305,49 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
             >
               <DailyNutritionProgress target={progressTarget} logged={dailyTotals} />
             </motion.div>
+            <PersonalFoodPatternsSection userId={user?.id ?? null} mergedNutrition={soloTarget} />
+            {hasSupabase && personalWeekConsistencyStrip ? (
+              <Card style={{ padding: spacing[14], border: `1px solid ${shell.cardBorder}`, background: colors.surface1 }}>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>
+                  Weekly macro consistency
+                </p>
+                <p style={{ margin: `${spacing[6]}px 0 ${spacing[10]}px`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+                  {personalWeekConsistencyStrip.tracked > 0
+                    ? `You hit your macros on ${personalWeekConsistencyStrip.strongHits} of 7 days this week 🎯`
+                    : 'Log meals through the week — each day will colour in when targets are in range.'}
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: spacing[6], marginBottom: spacing[10] }}>
+                  {personalWeekConsistencyStrip.days.map((day) => {
+                    const bg =
+                      day.tone === 'green'
+                        ? colors.success
+                        : day.tone === 'amber'
+                          ? colors.warning
+                          : day.tone === 'red'
+                            ? colors.danger
+                            : colors.surface2;
+                    return (
+                      <div key={day.key} style={{ flex: 1, textAlign: 'center' }}>
+                        <div
+                          title={day.pct != null ? `${Math.round(day.pct)}% hit` : 'No data'}
+                          style={{
+                            height: 36,
+                            borderRadius: 10,
+                            background: bg,
+                            border: `1px solid ${colors.border}`,
+                            opacity: day.tone === 'empty' ? 0.45 : 1,
+                          }}
+                        />
+                        <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 10, color: colors.muted }}>{day.label}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Button type="button" variant="outline" onClick={() => savePersonalDayForChart()} style={{ width: '100%', fontWeight: 600 }}>
+                  Log day complete (save today to chart)
+                </Button>
+              </Card>
+            ) : null}
             <Button
               type="button"
               onClick={() => {
@@ -1224,6 +1567,41 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
               Daily overview
             </p>
             <DailyNutritionProgress target={progressTarget} logged={dailyTotals} />
+            {isClientRole && isCompPrepClient && prepMacroPhaseLine ? (
+              <Card
+                style={{
+                  padding: spacing[12],
+                  marginTop: spacing[10],
+                  border: `1px solid ${colors.warning}44`,
+                  background: colors.warningSubtle,
+                }}
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide m-0" style={{ color: colors.warning }}>
+                  Prep phase
+                </p>
+                <p className="text-sm m-0 mt-1" style={{ color: colors.text }}>{prepMacroPhaseLine}</p>
+              </Card>
+            ) : null}
+            {isClientRole && nutritionPlan?.prep_instruction_explanation_key ? (
+              <Card style={{ padding: spacing[12], marginTop: spacing[10], border: `1px solid ${colors.border}` }}>
+                <button
+                  type="button"
+                  onClick={() => setOpenMacroWhy((o) => !o)}
+                  className="text-xs font-bold border-none bg-transparent p-0 cursor-pointer"
+                  style={{ color: colors.primary }}
+                >
+                  Why?
+                </button>
+                {openMacroWhy ? (
+                  <p className="text-sm m-0 mt-2" style={{ color: colors.textSecondary, lineHeight: 1.45 }}>
+                    {(() => {
+                      const e = getPrepEducationEntry(nutritionPlan.prep_instruction_explanation_key);
+                      return e ? `${e.title} ${e.explanation}` : 'Your coach linked extra context to this plan update.';
+                    })()}
+                  </p>
+                ) : null}
+              </Card>
+            ) : null}
             <NutritionPrepOverviewStrip
               profile={profile}
               prepEnabled={nutritionLayerCtx.prepEnabledForUser}
@@ -1286,8 +1664,9 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
 
         {showPersonalMealLog && (
           <>
+            <div ref={mealLogSectionRef} />
             {isPersonal ? (
-              <div ref={mealLogSectionRef}>
+              <div>
                 <p
                   style={{
                     margin: 0,
@@ -1302,13 +1681,40 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
                 </p>
               </div>
             ) : null}
+            {recentBarcodeScans.length > 0 ? (
+              <Card style={{ padding: spacing[12], border: `1px solid ${shell.cardBorder}` }}>
+                <h3 style={{ margin: 0, marginBottom: spacing[8], fontSize: 14, color: colors.text, fontWeight: 600 }}>Recent scans</h3>
+                <p style={{ margin: 0, fontSize: 12, color: colors.muted }}>Tap + Log again in the logger below to reuse these instantly.</p>
+              </Card>
+            ) : null}
             <MealLogForm
-              onSubmit={(data) => logMealMutation.mutate(data)}
+              onSubmit={(data) => logMealMutation.mutateAsync(data)}
               isLoading={logMealMutation.isPending}
               openFormSignal={openFormSignal}
               openScannerSignal={openScannerSignal}
               hideCollapsedActions={showMobileStickyMealBar}
+              supabaseEnabled={hasSupabase}
+              profileId={isPersonal ? user?.id ?? null : null}
+              clientId={isClient && clientProfile?.id ? clientProfile.id : null}
+              calendarDayKey={todayDateKey}
+              recentFoodsFallback={!hasSupabase && isPersonal ? recentPersonalFoods : undefined}
+              presetMealType={presetMealType}
             />
+            {mealNextPrompt ? (
+              <Card style={{ padding: spacing[12], border: `1px solid ${colors.primary}55`, background: colors.primarySubtle }}>
+                <p style={{ margin: 0, fontSize: 13, color: colors.text, fontWeight: 600 }}>What&apos;s next?</p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>
+                  {mealNextPrompt.message}
+                </p>
+                <Button
+                  type="button"
+                  style={{ marginTop: spacing[8] }}
+                  onClick={() => navigate(isPersonal ? '/workout' : '/today-workout')}
+                >
+                  {mealNextPrompt.cta}
+                </Button>
+              </Card>
+            ) : null}
             {isPersonal && showRecentFoods && recentPersonalFoods.length > 0 && (
               <Card style={{ padding: spacing[12], border: `1px solid ${shell.cardBorder}` }}>
                 <h3 style={{ margin: 0, marginBottom: spacing[8], fontSize: 14, color: colors.text, fontWeight: 600 }}>Recent foods</h3>
@@ -1366,39 +1772,94 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
                 }
                 repeatLastDisabled={!repeatLastPayload || logMealMutation.isPending}
                 repeatYesterdayDisabled={!repeatYesterdayPayload || logMealMutation.isPending}
-                onEdit={isPersonal ? (meal) => {
-                  setEditingMeal(meal);
-                  setEditDraft({
-                    calories: String(meal.calories ?? ''),
-                    protein_g: String(meal.protein_g ?? ''),
-                    carbs_g: String(meal.carbs_g ?? ''),
-                    fats_g: String(meal.fats_g ?? ''),
-                  });
-                } : null}
+                onEdit={
+                  isPersonal || (isClientRole && hasSupabase)
+                    ? (meal) => {
+                        setEditingMeal(meal);
+                        setEditDraft({
+                          calories: String(meal.calories ?? ''),
+                          protein_g: String(meal.protein_g ?? ''),
+                          carbs_g: String(meal.carbs_g ?? ''),
+                          fats_g: String(meal.fats_g ?? ''),
+                        });
+                      }
+                    : null
+                }
                 isDeleting={deleting}
+                emptyTitle={isClientRole ? 'Nothing logged yet today' : undefined}
+                emptyDescription={
+                  isClientRole
+                    ? 'Tap the button below to scan a barcode or add a meal manually.'
+                    : undefined
+                }
                 emptyAction={
-                  isPersonal && hasPersonalTargets && !showMobileStickyMealBar ? (
-                    <Button
-                      type="button"
-                      onClick={() => setOpenFormSignal((s) => s + 1)}
-                      disabled={logMealMutation.isPending}
-                      style={{
-                        minHeight: 44,
-                        borderRadius: 10,
-                        fontWeight: 700,
-                        background: colors.primary,
-                        color: '#fff',
-                      }}
-                    >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add meal
-                    </Button>
+                  (isPersonal && hasPersonalTargets && !showMobileStickyMealBar) || (isClientRole && !showMobileStickyMealBar) ? (
+                    <>
+                      <Button
+                        type="button"
+                        onClick={() => setOpenFormSignal((s) => s + 1)}
+                        disabled={logMealMutation.isPending}
+                        style={{
+                          minHeight: 44,
+                          borderRadius: 10,
+                          fontWeight: 700,
+                          background: colors.primary,
+                          color: '#fff',
+                        }}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Log meal
+                      </Button>
+                      <p style={{ fontSize: 12, color: colors.muted, marginTop: spacing[4], textAlign: 'center' }}>
+                        Scan any barcode — it&apos;s always free on Atlas.
+                      </p>
+                    </>
+                  ) : isClientRole && showMobileStickyMealBar ? (
+                    <p className="text-xs" style={{ color: colors.muted }}>
+                      Use the Log meal bar at the bottom to scan or add food.
+                    </p>
                   ) : null
                 }
               />
             </div>
           </>
         )}
+        {isPersonal ? (
+          <div ref={weightSectionRef}>
+            <Card style={{ padding: spacing[14], border: `1px solid ${shell.cardBorder}` }}>
+              <h3 style={{ margin: 0, marginBottom: spacing[8], fontSize: 15, color: colors.text, fontWeight: 600 }}>Weight</h3>
+              <p style={{ margin: 0, fontSize: 12, color: colors.muted, marginBottom: spacing[8] }}>
+                30-day trend: {personalWeight30.length > 1 ? `${personalWeight30[0].weight.toFixed(1)} -> ${personalWeight30[personalWeight30.length - 1].weight.toFixed(1)} kg` : 'log more entries to show trend'}
+              </p>
+              <div style={{ display: 'flex', gap: spacing[8] }}>
+                <Input value={weightEntry} onChange={(e) => setWeightEntry(e.target.value)} placeholder="Weight (kg)" type="number" />
+                <Button type="button" onClick={logPersonalWeight}>Save</Button>
+              </div>
+            </Card>
+          </div>
+        ) : null}
+        {isPersonal ? (
+          <div ref={bodySectionRef}>
+            <Card style={{ padding: spacing[14], border: `1px solid ${shell.cardBorder}` }}>
+              <button type="button" onClick={() => setBodyOpen((v) => !v)} style={{ background: 'none', border: 'none', padding: 0, color: colors.text, fontSize: 15, fontWeight: 600 }}>
+                Body measurements {bodyOpen ? '▲' : '▼'}
+              </button>
+              {bodyOpen ? (
+                <div style={{ marginTop: spacing[8], display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: spacing[8] }}>
+                  {['chest', 'waist', 'hips', 'arms'].map((field) => (
+                    <Input
+                      key={field}
+                      value={bodyMeasures[field]}
+                      onChange={(e) => setBodyMeasures((prev) => ({ ...prev, [field]: e.target.value }))}
+                      placeholder={`${field} (cm)`}
+                      type="number"
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </Card>
+          </div>
+        ) : null}
 
         {/* Client: duplicate macro hero cards hidden when daily overview already shows targets */}
         {/* Client: Daily Calories */}

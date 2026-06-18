@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import { colors, spacing, shell, touchTargetMin } from '@/ui/tokens';
 import { isNative } from '@/lib/platform';
-import { impactLight } from '@/lib/haptics';
+import { hapticNavigation } from '@/lib/haptics';
 
 /** Visual + safe-area; keep in sync with paddingTop/paddingBottom below */
 const NAV_BAR_HEIGHT = 94;
@@ -15,11 +15,12 @@ const ICON_SIZE = 24;
  * @param {{ key: string, label: string, icon: React.ComponentType, to: string, badge?: number }[]} props.items
  * @param {string} props.activeKey - key of the active item (e.g. path or tab key)
  * @param {(key: string, to: string) => void} props.onNavigate
+ * @param {string} [props.activeTint] - optional hex for active tab icon colour (Elite client branding)
  */
-export default function BottomNavPremium({ items = [], activeKey, onNavigate }) {
+export default function BottomNavPremium({ items = [], activeKey, onNavigate, activeTint }) {
   const handleTap = useCallback(
     async (key, to) => {
-      if (isNative()) await impactLight();
+      if (isNative()) await hapticNavigation();
       onNavigate?.(key, to);
     },
     [onNavigate]
@@ -45,6 +46,7 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate }) 
       {items.map((item) => {
         const Icon = item.icon;
         const active = activeKey === item.key;
+        const activeColor = activeTint && /^#[0-9A-Fa-f]{6}$/i.test(String(activeTint).trim()) ? String(activeTint).trim() : colors.primary;
         return (
           <button
             key={item.key}
@@ -72,7 +74,7 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate }) 
                 height: shell.iconContainerSize,
                 borderRadius: shell.iconContainerRadius,
                 background: 'transparent',
-                color: active ? colors.primary : colors.muted,
+                color: active ? activeColor : colors.muted,
               }}
             >
               <Icon size={ICON_SIZE} strokeWidth={active ? 2.5 : 2} aria-hidden />

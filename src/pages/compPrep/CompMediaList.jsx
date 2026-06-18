@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { getClientByUserId } from '@/data/selectors';
+import { useQuery } from '@tanstack/react-query';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getSandboxClientByUserId } from '@/lib/linkedClientFromUserId';
 import { listMedia, getCompMediaById } from '@/lib/repos/compPrepRepo';
 import { impactLight } from '@/lib/haptics';
 import Card from '@/ui/Card';
@@ -19,6 +21,7 @@ export default function CompMediaList() {
   const [searchParams] = useSearchParams();
   const outletContext = useOutletContext() || {};
   const { role, user } = useAuth();
+  const supabase = getSupabase();
   const urlClientId = searchParams.get('clientId') || null;
   const focusMediaId = searchParams.get('focus') || null;
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -27,15 +30,28 @@ export default function CompMediaList() {
   const [refreshKey, setRefreshKey] = useState(0);
   const focusRef = useRef(null);
 
+  const { data: linkedClient } = useQuery({
+    queryKey: ['client-by-user', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      if (supabase) {
+        const { data, error } = await supabase.from('clients').select('id').eq('user_id', user.id).maybeSingle();
+        if (error) return null;
+        return data;
+      }
+      const c = getSandboxClientByUserId(user.id);
+      return c?.id ? { id: c.id } : null;
+    },
+    enabled: role === 'client' && !!user?.id,
+    staleTime: 10 * 60 * 1000,
+  });
+
   const effectiveClientId = useMemo(() => {
     if ((role === 'coach' || role === 'trainer') && urlClientId) return urlClientId;
-    if (role === 'client' && user?.id) {
-      const c = getClientByUserId(user.id);
-      return c?.id ?? null;
-    }
+    if (role === 'client' && user?.id) return linkedClient?.id ?? null;
     if (role === 'solo' && user?.id) return `solo-${user.id}`;
     return null;
-  }, [role, user?.id, urlClientId]);
+  }, [role, user?.id, urlClientId, linkedClient?.id]);
 
   const allMedia = useMemo(
     () =>

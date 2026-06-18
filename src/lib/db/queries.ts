@@ -4,7 +4,7 @@
  */
 import { clients, checkIns, threads } from '../../data/mockData';
 import { getLeadsForTrainer, createLead } from '../leadsStore';
-import { getEarningsForPeriod } from '../earningsMock';
+import { payments as mockPayments } from '../../data/mockData';
 import { setClientPhase } from '../clientPhaseStore';
 import {
   clientSchema,
@@ -84,8 +84,12 @@ export function getInvoices(trainerId: string, range?: { from: string; to: strin
 }
 
 function buildMockInvoicesFromEarnings(trainerId: string): Record<string, unknown>[] {
-  const period = getEarningsForPeriod('this_month');
-  const txs = period.transactions ?? [];
+  const txs = (mockPayments ?? []).map((payment) => ({
+    id: payment.id,
+    amount: payment.amount,
+    status: payment.status,
+    date: payment.due_date,
+  }));
   const clientsList = clients as Record<string, unknown>[];
   return txs.map((t: Record<string, unknown>, i: number) => ({
     id: (t as { id?: string }).id ?? `inv-${i}`,

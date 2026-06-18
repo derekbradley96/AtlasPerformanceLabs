@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
@@ -10,30 +10,34 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Edit, Copy, FileText, CheckCircle2, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { isCoach } from '@/lib/roles';
 
 export default function IntakeForms() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user: authUser, isDemoMode } = useAuth();
-  const [user, setUser] = useState(null);
-  const displayUser = isDemoMode ? authUser : user;
+  const displayUser = authUser;
+  const supabase = hasSupabase ? getSupabase() : null;
 
   useEffect(() => {
-    if (isDemoMode) return;
-    const loadUser = async () => {
-      const u = await base44.auth.me();
-      setUser(u);
-    };
-    loadUser();
+    // LEGACY base44 fallback remains for template-specific entities below.
   }, [isDemoMode]);
 
   const { data: trainerProfile } = useQuery({
     queryKey: ['trainer-profile', displayUser?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.TrainerProfile.filter({ user_id: displayUser.id });
-      return profiles[0] || null;
+      if (!supabase || !displayUser?.id) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, user_id, role, display_name')
+        .eq('user_id', displayUser.id)
+        .in('role', ['coach', 'trainer'])
+        .maybeSingle();
+      if (error) throw error;
+      return data ?? null;
     },
-    enabled: !!displayUser?.id && (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer') && !isDemoMode
+    enabled: !!displayUser?.id && isCoach(displayUser?.user_type ?? displayUser?.role) && !isDemoMode && !!supabase
   });
 
   const { data: templatesData = [], isLoading } = useQuery({
@@ -115,7 +119,7 @@ export default function IntakeForms() {
   };
 
   if (!displayUser) return <PageLoader />;
-  if (displayUser.user_type !== 'coach' && displayUser.user_type !== 'trainer') return <NotAuthorized />;
+  if (!isCoach(displayUser?.user_type ?? displayUser?.role)) return <NotAuthorized />;
   if (!isDemoMode && isLoading) return <PageLoader />;
 
   const getCompletionCount = (templateId) => {

@@ -179,16 +179,34 @@ cd atlas-performance-labs-app
 npm install
 ```
 
-### Environment variables
+## Local development setup
 
-Create a **`.env.local`** in the project root (do **not** commit real keys).
+Copy the example env file:
+
+```bash
+cp .env.example .env.local
+```
+
+Fill in your values (get from Supabase Dashboard -> Settings):
+
+- `VITE_SUPABASE_URL` — your project URL
+- `VITE_SUPABASE_ANON_KEY` — your anon public key
+
+Never commit `.env.local`. Never share it in zips.
+Use Vercel Dashboard for production environment variables.
+
+### Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `VITE_SUPABASE_URL` | Yes (for auth/data) | Supabase project URL, e.g. `https://<project>.supabase.co` |
 | `VITE_SUPABASE_ANON_KEY` | Yes (for auth/data) | Supabase anonymous (public) key |
+| `VITE_POSTHOG_KEY` | No | PostHog project API key (`phc_…`). Enables analytics, funnels, and session replay in **production builds only** (not initialised in `npm run dev`). |
+| `VITE_POSTHOG_HOST` | No | PostHog API host; default `https://eu.posthog.com` (EU) if unset. |
 
 Without these, the app still runs in **local/demo mode** with limited backend features.
+
+**PostHog:** Create a free project at [posthog.com](https://posthog.com), copy the project API key into `VITE_POSTHOG_KEY`, and add the same variables to **Vercel → Project → Settings → Environment Variables** for preview and production. Use preview deployments to verify events (local dev does not capture).
 
 Optional (for full functionality):
 
@@ -218,7 +236,7 @@ npm run preview
 
 ### Mobile (Capacitor)
 
-**Sign-in on device:** If you see “Sign-in unavailable”, the app was built without Supabase env vars. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to `.env` or `.env.local` (copy from `.env.example`), then run `npm run build` and `npm run cap:sync:all` (or `npx cap sync ios`). Vite inlines these at build time, so they must be set before building.
+**Sign-in on device:** If you see "Sign-in unavailable", the app was built without Supabase env vars. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to `.env.local` (copy from `.env.example`), then run `npm run build` and `npm run cap:sync:all` (or `npx cap sync ios`). Vite inlines these at build time, so they must be set before building.
 
 **One-time: add platforms**
 

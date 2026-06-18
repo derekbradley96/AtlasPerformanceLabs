@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
@@ -295,7 +296,7 @@ export default function PeakWeekCheckinReviewPage() {
           </section>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" className="inline-flex items-center gap-1.5" onClick={() => { hapticLight(); navigate(`/messages/${clientId}`); }}>
+            <Button variant="outline" size="sm" className="inline-flex items-center gap-1.5" onClick={() => { hapticLight(); navigateToThread(navigate, clientId); }}>
               <MessageSquare size={14} /> Message client
             </Button>
             <Button variant="outline" size="sm" className="inline-flex items-center gap-1.5" onClick={() => { hapticLight(); navigate(`/clients/${clientId}/peak-week-editor`); }}>

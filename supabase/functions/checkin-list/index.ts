@@ -2,12 +2,12 @@
  * List check-ins for a client. Caller must be the client or the client's coach.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, assertCoachOwnsClient, jsonError } from "../_shared/auth.ts";
 import { parseCheckinTemplateAnswers } from "../_shared/checkinTemplateAnswers.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
       };
     }).filter(Boolean);
 
-    return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(out), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("checkin-list", e);
     return jsonError("Request failed", 500);

@@ -9,6 +9,7 @@
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { Search as SearchIcon, User, Dumbbell, MessageSquare, FileText, X } from 'lucide-react';
 import { useData } from '@/data/useData';
 import { searchExercises } from '@/data/exercises/exerciseLibrary';
@@ -151,7 +152,7 @@ export default function GlobalSearch({ onClose }) {
 
   const handleMessageClick = (clientId) => {
     if (!clientId) return;
-    navigate(`/messages/${clientId}`);
+    navigateToThread(navigate, clientId);
     onClose?.();
   };
 

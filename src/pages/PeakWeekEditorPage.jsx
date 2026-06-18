@@ -119,6 +119,10 @@ export default function PeakWeekEditorPage() {
   const autoExpandedWeekRef = useRef(null);
 
   useEffect(() => {
+    document.title = 'Peak Week Editor — Atlas';
+  }, []);
+
+  useEffect(() => {
     autoExpandedWeekRef.current = null;
   }, [clientId]);
 

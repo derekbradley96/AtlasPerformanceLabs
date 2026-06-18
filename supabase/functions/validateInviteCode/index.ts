@@ -4,17 +4,12 @@
  * Always returns 200 with { valid, error?, trainer_id?, coach_id?, trainer?, _debug? }.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { z } from "https://esm.sh/zod@3.23.8";
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { checkEdgeRateLimit } from "../_shared/publicSecurity.ts";
 
 function normalize(s: string): string {
   return s.trim().toLowerCase();
-}
-
-function addDebug(payload: Record<string, unknown>, supabaseUrl: string): void {
-  try {
-    const u = new URL(supabaseUrl);
-    payload._debug = { project: u.hostname.replace(".supabase.co", "") };
-  } catch (_) {}
 }
 
 type TrainerPreview = {
@@ -122,9 +117,9 @@ function runFallback(supabase: ReturnType<typeof createClient>, normalized: stri
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   const json = (body: unknown) =>
-    new Response(JSON.stringify(body), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    new Response(JSON.stringify(body), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -133,9 +128,37 @@ Deno.serve(async (req) => {
     }
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const includeServices = body?.include_services === true || body?.include_plans === true;
-    const raw = typeof body?.code === "string" ? body.code : "";
+    const rate = await checkEdgeRateLimit({
+      req,
+      scope: "validateInviteCode",
+      keyPart: "global",
+      maxHits: 10,
+      windowSeconds: 60,
+    });
+    if (!rate.allowed) {
+      return new Response(JSON.stringify({ error: "Too many requests" }), {
+        status: 429,
+        headers: {
+          ...getCorsHeaders(req),
+          "Content-Type": "application/json",
+          "Retry-After": String(rate.retryAfterSeconds),
+        },
+      });
+    }
+
+    const payloadSchema = z.object({
+      code: z.string().trim().min(1).max(80),
+      include_services: z.boolean().optional(),
+      include_plans: z.boolean().optional(),
+    }).strict();
+    const rawBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const parsed = payloadSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return json({ valid: false, error: "Invalid request payload" });
+    }
+    const body = parsed.data;
+    const includeServices = body.include_services === true || body.include_plans === true;
+    const raw = body.code;
     const normalized = normalize(raw);
     if (!normalized) {
       return json({ valid: false, error: "Invalid code" });
@@ -152,9 +175,7 @@ Deno.serve(async (req) => {
     }
 
     if (!result) {
-      const payload: Record<string, unknown> = { valid: false, error: "Lookup failed" };
-      addDebug(payload, supabaseUrl);
-      return json(payload);
+      return json({ valid: false, error: "Lookup failed" });
     }
 
     if (result.valid === true && result.trainer) {
@@ -228,10 +249,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (result.valid === false) addDebug(payload, supabaseUrl);
     return json(payload);
   } catch (err) {
     console.error("validateInviteCode:", err);
-    return json({ valid: false, error: (err as Error).message });
+    return json({ valid: false, error: "Request failed" });
   }
 });

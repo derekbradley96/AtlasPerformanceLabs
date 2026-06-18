@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
+import { useQuery } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
 import { toast } from 'sonner';
-import { getClientById, getClientCheckIns } from '@/data/selectors';
-import { safeDate } from '@/lib/format';
 import { setCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { logAuditEvent } from '@/lib/auditLogStore';
 import { getClientRiskEvaluation } from '@/lib/riskService';
@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { colors } from '@/ui/tokens';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 const PHASE_EXPECTATIONS = {
   cut: 'In a cut, minor strength drop is expected. Focus on adherence and steps.',
@@ -59,27 +60,72 @@ export default function CheckinReview() {
   const { user, isDemoMode, profile } = useAuth();
   const viewerWU = resolveViewerBodyweightUnit(profile);
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? 'trainer-1';
+  const supabase = getSupabase();
   const [coachResponse, setCoachResponse] = useState('');
+  const [signedPhotoUrls, setSignedPhotoUrls] = useState([]);
+  const [photoLoading, setPhotoLoading] = useState(false);
 
-  const client = clientId ? getClientById(clientId) : null;
-  const checkInsList = useMemo(() => {
-    const raw = clientId ? getClientCheckIns(clientId) : [];
-    const list = Array.isArray(raw) ? raw : [];
-    return [...list].sort((a, b) => {
-      const da = safeDate(a?.submitted_at ?? a?.created_date)?.getTime() ?? 0;
-      const db = safeDate(b?.submitted_at ?? b?.created_date)?.getTime() ?? 0;
-      return db - da;
-    });
-  }, [clientId]);
+  const { data: checkin, isLoading } = useQuery({
+    queryKey: ['checkin-detail', checkinId, clientId],
+    queryFn: async () => {
+      if (!supabase || !checkinId) return null;
+      const { data, error } = await supabase
+        .from('checkins')
+        .select('*')
+        .eq('id', checkinId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data;
+    },
+    enabled: !!checkinId && hasSupabase,
+  });
 
-  const thisWeek = checkinId ? checkInsList.find((c) => c?.id === checkinId) : null;
+  const { data: client } = useQuery({
+    queryKey: ['checkin-review-client', clientId],
+    queryFn: async () => {
+      if (!supabase || !clientId) return null;
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name, full_name, phase')
+        .eq('id', clientId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data;
+    },
+    enabled: !!clientId && hasSupabase,
+  });
+
+  const { data: checkInsList = [] } = useQuery({
+    queryKey: ['client-checkins', clientId],
+    queryFn: async () => {
+      const supabase = getSupabase();
+      if (!supabase || !clientId) return [];
+      const { data, error } = await supabase
+        .from('checkins')
+        .select('*')
+        .eq('client_id', clientId)
+        .order('submitted_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false });
+      if (error || !Array.isArray(data)) return [];
+      return data;
+    },
+    enabled: !!clientId && hasSupabase,
+  });
+
+  const thisWeek = checkin || (checkinId ? checkInsList.find((c) => c?.id === checkinId) : null);
   const thisWeekIndex = thisWeek ? checkInsList.indexOf(thisWeek) : -1;
   const lastWeek = thisWeekIndex >= 0 && thisWeekIndex < checkInsList.length - 1 ? checkInsList[thisWeekIndex + 1] : null;
 
   const phase = useMemo(() => normalizePhase(client?.phase), [client?.phase]);
   const phaseLabel = phase === 'cut' ? 'Cut' : phase === 'bulk' ? 'Bulk' : 'Maintenance';
   const riskEvaluation = useMemo(
-    () => (client && clientId ? getClientRiskEvaluation(clientId) : null),
+    () =>
+      client && clientId
+        ? getClientRiskEvaluation(clientId, {
+            client: { ...client, full_name: client.full_name ?? client.name, trainer_id: client.trainer_id ?? trainerId },
+            checkIns: checkInsList,
+          })
+        : null,
     [clientId, client, checkInsList]
   );
   const suggestedAction = getSuggestedAction(riskEvaluation);
@@ -214,7 +260,7 @@ export default function CheckinReview() {
 
   const handleSendFeedbackConfirm = useCallback(() => {
     if (pendingSendFeedback?.clientId) {
-      navigate(`/messages/${pendingSendFeedback.clientId}`, { state: { prefilledMessage: pendingSendFeedback.message } });
+      navigateToThread(navigate, pendingSendFeedback.clientId, { state: { prefilledMessage: pendingSendFeedback.message } });
     } else {
       navigate(`/clients/${clientId}?tab=checkins`);
     }
@@ -229,12 +275,51 @@ export default function CheckinReview() {
   }, [clientId, navigate]);
 
   const handleMessageClient = (prefilled) => {
-    navigate(`/messages/${clientId}`, { state: { prefilledMessage: prefilled || 'Quick reply from your coach' } });
+    navigateToThread(navigate, clientId, { state: { prefilledMessage: prefilled || 'Quick reply from your coach' } });
   };
 
   const handleOpenProgram = () => {
     navigate(`/clients/${clientId}?tab=program`);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!checkin?.photos?.length || !supabase) {
+        if (!cancelled) setSignedPhotoUrls([]);
+        return;
+      }
+      setPhotoLoading(true);
+      const resolved = await Promise.all(
+        checkin.photos.map((path) =>
+          supabase.storage
+            .from('checkin_photos')
+            .createSignedUrl(path, 60 * 60 * 24)
+            .then((r) => r.data?.signedUrl)
+            .catch(() => null)
+        )
+      );
+      if (!cancelled) {
+        setSignedPhotoUrls(resolved.filter(Boolean));
+        setPhotoLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkin?.photos, supabase]);
+
+  if (isLoading) {
+    return (
+      <div className="min-w-0 max-w-full px-4 py-8 app-screen" style={{ background: colors.bg }}>
+        <div className="animate-pulse space-y-3">
+          <div style={{ height: 18, width: '40%', borderRadius: 6, background: colors.surface2 }} />
+          <div style={{ height: 120, width: '100%', borderRadius: 10, background: colors.surface2 }} />
+          <div style={{ height: 220, width: '100%', borderRadius: 10, background: colors.surface2 }} />
+        </div>
+      </div>
+    );
+  }
 
   if (!client || !thisWeek) {
     return (
@@ -248,6 +333,22 @@ export default function CheckinReview() {
 
   return (
     <>
+      <div className="px-4 pt-4">
+        {photoLoading ? (
+          <p className="text-sm" style={{ color: colors.muted }}>Loading photos…</p>
+        ) : signedPhotoUrls.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {signedPhotoUrls.map((url) => (
+              <img
+                key={url}
+                src={url}
+                alt="Check-in"
+                style={{ width: 112, height: 112, objectFit: 'cover', borderRadius: 8, border: `1px solid ${colors.border}` }}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
       <ReviewEngine
         item={reviewItem}
         coachResponse={coachResponse}

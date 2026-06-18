@@ -1,13 +1,14 @@
 /**
  * Exercise builder: sticky header, scrollable exercise cards, bottom add action (mobile-first).
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { Plus, Sparkles, History, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { sectionLabel } from '@/ui/pageLayout';
 import EmptyState from '@/components/ui/EmptyState';
 import ExerciseRow from './ExerciseRow';
+import { EXERCISES as LIBRARY_EXERCISES } from '@/data/exercises/exerciseLibrary';
 
 const EDITOR_MAX_H = 'min(75vh, 720px)';
 
@@ -23,25 +24,98 @@ export default function ExerciseEditor({
   onOpenPicker,
   recentExerciseNames = [],
   suggestionByExerciseId = {},
+  previousPerformanceByExerciseId = {},
   notesPlaceholder = 'Notes (optional)',
   saving,
   emptyStateFooter = null,
   personalEditorMode = 'default',
   dayPromptActions = [],
   onSmartSwapExercise,
+  showPrepEducationPicker = false,
+  isAssignedProgramLive = false,
+  personalExperienceLevel = 'intermediate',
+  onLinkSuperset,
+  onRemoveSuperset,
 }) {
+  const supersetOptionsByExerciseId = useMemo(() => {
+    const out = {};
+    for (const ex of exercises || []) {
+      out[ex.id] = (exercises || [])
+        .filter((other) => other.id !== ex.id)
+        .map((other) => ({ id: other.id, label: other.exercise_name || 'Exercise' }));
+    }
+    return out;
+  }, [exercises]);
+
   const isEmpty = !exercises || exercises.length === 0;
   const count = exercises?.length ?? 0;
   const isPersonalBasic = personalEditorMode === 'personal_basic';
   const isPersonalEnhanced = personalEditorMode === 'personal_enhanced';
 
-  const handleAdd = useCallback(() => {
-    if (typeof onOpenPicker === 'function') {
-      onOpenPicker();
-      return;
+  const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const [inlineSearchQuery, setInlineSearchQuery] = useState('');
+  const [inlineMuscleFilter, setInlineMuscleFilter] = useState('All');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedQuery(inlineSearchQuery), 2000);
+    return () => window.clearTimeout(t);
+  }, [inlineSearchQuery]);
+
+  const muscleChips = ['All', 'Chest', 'Back', 'Legs', 'Shoulders', 'Arms', 'Core', 'Cardio'];
+  const quickAddMuscles = ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms', 'Core'];
+  const [quickAddMuscle, setQuickAddMuscle] = useState('');
+  const quickAddResults = useMemo(() => {
+    if (!(isPersonalBasic || isPersonalEnhanced) || !quickAddMuscle) return [];
+    const target = quickAddMuscle.toLowerCase();
+    const filtered = LIBRARY_EXERCISES.filter((row) => {
+      const primary = String(row.primaryMuscle || '').toLowerCase();
+      if (target === 'arms') return ['biceps', 'triceps', 'forearms'].includes(primary);
+      if (target === 'legs') return ['quads', 'hamstrings', 'glutes', 'calves'].includes(primary);
+      return primary === target;
+    });
+    const ranked = [...filtered].sort((a, b) => {
+      const aName = String(a.name || '');
+      const bName = String(b.name || '');
+      const aBody = /(bodyweight|band)/i.test(String(a.equipment || ''));
+      const bBody = /(bodyweight|band)/i.test(String(b.equipment || ''));
+      const aBar = /(barbell)/i.test(String(a.equipment || ''));
+      const bBar = /(barbell)/i.test(String(b.equipment || ''));
+      if (personalExperienceLevel === 'beginner') {
+        if (aBody !== bBody) return aBody ? -1 : 1;
+      }
+      if (personalExperienceLevel === 'advanced') {
+        if (aBar !== bBar) return aBar ? -1 : 1;
+      }
+      return aName.localeCompare(bName);
+    });
+    return ranked.slice(0, 5);
+  }, [isPersonalBasic, isPersonalEnhanced, quickAddMuscle, personalExperienceLevel]);
+  const searchResults = useMemo(() => {
+    const q = debouncedQuery.trim().toLowerCase();
+    const rows = LIBRARY_EXERCISES.filter((row) => {
+      if (inlineMuscleFilter === 'All') return true;
+      if (inlineMuscleFilter === 'Arms') return ['Biceps', 'Triceps', 'Forearms'].includes(row.primaryMuscle);
+      if (inlineMuscleFilter === 'Legs') return ['Quads', 'Hamstrings', 'Glutes', 'Calves'].includes(row.primaryMuscle);
+      return String(row.primaryMuscle || '').toLowerCase() === inlineMuscleFilter.toLowerCase();
+    });
+    if (!q) return rows.slice(0, 8);
+    const exact = [];
+    const partial = [];
+    const muscle = [];
+    for (const row of rows) {
+      const name = String(row.name || '').toLowerCase();
+      const primaryMuscle = String(row.primaryMuscle || '').toLowerCase();
+      if (name === q) exact.push(row);
+      else if (name.includes(q)) partial.push(row);
+      else if (primaryMuscle.includes(q)) muscle.push(row);
     }
-    onAddExercise?.();
-  }, [onAddExercise, onOpenPicker]);
+    return [...exact, ...partial, ...muscle].slice(0, 8);
+  }, [debouncedQuery, inlineMuscleFilter]);
+
+  const handleAdd = useCallback(() => {
+    setInlineSearchOpen((prev) => !prev);
+  }, []);
 
   return (
     <div
@@ -108,6 +182,42 @@ export default function ExerciseEditor({
           ))}
         </div>
       )}
+      {inlineSearchOpen ? (
+        <div style={{ padding: `${spacing[8]}px ${spacing[14]}px`, borderBottom: `1px solid ${colors.border}`, background: colors.bg }}>
+          <input
+            type="search"
+            autoFocus
+            value={inlineSearchQuery}
+            onChange={(e) => setInlineSearchQuery(e.target.value)}
+            placeholder="Search exercise library..."
+            style={{ width: '100%', minHeight: 42, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, fontSize: 14, padding: '0 10px' }}
+          />
+          <div className="flex flex-wrap gap-2" style={{ marginTop: 8 }}>
+            {muscleChips.map((chip) => (
+              <button key={chip} type="button" onClick={() => setInlineMuscleFilter(chip)} style={{ border: `1px solid ${inlineMuscleFilter === chip ? colors.primary : colors.border}`, background: inlineMuscleFilter === chip ? colors.primarySubtle : colors.surface1, color: inlineMuscleFilter === chip ? colors.primary : colors.text, borderRadius: 999, fontSize: 12, fontWeight: 600, padding: '4px 10px' }}>
+                {chip}
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, maxHeight: 260, overflowY: 'auto', display: 'grid', gap: 6 }}>
+            {searchResults.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => {
+                  onAddExercise?.({ exercise_name: row.name }, { silent: true });
+                  setInlineSearchOpen(false);
+                  setInlineSearchQuery('');
+                }}
+                style={{ textAlign: 'left', border: `1px solid ${colors.border}`, borderRadius: 10, background: colors.surface1, color: colors.text, padding: '8px 10px' }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{row.name}</div>
+                <div style={{ fontSize: 11, color: colors.muted }}>{row.primaryMuscle} · {(row.equipment || []).join(', ') || 'Equipment varies'}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {isPersonalEnhanced && dayPromptActions.length > 0 && (
         <div
@@ -203,10 +313,17 @@ export default function ExerciseEditor({
                 onCopyPrevious={onCopyPreviousValues}
                 hasPrevious={index > 0}
                 suggestions={suggestionByExerciseId?.[exercise.id] || recentExerciseNames}
+                previousPerformance={previousPerformanceByExerciseId?.[exercise.id] || null}
                 notesPlaceholder={notesPlaceholder}
                 saving={saving}
                 personalEditorMode={personalEditorMode}
+                personalExperienceLevel={personalExperienceLevel}
                 onSmartSwap={onSmartSwapExercise}
+                showPrepEducationPicker={showPrepEducationPicker}
+                isAssignedProgramLive={isAssignedProgramLive}
+                supersetOptions={supersetOptionsByExerciseId?.[exercise.id] || []}
+                onLinkSuperset={onLinkSuperset}
+                onRemoveSuperset={onRemoveSuperset}
               />
             ))}
           </div>
@@ -223,6 +340,59 @@ export default function ExerciseEditor({
             background: colors.bg,
           }}
         >
+          {(isPersonalBasic || isPersonalEnhanced) ? (
+            <div style={{ marginBottom: spacing[10], display: 'grid', gap: spacing[8] }}>
+              <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                Quick add
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {quickAddMuscles.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => setQuickAddMuscle((prev) => (prev === chip ? '' : chip))}
+                    style={{
+                      minHeight: 36,
+                      padding: `0 ${spacing[10]}px`,
+                      borderRadius: 999,
+                      border: `1px solid ${quickAddMuscle === chip ? colors.primary : colors.border}`,
+                      background: quickAddMuscle === chip ? colors.primarySubtle : colors.surface1,
+                      color: quickAddMuscle === chip ? colors.primary : colors.text,
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+              {quickAddMuscle && quickAddResults.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {quickAddResults.map((row) => (
+                    <button
+                      key={`quick-${row.id}`}
+                      type="button"
+                      onClick={() => onAddExercise?.({ exercise_name: row.name }, { silent: true })}
+                      disabled={saving}
+                      style={{
+                        minHeight: 36,
+                        padding: `0 ${spacing[10]}px`,
+                        borderRadius: 10,
+                        border: `1px solid ${colors.border}`,
+                        background: colors.surface1,
+                        color: colors.text,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        opacity: saving ? 0.6 : 1,
+                      }}
+                    >
+                      {row.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <motion.button
             type="button"
             onClick={handleAdd}

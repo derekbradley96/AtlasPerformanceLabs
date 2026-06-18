@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { getClientByUserId } from '@/data/selectors';
+import { useQuery } from '@tanstack/react-query';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getSandboxClientByUserId } from '@/lib/linkedClientFromUserId';
 import { addMedia } from '@/lib/repos/compPrepRepo';
 import { getClientCompProfile } from '@/lib/repos/compPrepRepo';
 import { getAllPoses } from '@/lib/repos/poseLibraryRepo';
@@ -9,6 +11,7 @@ import { impactLight, notificationSuccess } from '@/lib/haptics';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
+import { toPoseLibraryDivisionTags } from '@/lib/compPrep/poseSets';
 
 const CATEGORIES = [
   { value: 'posing', label: 'Posing' },
@@ -21,21 +24,36 @@ export default function CompMediaUpload() {
   const [searchParams] = useSearchParams();
   const poseIdFromQuery = searchParams.get('poseId') || '';
   const { role, user } = useAuth();
+  const supabase = getSupabase();
+
+  const { data: linkedClient } = useQuery({
+    queryKey: ['client-by-user', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      if (supabase) {
+        const { data, error } = await supabase.from('clients').select('id').eq('user_id', user.id).maybeSingle();
+        if (error) return null;
+        return data;
+      }
+      const c = getSandboxClientByUserId(user.id);
+      return c?.id ? { id: c.id } : null;
+    },
+    enabled: role === 'client' && !!user?.id,
+    staleTime: 10 * 60 * 1000,
+  });
 
   const clientId = useMemo(() => {
-    if (role === 'client' && user?.id) {
-      const c = getClientByUserId(user.id);
-      return c?.id ?? null;
-    }
+    if (role === 'client' && user?.id) return linkedClient?.id ?? null;
     if (role === 'solo' && user?.id) return `solo-${user.id}`;
     return null;
-  }, [role, user?.id]);
+  }, [role, user?.id, linkedClient?.id]);
 
   const profile = useMemo(() => (clientId ? getClientCompProfile(clientId) : null), [clientId]);
   const allPoses = useMemo(() => getAllPoses(), []);
   const posesForDivision = useMemo(() => {
     if (!profile?.division) return allPoses;
-    return allPoses.filter((p) => p.divisions.includes(profile.division));
+    const divisionTags = toPoseLibraryDivisionTags(profile.division);
+    return allPoses.filter((p) => divisionTags.some((t) => p.divisions.includes(t)));
   }, [allPoses, profile?.division]);
 
   const [mediaType, setMediaType] = useState('photo');

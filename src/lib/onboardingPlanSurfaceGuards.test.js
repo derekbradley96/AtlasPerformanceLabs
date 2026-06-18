@@ -27,11 +27,11 @@ describe('getRedirectAwayFromCoachAtlasSubscriptionSurfaces', () => {
       })
     ).toBe('/client-dashboard');
   });
-  it('personal without tier -> personal-onboarding-tier', () => {
+  it('personal without tier -> personal-onboarding-flow', () => {
     expect(
       getRedirectAwayFromCoachAtlasSubscriptionSurfaces('personal', {
         personal_plan_tier: null,
       })
-    ).toBe('/personal-onboarding-tier');
+    ).toBe('/personal-onboarding-flow');
   });
 });

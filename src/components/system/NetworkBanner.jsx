@@ -1,34 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { colors } from '@/ui/tokens';
+import { useNetworkStatus } from '@/lib/networkStatus';
+import { WifiOff } from 'lucide-react';
 
 export default function NetworkBanner() {
-  const [offline, setOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
-
-  useEffect(() => {
-    if (typeof navigator === 'undefined') return;
-    const onOnline = () => setOffline(false);
-    const onOffline = () => setOffline(true);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
-    return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
-    };
-  }, []);
-
-  if (!offline) return null;
+  const connected = useNetworkStatus();
+  if (connected) return null;
 
   return (
     <div
       role="status"
-      className="text-center py-2 px-4 text-sm font-medium"
+      aria-live="polite"
       style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 200,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        padding: '8px 16px',
         background: colors.warningSubtle,
-        color: colors.warning,
         borderBottom: `1px solid ${colors.warning}`,
+        fontSize: 13,
+        fontWeight: 500,
+        color: colors.warning,
       }}
     >
-      Offline. Changes will sync when back online.
+      <WifiOff size={14} />
+      Offline — changes will sync when back online
     </div>
   );
 }

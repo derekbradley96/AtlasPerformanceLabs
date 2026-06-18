@@ -3,43 +3,76 @@
  * Resolves coach_id from slug (referral_code), inserts coach_public_enquiries and coach_referral_events (enquiry_started).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { z } from "https://esm.sh/zod@3.23.8";
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { checkEdgeRateLimit, getClientIp, verifyTurnstileToken } from "../_shared/publicSecurity.ts";
 
 const ENQUIRY_TYPES = ["transformation", "competition", "general"];
+const enquirySchema = z.object({
+  slug: z.string().trim().min(1).max(80),
+  enquiry_name: z.string().trim().min(1).max(120),
+  enquiry_email: z.string().trim().email().max(200),
+  enquiry_goal: z.string().trim().max(500).optional().nullable(),
+  enquiry_type: z.enum(["transformation", "competition", "general"]).optional().nullable(),
+  message: z.string().trim().max(2000).optional().nullable(),
+  captcha_token: z.string().trim().max(4096).optional().nullable(),
+}).strict();
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !supabaseServiceKey) {
       return new Response(
         JSON.stringify({ error: "Server not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const slug = typeof body?.slug === "string" ? body.slug.trim() : "";
-    const name = typeof body?.enquiry_name === "string" ? body.enquiry_name.trim() : "";
-    const email = typeof body?.enquiry_email === "string" ? body.enquiry_email.trim() : "";
-    const goal = typeof body?.enquiry_goal === "string" ? body.enquiry_goal.trim() : null;
-    const enquiryTypeRaw = typeof body?.enquiry_type === "string" ? body.enquiry_type.trim().toLowerCase() : null;
-    const enquiryType = enquiryTypeRaw && ENQUIRY_TYPES.includes(enquiryTypeRaw) ? enquiryTypeRaw : null;
-    const message = typeof body?.message === "string" ? body.message.trim() : null;
-
-    if (!slug) {
-      return new Response(
-        JSON.stringify({ error: "slug required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const rawBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const parsed = enquirySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(JSON.stringify({ error: "Invalid request payload" }), {
+        status: 400,
+        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+      });
     }
-    if (!name || !email) {
-      return new Response(
-        JSON.stringify({ error: "enquiry_name and enquiry_email required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const body = parsed.data;
+    const slug = body.slug.trim();
+    const name = body.enquiry_name.trim();
+    const email = body.enquiry_email.trim();
+    const goal = body.enquiry_goal?.trim() || null;
+    const enquiryTypeRaw = body.enquiry_type?.trim().toLowerCase() ?? null;
+    const enquiryType = enquiryTypeRaw && ENQUIRY_TYPES.includes(enquiryTypeRaw) ? enquiryTypeRaw : null;
+    const message = body.message?.trim() || null;
+
+    const rate = await checkEdgeRateLimit({
+      req,
+      scope: "submit-public-enquiry",
+      keyPart: slug.toLowerCase(),
+      maxHits: 12,
+      windowSeconds: 60,
+    });
+    if (!rate.allowed) {
+      return new Response(JSON.stringify({ error: "Too many requests" }), {
+        status: 429,
+        headers: {
+          ...getCorsHeaders(req),
+          "Content-Type": "application/json",
+          "Retry-After": String(rate.retryAfterSeconds),
+        },
+      });
+    }
+
+    const ip = getClientIp(req);
+    const captchaOk = await verifyTurnstileToken(body.captcha_token ?? "", ip);
+    if (!captchaOk) {
+      return new Response(JSON.stringify({ error: "Captcha verification failed" }), {
+        status: 400,
+        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+      });
     }
 
     const normalized = slug.toLowerCase();
@@ -69,7 +102,7 @@ Deno.serve(async (req) => {
     if (!coachId) {
       return new Response(
         JSON.stringify({ error: "Coach not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -92,7 +125,7 @@ Deno.serve(async (req) => {
       console.error("submit-public-enquiry insert:", insertErr);
       return new Response(
         JSON.stringify({ error: "Failed to save enquiry" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -111,13 +144,13 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({ ok: true, id: (enquiry as { id: string }).id }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   } catch (err) {
     console.error("submit-public-enquiry:", err);
     return new Response(
-      JSON.stringify({ error: (err as Error).message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: "Request failed" }),
+      { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

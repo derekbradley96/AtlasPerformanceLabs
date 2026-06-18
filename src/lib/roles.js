@@ -1,6 +1,12 @@
 /**
- * Single source of truth for auth roles. Canonical: 'coach', 'client', 'personal' (optional: 'admin').
- * No athlete or trainer—only coach, client, personal. Guard system uses Roles for route protection and hasRole().
+ * Role utilities. Import these instead of branching on
+ * raw DB strings ('trainer', 'solo', 'athlete', etc).
+ *
+ * RULE: Never compare user.role directly in UI code.
+ * Always use normalizeRole() or isCoach() / isClient() / isPersonal().
+ *
+ * Canonical stored roles: 'coach', 'client', 'personal' (optional: 'admin' for guards).
+ * Legacy reads only — map with normalizeRole; never write legacy strings.
  */
 
 const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV;
@@ -69,6 +75,27 @@ export function normalizeRole(input) {
     console.warn('[roles] Unknown role arrived:', raw, '→ defaulting to personal');
   }
   return DEFAULT_ROLE;
+}
+
+/**
+ * Human-readable label for any role value from the database.
+ * Handles legacy strings: 'trainer', 'solo', 'athlete'.
+ * Never branch UI directly on raw DB strings — use this for display.
+ * @param {string | { role?: string | null } | null | undefined} role
+ * @returns {string}
+ */
+export function displayRoleLabel(role) {
+  const r = normalizeRole(role);
+  switch (r) {
+    case 'coach':
+      return 'Coach';
+    case 'client':
+      return 'Client';
+    case 'personal':
+      return 'Personal';
+    default:
+      return 'User';
+  }
 }
 
 /**

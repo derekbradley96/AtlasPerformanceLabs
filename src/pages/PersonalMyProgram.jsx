@@ -45,7 +45,7 @@ export default function PersonalMyProgram() {
   const { user, profile } = useAuth();
   const { isDesktopWeb } = usePresentationMode();
   const rhythm = desktopRhythm(isDesktopWeb);
-  const isEnhancedPersonal = resolvePersonalPlanTier(profile, user) === 'enhanced';
+  const isEnhancedPersonal = ['enhanced', 'free'].includes(resolvePersonalPlanTier(profile, user));
   const todayIso = new Date().toISOString().slice(0, 10);
   const personalTarget = getPersonalNutritionTarget(user?.id);
   const personalMealsToday = listPersonalMealLogs(user?.id, todayIso);

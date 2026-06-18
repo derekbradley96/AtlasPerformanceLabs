@@ -2,14 +2,26 @@
 // Uses service role. Schedule via Supabase Dashboard → Scheduled Triggers (e.g. daily 06:00 UTC).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 const RETENTION_REVIEW_TABLE = "atlas_retention_review_items";
 const RETENTION_VIEW = "v_client_retention_risk";
 const TYPE_RETENTION_RISK = "retention_risk";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
+
+  // Set CRON_SECRET in Supabase Edge Function secrets.
+  // In Supabase Dashboard > Edge Functions > Schedules, set the HTTP header:
+  // Authorization: Bearer <your-CRON_SECRET>
+  // Validate cron caller secret
+  if (req.method !== "OPTIONS") {
+    const authHeader = req.headers.get('Authorization');
+    const cronSecret = Deno.env.get('CRON_SECRET');
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+  }
 
   try {
     const supabase = createClient(
@@ -26,7 +38,7 @@ Deno.serve(async (req) => {
       console.error("retention-alerts: fetch high risk", fetchError);
       return new Response(
         JSON.stringify({ error: fetchError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -79,7 +91,7 @@ Deno.serve(async (req) => {
         console.error("retention-alerts: insert", insertError);
         return new Response(
           JSON.stringify({ error: insertError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       inserted += 1;
@@ -87,13 +99,13 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({ ok: true, high_risk_count: rows.length, inserted, skipped }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   } catch (e) {
     console.error("retention-alerts", e);
     return new Response(
       JSON.stringify({ error: String(e) }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

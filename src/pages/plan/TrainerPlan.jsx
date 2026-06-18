@@ -10,6 +10,7 @@ import { impactLight } from '@/lib/haptics';
 import { stripeCreatePlanCheckout } from '@/lib/supabaseStripeApi';
 import { toast } from 'sonner';
 import { CURRENCY, PLANS } from '@/config/plans';
+import { formatCoachPlanCardEffectiveLine } from '@/utils/upgradeTriggers';
 import UpgradePrompt from '@/components/UpgradePrompt';
 import {
   evaluateUpgradeTriggers,
@@ -204,6 +205,13 @@ export default function TrainerPlan() {
                     <li>{plan.commission ?? '0%'} commission on client payments</li>
                     <li>{plan.id === 'elite' ? 'Team features (assistant coaches)' : 'Full Atlas features included'}</li>
                   </ul>
+                  <p className="text-xs font-medium mb-4" style={{ color: colors.textSecondary }}>
+                    {formatCoachPlanCardEffectiveLine({
+                      planTierId: plan.id,
+                      clientCount: usage.clients,
+                      monthlyRevenueEstimate: null,
+                    })}
+                  </p>
                   {plan.id !== currentPlanId && (
                     <Button
                       variant="secondary"

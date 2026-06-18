@@ -16,6 +16,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { isCoach as roleIsCoach, isClient as roleIsClient } from '@/lib/roles';
+import { getMessagesListPath, getMessagesThreadPath } from '@/lib/messagesPath';
 
 function pickData(notification) {
   return notification?.data && typeof notification.data === 'object' ? notification.data : {};
@@ -59,8 +60,10 @@ export function getRouteForNotification(notification, viewerRole = null) {
       return isClient || !isCoach ? '/check-in' : '/review-center/checkins';
     case 'message_received':
     case 'message_reply':
-      if (isCoach && clientId) return `/messages/${clientId}`;
-      return '/messages';
+      if (isCoach && clientId) return getMessagesThreadPath(clientId);
+      return getMessagesListPath();
+    case 'community_mention':
+      return '/community';
     case 'pose_check_submitted':
       if (isCoach && poseCheckId) return `/review-center/pose-checks/${poseCheckId}`;
       if (isCoach) return '/review-center/pose-checks';
@@ -86,7 +89,7 @@ export function getRouteForNotification(notification, viewerRole = null) {
     case 'missed_session':
       return '/habits-daily';
     case 'peak_week_update':
-      if (isCoach && clientId) return `/clients/${clientId}/peak-week`;
+      if (isCoach && clientId) return `/clients/${clientId}/peak-week-editor`;
       if (peakWeekId && isCoach) return '/peak-week-dashboard';
       return '/peak-week';
     case 'adherence_drop':
@@ -109,6 +112,7 @@ const ICON_MAP = {
   checkin_overdue: Calendar,
   message_received: MessageCircle,
   message_reply: MessageCircle,
+  community_mention: MessageCircle,
   habit_due: CheckSquare,
   habit_streak: CheckSquare,
   retention_nudge: CheckSquare,

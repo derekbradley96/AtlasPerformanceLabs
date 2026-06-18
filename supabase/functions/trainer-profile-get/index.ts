@@ -2,11 +2,11 @@
  * Get trainer/coach profile by id. Caller can only access own profile (id must equal JWT).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, assertUserCanAccessProfile, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -27,10 +27,10 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (profileErr) {
-      return new Response(JSON.stringify({ error: profileErr.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: profileErr.message }), { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     if (!profile) {
-      return new Response(JSON.stringify(null), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(null), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const { data: marketplace } = await supabase
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       accepting_clients: (marketplace as Record<string, unknown>)?.is_listed ?? true,
       created_at: (profile as Record<string, unknown>).created_at,
     };
-    return new Response(JSON.stringify(merged), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(merged), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("trainer-profile-get", e);
     return jsonError("Request failed", 500);

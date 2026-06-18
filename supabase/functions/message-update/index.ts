@@ -2,11 +2,11 @@
  * Update a message. Caller must be a participant in the message's thread.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
     const payload: Record<string, unknown> = {};
     if (body.read_at !== undefined) payload.read_at = body.read_at;
     if (Object.keys(payload).length === 0) {
-      return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ ok: true }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -42,9 +42,9 @@ Deno.serve(async (req) => {
     }
     const { error } = await supabase.from("message_messages").update(payload).eq("id", id);
     if (error) {
-      return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ ok: true }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
-    return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("message-update", e);
     return jsonError("Request failed", 500);

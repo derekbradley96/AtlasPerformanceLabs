@@ -5,7 +5,7 @@
  * Maps to: program_blocks → program_weeks → program_days → program_exercises.
  * If an exercise name doesn't match the Atlas library, shows mapping UI to pick a library exercise or keep as-is.
  */
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
@@ -24,6 +24,7 @@ import {
 } from '@/services/migration/programImportService';
 import { trackFriction } from '@/services/frictionTracker';
 import { User, CheckCircle2, AlertCircle } from 'lucide-react';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 async function fetchCoachClients() {
   if (!hasSupabase) return [];
@@ -57,6 +58,7 @@ export default function ImportProgramsPage() {
   const [exerciseMapping, setExerciseMapping] = useState({});
   const [loading, setLoading] = useState(false);
   const [createdBlockId, setCreatedBlockId] = useState(null);
+  const [showImportConfirm, setShowImportConfirm] = useState(false);
 
   const isCoachRole = isCoach(effectiveRole);
 
@@ -107,7 +109,7 @@ export default function ImportProgramsPage() {
     }
   };
 
-  const handleImport = async () => {
+  const handleImportRequest = () => {
     if (!parsed?.rowsWithMatch?.length) {
       toast.error('Parse a CSV first.');
       return;
@@ -120,13 +122,10 @@ export default function ImportProgramsPage() {
       toast.error('Supabase is not available.');
       return;
     }
-    const ok =
-      typeof window !== 'undefined' &&
-      window.confirm(
-        `Create program "${blockTitle || 'Imported program'}" for this client with ${parsed.rowsWithMatch.length} exercise(s)?`
-      );
-    if (!ok) return;
+    setShowImportConfirm(true);
+  };
 
+  const handleImport = useCallback(async () => {
     setLoading(true);
     try {
       const supabase = getSupabase();
@@ -162,7 +161,7 @@ export default function ImportProgramsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [parsed, clientId, blockTitle, exerciseMapping]);
 
   const setMappingFor = (csvName, value) => {
     setExerciseMapping((prev) => ({ ...prev, [csvName]: value }));
@@ -265,7 +264,7 @@ export default function ImportProgramsPage() {
             </Button>
             <Button
               size="sm"
-              onClick={handleImport}
+              onClick={handleImportRequest}
               disabled={!parsed?.rowsWithMatch?.length || !clientId || loading}
             >
               {loading ? 'Creating…' : 'Create program'}
@@ -372,6 +371,16 @@ export default function ImportProgramsPage() {
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={showImportConfirm}
+        title="Create program?"
+        message={`Create "${blockTitle || 'Imported program'}" for this client with ${parsed?.rowsWithMatch?.length ?? 0} exercise(s)?`}
+        confirmLabel="Create"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => { setShowImportConfirm(false); handleImport(); }}
+        onCancel={() => setShowImportConfirm(false)}
+      />
     </div>
   );
 }

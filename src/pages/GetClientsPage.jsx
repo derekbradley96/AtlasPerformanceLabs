@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import {
@@ -559,7 +560,7 @@ export default function GetClientsPage() {
                         size="sm"
                         className="h-9 text-xs"
                         disabled={tasks.nutritionAssigned}
-                        onClick={() => navigate(`/trainer/nutrition/${encodeURIComponent(cid)}`)}
+                        onClick={() => navigate(`/coach/nutrition/${encodeURIComponent(cid)}`)}
                       >
                         <UtensilsCrossed size={14} className="mr-1" />
                         {tasks.nutritionAssigned ? 'Nutrition set' : 'Assign nutrition'}
@@ -569,7 +570,7 @@ export default function GetClientsPage() {
                         size="sm"
                         className="h-9 text-xs"
                         disabled={tasks.firstMessageSent}
-                        onClick={() => navigate(`/messages/${encodeURIComponent(cid)}`)}
+                        onClick={() => navigateToThread(navigate, cid)}
                       >
                         <MessageSquare size={14} className="mr-1" />
                         {tasks.firstMessageSent ? 'Messaged' : 'First message'}

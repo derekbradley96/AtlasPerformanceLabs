@@ -1,19 +1,20 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
 import { safeDate } from '@/lib/format';
 import { listForTrainer } from '@/data/supabaseCheckinsRepo';
-import { listClients } from '@/data/supabaseClientsRepo';
+import { getSupabase } from '@/lib/supabaseClient';
 import {
   Calendar, AlertCircle, Clock, CheckCircle2, User
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
+import { CardSkeleton, EmptyState } from '@/components/ui/LoadingState';
 import NotAuthorized from '@/components/NotAuthorized';
 import { atlasMigrationDataAttributes, deriveTrainerCheckInsHubRouteState } from '@/lib/atlasMigrationPhases';
+import { isCoach } from '@/lib/roles';
 
 export default function CheckIns() {
   const navigate = useNavigate();
@@ -23,15 +24,42 @@ export default function CheckIns() {
   const { data: checkinsData = [], isLoading } = useQuery({
     queryKey: ['trainer-checkins-queue', coachId],
     queryFn: () => listForTrainer(coachId),
-    enabled: !!coachId && (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer') && !isDemoMode
+    enabled: !!coachId && isCoach(displayUser?.user_type ?? displayUser?.role) && !isDemoMode
   });
   const checkins = Array.isArray(isDemoMode ? [] : checkinsData) ? (isDemoMode ? [] : checkinsData) : [];
 
   const { data: clients = [] } = useQuery({
-    queryKey: ['trainer-clients-checkins', coachId],
-    queryFn: () => listClients(coachId),
+    queryKey: ['coach-clients-with-names', coachId],
+    queryFn: async () => {
+      const supabase = getSupabase();
+      if (!supabase || !coachId) return [];
+
+      const { data: clientRows, error: clientsError } = await supabase
+        .from('clients')
+        .select('id, user_id')
+        .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`);
+      if (clientsError || !clientRows?.length) return [];
+
+      const userIds = clientRows.map(c => c.user_id).filter(Boolean);
+      const { data: profiles } = userIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, display_name, avatar_url')
+            .in('id', userIds)
+        : { data: [] };
+
+      return clientRows.map(c => ({
+        ...c,
+        display_name: profiles?.find(p => p.id === c.user_id)?.display_name ?? null,
+        avatar_url: profiles?.find(p => p.id === c.user_id)?.avatar_url ?? null,
+      }));
+    },
     enabled: !!coachId && !isDemoMode
   });
+
+  useEffect(() => {
+    document.title = 'Check-ins — Atlas';
+  }, []);
 
   // Sort check-ins: overdue first, then submitted (newest first), then pending
   const sortedCheckins = [...checkins].sort((a, b) => {
@@ -59,7 +87,7 @@ export default function CheckIns() {
   }).length;
 
   const checkinsHubMigrationAttrs = useMemo(() => {
-    if (displayUser && displayUser.user_type !== 'coach' && displayUser?.user_type !== 'trainer') {
+    if (displayUser && !isCoach(displayUser?.user_type ?? displayUser?.role)) {
       const s = deriveTrainerCheckInsHubRouteState({ surface: 'unauthorized' });
       return atlasMigrationDataAttributes(s.phase, s.primary);
     }
@@ -70,7 +98,7 @@ export default function CheckIns() {
     return atlasMigrationDataAttributes(s.phase, s.primary);
   }, [displayUser, isDemoMode, isLoading, sortedCheckins.length]);
 
-  if (displayUser && displayUser.user_type !== 'coach' && displayUser?.user_type !== 'trainer') {
+  if (displayUser && !isCoach(displayUser?.user_type ?? displayUser?.role)) {
     return (
       <div className="min-h-screen" {...checkinsHubMigrationAttrs}>
         <NotAuthorized />
@@ -80,8 +108,9 @@ export default function CheckIns() {
 
   if (!isDemoMode && isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" {...checkinsHubMigrationAttrs}>
-        <PageLoader />
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6" {...checkinsHubMigrationAttrs}>
+        <div className="h-8 w-48 bg-slate-800 rounded animate-pulse mb-4" />
+        <CardSkeleton count={3} />
       </div>
     );
   }
@@ -94,7 +123,7 @@ export default function CheckIns() {
       <div className="p-4 md:p-6 border-b border-slate-800">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">Check-Ins</h1>
+            <h1 className="text-2xl font-bold text-white">Check-ins</h1>
             <p className="text-slate-400">
               {pendingCount} pending · {overdueCount} overdue
             </p>
@@ -113,16 +142,10 @@ export default function CheckIns() {
         {sortedCheckins.length === 0 ? (
           <EmptyState
             icon={Calendar}
-            title="No check-ins yet"
-            description="Client check-ins will appear here when submitted."
-            action={
-              <Button 
-                onClick={() => navigate(createPageUrl('CheckInTemplates'))}
-                className="bg-blue-500 hover:bg-blue-600"
-              >
-                Set Up Templates
-              </Button>
-            }
+            title="No check-ins pending"
+            description="When clients submit their weekly check-in, it appears here for you to review."
+            actionLabel="Review Center"
+            onAction={() => navigate('/review-center')}
           />
         ) : (
           <div className="grid gap-3">
@@ -156,7 +179,7 @@ export default function CheckIns() {
               return (
                 <button
                   key={checkin?.id ?? `checkin-${index}`}
-                  onClick={() => navigate(createPageUrl('ReviewCheckIn') + `?id=${checkin.id}`)}
+                  onClick={() => navigate(`/review-center/checkins/${checkin.id}`)}
                   className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-4 hover:bg-slate-800 transition-colors text-left"
                 >
                   <div className="flex items-start justify-between gap-3 mb-3">
@@ -165,7 +188,7 @@ export default function CheckIns() {
                         <User className="w-5 h-5 text-slate-400" />
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-semibold text-white">{client?.name ?? client?.full_name ?? 'Client'}</h3>
+                        <h3 className="font-semibold text-white">{client?.display_name ?? 'Client'}</h3>
                         <p className="text-sm text-slate-400">
                           Due: {dueDate ? dueDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}
                         </p>

@@ -9,6 +9,14 @@ import { ChevronRight, ClipboardList } from 'lucide-react';
 import EmptyState from '@/components/ui/EmptyState';
 import { colors, spacing, touchTargetMin } from '@/ui/tokens';
 
+const TAG_STYLES = [
+  { bg: colors.primarySubtle, color: colors.primary },
+  { bg: colors.successSubtle, color: colors.success },
+  { bg: colors.warningSubtle, color: colors.warning },
+  { bg: 'rgba(167,139,250,0.18)', color: '#C4B5FD' },
+  { bg: 'rgba(236,72,153,0.14)', color: '#F9A8D4' },
+];
+
 export default function ClientCheckinsPanel({
   clientId,
   checkInsList = [],
@@ -72,6 +80,22 @@ export default function ClientCheckinsPanel({
                 {c.status === 'pending' && <span>Pending</span>}
                 {c.status === 'submitted' && c.adherence_pct == null && c.weight_kg == null && <span>Submitted</span>}
               </div>
+              {Array.isArray(c.coach_review_tags) && c.coach_review_tags.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {c.coach_review_tags.map((tag, ti) => {
+                    const style = TAG_STYLES[ti % TAG_STYLES.length];
+                    return (
+                      <span
+                        key={`${c.id}-tag-${ti}`}
+                        className="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                        style={{ background: style.bg, color: style.color }}
+                      >
+                        {tag}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
             <ChevronRight size={18} style={{ color: colors.muted }} className="flex-shrink-0" />
           </button>

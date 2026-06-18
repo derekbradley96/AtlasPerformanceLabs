@@ -18,8 +18,7 @@ function mapAdminRow(row) {
   };
 }
 
-export default function AdminUsersSection({ adminEmail }) {
-  const isAdmin = adminEmail?.toLowerCase() === 'derekbradley96@gmail.com';
+export default function AdminUsersSection({ isAdmin, adminEmail }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');

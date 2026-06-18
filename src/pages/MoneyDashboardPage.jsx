@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
@@ -14,12 +15,13 @@ import {
   CoachMonthlyFeeSummaryModal,
 } from '@/components/coaching/CoachUpgradeMoments';
 import { MessageCircle, DollarSign, Users, AlertCircle } from 'lucide-react';
+import { formatGbpWhole } from '@/lib/coachUpgradeMomentMath';
 
 const PAYMENT_REMINDER_MSG = 'Hi! This is a friendly reminder that your payment is overdue. Please settle at your earliest convenience. Thanks!';
 
 function formatCurrency(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(value));
+  return formatGbpWhole(Number(value));
 }
 
 function formatDate(dateStr) {
@@ -110,7 +112,7 @@ export default function MoneyDashboardPage() {
   }, []);
 
   const handleSendReminder = (clientId) => {
-    navigate(`/messages/${clientId}`, { state: { prefilledMessage: PAYMENT_REMINDER_MSG } });
+    navigateToThread(navigate, clientId, { state: { prefilledMessage: PAYMENT_REMINDER_MSG } });
   };
 
   if (loading) {

@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import { isPersonal } from '@/lib/roles';
 
 export function useCoachingUpgradeTriggers(userId, userType) {
-  const enabled = userType === 'solo' && !!userId;
+  const enabled = isPersonal(userType) && !!userId;
 
   const { data: workouts = [] } = useQuery({
     queryKey: ['workouts-for-trigger', userId],
@@ -15,7 +16,7 @@ export function useCoachingUpgradeTriggers(userId, userType) {
     enabled,
   });
 
-  if (userType !== 'solo') {
+  if (!isPersonal(userType)) {
     return { trigger: null, reason: null };
   }
 

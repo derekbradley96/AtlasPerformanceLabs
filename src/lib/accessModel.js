@@ -52,6 +52,7 @@ export function resolveClientDeliveryContext({ clientRow, linkedCoachFocus }) {
  * @param {object|null} [opts.clientLinkedRow] - clients row for signed-in client (user_id match)
  * @param {string|null} [opts.linkedCoachFocus] - profiles.coach_focus for clients.coach_id
  * @param {boolean} [opts.clientLinkedResolved] - after first fetch of client row (avoids wrong defaults mid-load)
+ * @param {Record<string, unknown> | null} [opts.activeContestPrep] - client's active contest_preps row (when present, unlock prep client surfaces)
  */
 export function resolveAtlasAccess({
   role,
@@ -62,6 +63,7 @@ export function resolveAtlasAccess({
   clientLinkedRow,
   linkedCoachFocus,
   clientLinkedResolved,
+  activeContestPrep,
 } = {}) {
   const resolvedRole = normalizeRole(role);
   const coach = isCoach(resolvedRole);
@@ -80,7 +82,7 @@ export function resolveAtlasAccess({
   const hasCompetitionPrep = isCompetitionCoach || isIntegratedCoach;
   const isCoachBasic = coachPlanTier === 'basic';
   const isCoachProOrElite = coachPlanTier === 'pro' || coachPlanTier === 'elite';
-  const isPersonalEnhanced = personalPlanTier === 'enhanced';
+  const isPersonalEnhanced = personalPlanTier === 'enhanced' || personalPlanTier === 'free';
 
   const clientDeliveryReady = !client || clientLinkedResolved === true;
   const clientDeliveryContext =
@@ -89,6 +91,7 @@ export function resolveAtlasAccess({
       : null;
   const isClientCompetitionDelivery = client && clientDeliveryContext === 'competition';
   const isClientTransformationDelivery = client && clientDeliveryContext === 'transformation';
+  const hasActiveContestPrepClient = Boolean(activeContestPrep && (activeContestPrep.id || activeContestPrep.show_date));
 
   return {
     role: resolvedRole,
@@ -114,7 +117,7 @@ export function resolveAtlasAccess({
     can_access_advanced_coach_automation: isCoachProOrElite,
     can_access_personal_enhanced_builder: isPersonalEnhanced,
     /** Client: competition prep surfaces (posing, peak week client flows). */
-    can_client_access_competition_prep: isClientCompetitionDelivery,
+    can_client_access_competition_prep: isClientCompetitionDelivery || (client && hasActiveContestPrepClient),
     /** Shared comp-prep area: coach with prep focus OR competition-delivery client. */
     can_access_comp_prep_area: hasCompetitionPrep || isClientCompetitionDelivery,
   };

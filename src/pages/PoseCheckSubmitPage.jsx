@@ -20,20 +20,65 @@ import {
   updatePoseCheckPhotos,
   getPoseCheckItems,
   updatePoseCheckItem,
+  createPoseCheckPhotoSignedUrl,
 } from '@/lib/poseChecks';
 import { trackPoseCheckSubmitted, trackProgressPhotoUploaded } from '@/services/engagementTracker';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { ImagePlus, CheckCircle2, Sparkles } from 'lucide-react';
 import { hapticLight } from '@/lib/haptics';
+import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';
+import { evaluateUserMilestones } from '@/lib/milestoneEngine';
+import { isClient, isPersonal } from '@/lib/roles';
 
 function isClientOrPersonal(role) {
-  const r = (role ?? '').toString().toLowerCase();
-  return r === 'client' || r === 'solo' || r === 'personal';
+  return isClient(role) || isPersonal(role);
+}
+
+function PoseFeedbackImage({ item, urlMap }) {
+  const [expandedIdx, setExpandedIdx] = useState(null);
+  const displayUrl =
+    item.annotated_image_path && urlMap?.annotated ? urlMap.annotated : urlMap?.raw;
+  const annotations = Array.isArray(item.coach_annotations) ? item.coach_annotations : [];
+  if (!displayUrl) return null;
+  return (
+    <div className="relative rounded-lg overflow-hidden mt-2" style={{ background: colors.surface2 }}>
+      <img src={displayUrl} alt={item.pose_label} className="w-full max-h-72 object-contain" />
+      {!item.annotated_image_path && annotations.length > 0 && (
+        <div className="absolute inset-0 pointer-events-none">
+          {annotations.map((a, idx) => (
+            <button
+              key={idx}
+              type="button"
+              className="absolute rounded-full pointer-events-auto border-2 border-white"
+              style={{
+                left: `${(a.x ?? 0) * 100}%`,
+                top: `${(a.y ?? 0) * 100}%`,
+                width: 14,
+                height: 14,
+                transform: 'translate(-50%, -50%)',
+                background: a.color || '#ef4444',
+              }}
+              onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)}
+              aria-label="Marker"
+            />
+          ))}
+        </div>
+      )}
+      {expandedIdx != null && annotations[expandedIdx]?.label && (
+        <div
+          className="absolute left-2 right-2 bottom-2 text-xs p-2 rounded-lg"
+          style={{ background: 'rgba(0,0,0,0.75)', color: '#fff' }}
+        >
+          {annotations[expandedIdx].label}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function PoseCheckSubmitPage() {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const [initLoading, setInitLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [clientId, setClientId] = useState(null);
@@ -49,6 +94,7 @@ export default function PoseCheckSubmitPage() {
   const [structuredExtraFiles, setStructuredExtraFiles] = useState([]);
   /** @type {Record<string, File | undefined>} */
   const [poseFilesByItemId, setPoseFilesByItemId] = useState({});
+  const [achievementRecord, setAchievementRecord] = useState(null);
 
   const loadWeekState = useCallback(async () => {
     const w = getWeekStartISO();
@@ -122,6 +168,33 @@ export default function PoseCheckSubmitPage() {
     structuredExtraPreviews.forEach((p) => URL.revokeObjectURL(p.url));
   }, [structuredExtraPreviews]);
 
+  useEffect(() => {
+    if (flow !== 'submitted' || !submittedItems.length) {
+      setFeedbackItemUrls({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const next = {};
+      await Promise.all(
+        submittedItems.map(async (i) => {
+          const entry = {};
+          if (i.annotated_image_path) {
+            const u = await createPoseCheckPhotoSignedUrl(i.annotated_image_path);
+            if (u) entry.annotated = u;
+          }
+          if (i.photo_path) {
+            const u2 = await createPoseCheckPhotoSignedUrl(i.photo_path);
+            if (u2) entry.raw = u2;
+          }
+          if (Object.keys(entry).length) next[i.id] = entry;
+        })
+      );
+      if (!cancelled) setFeedbackItemUrls(next);
+    })();
+    return () => { cancelled = true; };
+  }, [flow, submittedRow?.id, weekStart, submittedItems.map((i) => `${i.id}:${i.annotated_image_path || ''}:${i.photo_path || ''}`).join('|')]);
+
   const handleLegacyPhotoChange = (e) => {
     const files = Array.from(e.target.files || []);
     setLegacyPhotoFiles((prev) => [...prev, ...files]);
@@ -185,6 +258,11 @@ export default function PoseCheckSubmitPage() {
       if (paths.length > 0) {
         trackProgressPhotoUploaded(clientId, coachId, { pose_check_id: row.id, photo_count: paths.length }).catch(() => {});
       }
+      const unlocked = evaluateUserMilestones(user?.id, [], {
+        poseCheckCount: 1,
+        isCompetitionClient: true,
+      });
+      if (unlocked) setAchievementRecord(unlocked);
       await loadWeekState();
     } catch {
       toast.error('Something went wrong');
@@ -238,6 +316,11 @@ export default function PoseCheckSubmitPage() {
       }
       trackPoseCheckSubmitted(clientId, coachId, { pose_check_id: poseCheckRow.id, photo_count: paths.length }).catch(() => {});
       trackProgressPhotoUploaded(clientId, coachId, { pose_check_id: poseCheckRow.id, photo_count: paths.length }).catch(() => {});
+      const unlocked = evaluateUserMilestones(user?.id, [], {
+        poseCheckCount: 1,
+        isCompetitionClient: true,
+      });
+      if (unlocked) setAchievementRecord(unlocked);
       setPoseFilesByItemId({});
       setStructuredExtraFiles([]);
       await loadWeekState();
@@ -346,21 +429,30 @@ export default function PoseCheckSubmitPage() {
             </Card>
           )}
 
-          {hasItemFeedback && (
+          {(hasItemFeedback || submittedItems.some((i) => i.photo_path || i.annotated_image_path)) && (
             <div style={{ marginBottom: spacing[16] }}>
-              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Per-pose notes</p>
+              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>Per-pose feedback</p>
               <div className="space-y-2">
-                {submittedItems.filter((i) => (i.coach_notes && String(i.coach_notes).trim()) || i.coach_rating != null).map((i) => (
-                  <Card key={i.id} style={{ padding: spacing[12] }}>
-                    <p className="text-sm font-semibold" style={{ color: colors.text }}>{i.pose_label}</p>
-                    {i.coach_rating != null && (
-                      <p className="text-xs mt-1" style={{ color: colors.accent }}>Rating {i.coach_rating}/10</p>
-                    )}
-                    {i.coach_notes && (
-                      <p className="text-sm mt-1 whitespace-pre-wrap" style={{ color: colors.text }}>{i.coach_notes}</p>
-                    )}
-                  </Card>
-                ))}
+                {submittedItems
+                  .filter(
+                    (i) =>
+                      (i.coach_notes && String(i.coach_notes).trim()) ||
+                      i.coach_rating != null ||
+                      i.photo_path ||
+                      i.annotated_image_path
+                  )
+                  .map((i) => (
+                    <Card key={i.id} style={{ padding: spacing[12] }}>
+                      <p className="text-sm font-semibold" style={{ color: colors.text }}>{i.pose_label}</p>
+                      <PoseFeedbackImage item={i} urlMap={feedbackItemUrls[i.id]} />
+                      {i.coach_rating != null && (
+                        <p className="text-xs mt-1" style={{ color: colors.accent }}>Rating {i.coach_rating}/10</p>
+                      )}
+                      {i.coach_notes && (
+                        <p className="text-sm mt-1 whitespace-pre-wrap" style={{ color: colors.text }}>{i.coach_notes}</p>
+                      )}
+                    </Card>
+                  ))}
               </div>
             </div>
           )}
@@ -522,6 +614,12 @@ export default function PoseCheckSubmitPage() {
           {submitting ? 'Working…' : 'Continue'}
         </Button>
       </form>
+      {achievementRecord ? (
+        <AchievementUnlockedModal
+          record={achievementRecord}
+          onClose={() => setAchievementRecord(null)}
+        />
+      ) : null}
     </div>
   );
 }

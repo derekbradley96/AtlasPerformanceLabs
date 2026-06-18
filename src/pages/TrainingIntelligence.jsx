@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { PageLoader, EmptyState } from '@/components/ui/LoadingState';

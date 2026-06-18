@@ -1,25 +1,28 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { DollarSign, Check, MessageSquare } from 'lucide-react';
+import { DollarSign, Check, MessageSquare, CreditCard } from 'lucide-react';
 import { toast } from 'sonner';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
+import TopBar from '@/components/ui/TopBar';
 import { colors, spacing } from '@/ui/tokens';
 import {
-  getRevenueForecast,
   getStoredPeriod,
-  setStoredPeriod,
+  setStoredPeriodPref,
+  getStoredPeriodPref,
   getStoredTasks,
   setStoredTasks,
   getStoredReceipts,
   setStoredReceipts,
-  markTransactionPaid,
-  isTransactionMarkedPaid,
-} from '@/lib/earningsMock';
-import * as atlasRepo from '@/data/repos/atlasRepo';
+  getEarningsSummary,
+  getClientPaymentsList,
+} from '@/lib/earningsService';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { isStripeConnected, setStripeConnected, getConnectAccountLinkUrl } from '@/lib/stripeConnectStore';
 import { stripeConnectLink, getCoach } from '@/lib/supabaseStripeApi';
 import { safeDate } from '@/lib/format';
@@ -38,6 +41,13 @@ import {
 const BG = '#0B1220';
 const CARD_BG = '#111827';
 const BORDER = 'rgba(255,255,255,0.06)';
+const pageContainer = {
+  background: BG,
+  color: colors.text,
+  paddingLeft: spacing[16],
+  paddingRight: spacing[16],
+  paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
+};
 
 
 async function lightHaptic() {
@@ -79,60 +89,85 @@ export default function Earnings() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, isDemoMode } = useAuth();
-  const userId = isDemoMode ? 'demo-trainer' : (user?.id ?? '');
-  const clientIdFromUrl = searchParams.get('clientId');
+  const userId = user?.id ?? '';
+  const supabase = hasSupabase ? getSupabase() : null;
   const filterOverdue = searchParams.get('filter') === 'overdue';
   const [mounted, setMounted] = useState(false);
   const [period, setPeriod] = useState(() => getStoredPeriod());
+  useEffect(() => {
+    let cancelled = false;
+    getStoredPeriodPref().then((value) => {
+      if (!cancelled && value) setPeriod(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [tasks, setTasks] = useState(() => getStoredTasks());
   const [receipts, setReceipts] = useState(() => getStoredReceipts());
   const [addReceiptOpen, setAddReceiptOpen] = useState(false);
-  const [markedPaidDirty, setMarkedPaidDirty] = useState(0);
   const [stripeConnectedState, setStripeConnectedState] = useState(() => isStripeConnected());
   const [stripeLoading, setStripeLoading] = useState(false);
   const overdueSectionRef = useRef(null);
   const isStripeConnectedNow = stripeConnectedState || isStripeConnected();
-  const [clients, setClients] = useState([]);
-  const [periodData, setPeriodData] = useState({ totals: {}, transactions: [], series: [], payouts: [] });
   const [dismissedUpgradePromptId, setDismissedUpgradePromptId] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    atlasRepo.getClients(userId, isDemoMode).then((list) => {
-      if (!cancelled) setClients(Array.isArray(list) ? list : []);
-    }).catch(() => { if (!cancelled) setClients([]); });
-    return () => { cancelled = true; };
-  }, [userId, isDemoMode]);
+  const { data: coachData } = useQuery({
+    queryKey: ['get-coach', userId],
+    queryFn: async () => {
+      const res = await getCoach(userId);
+      return res.coach ? { ...res.coach, connected: res.connected } : null;
+    },
+    enabled: !!userId,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    atlasRepo.getEarningsSummaryForPeriod(userId, period, isDemoMode).then((data) => {
-      if (!cancelled) {
-        setPeriodData({
-          totals: data?.totals ?? {},
-          transactions: data?.transactions ?? [],
-          series: data?.series ?? [],
-          payouts: [],
-        });
-      }
-    }).catch(() => { if (!cancelled) setPeriodData({ totals: {}, transactions: [], series: [], payouts: [] }); });
-    return () => { cancelled = true; };
-  }, [userId, period, isDemoMode]);
+  const { data: summaryData, isLoading: summaryLoading } = useQuery({
+    queryKey: ['earnings-summary', userId, period],
+    queryFn: async () => getEarningsSummary(supabase, userId, period),
+    enabled: !!supabase && !!userId && !isDemoMode,
+  });
 
-  const { totals, series, transactions, payouts } = periodData;
+  const { data: paymentRows = [] } = useQuery({
+    queryKey: ['earnings-payments-list', userId],
+    queryFn: async () => getClientPaymentsList(supabase, userId),
+    enabled: !!supabase && !!userId && !isDemoMode,
+  });
+
+  const totals = summaryData?.totals ?? {};
+  const series = summaryData?.series ?? [];
+  const transactions = summaryData?.transactions ?? [];
+  const payouts = summaryData?.payouts ?? [];
+  const hasPaymentHistory = summaryData?.hasPaymentHistory === true;
+  const clients = paymentRows.map((p) => ({ id: p.client_id, full_name: p.clientName }));
   const summary = useMemo(() => ({
-    totals: periodData.totals,
-    taxSetAside: { rate: 25, amount: Math.round((periodData.totals?.netRevenue ?? 0) * 0.25), alreadySetAside: 0 },
-    projected30: Math.round((periodData.totals?.grossRevenue ?? 0) + (periodData.totals?.pending ?? 0)),
-    atRisk: (periodData.transactions ?? []).filter((t) => t.status === 'overdue').reduce((s, t) => s + (t.amount ?? 0), 0),
-  }), [periodData]);
+    totals,
+    taxSetAside: summaryData?.taxSetAside ?? { rate: 25, amount: Math.round((totals?.netRevenue ?? 0) * 0.25), alreadySetAside: 0 },
+    projected30DayRevenue: summaryData?.projected30DayRevenue ?? Math.round((totals?.grossRevenue ?? 0) + (totals?.pending ?? 0)),
+    atRiskRevenue: summaryData?.atRiskRevenue ?? (transactions ?? []).filter((t) => t.status === 'overdue').reduce((s, t) => s + (t.amount ?? 0), 0),
+  }), [summaryData, totals, transactions]);
   const timeLabel = PERIOD_OPTIONS.find((o) => o.key === period)?.label ?? 'This month';
-  const forecast = getRevenueForecast();
+  const forecast = useMemo(() => ({
+    expectedNext30Days: summary.projected30DayRevenue ?? 0,
+    overdue: totals.overdue ?? 0,
+    pending: totals.pending ?? 0,
+  }), [summary, totals]);
   const atRiskRevenue = useMemo(() => {
     return (transactions ?? []).filter((t) => t.status === 'overdue' || t.status === 'pending').reduce((s, t) => s + (t.amount ?? 0), 0);
   }, [transactions]);
+  const pendingThisWeek = useMemo(() => {
+    const now = new Date();
+    const in7 = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    return (transactions ?? [])
+      .filter((t) => t.status === 'pending' && t.due_date)
+      .filter((t) => {
+        const d = safeDate(t.due_date);
+        return d && d >= now && d <= in7;
+      })
+      .reduce((s, t) => s + (t.amount ?? 0), 0);
+  }, [transactions]);
 
-  const overdueTransactions = transactions.filter((t) => t.status === 'overdue' && !isTransactionMarkedPaid(t.id));
+  const overdueTransactions = transactions.filter((t) => t.status === 'overdue');
   const getClientIdByName = (name) => clients.find((c) => (c.full_name || '').trim() === (name || '').trim())?.id;
   const daysOverdue = (dateStr) => {
     const d = safeDate(dateStr);
@@ -174,7 +209,6 @@ export default function Earnings() {
       if (connected) {
         setStripeConnected(true, 'connected');
         setStripeConnectedState(true);
-        setMarkedPaidDirty((n) => n + 1);
         toast.success(charges_enabled ? 'Stripe connected' : 'Stripe: complete onboarding to accept payments');
       }
     })();
@@ -183,7 +217,7 @@ export default function Earnings() {
   const setPeriodAndPersist = useCallback((p) => {
     lightHaptic();
     setPeriod(p);
-    setStoredPeriod(p);
+    void setStoredPeriodPref(p);
   }, []);
 
   const persistTasks = useCallback((next) => {
@@ -265,6 +299,90 @@ export default function Earnings() {
     navigate('/plan');
   }, [userId, currentPlan, navigate]);
 
+  const handleSetupPayouts = useCallback(async () => {
+    await lightHaptic();
+    setStripeLoading(true);
+    try {
+      const { url } = await stripeConnectLink(userId);
+      if (url) {
+        window.location.href = url;
+        return;
+      }
+      const fallbackUrl = getConnectAccountLinkUrl();
+      if (fallbackUrl) {
+        window.location.href = fallbackUrl;
+        return;
+      }
+      setStripeConnected(true, 'acct_demo');
+      setStripeConnectedState(true);
+      toast.success('Stripe connected (demo)');
+    } catch (e) {
+      toast.error(e?.message ?? 'Could not start Connect');
+    } finally {
+      setStripeLoading(false);
+    }
+  }, [userId]);
+
+  if (!hasPaymentHistory && !summaryLoading) {
+    return (
+      <div style={pageContainer}>
+        <TopBar title="Earnings" />
+        {!isStripeConnectedNow ? (
+          <section style={{ marginBottom: spacing[12], ...sectionStyle(0) }}>
+            <Card style={{ padding: spacing[14] }}>
+              <p className="text-[15px] font-semibold" style={{ color: colors.text }}>
+                Connect Stripe to start receiving payments from clients through Atlas.
+              </p>
+              <Button
+                variant="primary"
+                disabled={stripeLoading}
+                onClick={handleSetupPayouts}
+                style={{ marginTop: spacing[12] }}
+              >
+                Set up payouts
+              </Button>
+            </Card>
+          </section>
+        ) : null}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 320,
+            textAlign: 'center',
+            padding: spacing[32],
+          }}
+        >
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: '50%',
+              background: colors.surface2,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: spacing[16],
+            }}
+          >
+            <CreditCard size={24} style={{ color: colors.muted }} />
+          </div>
+          <p style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0 }}>
+            No earnings yet
+          </p>
+          <p style={{ fontSize: 14, color: colors.muted, marginTop: spacing[8], maxWidth: 280 }}>
+            Once clients start paying through Atlas, your transactions appear here.
+          </p>
+          <Button onClick={() => navigate('/get-clients')} style={{ marginTop: spacing[20] }}>
+            Get your first client →
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
@@ -298,30 +416,7 @@ export default function Earnings() {
               <Button
                 variant="primary"
                 disabled={stripeLoading}
-                onClick={async () => {
-                  await lightHaptic();
-                  setStripeLoading(true);
-                  try {
-                    const { url } = await stripeConnectLink(userId);
-                    if (url) {
-                      window.location.href = url;
-                      return;
-                    }
-                    const fallbackUrl = getConnectAccountLinkUrl();
-                    if (fallbackUrl) {
-                      window.location.href = fallbackUrl;
-                      return;
-                    }
-                    setStripeConnected(true, 'acct_demo');
-                    setStripeConnectedState(true);
-                    toast.success('Stripe connected (demo)');
-                    setMarkedPaidDirty((n) => n + 1);
-                  } catch (e) {
-                    toast.error(e?.message ?? 'Could not start Connect');
-                  } finally {
-                    setStripeLoading(false);
-                  }
-                }}
+                onClick={handleSetupPayouts}
               >
                 Connect Stripe Account
               </Button>
@@ -358,10 +453,22 @@ export default function Earnings() {
         </div>
       </section>
 
+      {!summaryLoading && !hasPaymentHistory ? (
+        <section style={{ marginBottom: spacing[16], ...sectionStyle(60) }}>
+          <Card style={{ padding: spacing[16] }}>
+            <p className="text-[15px] font-semibold" style={{ color: colors.text }}>No payments recorded yet.</p>
+            <p className="text-[13px] mt-1" style={{ color: colors.muted }}>
+              Once clients pay through Atlas, transactions appear here.
+            </p>
+          </Card>
+        </section>
+      ) : null}
+
       {/* Revenue forecast: expected next 30d, overdue, pending, at-risk */}
+      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(60) }}>
         <p className="text-[13px] font-medium mb-2" style={{ color: colors.muted }}>Revenue forecast</p>
-        <div className="grid grid-cols-2" style={{ gap: spacing[10] }}>
+        <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: spacing[10] }}>
           <Card style={{ padding: spacing[12] }}>
             <p className="text-[11px]" style={{ color: colors.muted }}>Expected next 30 days</p>
             <p className="text-[18px] font-semibold mt-0.5" style={{ color: colors.text }}>{formatCurrency(forecast.expectedNext30Days)}</p>
@@ -380,6 +487,18 @@ export default function Earnings() {
           </Card>
         </div>
       </section>
+      ) : null}
+
+      {summaryLoading ? (
+        <section style={{ marginBottom: spacing[16], ...sectionStyle(70) }}>
+          <Card style={{ padding: spacing[16] }}>
+            <div className="animate-pulse space-y-2">
+              <div className="h-4 w-40 rounded" style={{ background: 'rgba(255,255,255,0.12)' }} />
+              <div className="h-4 w-56 rounded" style={{ background: 'rgba(255,255,255,0.08)' }} />
+            </div>
+          </Card>
+        </section>
+      ) : null}
 
       {earningsUpgradePrompt && (
         <section style={{ marginBottom: spacing[16], ...sectionStyle(70) }}>
@@ -399,8 +518,9 @@ export default function Earnings() {
       )}
 
       {/* Summary cards */}
+      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(80) }}>
-        <div className="grid grid-cols-2" style={{ gap: spacing[12] }}>
+        <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: spacing[12] }}>
           <Card>
             <p className="text-[12px]" style={{ color: colors.muted }}>{timeLabel}</p>
             <p className="text-[22px] font-bold mt-0.5" style={{ color: colors.text }}>{formatCurrency(totals.grossRevenue)}</p>
@@ -442,9 +562,23 @@ export default function Earnings() {
             </p>
           </Card>
         )}
+        {!summaryLoading && transactions.length > 0 && (
+          <Card style={{ marginTop: spacing[12], padding: spacing[12] }}>
+            <p className="text-[12px] font-semibold" style={{ color: colors.text }}>
+              {Number.isFinite(totals.trendPct)
+                ? `${totals.trendPct >= 0 ? 'Up' : 'Down'} ${Math.abs(Math.round(totals.trendPct))}% vs last month`
+                : 'No last-month baseline yet'}
+            </p>
+            <p className="text-[11px] mt-1" style={{ color: colors.muted }}>
+              {formatCurrency(pendingThisWeek)} pending collection this week.
+            </p>
+          </Card>
+        )}
       </section>
+      ) : null}
 
       {/* Overdue list – scroll target for Home "Payments overdue" */}
+      {hasPaymentHistory ? (
       <section ref={overdueSectionRef} id="overdue" style={{ marginBottom: spacing[16], ...sectionStyle(90) }}>
         <p className="text-[13px] font-semibold" style={{ color: colors.muted, marginBottom: spacing[8] }}>Overdue</p>
         {overdueTransactions.length === 0 ? (
@@ -480,7 +614,7 @@ export default function Earnings() {
                         variant="secondary"
                         onClick={async () => {
                           await mediumHaptic();
-                          navigate(`/messages/${clientId}`, { state: { prefilledMessage: PAYMENT_REMINDER_MSG } });
+                          navigateToThread(navigate, clientId, { state: { prefilledMessage: PAYMENT_REMINDER_MSG } });
                         }}
                       >
                         <MessageSquare size={14} style={{ marginRight: 4 }} /> Send reminder
@@ -490,9 +624,7 @@ export default function Earnings() {
                       variant="secondary"
                       onClick={async () => {
                         await mediumHaptic();
-                        markTransactionPaid(tx.id);
-                        setMarkedPaidDirty((n) => n + 1);
-                        toast.success('Marked as paid');
+                        toast.info('Update payment status from billing flow');
                       }}
                     >
                       <Check size={14} style={{ marginRight: 4 }} /> Mark as paid
@@ -504,19 +636,27 @@ export default function Earnings() {
           </Card>
         )}
       </section>
+      ) : null}
 
       {/* Revenue trend */}
+      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(120) }}>
         <div key={period} style={{ animation: 'earnings-fade-in 240ms ease-out' }}>
           <RevenueTrend series={series} period={period} />
         </div>
       </section>
+      ) : null}
 
       {/* Recent transactions */}
+      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(160) }}>
         <p className="text-[13px] font-semibold" style={{ color: colors.muted, marginBottom: spacing[8] }}>Recent transactions</p>
         <Card style={{ padding: 0 }}>
-          {transactions.slice(0, 5).map((tx, idx) => (
+          {transactions.length === 0 ? (
+            <div style={{ padding: spacing[16], textAlign: 'center' }}>
+              <p className="text-[13px]" style={{ color: colors.muted }}>No transactions yet</p>
+            </div>
+          ) : transactions.slice(0, 5).map((tx, idx) => (
             <div
               key={tx.id}
               className="flex items-center justify-between"
@@ -546,8 +686,10 @@ export default function Earnings() {
           ))}
         </Card>
       </section>
+      ) : null}
 
       {/* Recent payouts */}
+      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(200) }}>
         <p className="text-[13px] font-semibold" style={{ color: colors.muted, marginBottom: spacing[8] }}>Recent payouts</p>
         <Card style={{ padding: 0 }}>
@@ -570,6 +712,7 @@ export default function Earnings() {
           ))}
         </Card>
       </section>
+      ) : null}
 
       {/* Tax set-aside */}
       <section style={{ marginBottom: spacing[16], ...sectionStyle(240) }}>

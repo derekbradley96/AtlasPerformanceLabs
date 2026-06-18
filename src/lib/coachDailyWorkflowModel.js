@@ -4,6 +4,7 @@
  */
 
 import { normalizeReviewQueueFilterParam, REVIEW_QUEUE_PATH, buildReviewQueueUrl } from './coachReviewRoutes';
+import { getMessagesListPath, getMessagesThreadPath } from '@/lib/messagesPath';
 
 /** @typedef {'all'|'needs_attention'|'checkins'|'peak_week'|'unread'|'at_risk'} CoachDailyStripKey */
 
@@ -170,7 +171,7 @@ export function getCoachWorkloadNavigatePath(item) {
   }
 
   if (action === 'review_messages' || (action === 'message_client' && item?.issue_type === 'unread_messages')) {
-    return cid ? `/messages/${encodeURIComponent(cid)}` : '/messages';
+    return cid ? getMessagesThreadPath(cid) : getMessagesListPath();
   }
 
   if (action === 'review_posing') {
@@ -195,8 +196,16 @@ export function getCoachWorkloadNavigatePath(item) {
     return cid ? `/clients/${encodeURIComponent(cid)}` : REVIEW_QUEUE_PATH;
   }
 
+  if (action === 'review_workout') {
+    const sessionId = payload.session_id || payload.sessionId || payload.id;
+    if (cid && sessionId) {
+      return `/clients/${encodeURIComponent(cid)}/workouts/${encodeURIComponent(sessionId)}`;
+    }
+    return cid ? `/clients/${encodeURIComponent(cid)}?tab=checkins` : REVIEW_QUEUE_PATH;
+  }
+
   if (action === 'message_client') {
-    return cid ? `/messages/${encodeURIComponent(cid)}` : '/messages';
+    return cid ? getMessagesThreadPath(cid) : getMessagesListPath();
   }
 
   return cid ? `/clients/${encodeURIComponent(cid)}` : REVIEW_QUEUE_PATH;

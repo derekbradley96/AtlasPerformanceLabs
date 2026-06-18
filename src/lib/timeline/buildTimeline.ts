@@ -3,7 +3,13 @@
  * Retention-related events from v_client_retention_signals and v_client_progress_trends when Supabase is available.
  */
 import type { TimelineEvent, TimelineEventType, TimelineBadge } from './timelineTypes';
-import { getClientById, getClientCheckIns, getPaymentsForClient } from '@/data/selectors';
+import * as sandbox from '@/lib/sandboxStore';
+import { SUPABASE_ENABLED } from '@/lib/config';
+import {
+  getClientById as repoGetClientById,
+  getCheckInsForClient,
+  getPaymentsForClient as repoGetPaymentsForClient,
+} from '@/data/repos/atlasRepo';
 import { getClientPhaseHistory } from '@/lib/clientPhaseStore';
 import { getProgramChangeLog } from '@/lib/programChangeLogStore';
 import { getCheckinReviewed, getCheckinReviewedAt } from '@/lib/checkinReviewStorage';
@@ -13,6 +19,7 @@ import { getStoredRetention } from '@/lib/retention/retentionRepo';
 import { getActionLogForClient } from './actionLogRepo';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+import { getMessagesThreadPath } from '@/lib/messagesPath';
 
 function ev(
   id: string,
@@ -35,7 +42,7 @@ function ev(
   };
 }
 
-export type ClientTimelineOptions = { weightUnit?: string };
+export type ClientTimelineOptions = { weightUnit?: string; trainerId?: string };
 
 export async function getClientTimeline(
   clientId: string,
@@ -43,7 +50,27 @@ export async function getClientTimeline(
   options: ClientTimelineOptions = {}
 ): Promise<TimelineEvent[]> {
   const wu = normalizeWeightUnit(options.weightUnit ?? 'kg');
-  const client = getClientById(clientId);
+  const trainerIdOpt = options.trainerId;
+
+  let client: Record<string, unknown> | null = null;
+  let checkIns: Array<Record<string, unknown>> = [];
+  let payments: Array<Record<string, unknown>> = [];
+
+  if (!SUPABASE_ENABLED) {
+    client = (sandbox.getClientById(clientId) as Record<string, unknown>) ?? null;
+    checkIns = (sandbox.listCheckIns(clientId) ?? []) as Array<Record<string, unknown>>;
+    payments = (sandbox.listPayments(clientId) ?? []) as Array<Record<string, unknown>>;
+  } else {
+    const [c, ch, pay] = await Promise.all([
+      repoGetClientById(clientId, false, trainerIdOpt),
+      getCheckInsForClient(clientId, false, trainerIdOpt),
+      repoGetPaymentsForClient(clientId, false),
+    ]);
+    client = (c as Record<string, unknown> | null) ?? ((sandbox.getClientById(clientId) as Record<string, unknown>) ?? null);
+    checkIns = (Array.isArray(ch) ? ch : []) as unknown as Array<Record<string, unknown>>;
+    payments = (Array.isArray(pay) ? pay : []) as unknown as Array<Record<string, unknown>>;
+  }
+
   const events: TimelineEvent[] = [];
 
   // CLIENT_JOINED
@@ -84,12 +111,11 @@ export async function getClientTimeline(
   }
 
   // CHECKIN_SUBMITTED + CHECKIN_REVIEWED
-  const checkIns = getClientCheckIns(clientId);
   for (const c of checkIns) {
     const submittedAt = c.submitted_at || c.created_date;
     if (submittedAt) {
       events.push(
-        ev(`checkin-sub-${c.id}`, clientId, 'CHECKIN_SUBMITTED', submittedAt, 'Check-in submitted', {
+        ev(`checkin-sub-${String(c.id)}`, clientId, 'CHECKIN_SUBMITTED', String(submittedAt), 'Check-in submitted', {
           subtitle: c.weight_kg != null ? formatWeightForViewer(Number(c.weight_kg), wu) : undefined,
           meta: { checkinId: c.id },
           route: `/clients/${clientId}/checkins/${c.id}`,
@@ -97,11 +123,11 @@ export async function getClientTimeline(
         })
       );
     }
-    if (getCheckinReviewed(c.id)) {
-      const reviewedAt = getCheckinReviewedAt(c.id) || submittedAt;
+    if (getCheckinReviewed(String(c.id))) {
+      const reviewedAt = getCheckinReviewedAt(String(c.id)) || submittedAt;
       if (reviewedAt) {
         events.push(
-          ev(`checkin-rev-${c.id}`, clientId, 'CHECKIN_REVIEWED', reviewedAt, 'Check-in reviewed', {
+          ev(`checkin-rev-${String(c.id)}`, clientId, 'CHECKIN_REVIEWED', String(reviewedAt), 'Check-in reviewed', {
             meta: { checkinId: c.id },
             route: `/clients/${clientId}/checkins/${c.id}`,
             badge: 'Review',
@@ -112,9 +138,15 @@ export async function getClientTimeline(
   }
 
   // PAYMENT_PAID / PAYMENT_OVERDUE
-  const payments = getPaymentsForClient(clientId);
   for (const p of payments) {
-    const pay = p as { id: string; status?: string; paid_at?: string | null; due_date?: string; amount?: number };
+    const pay = p as {
+      id: string;
+      status?: string;
+      paid_at?: string | null;
+      due_date?: string;
+      amount?: number;
+      created_at?: string;
+    };
     if (pay.status === 'paid' && pay.paid_at) {
       events.push(
         ev(`pay-paid-${pay.id}`, clientId, 'PAYMENT_PAID', pay.paid_at, 'Payment received', {
@@ -124,12 +156,13 @@ export async function getClientTimeline(
         })
       );
     }
-    if (pay.status === 'overdue' && pay.due_date) {
+    const overdueAt = pay.due_date || (typeof pay.created_at === 'string' ? pay.created_at.slice(0, 10) : null);
+    if (pay.status === 'overdue' && overdueAt) {
       events.push(
-        ev(`pay-overdue-${pay.id}`, clientId, 'PAYMENT_OVERDUE', `${pay.due_date}T23:59:59Z`, 'Payment overdue', {
+        ev(`pay-overdue-${pay.id}`, clientId, 'PAYMENT_OVERDUE', `${overdueAt}T23:59:59Z`, 'Payment overdue', {
           subtitle: pay.amount != null ? `$${pay.amount}` : undefined,
           meta: { paymentId: pay.id },
-          route: `/messages/${clientId}`,
+          route: getMessagesThreadPath(clientId),
           badge: 'Payment',
         })
       );

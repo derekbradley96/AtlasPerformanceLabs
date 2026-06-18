@@ -1,12 +1,12 @@
 /**
  * Client performance snapshot: weeks with trainer, adherence %, weight delta, PR count.
  */
-import { getClientById, getClientCheckIns } from '@/data/selectors';
+import { resolveClientRecord, listClientCheckInsForInbox } from '@/lib/inboxLocalSources';
 import { getClientRiskScore } from '@/lib/riskService';
 
 /** Weeks since client.created_date. */
 export function getWeeksWithTrainer(clientId) {
-  const client = getClientById(clientId);
+  const client = resolveClientRecord(clientId);
   if (!client?.created_date) return 0;
   const start = new Date(client.created_date);
   const now = new Date();
@@ -15,11 +15,11 @@ export function getWeeksWithTrainer(clientId) {
 
 /** Adherence %: submitted check-ins vs expected (e.g. 1 per week since start). */
 export function getAdherencePct(clientId) {
-  const client = getClientById(clientId);
+  const client = resolveClientRecord(clientId);
   if (!client?.created_date) return null;
   const weeks = getWeeksWithTrainer(clientId);
   if (weeks === 0) return 100;
-  const checkIns = getClientCheckIns(clientId);
+  const checkIns = listClientCheckInsForInbox(clientId);
   const submitted = checkIns.filter((c) => c.status === 'submitted').length;
   const expected = weeks;
   if (expected === 0) return 100;
@@ -28,7 +28,7 @@ export function getAdherencePct(clientId) {
 
 /** Weight delta since first submitted check-in with weight. */
 export function getWeightDeltaSinceStart(clientId) {
-  const checkIns = getClientCheckIns(clientId).filter((c) => c.weight_kg != null && (c.submitted_at || c.created_date));
+  const checkIns = listClientCheckInsForInbox(clientId).filter((c) => c.weight_kg != null && (c.submitted_at || c.created_date));
   if (checkIns.length < 2) return null;
   const sorted = [...checkIns].sort((a, b) => new Date(a.submitted_at || a.created_date) - new Date(b.submitted_at || b.created_date));
   const first = sorted[0].weight_kg;

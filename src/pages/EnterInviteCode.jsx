@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { trackPersonalConvertedToClient } from '@/services/analyticsService';
 import { trackInviteCodeEnteredFromPersonal } from '@/lib/personalMarketplaceEntry';
 import { normalizeMarketplaceTier, buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
+import { applyInviteCodeForUser } from '@/lib/inviteConversion';
 import { Users, CheckCircle2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -23,35 +24,8 @@ export default function EnterInviteCode() {
 
   const joinMutation = useMutation({
     mutationFn: async (inviteCode) => {
-      if (!user?.id) throw new Error('Please sign in first');
-      const result = await invokeSupabaseFunction('validateInviteCode', { code: normalizeInviteCode(inviteCode) });
-      if (result.error || !result.data?.valid) {
-        throw new Error(result.data?.message || result.error || 'Invalid invite code');
-      }
-      const coachProfileId = result.data.trainer_id ?? result.data.coach_id;
-      const { data: profileList } = await invokeSupabaseFunction('client-profile-list', { user_id: user.id });
-      const list = Array.isArray(profileList) ? profileList : [];
-      let clientProfile = list[0];
-      if (!clientProfile) {
-        const { data: created } = await invokeSupabaseFunction('client-profile-create', {
-          user_id: user.id,
-          coach_id: coachProfileId,
-          trainer_id: coachProfileId,
-          subscription_status: 'pending'
-        });
-        clientProfile = created ?? null;
-      } else {
-        await invokeSupabaseFunction('client-profile-update', {
-          id: clientProfile.id,
-          coach_id: coachProfileId,
-          trainer_id: coachProfileId
-        });
-      }
-      if (user.user_type !== 'client') {
-        await invokeSupabaseFunction('user-update-role', { user_type: 'client' });
-      }
-      const wasPersonal = (user.user_type === 'personal' || user.user_type === 'solo');
-      return { clientProfile, coach_id: coachProfileId, was_personal: wasPersonal };
+      const supabase = getSupabase();
+      return applyInviteCodeForUser({ supabase, user, inviteCode });
     },
     onSuccess: async (result) => {
       if (result?.was_personal && result?.coach_id) {

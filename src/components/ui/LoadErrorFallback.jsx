@@ -8,8 +8,8 @@ import { colors, spacing, shell } from '@/ui/tokens';
 import Button from '@/ui/Button';
 
 export default function LoadErrorFallback({
-  title = 'Something went wrong',
-  description = "We couldn't load this content. Check your connection and try again.",
+  title = 'Could not load this screen',
+  description = 'Check your connection and tap try again.',
   onRetry,
   showGoHome = true,
 }) {
@@ -55,7 +55,7 @@ export default function LoadErrorFallback({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 280 }}>
         {typeof onRetry === 'function' && (
           <Button variant="primary" onClick={onRetry} style={{ width: '100%' }}>
-            Try again
+            Retry
           </Button>
         )}
         {showGoHome && (

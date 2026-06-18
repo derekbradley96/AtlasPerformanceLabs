@@ -2,27 +2,27 @@
  * Update a check-in by id. Caller must be the client (clients.user_id) or the client's coach.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     if (!callerId) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const id = body.id;
     if (!id) {
-      return new Response(JSON.stringify({ error: "id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "id required" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     const { data: existing } = await supabase.from("checkins").select("id, client_id").eq("id", id).maybeSingle();
     if (!existing) {
-      return new Response(JSON.stringify({ error: "Check-in not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Check-in not found" }), { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const { data: clientRow } = await supabase.from("clients").select("user_id, coach_id, trainer_id").eq("id", (existing as Record<string, unknown>).client_id).maybeSingle();
     const c = clientRow as Record<string, unknown> | null;
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
     const isOwner = clientUserId === callerId;
     const isCoach = coachId === callerId || trainerId === callerId;
     if (!isOwner && !isCoach) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const allowed = [
@@ -80,7 +80,7 @@ Deno.serve(async (req) => {
     if (error) {
       return jsonError("Request failed", 500);
     }
-    return new Response(JSON.stringify(updated), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(updated), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("checkin-update", e);
     return jsonError("Request failed", 500);

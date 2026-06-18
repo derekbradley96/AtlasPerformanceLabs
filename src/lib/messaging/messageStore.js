@@ -1,7 +1,19 @@
 /**
- * Local-first thread and message store. Persists via messaging/storage (Capacitor Prefs or localStorage).
- * Thread: { id, client_id, client_name, last_message, updated_at }
- * Message: { id, thread_id, sender: 'coach'|'client', text, created_at }
+ * LOCAL CACHE LAYER — NOT source of truth.
+ *
+ * Source of truth: Supabase (message_threads, message_messages).
+ * This store is a local cache for offline / optimistic UI only.
+ *
+ * DO NOT add new writes here for features that should sync
+ * across devices. Use supabaseMessaging.js instead.
+ *
+ * Current uses (acceptable as cache):
+ *  - Offline fallback when Supabase is unreachable
+ *  - Optimistic UI before server confirms
+ *
+ * TODO: When offline support is fully specified, replace
+ * this with an explicit offline queue (like offlineWorkoutQueue.js)
+ * that syncs to Supabase on reconnect.
  */
 
 import * as storage from './storage';

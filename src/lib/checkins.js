@@ -4,6 +4,8 @@
  */
 
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { isCoach, isClient } from '@/lib/roles';
+import { resolveCoachLinkId } from '@/lib/coachLink';
 
 /**
  * Returns YYYY-MM-DD for Monday of the week containing the given date (local time, stable).
@@ -58,13 +60,39 @@ export async function getCoachClients() {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user?.id) return [];
-    const { data, error } = await supabase
-      .from('clients')
-      .select('id, name, full_name, created_at, user_id')
-      .eq('trainer_id', user.id)
-      .order('created_at', { ascending: false });
-    if (error) return [];
-    return Array.isArray(data) ? data : [];
+    const baseSelectFull = 'id, name, full_name, created_at, user_id, show_date, client_type';
+    const baseSelectLegacy = 'id, name, full_name, created_at, user_id';
+
+    const load = async (selectCols) => {
+      let result = await supabase
+        .from('clients')
+        .select(selectCols)
+        .or(`trainer_id.eq.${user.id},coach_id.eq.${user.id}`)
+        .order('created_at', { ascending: false });
+      if (!result.error) return result;
+
+      result = await supabase
+        .from('clients')
+        .select(selectCols)
+        .eq('trainer_id', user.id)
+        .order('created_at', { ascending: false });
+      if (!result.error) return result;
+
+      return supabase
+        .from('clients')
+        .select(selectCols)
+        .eq('coach_id', user.id)
+        .order('created_at', { ascending: false });
+    };
+
+    let result = await load(baseSelectFull);
+    const msg = String(result.error?.message || '');
+    if (result.error && /show_date|client_type|schema cache|PGRST204/i.test(msg)) {
+      result = await load(baseSelectLegacy);
+    }
+    if (!result.error) return Array.isArray(result.data) ? result.data : [];
+
+    return [];
   } catch {
     return [];
   }
@@ -86,7 +114,7 @@ export async function getClientCoachId(clientId) {
       .eq('id', clientId)
       .maybeSingle();
     if (error || !data) return null;
-    return data.trainer_id ?? data.coach_id ?? null;
+    return resolveCoachLinkId(data);
   } catch {
     return null;
   }
@@ -179,14 +207,15 @@ export async function getFocusTypeForCurrentUser() {
     if (!user?.id) return 'transformation';
     const { data: profile } = await supabase.from('profiles').select('role, coach_focus').eq('id', user.id).maybeSingle();
     const role = (profile?.role ?? '').toString().trim().toLowerCase();
-    if (role === 'coach' || role === 'trainer') {
+    if (isCoach(role)) {
       const focus = (profile?.coach_focus ?? '').toString().trim().toLowerCase();
       return FOCUS_VALUES.includes(focus) ? focus : 'transformation';
     }
-    if (role === 'client') {
-      const { data: clientRow } = await supabase.from('clients').select('trainer_id').eq('user_id', user.id).maybeSingle();
-      if (clientRow?.trainer_id) {
-        const { data: coachProfile } = await supabase.from('profiles').select('coach_focus').eq('id', clientRow.trainer_id).maybeSingle();
+    if (isClient(role)) {
+      const { data: clientRow } = await supabase.from('clients').select('coach_id, trainer_id').eq('user_id', user.id).maybeSingle();
+      const linkedCoachId = resolveCoachLinkId(clientRow);
+      if (linkedCoachId) {
+        const { data: coachProfile } = await supabase.from('profiles').select('coach_focus').eq('id', linkedCoachId).maybeSingle();
         const focus = (coachProfile?.coach_focus ?? '').toString().trim().toLowerCase();
         return FOCUS_VALUES.includes(focus) ? focus : 'transformation';
       }
@@ -270,19 +299,21 @@ export async function getCheckinById(checkinId) {
 /**
  * Set reviewed_at and reviewed_by on a checkin (coach only, RLS).
  * @param {string} checkinId
+ * @param {{ coach_review_tags?: string[] }} [opts]
  * @returns {Promise<boolean>}
  */
-export async function markCheckinReviewed(checkinId) {
+export async function markCheckinReviewed(checkinId, opts = {}) {
   if (!hasSupabase || !checkinId) return false;
   const supabase = getSupabase();
   if (!supabase) return false;
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user?.id) return false;
-    const { error } = await supabase
-      .from('checkins')
-      .update({ reviewed_at: new Date().toISOString(), reviewed_by: user.id })
-      .eq('id', checkinId);
+    const patch = { reviewed_at: new Date().toISOString(), reviewed_by: user.id };
+    if (Array.isArray(opts.coach_review_tags) && opts.coach_review_tags.length > 0) {
+      patch.coach_review_tags = [...new Set(opts.coach_review_tags.map((t) => String(t).trim()).filter(Boolean))];
+    }
+    const { error } = await supabase.from('checkins').update(patch).eq('id', checkinId);
     return !error;
   } catch {
     return false;

@@ -1,4 +1,3 @@
-import { isInternalAdmin } from '@/lib/internalAccess';
 
 /**
  * Manual roster creation (modal add, CSV import UI) is not a production coach path.
@@ -9,8 +8,8 @@ import { isInternalAdmin } from '@/lib/internalAccess';
 export function showCoachManualClientAcquisitionTools({
   isDemoMode = false,
   isAdminBypass = false,
+  isAdmin = false,
   profile = null,
-  supabaseUser = null,
 } = {}) {
   if (isDemoMode) return true;
   if (import.meta.env.DEV) return true;
@@ -18,6 +17,6 @@ export function showCoachManualClientAcquisitionTools({
   const adminFlag = profile?.is_admin;
   if (adminFlag === true || adminFlag === 1) return true;
   if (typeof adminFlag === 'string' && adminFlag.toLowerCase() === 'true') return true;
-  if (isInternalAdmin(supabaseUser)) return true;
+  if (isAdmin) return true;
   return false;
 }

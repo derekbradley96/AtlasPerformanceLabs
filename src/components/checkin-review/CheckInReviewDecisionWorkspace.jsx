@@ -3,6 +3,8 @@
  * Data + handlers owned by parent (CheckInReviewPage).
  */
 import React, { useState, useCallback, useMemo } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,18 +13,21 @@ import {
   X,
   Maximize2,
   Columns2,
+  AlertTriangle,
 } from 'lucide-react';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { colors, spacing, shell, shadows } from '@/ui/tokens';
-import { formatWeightForViewer, normalizeWeightUnit, formatWeightDeltaKg } from '@/lib/bodyMeasurementUnits';
+import { getSupabase } from '@/lib/supabaseClient';
+import { formatWeightDeltaKg } from '@/lib/bodyMeasurementUnits';
 import {
   RESPONSE_TEMPLATES,
   ADJUSTMENT_SNIPPETS,
   getQuickActionIds,
 } from '@/lib/checkinReviewWorkspaceModel';
 import { deriveCheckInReviewWorkspaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
+import AtlasVideoCall from '@/components/video/AtlasVideoCall';
 
 function MiniBars({ values, color, height = 44 }) {
   const v = Array.isArray(values) ? values.map(Number).filter((n) => Number.isFinite(n)) : [];
@@ -115,117 +120,29 @@ function sectionTitle(text) {
   );
 }
 
-const METRIC_LABELS = {
-  weight: 'Weight',
-  steps_avg: 'Steps (avg)',
-  sleep_score: 'Sleep',
-  energy_level: 'Energy',
-  training_completion: 'Training completion %',
-  nutrition_adherence: 'Nutrition adherence %',
-  cardio_completion: 'Cardio %',
-  posing_minutes: 'Posing (min)',
-  pump_quality: 'Pump quality',
-  digestion_score: 'Digestion',
-};
-
-function formatMetricValue(key, v, viewerWU) {
-  if (v == null || v === '') return '—';
-  if (key === 'weight') {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return String(v);
-    return formatWeightForViewer(n, normalizeWeightUnit(viewerWU));
-  }
-  return String(v);
-}
-
-function metricCellsForKeys(checkin, keys, viewerWU) {
-  const out = [];
-  for (const key of keys) {
-    const raw = checkin?.[key];
-    if (raw == null || raw === '') continue;
-    out.push(
-      <div key={key} style={{ padding: spacing[10], borderRadius: 12, background: colors.surface2, border: `1px solid ${colors.border}` }}>
-        <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>{METRIC_LABELS[key] || key}</p>
-        <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 15, fontWeight: 700, color: colors.text }}>{formatMetricValue(key, raw, viewerWU)}</p>
-      </div>
-    );
-  }
-  return out;
-}
-
-function MetricSubGroup({ title, children }) {
-  if (!children?.length) return null;
+function DataCard({ title, children }) {
   return (
-    <div style={{ marginBottom: spacing[12] }}>
+    <Card style={{ padding: spacing[14], border: `1px solid ${colors.border}`, marginBottom: spacing[12] }}>
       {sectionTitle(title)}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: spacing[10] }}>{children}</div>
-    </div>
-  );
-}
-
-/** Grouped metrics + optional prep targets in one card (avoids spreadsheet sprawl). */
-function MetricsGroupedCard({ checkin, emphasis, viewerWU, prepPrecision }) {
-  const tf = {
-    body: ['weight'],
-    training: ['training_completion', 'nutrition_adherence', 'cardio_completion'],
-    readiness: ['sleep_score', 'energy_level', 'digestion_score', 'steps_avg'],
-  };
-  const comp = {
-    body: ['weight'],
-    training: ['cardio_completion', 'nutrition_adherence', 'training_completion', 'posing_minutes', 'pump_quality'],
-    readiness: ['digestion_score', 'sleep_score', 'energy_level', 'steps_avg'],
-  };
-  const groups = emphasis === 'competition_prep' ? comp : tf;
-  const bodyCells = metricCellsForKeys(checkin, groups.body, viewerWU);
-  const trainCells = metricCellsForKeys(checkin, groups.training, viewerWU);
-  const readyCells = metricCellsForKeys(checkin, groups.readiness, viewerWU);
-  const showPrep = emphasis === 'competition_prep' && prepPrecision;
-
-  if (!bodyCells.length && !trainCells.length && !readyCells.length && !showPrep) {
-    return (
-      <Card style={{ padding: spacing[14], border: `1px solid ${colors.border}` }}>
-        <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>No structured metrics on this check-in.</p>
-      </Card>
-    );
-  }
-
-  return (
-    <Card style={{ padding: spacing[14], border: `1px solid ${colors.border}`, marginBottom: spacing[16] }}>
-      {sectionTitle('Metrics')}
-      <MetricSubGroup title="Body">{bodyCells}</MetricSubGroup>
-      <MetricSubGroup title="Training & fuel">{trainCells}</MetricSubGroup>
-      <MetricSubGroup title="Readiness & lifestyle">{readyCells}</MetricSubGroup>
-      {showPrep ? (
-        <div style={{ marginTop: spacing[4] }}>
-          {sectionTitle('Prep targets')}
-          <div style={{ fontSize: 13, color: colors.textSecondary, lineHeight: 1.5 }}>
-            <p style={{ margin: '0 0 4px' }}>
-              <strong style={{ color: colors.text }}>Water target: </strong>
-              {prepPrecision.water_target_ml != null ? `${prepPrecision.water_target_ml} ml` : '—'}
-            </p>
-            <p style={{ margin: '0 0 4px' }}>
-              <strong style={{ color: colors.text }}>Sodium target: </strong>
-              {prepPrecision.sodium_target_mg != null ? `${prepPrecision.sodium_target_mg} mg` : '—'}
-            </p>
-            <p style={{ margin: 0 }}>
-              <strong style={{ color: colors.text }}>Day type: </strong>
-              {prepPrecision.day_type || '—'}
-            </p>
-          </div>
-        </div>
-      ) : null}
+      {children}
     </Card>
   );
 }
 
-function AnswerSection({ title, body }) {
-  if (!body || !String(body).trim()) return null;
-  return (
-    <div style={{ marginBottom: spacing[12] }}>
-      {sectionTitle(title)}
-      <Card style={{ padding: spacing[12], border: `1px solid ${colors.border}`, fontSize: 14, color: colors.textSecondary, lineHeight: 1.55 }}>{String(body).trim()}</Card>
-    </div>
-  );
+function scoreBandColor(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return colors.muted;
+  if (n <= 3) return colors.danger;
+  if (n <= 6) return colors.warning;
+  return colors.success;
+}
+
+function pctColor(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return colors.muted;
+  if (n < 50) return colors.danger;
+  if (n < 80) return colors.warning;
+  return colors.success;
 }
 
 function PhotoGallery({ photoUrls, prevPhotoUrls, prioritize }) {
@@ -267,7 +184,7 @@ function PhotoGallery({ photoUrls, prevPhotoUrls, prioritize }) {
                   key={i}
                   type="button"
                   onClick={() => setLightbox(url)}
-                  style={{ padding: 0, border: 'none', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', width: 120, height: 120 }}
+                  style={{ padding: 0, border: 'none', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', width: 180, height: 180 }}
                 >
                   <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 </button>
@@ -282,7 +199,7 @@ function PhotoGallery({ photoUrls, prevPhotoUrls, prioritize }) {
                   key={i}
                   type="button"
                   onClick={() => setLightbox(url)}
-                  style={{ padding: 0, border: 'none', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', width: 120, height: 120 }}
+                  style={{ padding: 0, border: 'none', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', width: 180, height: 180 }}
                 >
                   <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 </button>
@@ -297,7 +214,7 @@ function PhotoGallery({ photoUrls, prevPhotoUrls, prioritize }) {
               <button
                 type="button"
                 onClick={() => setLightbox(url)}
-                style={{ padding: 0, border: 'none', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', width: 112, height: 112 }}
+                style={{ padding: 0, border: 'none', borderRadius: 12, overflow: 'hidden', cursor: 'pointer', width: 180, height: 180 }}
               >
                 <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </button>
@@ -428,6 +345,10 @@ function ActionRailContent({
   replyBusy = false,
   isReviewed,
   stickyWrapStyle,
+  macroSuggestionSlot,
+  onOpenCallRequest,
+  callRequest,
+  onJoinCall,
 }) {
   const ids = getQuickActionIds({
     showPrepHygiene: reviewContext?.showPrepHygiene ?? emphasis === 'competition_prep',
@@ -501,6 +422,89 @@ function ActionRailContent({
           ))}
         </div>
 
+        {macroSuggestionSlot}
+
+        <div style={{ marginTop: 20, borderTop: `1px solid ${colors.border}`, paddingTop: 16 }}>
+          <p
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: colors.muted,
+              textTransform: 'uppercase',
+              letterSpacing: '.06em',
+              marginBottom: 10,
+            }}
+          >
+            Follow up
+          </p>
+          <button
+            type="button"
+            onClick={onOpenCallRequest}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: 10,
+              border: `1px solid ${colors.primary}`,
+              background: colors.primarySubtle,
+              color: colors.primary,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 500,
+              textAlign: 'left',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            📞 Request a call
+          </button>
+          {callRequest ? (
+            <div
+              style={{
+                marginTop: spacing[10],
+                border: `1px solid ${colors.border}`,
+                borderRadius: 10,
+                padding: spacing[10],
+                background: colors.surface2,
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 11,
+                  color: colors.muted,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                {callRequest.status === 'pending'
+                  ? '⏳ Waiting for client to accept'
+                  : '✓ Call accepted'}
+              </p>
+              {callRequest.status === 'accepted' && callRequest.call_type === 'video' ? (
+                <button
+                  type="button"
+                  onClick={onJoinCall}
+                  style={{
+                    marginTop: spacing[8],
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: colors.primary,
+                    color: '#fff',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  📹 Join video call
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
         {sectionTitle('Response')}
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[6], marginBottom: spacing[8] }}>
           {RESPONSE_TEMPLATES.map((t) => (
@@ -537,7 +541,7 @@ function ActionRailContent({
             {marking ? 'Saving…' : 'Mark reviewed'}
           </Button>
           <Button size="sm" variant="primary" onClick={onApproveAndMessage} disabled={marking || replyBusy}>
-            {replyBusy ? 'Sending…' : 'Send response'}
+            {replyBusy ? 'Sending…' : nav?.nextId ? 'Send & review next' : 'Send response'}
           </Button>
           <Button size="sm" variant="secondary" onClick={onRequestUpdate} disabled={replyBusy}>
             Request update
@@ -552,6 +556,11 @@ function ActionRailContent({
 
 export default function CheckInReviewDecisionWorkspace({
   shell,
+  checkinId,
+  clientId,
+  clientUserId,
+  coachId,
+  coachName,
   checkin,
   clientRow,
   dashboardData,
@@ -593,9 +602,18 @@ export default function CheckInReviewDecisionWorkspace({
   marking,
   replyBusy = false,
   isReviewed,
+  macroSuggestionSlot = null,
 }) {
   const [appActionsOpen, setAppActionsOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(true);
+  const [callRequestOpen, setCallRequestOpen] = useState(false);
+  const [callType, setCallType] = useState('video');
+  const [proposedAt, setProposedAt] = useState('');
+  const [durationMins, setDurationMins] = useState(30);
+  const [callAgenda, setCallAgenda] = useState('');
+  const [callRequestError, setCallRequestError] = useState('');
+  const [coachCallActive, setCoachCallActive] = useState(false);
+  const queryClient = useQueryClient();
   const emphasis = reviewContext?.emphasis === 'competition_prep' ? 'competition_prep' : 'transformation';
   const checkInReviewMigration = useMemo(
     () => deriveCheckInReviewWorkspaceState({ shell, emphasis: reviewContext?.emphasis }),
@@ -612,6 +630,104 @@ export default function CheckInReviewDecisionWorkspace({
   const onMarkUrgent = useCallback(() => {
     onSetSessionFlag(sessionFlag === 'urgent' ? 'none' : 'urgent');
   }, [onSetSessionFlag, sessionFlag]);
+
+  const { data: callRequest = null } = useQuery({
+    queryKey: ['call-request-for-checkin', checkin?.id ?? checkinId],
+    queryFn: async () => {
+      const supabase = getSupabase();
+      const currentCheckinId = checkin?.id ?? checkinId;
+      if (!supabase || !currentCheckinId) return null;
+      let query = supabase
+        .from('checkin_call_requests')
+        .select('id, call_type, status, proposed_at, duration_minutes, created_at')
+        .eq('checkin_id', currentCheckinId)
+        .in('status', ['accepted', 'pending'])
+        .order('created_at', { ascending: false })
+        .limit(1);
+      const { data, error } = await query.maybeSingle();
+      if (error) throw error;
+      return data ?? null;
+    },
+    enabled: !!(checkin?.id ?? checkinId),
+    staleTime: 30000,
+    refetchInterval: 15000,
+  });
+
+  const sendCallRequestMutation = useMutation({
+    mutationFn: async () => {
+      setCallRequestError('');
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('No connection');
+      if (!coachId || !clientId || !checkinId) throw new Error('Missing request data');
+
+      const { data: inserted, error } = await supabase
+        .from('checkin_call_requests')
+        .insert({
+          checkin_id: checkinId,
+          coach_id: coachId,
+          client_id: clientId,
+          call_type: callType,
+          proposed_at:
+            callType === 'message'
+              ? new Date().toISOString()
+              : new Date(proposedAt).toISOString(),
+          duration_minutes: durationMins,
+          agenda: callAgenda || null,
+        })
+        .select('id')
+        .maybeSingle();
+      if (error) throw error;
+
+      await supabase.from('notifications').insert({
+        user_id: clientUserId,
+        type: 'call_request',
+        title:
+          callType === 'video'
+            ? `${coachName || 'Your coach'} wants a video call`
+            : callType === 'phone'
+              ? `${coachName || 'Your coach'} wants a phone call`
+              : `${coachName || 'Your coach'} wants to chat over messages`,
+        message:
+          callType === 'message'
+            ? `Re: your check-in - ${callAgenda || 'tap to respond'}`
+            : `Proposed: ${new Date(proposedAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}. Tap to accept or reschedule.`,
+        category: 'coaching',
+        is_read: false,
+        metadata: JSON.stringify({ call_request_id: inserted?.id || null }),
+        created_at: new Date().toISOString(),
+      });
+    },
+    onSuccess: () => {
+      toast.success(callType === 'message' ? 'Message request sent' : `Call request sent to ${clientName}`);
+      setCallRequestOpen(false);
+      setProposedAt('');
+      setCallAgenda('');
+      setDurationMins(30);
+      setCallType('video');
+      setCallRequestError('');
+      queryClient.invalidateQueries({ queryKey: ['call-request-for-checkin', checkin?.id ?? checkinId] });
+    },
+    onError: (error) => {
+      const message = error?.message || 'Failed to send request';
+      setCallRequestError(message);
+      toast.error(message);
+    },
+  });
+
+  const handleSendCallRequest = useCallback(
+    () => sendCallRequestMutation.mutate(),
+    [sendCallRequestMutation]
+  );
+
+  const handleStartCall = useCallback(async () => {
+    if (!callRequest) return;
+      if (callRequest.call_type === 'video') {
+        setCoachCallActive(true);
+        return;
+      }
+
+      toast.message('Open your messages to continue.');
+  }, [callRequest]);
 
   const leftRail = (
     <aside
@@ -667,6 +783,22 @@ export default function CheckInReviewDecisionWorkspace({
             }}
           >
             {urgencyBadge.label}
+          </span>
+        ) : null}
+        {String(checkin?.athlete_prep_pace_ack || '').toLowerCase() === 'behind' ? (
+          <span
+            className="inline-flex items-center gap-1"
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              padding: '4px 10px',
+              borderRadius: 8,
+              background: `${colors.warning}22`,
+              color: colors.warning,
+            }}
+          >
+            <AlertTriangle size={12} />
+            Behind pace — consider macro adjustment
           </span>
         ) : null}
         <span
@@ -747,17 +879,184 @@ export default function CheckInReviewDecisionWorkspace({
           </div>
         </div>
       ) : null}
+
+      <DataCard title="Body & progress">
+        <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>Weight</p>
+        <p style={{ margin: `${spacing[4]}px 0 ${spacing[8]}px`, fontSize: 24, fontWeight: 800, color: colors.text }}>
+          {checkin?.weight_kg ?? checkin?.weight ?? '—'} kg
+        </p>
+        {weightDeltaKg != null ? (
+          <p style={{ margin: `0 0 ${spacing[10]}px`, fontSize: 13, color: weightDeltaKg < 0 ? colors.success : colors.warning, fontWeight: 600 }}>
+            {weightDeltaKg < 0 ? '↓' : '↑'} {Math.abs(Number(weightDeltaKg)).toFixed(1)}kg from last week
+          </p>
+        ) : null}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: spacing[8] }}>
+          {[
+            ['waist_cm', 'Waist'],
+            ['chest_cm', 'Chest'],
+            ['hip_cm', 'Hip'],
+            ['thigh_cm', 'Thigh'],
+            ['arm_cm', 'Arm'],
+          ].map(([key, label]) =>
+            checkin?.[key] != null ? (
+              <div key={key} style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>{label}</p>
+                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 15, fontWeight: 700, color: colors.text }}>{checkin[key]} cm</p>
+              </div>
+            ) : null
+          )}
+        </div>
+      </DataCard>
+
+      <DataCard title="Nutrition">
+        <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>Nutrition adherence</p>
+        <p style={{ margin: `${spacing[4]}px 0 ${spacing[10]}px`, fontSize: 26, fontWeight: 800, color: pctColor(checkin?.nutrition_adherence) }}>
+          {checkin?.nutrition_adherence ?? '—'}%
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: spacing[8] }}>
+          {[
+            ['water_litres', 'Water', 'L'],
+            ['hunger_level', 'Hunger', '/10'],
+            ['digestion_score', 'Digestion', '/10'],
+            ['supplement_adherence', 'Supplements', '%'],
+          ].map(([key, label, suffix]) =>
+            checkin?.[key] != null ? (
+              <div key={key} style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>{label}</p>
+                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, fontWeight: 700, color: pctColor(checkin[key]) }}>
+                  {checkin[key]}{suffix}
+                </p>
+              </div>
+            ) : null
+          )}
+        </div>
+      </DataCard>
+
+      <DataCard title="Training">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: spacing[8], marginBottom: spacing[8] }}>
+          {[
+            ['training_completion', 'Training completion'],
+            ['cardio_completion', 'Cardio completion'],
+            ['steps_avg', 'Steps avg'],
+          ].map(([key, label]) =>
+            checkin?.[key] != null ? (
+              <div key={key} style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>{label}</p>
+                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, fontWeight: 700, color: key.includes('completion') ? pctColor(checkin[key]) : colors.text }}>
+                  {key.includes('completion') ? `${checkin[key]}%` : checkin[key]}
+                </p>
+              </div>
+            ) : null
+          )}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing[8] }}>
+          {[
+            ['strength_feeling', 'Strength'],
+            ['pump_quality', 'Pump'],
+            ['recovery_score', 'Recovery'],
+          ].map(([key, label]) => {
+            if (checkin?.[key] == null) return null;
+            const c = scoreBandColor(checkin[key]);
+            return (
+              <span key={key} style={{ padding: '6px 10px', borderRadius: 999, border: `1px solid ${c}55`, background: `${c}22`, color: c, fontSize: 12, fontWeight: 700 }}>
+                {label}: {checkin[key]}/10
+              </span>
+            );
+          })}
+        </div>
+      </DataCard>
+
+      <DataCard title="Wellbeing">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: spacing[8], marginBottom: spacing[8] }}>
+          {[
+            ['energy_level', 'Energy'],
+            ['sleep_score', 'Sleep'],
+            ['mood_level', 'Mood'],
+            ['stress_level', 'Stress'],
+            ['libido_level', 'Libido'],
+          ].map(([key, label]) => {
+            if (checkin?.[key] == null) return null;
+            const c = scoreBandColor(checkin[key]);
+            return (
+              <span key={key} style={{ padding: '6px 10px', borderRadius: 999, border: `1px solid ${c}55`, background: `${c}22`, color: c, fontSize: 12, fontWeight: 700 }}>
+                {label}: {checkin[key]}/10
+              </span>
+            );
+          })}
+        </div>
+        {[
+          ['energy_level', 'energy'],
+          ['sleep_score', 'sleep'],
+          ['mood_level', 'mood'],
+          ['stress_level', 'stress'],
+          ['libido_level', 'libido'],
+        ].map(([key, label]) =>
+          Number(checkin?.[key]) <= 4 ? (
+            <p key={key} style={{ margin: `${spacing[4]}px 0`, color: colors.warning, fontSize: 12 }}>
+              ⚠️ Low {label} — may indicate recovery issues
+            </p>
+          ) : null
+        )}
+      </DataCard>
+
+      {String(checkin?.focus_type || '').toLowerCase() === 'competition' ? (
+        <DataCard title="Competition">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: spacing[8], marginBottom: spacing[8] }}>
+            {checkin?.posing_minutes != null ? <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}><p style={{ margin: 0, fontSize: 11, color: colors.muted }}>Posing</p><p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, fontWeight: 700, color: colors.text }}>{checkin.posing_minutes} min</p></div> : null}
+            {checkin?.peak_week_water_litres != null ? <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}><p style={{ margin: 0, fontSize: 11, color: colors.muted }}>Peak water</p><p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, fontWeight: 700, color: colors.text }}>{checkin.peak_week_water_litres} L</p></div> : null}
+            {checkin?.peak_week_sodium_mg != null ? <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}><p style={{ margin: 0, fontSize: 11, color: colors.muted }}>Peak sodium</p><p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, fontWeight: 700, color: colors.text }}>{checkin.peak_week_sodium_mg} mg</p></div> : null}
+            {checkin?.peak_week_carb_g != null ? <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}><p style={{ margin: 0, fontSize: 11, color: colors.muted }}>Peak carbs</p><p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, fontWeight: 700, color: colors.text }}>{checkin.peak_week_carb_g} g</p></div> : null}
+          </div>
+          {checkin?.stage_condition_notes ? <div style={{ maxHeight: 120, overflowY: 'auto', border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8], marginBottom: spacing[8] }}><p style={{ margin: 0, fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>{checkin.stage_condition_notes}</p></div> : null}
+          {checkin?.symmetry_notes ? <div style={{ maxHeight: 120, overflowY: 'auto', border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}><p style={{ margin: 0, fontSize: 12, color: colors.textSecondary, lineHeight: 1.5 }}>{checkin.symmetry_notes}</p></div> : null}
+        </DataCard>
+      ) : null}
+
+      <DataCard title="Highlights">
+        {checkin?.wins ? (
+          <div style={{ border: '1px solid rgba(34,197,94,0.35)', background: 'rgba(34,197,94,0.12)', borderRadius: 10, padding: spacing[10], marginBottom: spacing[8] }}>
+            <p style={{ margin: 0, fontSize: 13, color: '#22c55e', fontWeight: 700 }}>🏆 Wins</p>
+            <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.textSecondary }}>{checkin.wins}</p>
+          </div>
+        ) : null}
+        {checkin?.struggles ? (
+          <div style={{ border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.12)', borderRadius: 10, padding: spacing[10] }}>
+            <p style={{ margin: 0, fontSize: 13, color: '#f59e0b', fontWeight: 700 }}>😤 Struggles</p>
+            <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.textSecondary }}>{checkin.struggles}</p>
+          </div>
+        ) : null}
+      </DataCard>
+
+      <DataCard title="Custom answers">
+        {Array.isArray(checkin?.answers) && checkin.answers.length ? (
+          checkin.answers.map((a, i) => (
+            <div key={`${a?.question_id || i}`} style={{ borderBottom: `1px solid ${colors.border}`, padding: `${spacing[8]}px 0` }}>
+              <p style={{ margin: 0, fontSize: 12, color: colors.muted }}>{a?.question_text || `Question ${i + 1}`}</p>
+              <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.textSecondary }}>{a?.answer || '—'}</p>
+            </div>
+          ))
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>No custom answers submitted.</p>
+        )}
+      </DataCard>
+
+      <DataCard title="Notes">
+        {checkin?.coach_questions ? (
+          <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8], marginBottom: spacing[8] }}>
+            <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>Coach questions field</p>
+            <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.textSecondary }}>{checkin.coach_questions}</p>
+          </div>
+        ) : null}
+        {checkin?.notes ? (
+          <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[8] }}>
+            <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>General notes</p>
+            <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.textSecondary }}>{checkin.notes}</p>
+          </div>
+        ) : null}
+      </DataCard>
+
       <PhotoGallery photoUrls={photoUrls} prevPhotoUrls={prevPhotoUrls} prioritize={reviewContext?.prioritizePhotos} />
-      <MetricsGroupedCard checkin={checkin} emphasis={emphasis} viewerWU={viewerWU} prepPrecision={prepPrecision} />
-      {sectionTitle('Check-in answers')}
-      <AnswerSection title="Wins" body={checkin?.wins} />
-      <AnswerSection title="Struggles" body={checkin?.struggles} />
-      <AnswerSection title="Recovery / lifestyle" body={checkin?.condition_notes} />
-      <AnswerSection
-        title="Digestion / hunger"
-        body={checkin?.digestion_score != null ? `Digestion score (1–10): ${checkin.digestion_score}` : null}
-      />
-      <AnswerSection title="Questions for coach" body={checkin?.questions} />
+
       {sectionTitle('Mini trends')}
       <TrendsRow
         series={miniSeries}
@@ -807,8 +1106,181 @@ export default function CheckInReviewDecisionWorkspace({
       replyBusy={replyBusy}
       isReviewed={isReviewed}
       stickyWrapStyle={shell === 'desktop_web' ? railStickyStyle : { display: 'flex', flexDirection: 'column', gap: 0 }}
+      macroSuggestionSlot={macroSuggestionSlot}
+      onOpenCallRequest={() => setCallRequestOpen(true)}
+      callRequest={callRequest}
+      onJoinCall={handleStartCall}
     />
   );
+
+  const callRequestModal = callRequestOpen ? (
+    <div
+      role="dialog"
+      onClick={(e) => e.target === e.currentTarget && setCallRequestOpen(false)}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 200,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'flex-end',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 560,
+          margin: '0 auto',
+          background: colors.surface,
+          borderRadius: '16px 16px 0 0',
+          padding: 24,
+          paddingBottom: 'max(24px, env(safe-area-inset-bottom))',
+        }}
+      >
+        <p style={{ fontSize: 17, fontWeight: 600, color: colors.text, marginBottom: 4 }}>Request a call</p>
+        <p style={{ fontSize: 13, color: colors.muted, marginBottom: 20 }}>
+          {clientName} will get a notification and can accept or suggest a different time.
+        </p>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          {[
+            { type: 'video', icon: '📹', label: 'Video call' },
+            { type: 'phone', icon: '📞', label: 'Phone call' },
+            { type: 'message', icon: '💬', label: 'Message' },
+          ].map((opt) => (
+            <button
+              key={opt.type}
+              type="button"
+              onClick={() => setCallType(opt.type)}
+              style={{
+                flex: 1,
+                padding: '10px 8px',
+                borderRadius: 10,
+                border: `1px solid ${callType === opt.type ? colors.primary : colors.border}`,
+                background: callType === opt.type ? colors.primarySubtle : 'transparent',
+                color: callType === opt.type ? colors.primary : colors.muted,
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 500,
+                textAlign: 'center',
+              }}
+            >
+              <div>{opt.icon}</div>
+              <div>{opt.label}</div>
+            </button>
+          ))}
+        </div>
+
+        {callType !== 'message' ? (
+          <>
+            <label style={{ fontSize: 13, color: colors.muted, display: 'block', marginBottom: 6 }}>
+              Proposed date & time
+            </label>
+            <input
+              type="datetime-local"
+              value={proposedAt}
+              min={new Date().toISOString().slice(0, 16)}
+              onChange={(e) => setProposedAt(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                background: colors.surface2,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 10,
+                color: colors.text,
+                fontSize: 14,
+                marginBottom: 12,
+              }}
+            />
+            <label style={{ fontSize: 13, color: colors.muted, display: 'block', marginBottom: 6 }}>
+              Duration
+            </label>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {[15, 30, 45, 60].map((mins) => (
+                <button
+                  key={mins}
+                  type="button"
+                  onClick={() => setDurationMins(mins)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 0',
+                    borderRadius: 8,
+                    border: `1px solid ${durationMins === mins ? colors.primary : colors.border}`,
+                    background: durationMins === mins ? colors.primarySubtle : 'transparent',
+                    color: durationMins === mins ? colors.primary : colors.muted,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  {mins}m
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+
+        <label style={{ fontSize: 13, color: colors.muted, display: 'block', marginBottom: 6 }}>
+          What do you want to cover?
+        </label>
+        <textarea
+          value={callAgenda}
+          onChange={(e) => setCallAgenda(e.target.value)}
+          placeholder={callType === 'message'
+            ? 'What would you like to discuss over messages?'
+            : 'Key points from this check-in you want to go through...'}
+          rows={3}
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            background: colors.surface2,
+            border: `1px solid ${colors.border}`,
+            borderRadius: 10,
+            color: colors.text,
+            fontSize: 14,
+            resize: 'none',
+            marginBottom: 16,
+            fontFamily: 'inherit',
+          }}
+        />
+
+        <button
+          type="button"
+          onClick={handleSendCallRequest}
+          disabled={sendCallRequestMutation.isPending || (callType !== 'message' && !proposedAt)}
+          style={{
+            width: '100%',
+            padding: '13px',
+            borderRadius: 12,
+            border: 'none',
+            background: (callType !== 'message' && !proposedAt) ? colors.border : colors.primary,
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: 15,
+            fontWeight: 600,
+          }}
+        >
+          {sendCallRequestMutation.isPending ? 'Sending request…' : `Send request to ${clientName}`}
+        </button>
+        {callRequestError ? (
+          <p style={{ margin: '10px 0 0', fontSize: 12, color: colors.warning }}>
+            {callRequestError}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
+
+  const coachCallOverlay = coachCallActive ? (
+    <AtlasVideoCall
+      callRequestId={callRequest?.id}
+      role="caller"
+      myName={coachName ?? 'Coach'}
+      theirName={clientName}
+      onEnd={() => {
+        setCoachCallActive(false);
+      }}
+    />
+    ) : null;
 
   const topBar = (
     <header
@@ -903,6 +1375,8 @@ export default function CheckInReviewDecisionWorkspace({
           <div style={{ gridColumn: 2, minWidth: 0 }}>{mainColumn}</div>
           <aside style={{ gridColumn: 3, minWidth: 0 }}>{actionRail}</aside>
         </div>
+        {callRequestModal}
+        {coachCallOverlay}
       </div>
     );
   }
@@ -963,7 +1437,7 @@ export default function CheckInReviewDecisionWorkspace({
         </Button>
         {!isReviewed ? (
           <Button className="flex-1" variant="primary" onClick={onApproveAndMessage} disabled={marking || replyBusy}>
-            {replyBusy ? '…' : 'Send'}
+            {replyBusy ? '…' : nav?.nextId ? 'Send & next' : 'Send'}
           </Button>
         ) : null}
       </div>
@@ -999,6 +1473,8 @@ export default function CheckInReviewDecisionWorkspace({
           </div>
         </div>
       ) : null}
+      {callRequestModal}
+      {coachCallOverlay}
     </div>
   );
 }

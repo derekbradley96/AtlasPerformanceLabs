@@ -1,4 +1,19 @@
 /**
+ * STATUS: UNVERIFIED ACTIVE STATUS
+ * This file is not imported by any active component.
+ * It was part of the original base44 architecture.
+ *
+ * Before deleting:
+ * 1. Search Supabase for automation_rules table
+ *    — if it exists and has rows, this may still matter
+ * 2. Check if any Edge Function imports this
+ * 3. If no active usage found: delete this file
+ *
+ * Suspected dead code from pre-Supabase architecture.
+ * See docs/GHOST_FUNCTIONS_AUDIT.md
+ */
+
+/**
  * Automation engine: persist events, load rules, evaluate conditions, execute actions.
  * automation_rules: trigger_type, condition jsonb, action_type
  * automation_events: event_type, payload jsonb

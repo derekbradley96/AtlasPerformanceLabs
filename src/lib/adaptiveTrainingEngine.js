@@ -266,3 +266,6 @@ export async function evaluateClientState(clientId) {
   return data ?? null;
 }
 
+/** Progressive overload hints in the workout player share the same RIR / rep logic as progression (see programProgression). */
+export { suggestNextLoad, buildNextSessionLoadPreviewLines } from '@/lib/programProgression';
+

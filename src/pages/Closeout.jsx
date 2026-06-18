@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ClipboardList, MessageSquare, CreditCard, UserPlus, Check, Flame } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { getCloseoutCounts } from '@/lib/inboxService';
+import { getCloseoutCounts, getCloseoutCountsFromSupabase } from '@/lib/inboxService';
 import {
   getStreak,
   wasCloseoutDoneToday,
@@ -18,6 +19,7 @@ import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { normalizeReviewQueueFilterParam, REVIEW_QUEUE_PATH } from '@/lib/coachReviewRoutes';
+import { hasSupabase } from '@/lib/supabaseClient';
 
 const CATEGORIES = [
   { key: 'checkinReview', label: 'Reviews', icon: ClipboardList, type: 'CHECKIN_REVIEW', filter: 'reviews' },
@@ -26,6 +28,15 @@ const CATEGORIES = [
   { key: 'newLeads', label: 'Leads', icon: UserPlus, type: 'NEW_LEAD', filter: 'leads' },
 ];
 
+const DEFAULT_COUNTS = {
+  checkinReview: 0,
+  overduePayments: 0,
+  unreadMessages: 0,
+  newLeads: 0,
+  total: 0,
+  completed: 4,
+};
+
 export default function Closeout() {
   const navigate = useNavigate();
   const { role, user, isDemoMode } = useAuth();
@@ -33,7 +44,15 @@ export default function Closeout() {
 
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const counts = useMemo(() => getCloseoutCounts(trainerId), [trainerId, refreshKey]);
+  const demoCounts = useMemo(() => getCloseoutCounts(trainerId), [trainerId, refreshKey]);
+  const { data: queriedCounts = DEFAULT_COUNTS, isLoading: countsLoading } = useQuery({
+    queryKey: ['closeout-counts', trainerId, refreshKey],
+    queryFn: () => getCloseoutCountsFromSupabase(trainerId),
+    enabled: !!trainerId && hasSupabase && !isDemoMode,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const counts = isDemoMode || !hasSupabase ? demoCounts : queriedCounts;
   const streak = getStreak();
   const alreadyDoneToday = wasCloseoutDoneToday();
   const allResolved = counts.total === 0;
@@ -74,6 +93,23 @@ export default function Closeout() {
     return (
       <div className="app-screen p-4" style={{ color: colors.muted }}>
         <p>Closeout is for trainers only.</p>
+      </div>
+    );
+  }
+
+  if (!isDemoMode && hasSupabase && countsLoading) {
+    return (
+      <div className="app-screen min-w-0 max-w-full overflow-x-hidden">
+        <Card style={{ padding: spacing[20], marginBottom: spacing[16], borderRadius: 20 }}>
+          <div style={{ height: 22, width: 160, borderRadius: 8, background: 'rgba(255,255,255,0.08)', marginBottom: spacing[10] }} />
+          <div style={{ height: 16, width: 120, borderRadius: 8, background: 'rgba(255,255,255,0.08)' }} />
+        </Card>
+        {[0, 1, 2, 3].map((idx) => (
+          <Card key={idx} style={{ padding: spacing[14], marginBottom: spacing[12], borderRadius: 20 }}>
+            <div style={{ height: 18, width: `${70 - idx * 8}%`, borderRadius: 8, background: 'rgba(255,255,255,0.08)', marginBottom: spacing[8] }} />
+            <div style={{ height: 14, width: `${55 - idx * 6}%`, borderRadius: 8, background: 'rgba(255,255,255,0.06)' }} />
+          </Card>
+        ))}
       </div>
     );
   }

@@ -8,7 +8,8 @@
  * - Peak week daily items are not added to this feed (handled by inbox separately; unique by clientId+date).
  * - Never auto-show modals on trainer role (handled in UI; this layer is data-only).
  */
-import { getClientById, getClientCheckIns, getClients } from '@/data/selectors';
+import { getCurrentTrainerId } from '@/lib/sandboxTrainerId';
+import { resolveClientRecord, getTrainerClientsList, listClientCheckInsForInbox } from '@/lib/inboxLocalSources';
 import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { listMedia } from '@/lib/repos/compPrepRepo';
 import { getPoseById } from '@/lib/repos/poseLibraryRepo';
@@ -39,14 +40,14 @@ import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasuremen
 export function getClientReviewFeed(clientId, options = {}) {
   const { status = 'active', filterType = null, weightUnit = 'kg' } = options;
   const wu = normalizeWeightUnit(weightUnit);
-  const client = getClientById(clientId);
+  const client = resolveClientRecord(clientId);
   if (!client) return [];
 
   const items = [];
 
   // --- Check-ins: only submitted; one per check-in (ruthless: no duplicates) ---
   if (filterType === null || filterType === 'checkin') {
-    const checkIns = getClientCheckIns(clientId);
+    const checkIns = listClientCheckInsForInbox(clientId);
     const submitted = checkIns
       .filter((c) => c.status === 'submitted')
       .sort((a, b) => new Date(b.submitted_at || b.created_date) - new Date(a.submitted_at || a.created_date));
@@ -113,7 +114,7 @@ export function getClientReviewFeed(clientId, options = {}) {
  * @returns {{ clientId: string, clientName: string, items: FeedItem[] }[]}
  */
 export function getAllReviewFeeds(options = {}) {
-  const clients = getClients();
+  const clients = getTrainerClientsList(getCurrentTrainerId());
   return clients.map((c) => ({
     clientId: c.id,
     clientName: c.full_name || 'Client',

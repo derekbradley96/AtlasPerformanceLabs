@@ -3,7 +3,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
@@ -11,7 +11,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion:
 const PRO_PRICE_ID = Deno.env.get("STRIPE_PRICE_PRO") ?? "";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -20,10 +20,10 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: coach, error: coachErr } = await supabase.from(TABLE.coaches).select("id, stripe_customer_id").eq("user_id", userId).single();
-    if (coachErr || !coach) return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (coachErr || !coach) return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
 
     const customerId = (coach as { stripe_customer_id?: string }).stripe_customer_id;
-    if (!customerId) return new Response(JSON.stringify({ error: "No subscription to cancel" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!customerId) return new Response(JSON.stringify({ error: "No subscription to cancel" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
 
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
@@ -42,8 +42,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (!canceled) return new Response(JSON.stringify({ error: "No active Pro subscription found" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!canceled) return new Response(JSON.stringify({ error: "No active Pro subscription found" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("cancelProPlan", e);
     return jsonError("Request failed", 500);

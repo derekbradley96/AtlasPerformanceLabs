@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://atlasperformancelabs.co.uk/sitemap-index.xml

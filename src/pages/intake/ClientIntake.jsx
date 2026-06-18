@@ -1,7 +1,9 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
-import { getClientById } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
+import * as sandbox from '@/lib/sandboxStore';
 import {
   getSubmissionsByClient,
   getLatestApprovedSubmission,
@@ -23,17 +25,35 @@ export default function ClientIntake() {
   const navigate = useNavigate();
   const { user, isDemoMode } = useAuth();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
-  const [client, setClient] = useState(null);
+  const supabase = getSupabase();
   const [submissions, setSubmissions] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [requestChangesMessage, setRequestChangesMessage] = useState('');
   const [showRequestModal, setShowRequestModal] = useState(false);
 
+  const { data: client = null, isLoading: clientLoading } = useQuery({
+    queryKey: ['intake-client', clientId],
+    queryFn: async () => {
+      if (!clientId) return null;
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name, user_id, coach_id, trainer_id')
+          .eq('id', clientId)
+          .maybeSingle();
+        if (error || !data) return null;
+        return { ...data, full_name: data.name ?? data.full_name };
+      }
+      const c = sandbox.getClientById(clientId);
+      return c ? { ...c, full_name: c.full_name ?? c.name } : null;
+    },
+    enabled: !!clientId,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const load = useCallback(() => {
     if (!clientId) return;
-    setClient(getClientById(clientId));
     setSubmissions(getSubmissionsByClient(clientId));
-    const latest = getLatestApprovedSubmission(clientId);
     setSelectedId(null);
   }, [clientId]);
 
@@ -83,6 +103,14 @@ export default function ClientIntake() {
     return (
       <div className="p-6 text-slate-400">
         <p>Invalid client.</p>
+      </div>
+    );
+  }
+
+  if (clientLoading) {
+    return (
+      <div className="p-6 text-slate-400">
+        <p>Loading…</p>
       </div>
     );
   }

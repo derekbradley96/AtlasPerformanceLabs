@@ -7,11 +7,11 @@ import {
 import { cn } from '@/lib/utils';
 import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
-import { isPersonal } from '@/lib/roles';
+import { isPersonal, isCoach, normalizeRole } from '@/lib/roles';
 import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
 export default function Sidebar({ userRole }) {
   const location = useLocation();
-  const { logout } = useAuth();
+  const { signOut } = useAuth();
   
   // Trainer navigation
   const trainerNavItems = [
@@ -36,9 +36,9 @@ export default function Sidebar({ userRole }) {
     { path: discoverNavPath, page: 'Discover', icon: Users, label: 'Find a coach' },
     { path: createPageUrl('Messages'), page: 'Messages', icon: MessageSquare, label: 'Messages', roles: ['client'] },
     { path: createPageUrl('Profile'), page: 'Profile', icon: User, label: 'Profile' },
-  ].filter(item => !item.roles || item.roles.includes(userRole));
+  ].filter(item => !item.roles || item.roles.includes(normalizeRole(userRole)));
 
-  const navItems = userRole === 'trainer' ? trainerNavItems : clientNavItems;
+  const navItems = isCoach(userRole) ? trainerNavItems : clientNavItems;
   const filteredItems = navItems;
 
   const discoverNavActive =
@@ -86,7 +86,7 @@ export default function Sidebar({ userRole }) {
       
       <div className="p-4 border-t border-atlas-border">
         <button 
-          onClick={() => logout()}
+          onClick={() => signOut('/login')}
           className="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all w-full font-medium"
         >
           <LogOut className="w-5 h-5" />

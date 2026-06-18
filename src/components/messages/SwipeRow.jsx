@@ -11,11 +11,11 @@ import { colors } from '@/ui/tokens';
 
 const LEFT_WIDTH = 88;
 const RIGHT_WIDTH = 88;
-const LEFT_THRESHOLD = 44;
-const RIGHT_THRESHOLD = 44;
+const LEFT_THRESHOLD = 60; // was 44 — needs more committed swipe
+const RIGHT_THRESHOLD = 60; // was 44
 const SCALE_DRAG = 0.985;
 const SPRING = { type: 'spring', stiffness: 500, damping: 40, mass: 0.8 };
-const SCROLL_LOCK_THRESHOLD = 6;
+const SCROLL_LOCK_THRESHOLD = 12; // was 6 — needs more deliberate swipe
 
 async function hapticLight() {
   try {
@@ -82,6 +82,8 @@ export default function SwipeRow({
 
   const handlePointerDown = useCallback(
     (e) => {
+      // Only allow swipe on touch — mouse users click, not swipe
+      if (e.pointerType === 'mouse') return;
       if (isDeleting) return;
       if (onSwipeStart) onSwipeStart(id);
       const x = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
@@ -105,6 +107,7 @@ export default function SwipeRow({
 
   const handlePointerMove = useCallback(
     (e) => {
+      if (e.pointerType === 'mouse') return;
       if (isDeleting || !isDragging) return;
       const x = e.clientX ?? e.touches?.[0]?.clientX ?? startX.current;
       const dx = x - startX.current;
@@ -164,6 +167,7 @@ export default function SwipeRow({
 
   const handlePointerLeave = useCallback(
     (e) => {
+      if (e.pointerType === 'mouse') return;
       if (isDeleting || !isDragging) return;
       endDrag(translateXRef.current);
     },

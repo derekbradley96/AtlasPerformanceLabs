@@ -23,20 +23,21 @@ function getISOWeekday(date) {
  */
 export async function getActiveProgramAssignmentForClient(supabase, clientId) {
   if (!supabase || !clientId) return null;
-  const { data: assignment, error: assignErr } = await supabase
+  const { data: assignmentRows, error: assignErr } = await supabase
     .from('program_block_assignments')
-    .select('id, client_id, program_block_id, start_date, is_active')
+    .select('id, client_id, program_block_id, start_date, is_active, client_display_name')
     .eq('client_id', clientId)
     .eq('is_active', true)
-    .limit(1)
-    .maybeSingle();
+    .order('start_date', { ascending: false })
+    .limit(1);
+  const assignment = Array.isArray(assignmentRows) ? (assignmentRows[0] || null) : null;
   if (assignErr && import.meta.env.DEV) {
     console.warn('[programAssignments] assignment query failed, trying block fallback', assignErr?.message);
   }
   if (!assignment) {
     const { data: fallbackBlocks, error: fallbackErr } = await supabase
       .from('program_blocks')
-      .select('id, title, total_weeks, client_id')
+      .select('id, title, total_weeks, client_id, coach_notes')
       .eq('client_id', clientId)
       .order('id', { ascending: false })
       .limit(1);
@@ -49,20 +50,31 @@ export async function getActiveProgramAssignmentForClient(supabase, clientId) {
         program_block_id: fallbackBlock.id,
         start_date: new Date().toISOString().slice(0, 10),
         is_active: true,
+        client_display_name: null,
       },
       block: {
         id: fallbackBlock.id,
         title: fallbackBlock.title ?? 'Program',
         total_weeks: Math.max(1, Number(fallbackBlock.total_weeks) || 1),
+        coach_notes: fallbackBlock.coach_notes ?? null,
       },
     };
   }
   const { data: block, error: blockErr } = await supabase
     .from('program_blocks')
-    .select('id, title, total_weeks')
+    .select('id, title, total_weeks, coach_notes')
     .eq('id', assignment.program_block_id)
     .maybeSingle();
-  if (blockErr || !block) return null;
+  if (blockErr || !block) {
+    return {
+      assignment: { ...assignment, start_date: assignment.start_date },
+      block: {
+        id: assignment.program_block_id ?? `missing-block-${clientId}`,
+        title: 'Program',
+        total_weeks: 1,
+      },
+    };
+  }
   return {
     assignment: { ...assignment, start_date: assignment.start_date },
     block: { ...block, total_weeks: Math.max(1, Number(block.total_weeks) || 1) },
@@ -88,7 +100,7 @@ export async function getActivePersonalProgramAssignment(supabase, profileId) {
   if (error || !row) return null;
   const { data: block, error: bErr } = await supabase
     .from('program_blocks')
-    .select('id, title, total_weeks')
+    .select('id, title, total_weeks, coach_notes')
     .eq('id', row.program_block_id)
     .maybeSingle();
   if (bErr || !block) return null;
@@ -107,12 +119,12 @@ export async function getActivePersonalProgramAssignment(supabase, profileId) {
 async function resolveWorkoutFromAssignment(supabase, assignment, block, asOf) {
   const week = await getCurrentProgramWeek(supabase, assignment, block, asOf);
   if (!week) return null;
-  const day = await getTodaysProgramDay(supabase, week, asOf);
+  const day = await getTodaysProgramDay(supabase, week, asOf, assignment);
   if (!day) return { assignment, block, week, day: null, exercises: [] };
 
   const { data: exercises, error: exErr } = await supabase
     .from('program_exercises')
-    .select('id, day_id, exercise_name, sets, reps, percentage, notes, sort_order, rest_seconds')
+    .select('id, day_id, exercise_name, sets, reps, percentage, notes, sort_order, rest_seconds, prep_instruction_explanation_key')
     .eq('day_id', day.id)
     .order('sort_order');
   if (exErr) {
@@ -165,7 +177,7 @@ export async function getCurrentProgramWeek(supabase, assignment, block, asOf = 
  * @param {Date} [date=new Date()]
  * @returns {Promise<{ id: string, week_id: string, day_number: number, title: string } | null>}
  */
-export async function getTodaysProgramDay(supabase, week, date = new Date()) {
+export async function getTodaysProgramDay(supabase, week, date = new Date(), assignment = null) {
   if (!supabase || !week?.id) return null;
   const { data: days, error } = await supabase
     .from('program_days')
@@ -176,6 +188,15 @@ export async function getTodaysProgramDay(supabase, week, date = new Date()) {
   const isoWeekday = getISOWeekday(date);
   const match = days.find((d) => Number(d.day_number) === isoWeekday);
   if (match) return match;
+  if (assignment?.start_date) {
+    const start = new Date(assignment.start_date);
+    start.setHours(0, 0, 0, 0);
+    const today = date instanceof Date ? new Date(date) : new Date(date);
+    today.setHours(0, 0, 0, 0);
+    const daysElapsed = Math.max(0, Math.floor((today - start) / (24 * 60 * 60 * 1000)));
+    const dayIndex = daysElapsed % days.length;
+    return days[dayIndex] ?? days[0] ?? null;
+  }
   return days[0] ?? null;
 }
 

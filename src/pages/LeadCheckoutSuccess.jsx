@@ -4,7 +4,6 @@ import { CheckCircle } from 'lucide-react';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { createClientStub } from '@/lib/clientStubStore';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { atlasMigrationDataAttributes, deriveLeadCheckoutPostRouteState } from '@/lib/atlasMigrationPhases';
 
 const LEAD_CHECKOUT_PENDING_KEY = 'lead_checkout_pending';
@@ -25,9 +24,8 @@ export default function LeadCheckoutSuccess() {
     const pending = pendingRaw ? (() => { try { return JSON.parse(pendingRaw); } catch { return null; } })() : null;
 
     if (sessionId && isSupabaseConfigured()) {
-      invokeSupabaseFunction('atlas-lead-convert', { session_id: sessionId })
-        .then(() => setConverted(true))
-        .catch(() => setConverted(true));
+      // Conversion is handled by Stripe webhook / backend; no undeployed edge call.
+      setConverted(true);
       return;
     }
     if (!sessionId && pending && pending.uid) {

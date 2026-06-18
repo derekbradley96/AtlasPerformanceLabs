@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { journeyRosterBucket, journeyRosterBadgeLabel } from '@/lib/clientJourney';
 import { useAppRefresh } from '@/lib/useAppRefresh';
 import { Capacitor } from '@capacitor/core';
@@ -12,6 +13,7 @@ import { getRetentionItem } from '@/lib/retention/retentionRepo';
 import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
+import { normalizeRole } from '@/lib/roles';
 import { showCoachManualClientAcquisitionTools } from '@/lib/coachClientAcquisition';
 import { deriveCoachClientLifecycle } from '@/lib/coachClientLifecycle';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
@@ -31,6 +33,9 @@ import { coachFocusAllowsPrepFeatures } from '@/lib/coachFocus';
 import { toast } from 'sonner';
 import { toCSV, downloadCSV } from '@/lib/csvExport';
 import { Download } from 'lucide-react';
+import BroadcastMessageSheet from '@/components/messages/BroadcastMessageSheet';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
+import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
 
 const STATUS_COLORS = { on_track: '#22C55E', needs_review: '#EAB308', attention: '#EF4444' };
 const STATUS_LABELS = { on_track: 'On track', needs_review: 'Needs review', attention: 'Attention' };
@@ -81,7 +86,9 @@ export default function Clients() {
   const outletContext = useOutletContext() || {};
   const { registerRefresh, setHeaderRight } = outletContext;
   const data = useData();
-  const { supabaseUser, authReady, profile, isDemoMode, isAdminBypass } = useAuth();
+  const { supabaseUser, authReady, profile, isDemoMode, isAdminBypass, effectiveRole, user } = useAuth();
+  const role = normalizeRole(effectiveRole ?? user?.role ?? null);
+  const isCoachView = role === 'coach';
   const showManualAcquisition = useMemo(
     () =>
       showCoachManualClientAcquisitionTools({
@@ -103,7 +110,9 @@ export default function Clients() {
     }
     return FILTER_CHIPS;
   }, [showPrepSegmentChip]);
-  const journeyParam = (searchParams.get('journey') ?? '').toLowerCase();
+  const typeParam = (searchParams.get('type') ?? '').toLowerCase();
+  const journeyFromType = typeParam === 'lifestyle' ? 'lifestyle' : typeParam === 'prep' ? 'prep' : '';
+  const journeyParam = journeyFromType || (searchParams.get('journey') ?? '').toLowerCase();
   const journeyLaneFilter =
     showJourneyLaneFilters && (journeyParam === 'lifestyle' || journeyParam === 'prep') ? journeyParam : 'all';
   const filterFromUrl = searchParams.get('filter');
@@ -138,6 +147,7 @@ export default function Clients() {
   const showRiskFilters = hasSupabase && isAuthed && trainerId && trainerId !== 'local-trainer';
   const loadRetriedRef = useRef(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [addClientForm, setAddClientForm] = useState({
     full_name: '',
     email: '',
@@ -150,6 +160,17 @@ export default function Clients() {
     gym_equipment: [],
   });
   const { refresh } = useAppRefresh(() => setRefreshKey((k) => k + 1));
+  const { pullY, refreshing, handlers } = usePullToRefresh({
+    disabled: isDesktopWeb,
+    onRefresh: async () => {
+      setRefreshKey((k) => k + 1);
+      await Promise.resolve(refresh?.());
+    },
+  });
+
+  useEffect(() => {
+    document.title = 'My Clients — Atlas';
+  }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setInitialLoad(false), 200);
@@ -213,6 +234,16 @@ export default function Clients() {
         >
           <UserPlus size={22} strokeWidth={2.25} aria-hidden />
         </button>
+        {isCoachView ? (
+          <button
+            type="button"
+            onClick={() => setBroadcastOpen(true)}
+            className="rounded-lg min-h-[40px] px-3 text-xs font-medium"
+            style={{ color: colors.primary, border: `1px solid ${colors.border}`, background: colors.surface1 }}
+          >
+            Broadcast message
+          </button>
+        ) : null}
         {showManualAcquisition ? (
           <button
             type="button"
@@ -292,7 +323,7 @@ export default function Clients() {
         captureUiError('Clients', err);
         if (import.meta.env.DEV) console.error('[Clients] listClients failed', err);
         setClientsLoadErrorMessage(msg);
-        toast.error('Could not load client list');
+        toast.error('Could not load your client list. Check your connection and try again.');
         setClientsLoadError(true);
       }
       setCheckIns(ch);
@@ -629,8 +660,10 @@ export default function Clients() {
 
   return (
     <div
+      {...handlers}
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
       style={{
+        position: 'relative',
         ...pageContainer,
         maxWidth: isDesktopWeb ? 1240 : undefined,
         margin: '0 auto',
@@ -639,6 +672,7 @@ export default function Clients() {
         paddingRight: isDesktopWeb ? spacing[20] : pageContainer.paddingRight,
       }}
     >
+      <PullToRefreshIndicator pullY={pullY} refreshing={refreshing} />
       {/* Title comes from AppShell header (getRouteTitle /clients); keep wayfinding only here */}
       <header style={{ marginBottom: rhythm.section }}>
         <p style={{ fontSize: 13, color: colors.muted, margin: 0, lineHeight: 1.45 }}>
@@ -830,32 +864,11 @@ export default function Clients() {
         />
       ) : !initialLoad && !dataLoading && showEmptyState ? (
         <EmptyState
-          title="Grow your roster with invites"
-          description="Clients join Atlas with your link or coach code, complete onboarding, then appear here. Share link, code, or QR from Invite clients — there is no separate “create client” in production."
+          title="No clients yet"
+          description="Once a client joins with your code, they appear here."
           icon={UserPlus}
-          action={(
-            <div className="flex flex-col gap-3 w-full max-w-[280px]">
-              <Button variant="primary" className="w-full" onClick={() => navigate('/get-clients')}>
-                Invite clients
-              </Button>
-              <Button variant="secondary" className="w-full" onClick={() => navigate('/get-clients?focus=code')}>
-                Coach code &amp; QR
-              </Button>
-              {showManualAcquisition ? (
-                <Button variant="secondary" className="w-full opacity-90" onClick={() => setAddClientOpen(true)}>
-                  Add client manually (dev)
-                </Button>
-              ) : null}
-              <button
-                type="button"
-                className="text-sm font-medium py-2"
-                style={{ color: colors.primary, background: 'none', border: 'none', cursor: 'pointer' }}
-                onClick={() => navigate('/program-builder')}
-              >
-                Open Program Builder
-              </button>
-            </div>
-          )}
+          actionLabel="Get your invite link"
+          onAction={() => navigate('/get-clients')}
         />
       ) : !initialLoad && !dataLoading && isEmpty ? (
         <EmptyState
@@ -914,7 +927,7 @@ export default function Clients() {
                     e.preventDefault();
                     e.stopPropagation();
                     await lightHaptic();
-                    navigate(`/messages/${client.id}`);
+                    navigateToThread(navigate, client.id);
                   }}
                   className="flex flex-col items-center justify-center gap-0.5 w-full h-full border-0 cursor-pointer"
                   style={{
@@ -1015,7 +1028,15 @@ export default function Clients() {
                           }}
                           className="rounded-full px-2 py-0.5 text-[10px] font-medium active:opacity-80 inline-flex items-center gap-1"
                           style={{ background: healthBg, color: healthResult ? healthRiskColor : colors.muted, border: 'none' }}
-                          aria-label="Health score"
+                          aria-label={
+                            healthResult?.riskLevel === 'red'
+                              ? 'High risk — open health details'
+                              : healthResult?.riskLevel === 'amber'
+                                ? 'Medium risk — open health details'
+                                : healthResult
+                                  ? 'On track — open health details'
+                                  : 'Health score — open details'
+                          }
                         >
                           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: healthResult ? healthRiskColor : colors.muted }} aria-hidden />
                           {healthResult?.score ?? '—'}
@@ -1070,6 +1091,19 @@ export default function Clients() {
         onOpenChange={(open) => { if (!open) setHealthSheetClientId(null); }}
         result={healthSheetClientId ? healthByClientId[healthSheetClientId] ?? null : null}
       />
+      {isCoachView && (
+        <BroadcastMessageSheet
+          open={broadcastOpen}
+          onOpenChange={setBroadcastOpen}
+          clients={allClients}
+          ensureThreadForClient={data?.ensureThreadForClient}
+          sendMessage={data?.sendMessage}
+          onSent={() => {
+            setRefreshKey((k) => k + 1);
+            refresh();
+          }}
+        />
+      )}
 
       {showManualAcquisition && addClientOpen && (
         <div

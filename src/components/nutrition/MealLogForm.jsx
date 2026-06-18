@@ -1,4 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { Capacitor } from '@capacitor/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -11,16 +14,105 @@ import {
 } from '@/components/ui/dialog';
 import { X, Plus, ScanBarcode } from 'lucide-react';
 import { motion } from 'framer-motion';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from '@/components/ui/drawer';
 import { scanBarcodeValue } from '@/lib/barcodeScanner';
 import { fetchOpenFoodFactsProduct } from '@/lib/openFoodFacts';
-import { formatCalories, formatNumber } from '@/lib/format';
+import { formatNumber } from '@/lib/format';
 import { useAuth } from '@/lib/AuthContext';
 import {
   HOUSEHOLD_UNIT_OPTIONS,
+  gramsToOuncesMass,
+  mlToUsFluidOunces,
   portionFromLoggerInputs,
   resolveViewerFoodQuantityUnit,
   resolveViewerNutritionLabelDisplay,
 } from '@/lib/nutritionUnits';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getRecentFoods } from '@/lib/mealLogsService';
+import { COMMON_FOOD_TABS } from '@/lib/commonFoodsLibrary';
+import {
+  getUserBarcodeCacheEntry,
+  setUserBarcodeCacheEntry,
+  listUserBarcodeCacheEntries,
+} from '@/lib/mealBarcodeUserCache';
+import { setNativePref } from '@/lib/nativePreferences';
+import { hapticSelection, hapticSuccess, hapticWarning } from '@/lib/haptics';
+import { colors } from '@/ui/tokens';
+
+function getLocalMondayDateString(d = new Date()) {
+  const day = d.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diffToMonday);
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const dayNum = String(monday.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dayNum}`;
+}
+
+const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'pre_workout', 'post_workout', 'snack'];
+const MEAL_TYPES_PREF_KEY = 'atlas_pref_meal_types';
+const BARCODE_SERVING_MODE_KEY = 'atlas_barcode_serving_mode_v1';
+
+function normalizeMealTypeForForm(mt) {
+  const t = String(mt || 'snack').toLowerCase();
+  if (t === 'pre') return 'pre_workout';
+  if (t === 'post') return 'post_workout';
+  return MEAL_TYPES.includes(t) ? t : 'snack';
+}
+
+function pickFoodEmoji(name) {
+  const n = String(name || '').toLowerCase();
+  if (/chicken|turkey|poultry|duck/.test(n)) return '🍗';
+  if (/beef|steak|bison|venison|lamb|ham|jerky|pork/.test(n)) return '🥩';
+  if (/egg|scrambl/.test(n)) return '🥚';
+  if (/fish|salmon|cod|tuna|prawn|shrimp|mackerel|sardine|tilapia/.test(n)) return '🐟';
+  if (/rice|pasta|noodle|pho|ramen|couscous|quinoa|oats|porridge|granola/.test(n)) return '🍚';
+  if (/bread|toast|bagel|wrap|tortilla/.test(n)) return '🍞';
+  if (/banana|berry|blueberr|apple|orange|grape|mango|watermelon|pineapple|pear/.test(n)) return '🍌';
+  if (/yogurt|quark|skyr|cottage|milk/.test(n)) return '🥛';
+  if (/cheese|cheddar|feta|mozzarella|halloumi/.test(n)) return '🧀';
+  if (/potato|sweet potato/.test(n)) return '🥔';
+  if (/avocado|almond|walnut|cashew|peanut|nut|seed|oil|butter|mayo|chocolate/.test(n)) return '🥜';
+  if (/burger|pizza|burrito|sandwich|meal|stir fry|prep|english|sushi/.test(n)) return '🍽️';
+  if (/shake|smoothie|bar|gel|drink|pre-workout|preworkout|bcaa|creatine/.test(n)) return '🥤';
+  if (/broccoli|salad|vegetable/.test(n)) return '🥗';
+  return '🍽️';
+}
+
+function isLikelyLiquid(servingText) {
+  const t = String(servingText || '').toLowerCase();
+  return /\bml\b|fl\s*oz|fluid/i.test(t);
+}
+
+function normalizeBarcodeMealType(mt) {
+  const t = String(mt || 'snack').toLowerCase();
+  if (['breakfast', 'lunch', 'dinner', 'snack', 'pre_workout', 'post_workout'].includes(t)) return t;
+  return 'snack';
+}
+
+const MEAL_TYPE_OPTIONS = [
+  { value: 'breakfast', label: 'Breakfast' },
+  { value: 'lunch', label: 'Lunch' },
+  { value: 'dinner', label: 'Dinner' },
+  { value: 'pre_workout', label: 'Pre-workout' },
+  { value: 'post_workout', label: 'Post-workout' },
+  { value: 'snack', label: 'Snack' },
+];
+
+function getMealTypeForLocalTime() {
+  const h = new Date().getHours();
+  if (h < 11) return 'breakfast';
+  if (h < 14) return 'lunch';
+  if (h < 17) return 'snack';
+  return 'dinner';
+}
 
 export default function MealLogForm({
   onSubmit,
@@ -28,12 +120,25 @@ export default function MealLogForm({
   openFormSignal = 0,
   openScannerSignal = 0,
   hideCollapsedActions = false,
+  supabaseEnabled = false,
+  profileId = null,
+  clientId = null,
+  calendarDayKey = null,
+  recentFoodsFallback,
+  presetMealType = null,
 }) {
   const { profile } = useAuth();
   const foodQtyPref = resolveViewerFoodQuantityUnit(profile);
   const labelPref = resolveViewerNutritionLabelDisplay(profile);
 
-  const [mealType, setMealType] = useState('breakfast');
+  const [mealType, setMealType] = useState(() => normalizeMealTypeForForm(getMealTypeForLocalTime()));
+  const setMealTypeWithPref = useCallback((nextType) => {
+    const normalized = normalizeMealTypeForForm(nextType);
+    hapticSelection();
+    setMealType(normalized);
+    void setNativePref(MEAL_TYPES_PREF_KEY, [normalized]);
+  }, []);
+
   const [calories, setCalories] = useState('');
   const [protein, setProtein] = useState('');
   const [carbs, setCarbs] = useState('');
@@ -59,8 +164,157 @@ export default function MealLogForm({
   const [manualFats, setManualFats] = useState('');
   /** null = use profile `nutrition_label_display` */
   const [barcodeLabelOverride, setBarcodeLabelOverride] = useState(null);
+  const [barcodeServingMode, setBarcodeServingMode] = useState(() => {
+    if (typeof localStorage === 'undefined') return '100g';
+    try {
+      const v = localStorage.getItem(BARCODE_SERVING_MODE_KEY);
+      if (v === '100g' || v === 'serving' || v === 'custom') return v;
+    } catch {
+      /* ignore */
+    }
+    return '100g';
+  });
+  const [customBarcodeAmount, setCustomBarcodeAmount] = useState('');
+  const [webBarcodeInput, setWebBarcodeInput] = useState('');
+  const [commonFoodTab, setCommonFoodTab] = useState('protein');
+  const [foodSearchQuery, setFoodSearchQuery] = useState('');
+  const isNativeApp = Capacitor.isNativePlatform();
+  const recentScans = useMemo(() => listUserBarcodeCacheEntries(10), [lookupOpen, showForm]);
 
   const effectiveBarcodeLabel = barcodeLabelOverride ?? labelPref;
+
+  const dayKey = calendarDayKey || new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BARCODE_SERVING_MODE_KEY, barcodeServingMode);
+    } catch {
+      /* ignore */
+    }
+  }, [barcodeServingMode]);
+
+  useEffect(() => {
+    if (!showForm || presetMealType) return;
+    setMealType(normalizeMealTypeForForm(getMealTypeForLocalTime()));
+  }, [showForm, presetMealType]);
+
+  useEffect(() => {
+    const next = normalizeMealTypeForForm(presetMealType);
+    if (next) setMealTypeWithPref(next);
+  }, [presetMealType, setMealTypeWithPref]);
+  const weekSince = useMemo(() => getLocalMondayDateString(new Date(`${dayKey}T12:00:00`)), [dayKey]);
+
+  const { data: remoteRecentFoods } = useQuery({
+    queryKey: ['meal-form-recent-foods', profileId, clientId, weekSince, dayKey],
+    queryFn: async () => {
+      const sb = getSupabase();
+      if (!sb) return [];
+      return getRecentFoods({
+        supabase: sb,
+        profileId: profileId || null,
+        clientId: clientId || null,
+        limit: 20,
+        sinceLogDate: weekSince,
+      });
+    },
+    enabled: Boolean(showForm && supabaseEnabled && (profileId || clientId)),
+  });
+
+  const recentFoodSources = useMemo(() => {
+    if (remoteRecentFoods?.length) return remoteRecentFoods;
+    if (Array.isArray(recentFoodsFallback)) return recentFoodsFallback;
+    return [];
+  }, [remoteRecentFoods, recentFoodsFallback]);
+
+  const needle = foodSearchQuery.trim().toLowerCase();
+  const recentFiltered = useMemo(() => {
+    if (!needle) return recentFoodSources;
+    return recentFoodSources.filter((r) => String(r?.food_name || '').toLowerCase().includes(needle));
+  }, [recentFoodSources, needle]);
+
+  const commonFiltered = useMemo(() => {
+    const tab = COMMON_FOOD_TABS.find((t) => t.id === commonFoodTab) || COMMON_FOOD_TABS[0];
+    let items = tab.items;
+    if (needle) items = items.filter((it) => `${it.label} ${it.food_name}`.toLowerCase().includes(needle));
+    return items;
+  }, [needle, commonFoodTab]);
+
+  const applyPrefillFromLogRow = useCallback(
+    (row) => {
+      if (!row) return;
+      setMealTypeWithPref(normalizeMealTypeForForm(row.meal_type));
+      setCalories(row.calories != null ? String(Math.round(Number(row.calories))) : '');
+      setProtein(row.protein_g != null ? String(Number(row.protein_g)) : '');
+      setCarbs(row.carbs_g != null ? String(Number(row.carbs_g)) : '');
+      setFats(row.fats_g != null ? String(Number(row.fats_g)) : '');
+      setFood(String(row.food_name || '').trim());
+      setNotes('');
+
+      if (foodQtyPref === 'household') {
+        if (row.household_unit && row.household_amount != null && Number(row.household_amount) > 0) {
+          setHouseholdUnit(String(row.household_unit));
+          setHouseholdAmount(String(row.household_amount));
+        } else {
+          setHouseholdAmount('');
+        }
+        setPortionAmount('');
+      } else if (foodQtyPref === 'oz_fl_oz') {
+        if (row.portion_ml != null && Number(row.portion_ml) > 0) {
+          setQuickSolidLiquid('liquid');
+          setPortionAmount(String(mlToUsFluidOunces(Number(row.portion_ml)).toFixed(1)));
+        } else if (row.portion_grams != null && Number(row.portion_grams) > 0) {
+          setQuickSolidLiquid('solid');
+          setPortionAmount(String(gramsToOuncesMass(Number(row.portion_grams)).toFixed(1)));
+        } else {
+          setPortionAmount('');
+        }
+      } else if (row.portion_ml != null && Number(row.portion_ml) > 0) {
+        setQuickSolidLiquid('liquid');
+        setPortionAmount(String(Math.round(Number(row.portion_ml))));
+      } else if (row.portion_grams != null && Number(row.portion_grams) > 0) {
+        setQuickSolidLiquid('solid');
+        setPortionAmount(String(Math.round(Number(row.portion_grams))));
+      } else {
+        setPortionAmount('');
+      }
+    },
+    [foodQtyPref],
+  );
+
+  const applyCommonFoodItem = useCallback(
+    (item) => {
+      setMealTypeWithPref(normalizeMealTypeForForm(item.meal_type || mealType));
+      setCalories(String(Math.round(Number(item.calories) || 0)));
+      setProtein(String(Number(item.protein_g) || 0));
+      setCarbs(String(Number(item.carbs_g) || 0));
+      setFats(String(Number(item.fats_g) || 0));
+      setFood(String(item.food_name || '').trim());
+      setNotes('');
+      if (foodQtyPref === 'household') {
+        setHouseholdAmount('');
+        setPortionAmount('');
+      } else if (foodQtyPref === 'oz_fl_oz') {
+        if (item.portion_ml != null && Number(item.portion_ml) > 0) {
+          setQuickSolidLiquid('liquid');
+          setPortionAmount(String(mlToUsFluidOunces(Number(item.portion_ml)).toFixed(1)));
+        } else if (item.portion_grams != null && Number(item.portion_grams) > 0) {
+          setQuickSolidLiquid('solid');
+          setPortionAmount(String(gramsToOuncesMass(Number(item.portion_grams)).toFixed(1)));
+        } else {
+          setPortionAmount('');
+        }
+      } else if (item.portion_ml != null && Number(item.portion_ml) > 0) {
+        setQuickSolidLiquid('liquid');
+        setPortionAmount(String(Math.round(Number(item.portion_ml))));
+      } else if (item.portion_grams != null && Number(item.portion_grams) > 0) {
+        setQuickSolidLiquid('solid');
+        setPortionAmount(String(Math.round(Number(item.portion_grams))));
+      } else {
+        setPortionAmount('');
+      }
+    },
+    [foodQtyPref, mealType, setMealTypeWithPref],
+  );
 
   const quantityFieldLabel = useMemo(() => {
     if (foodQtyPref === 'household') return 'Amount';
@@ -68,9 +322,12 @@ export default function MealLogForm({
     return quickSolidLiquid === 'liquid' ? 'Millilitres' : 'Grams';
   }, [foodQtyPref, quickSolidLiquid]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!calories) return;
+    if (!calories) {
+      hapticWarning();
+      return;
+    }
 
     const trimmedFood = (food || '').trim();
     const portion = portionFromLoggerInputs({
@@ -94,7 +351,7 @@ export default function MealLogForm({
     const extraNotes = (notes || '').trim();
     const finalNotes = [formattedFood || null, extraNotes || null].filter(Boolean).join(' | ') || null;
 
-    onSubmit({
+    const payload = {
       meal_type: mealType,
       calories: parseFloat(calories),
       protein_g: protein ? parseFloat(protein) : null,
@@ -106,9 +363,18 @@ export default function MealLogForm({
       portion_ml: portion.portion_ml,
       household_unit: portion.household_unit,
       household_amount: portion.household_amount,
-    });
+    };
 
-    setMealType('breakfast');
+    try {
+      await Promise.resolve(onSubmit?.(payload));
+    } catch (err) {
+      hapticWarning();
+      toast.error(err?.message || 'Could not save meal');
+      return;
+    }
+    hapticSuccess();
+
+    setMealTypeWithPref('breakfast');
     setCalories('');
     setProtein('');
     setCarbs('');
@@ -119,6 +385,7 @@ export default function MealLogForm({
     setHouseholdUnit('tbsp');
     setHouseholdAmount('');
     setNotes('');
+    setFoodSearchQuery('');
     setShowForm(false);
   };
 
@@ -138,6 +405,8 @@ export default function MealLogForm({
 
   const servingSizeGrams = Number(scannedFood?.serving_size_grams);
   const effectiveGrams = useMemo(() => {
+    const customRaw = Number(customBarcodeAmount);
+    if (barcodeServingMode === 'custom' && Number.isFinite(customRaw) && customRaw > 0) return customRaw;
     const gramsRaw = Number(consumedGrams);
     if (Number.isFinite(gramsRaw) && gramsRaw > 0) return gramsRaw;
     const servingsRaw = Number(consumedServings);
@@ -145,7 +414,7 @@ export default function MealLogForm({
       return servingsRaw * servingSizeGrams;
     }
     return 100;
-  }, [consumedGrams, consumedServings, servingSizeGrams]);
+  }, [barcodeServingMode, customBarcodeAmount, consumedGrams, consumedServings, servingSizeGrams]);
 
   const storedPortionGramsFromBarcode = useMemo(() => {
     if (!scannedFood) return null;
@@ -215,6 +484,8 @@ export default function MealLogForm({
     setManualCarbs('');
     setManualFats('');
     setBarcodeLabelOverride(null);
+    setBarcodeServingMode('100g');
+    setCustomBarcodeAmount('');
   };
 
   const setManualFromScanned = (foodObj) => {
@@ -233,6 +504,27 @@ export default function MealLogForm({
     setLookupLoading(true);
     setLookupError('');
     setLookupBarcode(clean);
+
+    const cached = getUserBarcodeCacheEntry(clean);
+    if (cached?.product) {
+      setScannedFood(cached.product);
+      const servingG = Number(cached.product?.serving_size_grams);
+      const liquid = isLikelyLiquid(cached.product?.serving_size);
+      if (Number.isFinite(servingG) && servingG > 0) {
+        setConsumedServings('1');
+        setConsumedGrams(String(Math.round(servingG)));
+        setBarcodeServingMode('serving');
+      } else {
+        const defaultAmount = liquid ? 250 : 100;
+        setConsumedGrams(String(defaultAmount));
+        setBarcodeServingMode('100g');
+      }
+      setManualFromScanned(cached.product);
+      setLookupError('');
+      setLookupLoading(false);
+      return;
+    }
+
     const result = await fetchOpenFoodFactsProduct(clean);
     if (!result.ok || !result.product) {
       setScannedFood(null);
@@ -241,11 +533,18 @@ export default function MealLogForm({
       return;
     }
     setScannedFood(result.product);
-    setConsumedGrams(
-      Number.isFinite(Number(result.product?.serving_size_grams))
-        ? String(Math.round(Number(result.product.serving_size_grams)))
-        : '100'
-    );
+    setUserBarcodeCacheEntry(clean, { ...result.product, barcode: clean });
+    const servingG = Number(result.product?.serving_size_grams);
+    const liquid = isLikelyLiquid(result.product?.serving_size);
+    if (Number.isFinite(servingG) && servingG > 0) {
+      setConsumedServings('1');
+      setConsumedGrams(String(Math.round(servingG)));
+      setBarcodeServingMode('serving');
+    } else {
+      const defaultAmount = liquid ? 250 : 100;
+      setConsumedGrams(String(defaultAmount));
+      setBarcodeServingMode('100g');
+    }
     setManualFromScanned(result.product);
     setLookupLoading(false);
   };
@@ -271,12 +570,12 @@ export default function MealLogForm({
     }
   };
 
-  const confirmScannedFood = () => {
+  const confirmScannedFood = async () => {
     if (!scannedFood || !consumedMacros || consumedMacros.calories <= 0) return;
     const g = storedPortionGramsFromBarcode;
     const sourceParts = [scannedFood?.name || null, g != null ? `${Math.round(g)}g` : null, lookupBarcode ? `barcode:${lookupBarcode}` : null].filter(Boolean);
-    onSubmit({
-      meal_type: mealType,
+    const payload = {
+      meal_type: normalizeBarcodeMealType(mealType),
       calories: consumedMacros.calories,
       protein_g: consumedMacros.protein,
       carbs_g: consumedMacros.carbs,
@@ -289,10 +588,68 @@ export default function MealLogForm({
       household_amount: null,
       source: 'barcode',
       barcode: lookupBarcode || null,
-    });
+    };
+
+    try {
+      await Promise.resolve(onSubmit?.(payload));
+    } catch (err) {
+      hapticWarning();
+      toast.error(err?.message || 'Could not save meal');
+      return;
+    }
+    hapticSuccess();
+
+    const code = String(lookupBarcode || '').trim();
+    if (code) {
+      const c100 = Number.isFinite(Number(scannedFood.calories_per_100g))
+        ? Number(scannedFood.calories_per_100g)
+        : Number(manualCalories);
+      const p100 = Number.isFinite(Number(scannedFood.protein_per_100g))
+        ? Number(scannedFood.protein_per_100g)
+        : Number(manualProtein);
+      const cb100 = Number.isFinite(Number(scannedFood.carbs_per_100g))
+        ? Number(scannedFood.carbs_per_100g)
+        : Number(manualCarbs);
+      const f100 = Number.isFinite(Number(scannedFood.fats_per_100g))
+        ? Number(scannedFood.fats_per_100g)
+        : Number(manualFats);
+      const productForCache = {
+        ...scannedFood,
+        barcode: code,
+        source: scannedFood?.source || 'user_cache',
+        calories_per_100g: Number.isFinite(c100) ? c100 : null,
+        protein_per_100g: Number.isFinite(p100) ? p100 : null,
+        carbs_per_100g: Number.isFinite(cb100) ? cb100 : null,
+        fats_per_100g: Number.isFinite(f100) ? f100 : null,
+      };
+      setUserBarcodeCacheEntry(code, productForCache);
+    }
+
     setLookupOpen(false);
     resetLookupState();
+    toast.success(`\u2713 ${scannedFood?.name || 'Food'} logged`);
   };
+
+  const openQuickConfirmFromCache = useCallback((entry) => {
+    const code = String(entry?.barcode || '').trim();
+    const product = entry?.product;
+    if (!code || !product) return;
+    setLookupOpen(true);
+    setLookupBarcode(code);
+    setScannedFood(product);
+    setLookupError('');
+    const servingG = Number(product?.serving_size_grams);
+    const liquid = isLikelyLiquid(product?.serving_size);
+    if (Number.isFinite(servingG) && servingG > 0) {
+      setConsumedServings('1');
+      setConsumedGrams(String(Math.round(servingG)));
+      setBarcodeServingMode('serving');
+    } else {
+      setConsumedGrams(String(liquid ? 250 : 100));
+      setBarcodeServingMode('100g');
+    }
+    setManualFromScanned(product);
+  }, []);
 
   React.useEffect(() => {
     if (!openFormSignal) return;
@@ -309,17 +666,96 @@ export default function MealLogForm({
     if (hideCollapsedActions) return null;
     return (
       <>
+        {recentScans.length > 0 ? (
+          <div className="mb-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Recent scans</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] md:grid md:grid-cols-2 [&::-webkit-scrollbar]:hidden">
+              {recentScans.map((entry) => {
+                const p = entry.product || {};
+                return (
+                  <div key={`${entry.barcode}-${entry.cachedAt}`} className="min-w-[220px] rounded-lg border border-slate-700 bg-slate-900/40 p-2">
+                    <p className="text-xs font-semibold text-slate-100 truncate">{p.name || 'Scanned food'}</p>
+                    <p className="text-[11px] text-slate-400">
+                      Cal {Math.round(Number(p.calories_per_100g) || 0)} · P {formatNumber(Number(p.protein_per_100g) || 0)} · C {formatNumber(Number(p.carbs_per_100g) || 0)} · F {formatNumber(Number(p.fats_per_100g) || 0)}
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-1 text-xs font-semibold text-blue-300"
+                      onClick={() => openQuickConfirmFromCache(entry)}
+                    >
+                      + Log again
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full h-11 border-slate-600 bg-slate-800/40 text-slate-200 hover:bg-slate-800 hover:text-white"
-            onClick={startScan}
-            disabled={lookupLoading}
-          >
-            <ScanBarcode className="w-4 h-4 mr-2 shrink-0" aria-hidden />
-            {lookupLoading ? 'Scanning...' : 'Scan barcode'}
-          </Button>
+          {isNativeApp ? (
+            <div>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-11 border-slate-600 bg-slate-800/40 text-slate-200 hover:bg-slate-800 hover:text-white"
+                onClick={startScan}
+                disabled={lookupLoading}
+              >
+                <ScanBarcode className="w-4 h-4 mr-2 shrink-0" aria-hidden />
+                {lookupLoading ? 'Scanning...' : 'Scan barcode'}
+              </Button>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: colors.success,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  display: 'block',
+                  textAlign: 'center',
+                  marginTop: 2,
+                }}
+              >
+                Always free
+              </span>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2">
+              <p className="text-xs text-slate-400 mb-2">Enter barcode</p>
+              <div className="flex gap-2">
+                <Input
+                  value={webBarcodeInput}
+                  onChange={(e) => setWebBarcodeInput(e.target.value)}
+                  placeholder="e.g. 5000169105718"
+                  className="bg-slate-800 border-slate-700"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setLookupOpen(true);
+                    void lookupByBarcode(webBarcodeInput);
+                  }}
+                >
+                  Search
+                </Button>
+              </div>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: colors.success,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  display: 'block',
+                  textAlign: 'center',
+                  marginTop: 6,
+                }}
+              >
+                Always free
+              </span>
+            </div>
+          )}
           <motion.button
             type="button"
             whileTap={{ scale: 0.98 }}
@@ -331,219 +767,140 @@ export default function MealLogForm({
           </motion.button>
         </div>
 
-        <Dialog
-          open={lookupOpen}
-          onOpenChange={(open) => {
-            setLookupOpen(open);
-            if (!open) resetLookupState();
-          }}
-        >
-          <DialogContent className="border-slate-700 bg-slate-900 text-slate-100 sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-white">Scan barcode</DialogTitle>
-              <DialogDescription className="text-slate-400">Auto-fill product macros from Open Food Facts.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-slate-300 mb-1 block">Barcode</label>
-                <div className="flex gap-2">
-                  <Input
-                    value={manualBarcode}
-                    onChange={(e) => setManualBarcode(e.target.value)}
-                    placeholder="Enter barcode"
-                    className="bg-slate-800 border-slate-700"
-                  />
-                  <Button type="button" variant="outline" onClick={() => lookupByBarcode(manualBarcode)} disabled={lookupLoading}>
-                    Lookup
-                  </Button>
-                </div>
-              </div>
-
-              {lookupError ? (
-                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
-                  <p className="text-sm text-amber-200">{lookupError}</p>
-                  <p className="text-xs text-slate-300 mt-1">Log food quickly using Quick Add for now.</p>
-                </div>
-              ) : null}
-
-              {scannedFood ? (
-                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 space-y-3">
-                  <div className="flex gap-3">
-                    {scannedFood.image ? (
-                      <img src={scannedFood.image} alt={scannedFood.name} className="w-14 h-14 rounded-md object-cover border border-slate-700" />
-                    ) : (
-                      <div className="w-14 h-14 rounded-md bg-slate-700 border border-slate-700" />
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{scannedFood.name}</p>
-                      {scannedFood.brands ? <p className="text-xs text-slate-400 truncate">{scannedFood.brands}</p> : null}
-                      <div className="flex flex-wrap gap-2 mt-2">
+        {isNativeApp ? (
+          <Drawer open={lookupOpen} onOpenChange={(open) => { setLookupOpen(open); if (!open) resetLookupState(); }}>
+            <DrawerContent className="border-slate-700 bg-slate-900 text-slate-100">
+              <DrawerHeader>
+                <DrawerTitle>Log scanned food</DrawerTitle>
+                <DrawerDescription>Scan → confirm serving → one tap to log.</DrawerDescription>
+              </DrawerHeader>
+              <div className="px-4 pb-2 space-y-3">
+                {scannedFood ? (
+                  <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 space-y-3">
+                    <div className="flex gap-3">
+                      {scannedFood.image ? <img src={scannedFood.image} alt={scannedFood.name} className="w-14 h-14 rounded-md object-cover border border-slate-700" /> : <div className="w-14 h-14 rounded-md bg-slate-700 border border-slate-700" />}
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{scannedFood.name}{scannedFood.brands ? ` — ${scannedFood.brands}` : ''}</p>
+                        <p className="text-[11px] text-slate-400">Source: {scannedFood?.source || 'barcode lookup'}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className={`text-[11px] px-2 py-1 rounded border ${barcodeServingMode === '100g' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-300'}`} onClick={() => setBarcodeServingMode('100g')}>100g</button>
+                      {Number.isFinite(servingSizeGrams) && servingSizeGrams > 0 ? (
+                        <button type="button" className={`text-[11px] px-2 py-1 rounded border ${barcodeServingMode === 'serving' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-300'}`} onClick={() => { setBarcodeServingMode('serving'); setConsumedServings('1'); }}>
+                          1 serving ({Math.round(servingSizeGrams)}g)
+                        </button>
+                      ) : null}
+                      <button type="button" className={`text-[11px] px-2 py-1 rounded border ${barcodeServingMode === 'custom' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-300'}`} onClick={() => setBarcodeServingMode('custom')}>Custom</button>
+                    </div>
+                    {barcodeServingMode === 'custom' ? (
+                      <Input type="number" value={customBarcodeAmount} onChange={(e) => setCustomBarcodeAmount(e.target.value)} placeholder={isLikelyLiquid(scannedFood?.serving_size) ? 'Custom ml' : 'Custom grams'} className="bg-slate-800 border-slate-700" />
+                    ) : null}
+                    <div className="flex flex-wrap gap-2">
+                      {(isLikelyLiquid(scannedFood?.serving_size) ? [150, 250, 500] : [50, 100, 150]).map((amt) => (
+                        <button key={amt} type="button" className="text-[11px] px-2 py-1 rounded border border-slate-600 text-slate-300" onClick={() => { setBarcodeServingMode('custom'); setCustomBarcodeAmount(String(amt)); }}>
+                          {isLikelyLiquid(scannedFood?.serving_size) ? `${amt}ml` : `${amt}g`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {MEAL_TYPE_OPTIONS.map((type) => (
                         <button
+                          key={type.value}
                           type="button"
-                          onClick={() => setBarcodeLabelOverride('per_100g')}
-                          className={`text-[11px] font-semibold px-2 py-1 rounded-md border ${
-                            effectiveBarcodeLabel === 'per_100g' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-400'
+                          onClick={() => setMealTypeWithPref(type.value)}
+                          className={`py-1.5 rounded text-xs font-medium ${
+                            mealType === type.value
+                              ? 'bg-blue-500 text-white'
+                              : type.value === 'pre_workout' || type.value === 'post_workout'
+                                ? 'text-slate-100'
+                                : 'bg-slate-700 text-slate-300'
                           }`}
+                          style={
+                            mealType !== type.value && (type.value === 'pre_workout' || type.value === 'post_workout')
+                              ? { background: colors.primarySubtle }
+                              : undefined
+                          }
                         >
-                          Per 100g
+                          {type.label}
                         </button>
+                      ))}
+                    </div>
+                    {consumedMacros ? <p className="text-xs text-slate-300">Cal: {Math.round(consumedMacros.calories)}  P: {formatNumber(consumedMacros.protein)}g  C: {formatNumber(consumedMacros.carbs)}g  F: {formatNumber(consumedMacros.fats)}g</p> : null}
+                  </div>
+                ) : lookupError ? (
+                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                    <p className="text-sm text-amber-200">Product not found ({lookupBarcode || manualBarcode || webBarcodeInput}).</p>
+                    <button type="button" className="text-xs text-slate-200 underline mt-1 mr-3" onClick={() => { setLookupOpen(false); setFood(''); setShowForm(true); }}>
+                      Open manual entry
+                    </button>
+                    <button type="button" className="text-xs text-blue-300 underline mt-1" onClick={() => window.open(`https://world.openfoodfacts.org/product/${encodeURIComponent(lookupBarcode || manualBarcode || webBarcodeInput)}`, '_blank', 'noopener,noreferrer')}>Help improve our database</button>
+                  </div>
+                ) : null}
+              </div>
+              <DrawerFooter>
+                <Button type="button" className="bg-blue-500 hover:bg-blue-600 text-white" onClick={confirmScannedFood} disabled={!scannedFood || !consumedMacros || consumedMacros.calories <= 0 || lookupLoading}>Log this food</Button>
+                <Button type="button" variant="outline" className="border-slate-700" onClick={startScan}>Search again</Button>
+              </DrawerFooter>
+            </DrawerContent>
+          </Drawer>
+        ) : (
+          <Dialog open={lookupOpen} onOpenChange={(open) => { setLookupOpen(open); if (!open) resetLookupState(); }}>
+            <DialogContent className="border-slate-700 bg-slate-900 text-slate-100 sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="text-white">Confirm food</DialogTitle>
+                <DialogDescription className="text-slate-400">One tap logs this barcode entry.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                {scannedFood ? (
+                  <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 space-y-2">
+                    <p className="text-sm font-semibold text-white">{scannedFood.name}{scannedFood.brands ? ` — ${scannedFood.brands}` : ''}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {MEAL_TYPE_OPTIONS.map((type) => (
                         <button
+                          key={type.value}
                           type="button"
-                          onClick={() => setBarcodeLabelOverride('per_serving')}
-                          disabled={!servingMacrosComplete}
-                          className={`text-[11px] font-semibold px-2 py-1 rounded-md border ${
-                            effectiveBarcodeLabel === 'per_serving' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-400'
-                          } disabled:opacity-40`}
+                          onClick={() => setMealTypeWithPref(type.value)}
+                          className={`py-1 px-2 rounded text-xs ${
+                            mealType === type.value
+                              ? 'bg-blue-500 text-white'
+                              : type.value === 'pre_workout' || type.value === 'post_workout'
+                                ? 'text-slate-100'
+                                : 'bg-slate-700 text-slate-300'
+                          }`}
+                          style={
+                            mealType !== type.value && (type.value === 'pre_workout' || type.value === 'post_workout')
+                              ? { background: colors.primarySubtle }
+                              : undefined
+                          }
                         >
-                          Per serving
+                          {type.label}
                         </button>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Default from your nutrition settings{barcodeLabelOverride ? ' (overridden)' : ''}.
-                      </p>
+                      ))}
                     </div>
+                    {consumedMacros ? <p className="text-xs text-slate-300">Cal: {Math.round(consumedMacros.calories)} · P {formatNumber(consumedMacros.protein)}g · C {formatNumber(consumedMacros.carbs)}g · F {formatNumber(consumedMacros.fats)}g</p> : null}
                   </div>
-                  {effectiveBarcodeLabel === 'per_serving' && servingMacrosComplete ? (
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <p className="text-slate-300">
-                        Calories: <span className="text-white">{Math.round(Number(scannedFood.calories_per_serving) || 0)}</span>
-                      </p>
-                      <p className="text-slate-300">
-                        Protein: <span className="text-white">{Number(scannedFood.protein_per_serving) || 0}g</span>
-                      </p>
-                      <p className="text-slate-300">
-                        Carbs: <span className="text-white">{Number(scannedFood.carbs_per_serving) || 0}g</span>
-                      </p>
-                      <p className="text-slate-300">
-                        Fats: <span className="text-white">{Number(scannedFood.fats_per_serving) || 0}g</span>
-                      </p>
-                    </div>
-                  ) : nutritionComplete ? (
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <p className="text-slate-300">
-                        Calories: <span className="text-white">{Math.round(Number(scannedFood.calories_per_100g) || 0)}</span>
-                      </p>
-                      <p className="text-slate-300">
-                        Protein: <span className="text-white">{Number(scannedFood.protein_per_100g) || 0}g</span>
-                      </p>
-                      <p className="text-slate-300">
-                        Carbs: <span className="text-white">{Number(scannedFood.carbs_per_100g) || 0}g</span>
-                      </p>
-                      <p className="text-slate-300">
-                        Fats: <span className="text-white">{Number(scannedFood.fats_per_100g) || 0}g</span>
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-xs text-amber-200">Nutrition data is incomplete. Enter missing macros below.</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          type="number"
-                          value={manualCalories}
-                          onChange={(e) => setManualCalories(e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          placeholder="Calories/100g"
-                          className="bg-slate-800 border-slate-700"
-                        />
-                        <Input
-                          type="number"
-                          value={manualProtein}
-                          onChange={(e) => setManualProtein(e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          placeholder="Protein/100g"
-                          className="bg-slate-800 border-slate-700"
-                        />
-                        <Input
-                          type="number"
-                          value={manualCarbs}
-                          onChange={(e) => setManualCarbs(e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          placeholder="Carbs/100g"
-                          className="bg-slate-800 border-slate-700"
-                        />
-                        <Input
-                          type="number"
-                          value={manualFats}
-                          onChange={(e) => setManualFats(e.target.value)}
-                          onFocus={(e) => e.target.select()}
-                          placeholder="Fats/100g"
-                          className="bg-slate-800 border-slate-700"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-slate-400 mb-1 block">Grams (portion)</label>
-                      <Input
-                        type="number"
-                        value={consumedGrams}
-                        onChange={(e) => setConsumedGrams(e.target.value)}
-                        onFocus={(e) => e.target.select()}
-                        min={1}
-                        className="bg-slate-800 border-slate-700"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-400 mb-1 block">Servings</label>
-                      <Input
-                        type="number"
-                        value={consumedServings}
-                        onChange={(e) => setConsumedServings(e.target.value)}
-                        onFocus={(e) => e.target.select()}
-                        min={1}
-                        step="0.5"
-                        className="bg-slate-800 border-slate-700"
-                      />
-                      {scannedFood.serving_size ? <p className="text-[11px] text-slate-500 mt-1 truncate">{scannedFood.serving_size}</p> : null}
-                    </div>
+                ) : (
+                  <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+                    <p className="text-sm text-amber-200">Product not found ({lookupBarcode || webBarcodeInput}).</p>
+                    <button type="button" className="text-xs text-slate-200 underline mt-1 mr-3" onClick={() => { setLookupOpen(false); setFood(''); setShowForm(true); }}>
+                      Open manual entry
+                    </button>
+                    <button type="button" className="text-xs text-blue-300 underline mt-1" onClick={() => window.open(`https://world.openfoodfacts.org/product/${encodeURIComponent(lookupBarcode || webBarcodeInput)}`, '_blank', 'noopener,noreferrer')}>Help improve our database</button>
                   </div>
-
-                  {consumedMacros ? (
-                    <p className="text-xs text-slate-300">
-                      Total: {formatCalories(consumedMacros.calories)} · P {formatNumber(consumedMacros.protein)}g · C {formatNumber(consumedMacros.carbs)}g · F{' '}
-                      {formatNumber(consumedMacros.fats)}g
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full sm:w-auto border-slate-700"
-                onClick={() => {
-                  setLookupOpen(false);
-                  resetLookupState();
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white"
-                onClick={confirmScannedFood}
-                disabled={!scannedFood || !consumedMacros || consumedMacros.calories <= 0 || lookupLoading}
-              >
-                Confirm
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full sm:w-auto"
-                onClick={() => {
-                  setLookupOpen(false);
-                  resetLookupState();
-                  setShowForm(true);
-                }}
-              >
-                Quick Add manually
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                )}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" className="w-full sm:w-auto border-slate-700" onClick={() => { setLookupOpen(false); resetLookupState(); }}>
+                  Cancel
+                </Button>
+                <Button type="button" className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white" onClick={confirmScannedFood} disabled={!scannedFood || !consumedMacros || consumedMacros.calories <= 0 || lookupLoading}>
+                  Log this food
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
       </>
     );
   }
@@ -555,66 +912,196 @@ export default function MealLogForm({
       onSubmit={handleSubmit}
       className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 space-y-3"
     >
-      <div className="grid grid-cols-4 gap-2">
-        {['breakfast', 'lunch', 'dinner', 'snack'].map((type) => (
+      <div>
+        <label className="text-xs font-medium text-slate-300 mb-1 block">Search foods</label>
+        {recentFoodSources.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <p
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                color: 'rgba(148,163,184,0.7)',
+                margin: '0 0 6px',
+              }}
+            >
+              Quick add
+            </p>
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+              {recentFoodSources.slice(0, 5).map((foodRow, idx) => (
+                <button
+                  key={foodRow.id ?? foodRow.food_name ?? idx}
+                  type="button"
+                  onClick={() => applyPrefillFromLogRow(foodRow)}
+                  style={{
+                    flexShrink: 0,
+                    padding: '5px 12px',
+                    borderRadius: 20,
+                    border: '1px solid rgba(100,116,139,0.3)',
+                    background: 'rgba(30,41,59,0.6)',
+                    color: '#cbd5e1',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 160,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {pickFoodEmoji(foodRow.food_name)} {foodRow.food_name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <Input
+          type="search"
+          value={foodSearchQuery}
+          onChange={(e) => setFoodSearchQuery(e.target.value)}
+          placeholder="Filter recent & common foods"
+          className="bg-slate-700 border-slate-600"
+        />
+      </div>
+
+      {recentFiltered.length > 0 ? (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">This week</p>
+          <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] md:grid md:grid-cols-3 md:gap-2 md:overflow-x-visible md:pb-0 [&::-webkit-scrollbar]:hidden">
+            {recentFiltered.map((row) => {
+              const name = String(row?.food_name || '').trim() || 'Meal';
+              const key = row?.id || `${name}-${row?.logged_at || ''}`;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => applyPrefillFromLogRow(row)}
+                  className="shrink-0 md:shrink rounded-full border border-slate-600 bg-slate-800/80 px-3 py-2 text-left text-xs font-medium text-slate-100 hover:border-slate-500 hover:bg-slate-800 md:rounded-lg md:text-left"
+                >
+                  <span className="whitespace-nowrap">
+                    {pickFoodEmoji(name)} {name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-3 space-y-2">
+        <p className="text-xs font-semibold text-slate-200">Common foods</p>
+        <div className="flex gap-1 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] md:flex-wrap md:overflow-x-visible [&::-webkit-scrollbar]:hidden">
+          {COMMON_FOOD_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setCommonFoodTab(t.id)}
+              className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold capitalize ${
+                commonFoodTab === t.id ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[min(40vh,320px)] overflow-y-auto pr-1">
+          {commonFiltered.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => applyCommonFoodItem(item)}
+              className="rounded-lg border border-slate-600 bg-slate-800/60 px-2 py-2 text-left text-xs text-slate-100 hover:border-slate-500 hover:bg-slate-800"
+            >
+              <span className="font-medium">
+                {item.emoji} {item.label}
+              </span>
+            </button>
+          ))}
+        </div>
+        {commonFiltered.length === 0 ? <p className="text-xs text-slate-500">No matches in this tab.</p> : null}
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {MEAL_TYPE_OPTIONS.map((type) => (
           <button
-            key={type}
+            key={type.value}
             type="button"
-            onClick={() => setMealType(type)}
-            className={`py-2 px-2 rounded-lg text-xs font-medium capitalize transition-colors ${
-              mealType === type ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            onClick={() => setMealTypeWithPref(type.value)}
+            className={`py-2 px-2 rounded-lg text-xs font-medium transition-colors ${
+              mealType === type.value
+                ? 'bg-blue-500 text-white'
+                : type.value === 'pre_workout' || type.value === 'post_workout'
+                  ? 'text-slate-100'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             }`}
+            style={
+              mealType !== type.value && (type.value === 'pre_workout' || type.value === 'post_workout')
+                ? { background: colors.primarySubtle }
+                : undefined
+            }
           >
-            {type}
+            {type.label}
           </button>
         ))}
       </div>
 
       <div>
-        <label className="text-xs font-medium text-slate-300 mb-1 block">Calories *</label>
+        <label className="text-xs font-medium text-slate-300 mb-1 block" htmlFor="atlas-meal-calories">Calories *</label>
         <Input
+          id="atlas-meal-calories"
           type="number"
           value={calories}
           onChange={(e) => setCalories(e.target.value)}
           onFocus={(e) => e.target.select()}
           placeholder="e.g., 450"
           className="bg-slate-700 border-slate-600"
+          style={{ scrollMarginBottom: 120 }}
           required
+          aria-label="Calories for this meal"
         />
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         <div>
-          <label className="text-xs font-medium text-slate-300 mb-1 block">Protein (g)</label>
+          <label className="text-xs font-medium text-slate-300 mb-1 block" htmlFor="atlas-meal-protein">Protein (g)</label>
           <Input
+            id="atlas-meal-protein"
             type="number"
             value={protein}
             onChange={(e) => setProtein(e.target.value)}
             onFocus={(e) => e.target.select()}
             placeholder="Optional"
             className="bg-slate-700 border-slate-600"
+            style={{ scrollMarginBottom: 120 }}
+            aria-label="Protein grams"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-300 mb-1 block">Carbs (g)</label>
+          <label className="text-xs font-medium text-slate-300 mb-1 block" htmlFor="atlas-meal-carbs">Carbs (g)</label>
           <Input
+            id="atlas-meal-carbs"
             type="number"
             value={carbs}
             onChange={(e) => setCarbs(e.target.value)}
             onFocus={(e) => e.target.select()}
             placeholder="Optional"
             className="bg-slate-700 border-slate-600"
+            style={{ scrollMarginBottom: 120 }}
+            aria-label="Carbohydrate grams"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-300 mb-1 block">Fats (g)</label>
+          <label className="text-xs font-medium text-slate-300 mb-1 block" htmlFor="atlas-meal-fats">Fats (g)</label>
           <Input
+            id="atlas-meal-fats"
             type="number"
             value={fats}
             onChange={(e) => setFats(e.target.value)}
             onFocus={(e) => e.target.select()}
             placeholder="Optional"
             className="bg-slate-700 border-slate-600"
+            style={{ scrollMarginBottom: 120 }}
+            aria-label="Fat grams"
           />
         </div>
       </div>
@@ -683,6 +1170,7 @@ export default function MealLogForm({
             onChange={(e) => setFood(e.target.value)}
             placeholder="e.g., oats"
             className="bg-slate-700 border-slate-600"
+            style={{ scrollMarginBottom: 120 }}
           />
         </div>
       ) : (
@@ -695,6 +1183,7 @@ export default function MealLogForm({
               onChange={(e) => setFood(e.target.value)}
               placeholder="e.g., chicken"
               className="bg-slate-700 border-slate-600"
+              style={{ scrollMarginBottom: 120 }}
             />
           </div>
           <div>

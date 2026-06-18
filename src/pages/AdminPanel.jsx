@@ -14,14 +14,12 @@ import AdminMarketplaceSettings from '@/components/admin/AdminMarketplaceSetting
 import AdminFeatureFlags from '@/components/admin/AdminFeatureFlags';
 
 export default function AdminPanel() {
-  const { user: authUser, isDemoMode, isLoadingAuth } = useAuth();
+  const { user: authUser, isDemoMode, isLoadingAuth, isAdmin } = useAuth();
   const displayUser = authUser;
   const loading = !isDemoMode && isLoadingAuth;
 
   if (!isDemoMode && loading) return <PageLoader />;
   if (!displayUser) return <PageLoader />;
-
-  const isAdmin = displayUser?.email?.toLowerCase() === 'derekbradley96@gmail.com';
 
   if (!isAdmin) {
     return (
@@ -89,39 +87,39 @@ export default function AdminPanel() {
           </TabsList>
 
           <TabsContent value="analytics">
-            <AdminAnalytics adminEmail={user.email} />
+            <AdminAnalytics isAdmin={isAdmin} />
           </TabsContent>
 
           <TabsContent value="users">
-            <AdminUsersSection adminEmail={user.email} />
+            <AdminUsersSection isAdmin={isAdmin} />
           </TabsContent>
 
           <TabsContent value="trainers">
-            <AdminTrainersSection adminEmail={user.email} />
+            <AdminTrainersSection isAdmin={isAdmin} adminEmail={displayUser?.email} />
           </TabsContent>
 
           <TabsContent value="billing">
-            <AdminBillingSettings adminEmail={user.email} />
+            <AdminBillingSettings isAdmin={isAdmin} adminEmail={displayUser?.email} />
           </TabsContent>
 
           <TabsContent value="content">
-            <AdminCMSContent adminEmail={user.email} />
+            <AdminCMSContent isAdmin={isAdmin} adminEmail={displayUser?.email} />
           </TabsContent>
 
           <TabsContent value="theme">
-            <AdminThemeSettings adminEmail={user.email} />
+            <AdminThemeSettings isAdmin={isAdmin} adminEmail={displayUser?.email} />
           </TabsContent>
 
           <TabsContent value="marketplace">
-            <AdminMarketplaceSettings adminEmail={user.email} />
+            <AdminMarketplaceSettings isAdmin={isAdmin} adminEmail={displayUser?.email} />
           </TabsContent>
 
           <TabsContent value="features">
-            <AdminFeatureFlags adminEmail={user.email} />
+            <AdminFeatureFlags isAdmin={isAdmin} adminEmail={displayUser?.email} />
           </TabsContent>
 
           <TabsContent value="audit">
-            <AdminAuditLog adminEmail={user.email} />
+            <AdminAuditLog isAdmin={isAdmin} />
           </TabsContent>
         </Tabs>
       </div>

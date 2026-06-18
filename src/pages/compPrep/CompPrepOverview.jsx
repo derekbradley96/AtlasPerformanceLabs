@@ -1,8 +1,12 @@
 import React, { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { atlasMigrationDataAttributes, deriveCompPrepOverviewRouteState } from '@/lib/atlasMigrationPhases';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Trophy, AlertTriangle } from 'lucide-react';
-import { getPrepClients, getClientCheckIns } from '@/data/selectors';
+import { useAuth } from '@/lib/AuthContext';
+import { getEffectiveTrainerId } from '@/data/useData';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getClientCompProfile } from '@/lib/repos/compPrepRepo';
 import { computeStageReadiness } from '@/lib/intelligence/stageReadiness';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
@@ -59,9 +63,93 @@ function ScoreRing({ score, size = 44 }) {
   );
 }
 
+function mapProfilePhaseToKey(p) {
+  const u = String(p || '').toUpperCase().replace(/-/g, '_');
+  if (u === 'OFFSEASON' || u === 'OFF_SEASON') return 'off_season';
+  if (u === 'PREP') return 'prep';
+  if (u === 'PEAK_WEEK' || u === 'PEAK WEEK') return 'peak_week';
+  if (u === 'SHOW_DAY' || u === 'SHOW DAY') return 'show_day';
+  if (u === 'POST_SHOW') return 'post_show';
+  return String(p || 'prep').toLowerCase().replace(/\s+/g, '_');
+}
+
 export default function CompPrepOverview() {
   const navigate = useNavigate();
-  const prepClients = useMemo(() => getPrepClients(), []);
+  const { user } = useAuth();
+  const supabase = getSupabase();
+  const trainerId = getEffectiveTrainerId(user?.id) || '';
+
+  const { data: prepClientsRaw = [] } = useQuery({
+    queryKey: ['prep-clients', trainerId],
+    queryFn: async () => {
+      if (!trainerId || !supabase) return [];
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name, user_id, coach_id, trainer_id, client_type, show_date')
+        .or(`coach_id.eq.${trainerId},trainer_id.eq.${trainerId}`)
+        .eq('client_type', 'competition')
+        .order('name', { ascending: true });
+      if (error) return [];
+      return data || [];
+    },
+    enabled: !!trainerId && !!supabase,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const prepClients = useMemo(
+    () =>
+      (prepClientsRaw ?? []).map((row) => {
+        const profile = getClientCompProfile(row.id);
+        const full_name = row.name ?? row.full_name ?? 'Client';
+        const showDate = profile?.showDate ?? row.show_date ?? null;
+        const prepPhase = mapProfilePhaseToKey(profile?.prepPhase ?? '');
+        return {
+          ...row,
+          full_name,
+          showDate,
+          prepPhase,
+          division: profile?.division ?? row.division,
+          federation: profile?.federation ?? row.federation,
+          baselineWeight: row.baseline_weight ?? row.baselineWeight,
+          target_weight: row.target_weight ?? row.target_weight_kg,
+        };
+      }),
+    [prepClientsRaw]
+  );
+
+  const prepIdsKey = useMemo(() => (prepClients ?? []).map((c) => c.id).filter(Boolean).sort().join(','), [prepClients]);
+
+  const { data: batchCheckins = [] } = useQuery({
+    queryKey: ['comp-checkins-overview', prepIdsKey],
+    queryFn: async () => {
+      const ids = prepIdsKey.split(',').filter(Boolean);
+      if (!supabase || ids.length === 0) return [];
+      const { data, error } = await supabase
+        .from('checkins')
+        .select('id, client_id, submitted_at, status, weight_kg, photos')
+        .in('client_id', ids)
+        .order('submitted_at', { ascending: false })
+        .limit(200);
+      if (error) return [];
+      return data || [];
+    },
+    enabled: !!supabase && !!prepIdsKey,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const checkinsByClientId = useMemo(() => {
+    const map = {};
+    for (const c of prepClients ?? []) {
+      if (c?.id) map[c.id] = [];
+    }
+    for (const ch of batchCheckins ?? []) {
+      const cid = ch.client_id;
+      if (!cid || !map[cid]) continue;
+      if (map[cid].length < 12) map[cid].push(ch);
+    }
+    return map;
+  }, [prepClients, batchCheckins]);
+
   const compPrepMigrationAttrs = useMemo(() => {
     const s = deriveCompPrepOverviewRouteState({
       surface: prepClients.length === 0 ? 'empty' : 'list',
@@ -96,7 +184,7 @@ export default function CompPrepOverview() {
       ) : (
         <div className="space-y-3">
           {prepClients.map((client) => {
-            const checkins = getClientCheckIns(client.id);
+            const checkins = checkinsByClientId[client.id] ?? [];
             const readiness = computeStageReadiness(
               {
                 showDate: client.showDate,
@@ -113,7 +201,7 @@ export default function CompPrepOverview() {
               <Card
                 key={client.id}
                 style={{ padding: spacing[16], cursor: 'pointer' }}
-                onClick={() => navigate(`/comp-prep/${client.id}`)}
+                onClick={() => navigate(`/comp-prep/client/${client.id}`)}
               >
                 <div className="flex items-center gap-3">
                   <ScoreRing score={readiness.score} />

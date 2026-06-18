@@ -61,13 +61,14 @@ function seedPrograms() {
 }
 
 export function getPrograms() {
-  const list = safeParse(PROGRAMS_KEY, []);
-  if (list.length === 0) {
+  const raw = localStorage.getItem(PROGRAMS_KEY);
+  const list = raw ? safeParse(PROGRAMS_KEY, []) : null;
+  if (list === null) {
     const seed = seedPrograms();
     safeSet(PROGRAMS_KEY, seed);
     return seed;
   }
-  return list;
+  return Array.isArray(list) ? list : [];
 }
 
 export function getProgramById(id) {

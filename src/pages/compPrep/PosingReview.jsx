@@ -1,6 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { getClientById } from '@/data/selectors';
+import { useQuery } from '@tanstack/react-query';
+import { navigateToThread } from '@/lib/messagesPath';
+import { getSupabase } from '@/lib/supabaseClient';
+import * as sandbox from '@/lib/sandboxStore';
 import { getCompMediaById, markMediaReviewed } from '@/lib/repos/compPrepRepo';
 import { getPoseById } from '@/lib/repos/poseLibraryRepo';
 import { impactMedium, notificationSuccess } from '@/lib/haptics';
@@ -12,12 +15,33 @@ export default function PosingReview() {
   const { mediaId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const supabase = getSupabase();
   const clientIdFromQuery = searchParams.get('clientId');
   const [coachResponse, setCoachResponse] = useState('');
 
   const media = useMemo(() => (mediaId ? getCompMediaById(mediaId) : null), [mediaId]);
   const clientId = media?.clientId ?? clientIdFromQuery;
-  const client = useMemo(() => (clientId ? getClientById(clientId) : null), [clientId]);
+
+  const { data: client = null, isLoading: clientLoading } = useQuery({
+    queryKey: ['comp-client', clientId],
+    queryFn: async () => {
+      if (!clientId) return null;
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name, user_id, coach_id, trainer_id')
+          .eq('id', clientId)
+          .maybeSingle();
+        if (error || !data) return null;
+        return { ...data, full_name: data.name ?? data.full_name };
+      }
+      const c = sandbox.getClientById(clientId);
+      return c ? { ...c, full_name: c.full_name ?? c.name } : null;
+    },
+    enabled: !!clientId,
+    staleTime: 10 * 60 * 1000,
+  });
+
   const pose = useMemo(() => (media?.poseId ? getPoseById(media.poseId) : null), [media?.poseId]);
 
   const reviewItem = useMemo(() => {
@@ -56,13 +80,21 @@ export default function PosingReview() {
   };
 
   const handleMessageClient = (prefilled) => {
-    navigate(`/messages/${clientId}`, { state: { prefilledMessage: prefilled || 'Quick reply from your coach' } });
+    navigateToThread(navigate, clientId, { state: { prefilledMessage: prefilled || 'Quick reply from your coach' } });
   };
 
   if (!media) {
     return (
       <div className="min-w-0 max-w-full px-4 py-8 app-screen" style={{ background: colors.bg, color: colors.muted }}>
         <p className="text-sm">Posing submission not found.</p>
+      </div>
+    );
+  }
+
+  if (clientId && clientLoading) {
+    return (
+      <div className="min-w-0 max-w-full px-4 py-8 app-screen" style={{ background: colors.bg, color: colors.muted }}>
+        <p className="text-sm">Loading…</p>
       </div>
     );
   }

@@ -26,6 +26,7 @@ const lastInsightPushByProfile = new Map();
  */
 export async function sendPushToProfile(profileId, title, body, data = {}) {
   if (!profileId || !title) return { error: 'profile_id and title required' };
+  // TODO: This Edge Function may not be deployed — verify or replace with direct Supabase query
   const { data: result, error } = await invokeSupabaseFunction('send-push', {
     profile_id: profileId,
     title: String(title).trim(),

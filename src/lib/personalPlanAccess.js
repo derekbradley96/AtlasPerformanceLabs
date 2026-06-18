@@ -106,7 +106,7 @@ const UPGRADE_COPY_BY_KIND = Object.freeze({
  */
 export function canUsePersonalFeature({ profile, user, feature }) {
   const tier = resolvePersonalPlanTier(profile, user);
-  const hasEnhancedAccess = tier === 'enhanced';
+  const hasEnhancedAccess = tier === 'enhanced' || tier === 'free';
   if (BASIC_FEATURES.has(feature)) return true;
   if (ENHANCED_ONLY.has(feature)) return hasEnhancedAccess;
   return true;

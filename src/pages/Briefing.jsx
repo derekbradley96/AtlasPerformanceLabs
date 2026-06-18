@@ -17,14 +17,14 @@ export default function Briefing() {
   const [loading, setLoading] = useState(true);
 
   const loadBriefing = useCallback(async () => {
-    const b = await getDailyBriefing(trainerId, new Date());
+    const b = await getDailyBriefing(trainerId, new Date(), { isDemoMode });
     setBriefing(b);
   }, [trainerId]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getDailyBriefing(trainerId, new Date())
+    getDailyBriefing(trainerId, new Date(), { isDemoMode })
       .then((b) => { if (!cancelled) setBriefing(b); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

@@ -50,6 +50,15 @@ const ChartStyle = ({
   id,
   config
 }) => {
+  function sanitizeCssIdentifier(str) {
+    // Only allow alphanumeric, hyphens, underscores — strip everything else
+    return String(str).replace(/[^a-zA-Z0-9_-]/g, '');
+  }
+  function sanitizeCssValue(str) {
+    // Strip anything that could break out of a CSS value context
+    return String(str).replace(/[;<>{}()\\"']/g, '');
+  }
+
   const colorConfig = Object.entries(config).filter(([, config]) => config.theme || config.color)
 
   if (!colorConfig.length) {
@@ -61,13 +70,16 @@ const ChartStyle = ({
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
           .map(([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+${prefix} [data-chart=${sanitizeCssIdentifier(id)}] {
 ${colorConfig
 .map(([key, itemConfig]) => {
+const safeKey = sanitizeCssIdentifier(key)
 const color =
   itemConfig.theme?.[theme] ||
   itemConfig.color
-return color ? `  --color-${key}: ${color};` : null
+// Config keys and values are sanitized to prevent CSS injection if user-controlled data ever reaches chart config.
+const safeColor = color ? sanitizeCssValue(color) : ''
+return safeColor ? `  --color-${safeKey}: ${safeColor};` : null
 })
 .join("\n")}
 }

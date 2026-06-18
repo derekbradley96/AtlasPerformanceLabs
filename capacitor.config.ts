@@ -26,6 +26,12 @@ const config: CapacitorConfig = {
       androidScaleType: 'CENTER_CROP',
       showSpinner: false,
     },
+    LiveUpdates: {
+      appId: 'com.atlasperformancelabs.app',
+      channel: 'production',
+      autoUpdateMethod: 'background',
+      maxVersions: 2,
+    },
   },
   server: {
     allowNavigation: [

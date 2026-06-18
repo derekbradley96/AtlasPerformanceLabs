@@ -1,54 +1,56 @@
 /**
  * Marketing home: product-first narrative for coaches, clients, and serious personal users.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
+import { trackPage } from '@/lib/analytics';
 import { Link } from 'react-router-dom';
-import { Hero, SocialProof, CTA } from './MarketingSections';
+import { Hero, CTA } from './MarketingSections';
 import { SIGNUP_PUBLIC_PATH } from '@/lib/publicAuthPaths';
+import { usePageMeta } from '@/lib/usePageMeta';
 import { colors } from '@/ui/tokens';
 
 const WHAT_ATLAS_DOES = [
   {
     heading: 'For coaches',
-    body: 'Build programs, set nutrition, review check-ins, message clients, and run your roster from one control center.',
+    body: 'Build per-set programmes, review check-ins in 90 seconds with AI-drafted responses, flag at-risk clients before they cancel, and track exactly who needs you today.',
   },
   {
     heading: 'For clients',
-    body: 'Know exactly what to do today, where to submit, and how to message your coach without confusion.',
+    body: "See your coach's targets for every set. Scan barcodes to log food. Submit your check-in with progress photos. Everything your coach needs, in one tap.",
   },
   {
     heading: 'For personal users',
-    body: 'Train free with manual tools, log progress properly, then upgrade for smarter guidance when it is worth it.',
+    body: 'Train to a real programme with progressive overload. Scan any barcode — free, always. Track macros with interpreted guidance, not raw numbers.',
   },
 ];
 
 const BUILT_FOR = [
   {
     heading: 'Transformation coaching',
-    body: 'Drive accountability with clear compliance, weekly review cadence, and action-first follow-up.',
+    body: 'Weekly check-in reviews, at-risk client alerts, macro adjustment queue, and a revenue forecast that tells you which clients might leave next month.',
   },
   {
     heading: 'Competition prep',
-    body: 'Manage posing, check-ins, prep feedback, and peak week control in one serious workflow.',
+    body: 'Peak week protocol deployment, pose check submission and markup, division judging criteria, show day checklist, and a countdown strip for every athlete.',
   },
   {
     heading: 'Serious self-coaching',
-    body: 'Use real structure, not guesswork: training logs, nutrition targets, readiness, and progress trends.',
+    body: 'An adaptive programme that adjusts load based on your actual performance. Plateau detection with 3 specific fixes. Weekly effort score every Sunday.',
   },
 ];
 
 const WHY_ATLAS = [
   {
-    heading: 'Run more clients without losing control',
-    body: 'Atlas keeps coaching actions visible so scale does not turn into inbox chaos.',
+    heading: 'No other app tracks RIR per set',
+    body: 'Reps in reserve on every set tells your coach exactly how close to failure you trained. MFP, Trainerize, TrueCoach — none of them have this.',
   },
   {
-    heading: 'Review what matters faster',
-    body: 'Check-ins, unread messages, payment issues, and at-risk clients land in one priority queue.',
+    heading: 'Interpreted data, not raw numbers',
+    body: "Atlas doesn't show you 142g protein and leave you guessing. It tells you: '33g short — try chicken or a shake before your evening session.'",
   },
   {
-    heading: 'Built for transformation and prep',
-    body: 'From lifestyle clients to competition prep, Atlas matches how high-accountability coaching really runs.',
+    heading: 'Start free, grow into it',
+    body: 'Basic is free forever with 10% commission. Upgrade to Pro at 10 clients, Elite at 12. You never pay more than you earn.',
   },
 ];
 
@@ -121,16 +123,28 @@ function RoleValueSection() {
 }
 
 export default function MarketingHomePage() {
+  usePageMeta({
+    title: 'Bodybuilding coaching software — prep, programmes, free barcode scan',
+    description:
+      'Atlas: per-set programme targets, check-ins with AI-drafted coach replies, peak week, posing, and a free barcode scanner. Built for bodybuilding — not generic fitness.',
+    canonical: 'https://atlasperformancelabs.co.uk/',
+  });
+
+  useEffect(() => {
+    trackPage('marketing_home');
+  }, []);
+
   return (
     <>
       <Hero
-        eyebrow="Atlas Performance Labs"
-        title="The coaching system built for serious transformation and competition results"
-        subtitle="Programs, nutrition, check-ins, messaging, review workflows, and progress tracking in one system for coaches, clients, and self-coached users."
-        primaryCtaLabel="Start Coaching"
+        eyebrow="Coaching, training and nutrition — done properly"
+        title="Free barcode scanning. Competition prep built in. The coaching platform your competitors don't have."
+        subtitle="Programs with per-set targets. Check-ins that become coaching evidence. Peak week tools. Posing library. And a barcode scanner that's always free — because MFP shouldn't have put theirs behind a paywall."
+        primaryCtaLabel="Start coaching — it's free"
         primaryCtaTo={SIGNUP_PUBLIC_PATH}
-        secondaryCtaLabel="Start Free (Personal)"
-        secondaryCtaTo={SIGNUP_PUBLIC_PATH}
+        secondaryCtaLabel="Free MFP import →"
+        secondaryCtaTo="/why-switch"
+        screenshotSrc="mockup"
       />
       <div className="text-center -mt-2 sm:-mt-3 mb-7 sm:mb-8">
         <Link to="/pricing" className="text-sm font-medium underline-offset-4 hover:underline" style={{ color: colors.muted }}>
@@ -140,29 +154,27 @@ export default function MarketingHomePage() {
 
       <ProductGrid
         title="What Atlas does"
-        subtitle="Atlas removes tool sprawl and keeps execution clear from day one."
+        subtitle="Concrete workflows for coaches, clients, and personal athletes — not a feature laundry list."
         items={WHAT_ATLAS_DOES}
       />
 
       <ProductGrid
         title="Built for transformation and competition coaching"
-        subtitle="Not generic fitness software. Atlas is built around adherence, accountability, and high-stakes prep."
+        subtitle="Every module exists because bodybuilding coaching demanded it — not because a generic fitness app needed another tab."
         items={BUILT_FOR}
       />
 
       <ProductGrid
         title="Why Atlas"
-        subtitle="Specific advantages for coaches and clients who care about real outcomes."
+        subtitle="Differentiators your roster feels on week one — not slogans."
         items={WHY_ATLAS}
       />
 
       <RoleValueSection />
 
-      <SocialProof
-        title="What coaches say"
-        quote="I stopped juggling five tools and started coaching faster. Atlas shows me exactly who needs action each day."
-        attribution="Transformation coach"
-      />
+      {/* Testimonials removed until real user quotes obtained.
+          See docs/TESTIMONIALS_TODO.md to re-add.
+          Do NOT use placeholder names. */}
 
       <CTA
         title="Serious coaching needs a serious system"

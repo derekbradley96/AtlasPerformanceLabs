@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CANONICAL_COACH_ONBOARDING_PATH } from '@/lib/coachOnboardingRoutes';
 import { CheckCircle2, ArrowRight, ArrowLeft } from 'lucide-react';
@@ -37,24 +38,39 @@ export default function BecomeATrainer() {
     mutationFn: async (data) => {
       const { data: codeResult } = await invokeSupabaseFunction('generateInviteCode', { user_id: user?.id });
       const code = codeResult?.code ?? `FITX-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-      const { data: profile } = await invokeSupabaseFunction('trainer-profile-create', {
-        user_id: user?.id,
-        display_name: data.display_name,
-        headline: data.headline,
-        specialties: data.specialties.filter(s => s.trim()),
-        monthly_rate: parseFloat(data.monthly_rate) * 100,
-        bio: data.bio,
-        whats_included: data.whats_included.filter(i => i.trim()),
-        experience: data.experience,
-        accepting_clients: data.accepting_clients,
-        invite_code: code,
-        stripe_connected: false
-      });
-      await invokeSupabaseFunction('user-update-role', { user_type: 'coach' });
+
+      const supabase = getSupabase();
+      if (!supabase || !user?.id) throw new Error('Supabase unavailable');
+
+      const monthlyPence = Math.round(parseFloat(data.monthly_rate) * 100);
+      const { data: profile, error: mpErr } = await supabase
+        .from('marketplace_coach_profiles')
+        .upsert(
+          {
+            coach_id: user.id,
+            display_name: data.display_name,
+            headline: data.headline || null,
+            bio: data.bio || null,
+            specialties: data.specialties.filter((s) => s.trim()),
+            monthly_price_from: Number.isFinite(monthlyPence) ? monthlyPence : null,
+            is_listed: !!data.accepting_clients,
+          },
+          { onConflict: 'coach_id' },
+        )
+        .select()
+        .single();
+
+      if (mpErr) throw mpErr;
+
+      const { error: roleErr } = await supabase
+        .from('profiles')
+        .update({ role: 'coach', user_type: 'coach' })
+        .eq('id', user.id);
+      if (roleErr) throw roleErr;
       return profile ?? { invite_code: code };
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['trainer-profile']);
+      queryClient.invalidateQueries({ queryKey: ['trainer-profile'] });
       toast.success('Trainer profile created!');
       navigate(CANONICAL_COACH_ONBOARDING_PATH);
     }

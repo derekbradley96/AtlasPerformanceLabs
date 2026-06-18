@@ -5,13 +5,15 @@
  * Tab vs pushed stack: use `isTabRootForRole` / `isPushedShellRoute` as the single source of truth
  * (see `normalizeCanonicalPathname`). AppShell hides the tab bar on any non-tab route for the current role.
  */
-import { isCoach, DEFAULT_ROLE, normalizeRole } from '@/lib/roles';
+import { isCoach, DEFAULT_ROLE, normalizeRole, Roles } from '@/lib/roles';
 
 const ROUTE_TITLES = {
   '/': 'Atlas',
   '/auth': 'Sign in',
   '/for-coaches': 'Coaches',
-  '/for-athletes': 'Personal',
+  '/for-athletes': 'Athletes & clients',
+  '/for-clients': 'Athletes & clients',
+  '/personal': 'Personal',
   '/pricing': 'Pricing',
   '/marketplace': 'Marketplace',
   '/login': 'Login',
@@ -40,6 +42,7 @@ const ROUTE_TITLES = {
   '/earnings': 'Earnings',
   '/workout': 'Workout',
   '/today': 'Today',
+  '/today-workout': 'Train',
   '/workout-player': 'Workout',
   '/readiness-checkin': 'Daily Check-in',
   '/progress': 'Progress',
@@ -60,6 +63,8 @@ const ROUTE_TITLES = {
   '/checkintemplates': 'Check-in Templates',
   '/editcheckintemplate': 'Edit Template',
   '/reviewcheckin': 'Review Check-in',
+  '/call-requests': 'Coach requests',
+  '/first-timer-guide': 'First comp guide',
   '/assignprogram': 'Assign Program',
   '/nutritionbuilder': 'Nutrition Plan',
   '/intakeforms': 'Intake Forms',
@@ -82,9 +87,13 @@ const ROUTE_TITLES = {
   '/inquiry-inbox': 'Inquiry inbox',
   '/workoutbuilder': 'Workout Builder',
   '/progressphotos': 'Progress Photos',
-  '/nutrition': 'Nutrition',
+  '/nutrition': 'Log',
   '/prep-precision': 'Prep precision',
-  '/prep-dashboard': 'Prep Dashboard',
+  '/prep-dashboard': 'Prep',
+  '/prep-dashboard/roster': 'Prep roster',
+  '/prep-timeline': 'Prep timeline',
+  '/time-report': 'Time report',
+  '/peak-week-templates': 'Peak week templates',
   '/nutrition-targets': 'Nutrition targets',
   '/leads': 'Leads',
   '/enquiries': 'Enquiries',
@@ -123,6 +132,7 @@ const ROUTE_TITLES = {
   '/reset-password': 'Reset password',
   '/join': 'Join',
   '/inbox': 'Inbox',
+  '/community': 'Community',
   '/closeout': 'Daily closeout',
   '/briefing': 'Briefing',
   '/coach-onboarding-flow': 'Coach setup',
@@ -139,13 +149,15 @@ const ROUTE_TITLES = {
 
 /** Tab roots: no back button, no edge-swipe back. Tab bar on these per-role tab paths. */
 const TAB_ROUTES_BY_ROLE = {
-  coach: ['/home', '/clients', '/messages', '/more'],
-  client: ['/client-dashboard', '/today', '/messages', '/progress', '/more'],
-  personal: ['/home', '/today', '/progress', '/nutrition', '/more'],
+  coach: ['/home', '/clients', '/inbox', '/prep-dashboard', '/more'],
+  /** Third tab may be check-in, prep-precision, or peak-week depending on delivery / active prep. */
+  client: ['/today', '/today-workout', '/clientcheckin', '/prep-precision', '/peak-week', '/more'],
+  personal: ['/today', '/workout', '/nutrition', '/progress'],
 };
 /** Union of all tab paths (any role) — only for legacy callers that omit role; prefer `isTabRootForRole`. */
 const TAB_ROUTES = [
-  '/home', '/clients', '/messages', '/more',
+  '/home', '/clients', '/messages', '/inbox', '/prep-dashboard', '/more',
+  '/today-workout', '/clientcheckin', '/prep-precision', '/peak-week',
   '/trainer', '/trainer-dashboard', '/client-dashboard', '/solo-dashboard',
   '/today', '/progress', '/nutrition',
 ];
@@ -161,13 +173,45 @@ export function normalizeCanonicalPathname(pathname) {
   if (p === '/trainer/home' || p === '/trainer-dashboard' || p === '/trainer') p = '/home';
   if (p === '/solo-dashboard') p = '/home';
   if (p === '/personal/home') p = '/home';
-  if (p === '/client/home') p = '/client-dashboard';
+  if (p === '/client/home' || p === '/client-dashboard') p = '/today';
   return p;
 }
 
 /**
+ * True when the shell tab item should show as selected (tab root or a pushed child under that tab).
+ * @param {string} itemKey - Tab path e.g. `/clients`
+ * @param {string} [pathname] - Raw location.pathname
+ * @param {string | { role?: string } | null} [roleOrProfile] - Needed for `/community` (maps to Inbox for coach, More for client).
+ */
+export function isShellTabItemActive(itemKey, pathname, roleOrProfile) {
+  const key = String(itemKey || '').replace(/\/$/, '').toLowerCase();
+  if (!key) return false;
+  const p = normalizeCanonicalPathname(pathname);
+  if (p === key) return true;
+  if (p.startsWith(`${key}/`)) return true;
+  if (key === '/prep-dashboard') {
+    if (p === '/prep-timeline' || p.startsWith('/peak-week-templates') || /^\/prep\/[^/]+\/show-checklist$/.test(p)) {
+      return true;
+    }
+  }
+  if (key === '/prep-precision') {
+    if (/^\/prep\/[^/]+\/show-checklist$/.test(p)) return true;
+  }
+  if (key === '/peak-week') {
+    if (p === '/peak-week' || p === '/pose-check' || p.startsWith('/peak-week')) return true;
+  }
+  if (p === '/community') {
+    const r = normalizeRole(roleOrProfile);
+    if (isCoach(r)) return key === '/inbox';
+    if (r === Roles.CLIENT) return key === '/more';
+    return false;
+  }
+  return false;
+}
+
+/**
  * True when this path is a primary tab root for the user's role (bottom nav / no back).
- * Coach: only /home, /clients, /messages, /more — all other routes are pushed.
+ * Coach: tab roots include /home, /clients, /inbox, /prep-dashboard, /more.
  * @param {string} [pathname]
  * @param {string | { role?: string } | null} roleOrProfile
  * @returns {boolean}
@@ -207,14 +251,25 @@ export function getShellNavState(pathname, roleOrProfile) {
 
 /**
  * Tab routes for bottom nav. Role-aware; same visual shell, items vary by role.
- * Coach: Home, Clients, Messages, More. (coach_focus does not change nav structure.)
- * Client: Home, Today, Messages, Progress, More.
- * Personal: Home, Today, Progress, Nutrition, More (no Messages as primary tab).
+ * Coach: dynamic by coach_focus.
+ * Client: dynamic by linked coach/prep context.
+ * Personal: Today, Train, Log, Progress.
  * @param {string} [role] - Normalized role: 'coach'|'client'|'personal' (legacy trainer|solo still map via normalizeRole).
+ * @param {string} [coachFocus] - Coach focus key: transformation|competition|integrated
+ * @param {{ clientDeliveryContext?: string, hasCompetitionPrep?: boolean, linkedCoachFocus?: string, isCompPrepClient?: boolean } | null} [navContext]
  */
-export function getTabRoutesForRole(role) {
+export function getTabRoutesForRole(role, coachFocus, navContext = null) {
   const r = normalizeRole(role) ?? DEFAULT_ROLE;
   if (isCoach(r)) {
+    const focus = String(coachFocus || '').toLowerCase().trim();
+    if (focus === 'competition') {
+      return [
+        { path: '/home', label: 'Home', iconKey: 'Home' },
+        { path: '/clients', label: 'Clients', iconKey: 'Users' },
+        { path: '/messages', label: 'Messages', iconKey: 'MessageSquare' },
+        { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
+      ];
+    }
     return [
       { path: '/home', label: 'Home', iconKey: 'Home' },
       { path: '/clients', label: 'Clients', iconKey: 'Users' },
@@ -223,22 +278,31 @@ export function getTabRoutesForRole(role) {
     ];
   }
   if (r === 'client') {
-    // Client: Home, Today, Progress, Messages, More (bottom nav order)
+    const clientCtx = String(navContext?.clientDeliveryContext || '').toLowerCase().trim();
+    const linkedCoachFocus = String(navContext?.linkedCoachFocus || '').toLowerCase().trim();
+    const hasCompetitionPrep = navContext?.hasCompetitionPrep === true;
+    const useCompetitionNav = clientCtx === 'competition' || linkedCoachFocus === 'competition' || hasCompetitionPrep;
+    if (useCompetitionNav) {
+      return [
+        { path: '/today', label: 'Today', iconKey: 'Calendar' },
+        { path: '/today-workout', label: 'Train', iconKey: 'Dumbbell' },
+        { path: '/prep-precision', label: 'Prep', iconKey: 'Crosshair' },
+        { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
+      ];
+    }
     return [
-      { path: '/client-dashboard', label: 'Home', iconKey: 'Home' },
       { path: '/today', label: 'Today', iconKey: 'Calendar' },
-      { path: '/progress', label: 'Progress', iconKey: 'TrendingUp' },
-      { path: '/messages', label: 'Messages', iconKey: 'MessageSquare' },
+      { path: '/today-workout', label: 'Train', iconKey: 'Dumbbell' },
+      { path: '/clientcheckin', label: 'Check-in', iconKey: 'ClipboardList' },
       { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
     ];
   }
-  // personal (solo) — /home renders same dashboard as legacy /solo-dashboard
+  // personal (solo) — direct action tabs only.
   return [
-    { path: '/home', label: 'Home', iconKey: 'Home' },
     { path: '/today', label: 'Today', iconKey: 'Calendar' },
+    { path: '/workout', label: 'Train', iconKey: 'Dumbbell' },
+    { path: '/nutrition', label: 'Log', iconKey: 'UtensilsCrossed' },
     { path: '/progress', label: 'Progress', iconKey: 'TrendingUp' },
-    { path: '/nutrition', label: 'Nutrition', iconKey: 'UtensilsCrossed' },
-    { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
   ];
 }
 
@@ -263,6 +327,7 @@ export function isPushedRoute(pathname) {
 export function getRouteTitle(pathname) {
   const path = pathname?.split('?')[0]?.toLowerCase() || '';
   if (path.includes('/checkins/')) return 'Check-in';
+  if (path.match(/^\/clients\/[^/]+\/journey$/)) return 'Journey';
   if (path.startsWith('/clients/') && path.length > '/clients/'.length) return 'Client';
   if (path.startsWith('/messages/') && path.length > '/messages/'.length) return 'Chat';
   if (path === '/comp-prep/pose-library') return 'Pose Library';
@@ -285,12 +350,15 @@ export function getRouteTitle(pathname) {
   if (path.match(/^\/clients\/[^/]+\/intake$/)) return 'Client Intake';
   if (path.match(/^\/clients\/[^/]+\/nutrition$/)) return 'Nutrition';
   if (path.match(/^\/clients\/[^/]+\/prep-precision$/)) return 'Prep precision';
-  if (path === '/prep-dashboard') return 'Prep Dashboard';
+  if (path === '/prep-dashboard' || path === '/prep-dashboard/roster') return ROUTE_TITLES[path] || 'Prep';
+  if (path === '/prep-timeline') return ROUTE_TITLES[path] || 'Prep timeline';
+  if (path === '/peak-week-templates') return ROUTE_TITLES[path] || 'Peak week templates';
+  if (path.match(/^\/prep\/[^/]+\/show-checklist$/)) return 'Show day checklist';
   if (path.startsWith('/results-stories')) return 'Result stories';
   if (path === '/enquiries') return 'Enquiries';
   if (path === '/referrals') return 'Referrals';
   if (path.match(/^\/onboarding\/[^/]+$/)) return 'Onboarding';
-  if (path === '/trainer/nutrition') return 'Nutrition plans';
+  if (path === '/coach/nutrition' || path === '/trainer/nutrition') return 'Nutrition plans';
   if (path.match(/^\/trainer\/nutrition\/[^/]+$/)) return 'Nutrition plan';
   return ROUTE_TITLES[path] ?? 'Atlas Performance Labs';
 }

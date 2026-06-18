@@ -3,11 +3,11 @@
  * JWT must match clients.user_id.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     const authErr = requireAuthResponse(callerId);
@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
     if (!row?.id) {
       return new Response(JSON.stringify({ ok: false, error: "no_client_row" }), {
         status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
         coach: { id: coachProfileId ?? null, display_name: coachName, avatar_url: coachAvatar },
         service,
       }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
     );
   } catch (e) {
     console.error("client-coach-offer-context", e);

@@ -3,24 +3,38 @@
  * Body: conversation_id (thread_id), text, sender_type (trainer|coach -> coach, client -> client).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { z } from "https://esm.sh/zod@3.23.8";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
 
+const payloadSchema = z.object({
+  conversation_id: z.string().uuid().optional(),
+  thread_id: z.string().uuid().optional(),
+  conversationId: z.string().uuid().optional(),
+  text: z.string().max(4000).optional(),
+  message_text: z.string().max(4000).optional(),
+  sender_type: z.string().optional(),
+  sender_role: z.string().optional(),
+}).strict();
+
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     if (!callerId) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
-    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const rawBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const parsed = payloadSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return jsonError("Invalid request payload", 400);
+    }
+    const body = parsed.data;
     const threadId = body.conversation_id ?? body.thread_id ?? body.conversationId;
     const text = body.text ?? body.message_text ?? "";
-    const senderType = (body.sender_type ?? body.sender_role ?? "client") as string;
-    const senderRole = senderType === "trainer" || senderType === "coach" ? "coach" : "client";
     if (!threadId) {
-      return new Response(JSON.stringify({ error: "conversation_id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "conversation_id required" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -31,7 +45,7 @@ Deno.serve(async (req) => {
       .is("deleted_at", null)
       .maybeSingle();
     if (threadErr || !thread) {
-      return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Thread not found" }), { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const t = thread as Record<string, unknown>;
     const coachId = t.coach_id as string | null;
@@ -44,8 +58,10 @@ Deno.serve(async (req) => {
     const isCoach = coachId === callerId;
     const isClient = clientUserId === callerId;
     if (!isCoach && !isClient) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
+    // Never trust caller-provided sender role; derive from authenticated relationship.
+    const senderRole = isCoach ? "coach" : "client";
 
     const { data: inserted, error } = await supabase
       .from("message_messages")
@@ -62,7 +78,7 @@ Deno.serve(async (req) => {
       text: (inserted as Record<string, unknown>).message_text,
       created_date: (inserted as Record<string, unknown>).created_at,
     };
-    return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(out), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("message-create", e);
     return jsonError("Request failed", 500);

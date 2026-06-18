@@ -1,19 +1,44 @@
 import { z } from 'zod';
 
-/** UK-first federations */
-export const federationEnum = z.enum(['PCA', '2BROS', 'OTHER']);
+/** Federations (UK-first + international natural + pro league labels). */
+export const federationEnum = z.enum([
+  'NPC',
+  'IFBB',
+  'NANBF',
+  'OCB',
+  'PCA',
+  'UKBFF',
+  'NABBA',
+  'WBFF',
+  'Pure Elite',
+  'Ben Weider',
+  'WNBF',
+  'INBF',
+  'IPE',
+  'Natural Physique Association',
+  'IFBB Pro League',
+  '2BROS',
+  'OTHER',
+]);
 export type Federation = z.infer<typeof federationEnum>;
 
 /** Sex */
 export const sexEnum = z.enum(['MALE', 'FEMALE']);
 export type Sex = z.infer<typeof sexEnum>;
 
-/** Male divisions (UK-first) */
-export const divisionMaleEnum = z.enum(['BODYBUILDING', 'CLASSIC', 'PHYSIQUE']);
+/** Male divisions */
+export const divisionMaleEnum = z.enum(['BODYBUILDING', 'CLASSIC', 'PHYSIQUE', 'WHEELCHAIR_OPEN']);
 export type DivisionMale = z.infer<typeof divisionMaleEnum>;
 
 /** Female divisions */
-export const divisionFemaleEnum = z.enum(['BIKINI', 'FIGURE', 'WELLNESS']);
+export const divisionFemaleEnum = z.enum([
+  'BIKINI',
+  'FIGURE',
+  'WELLNESS',
+  'WOMENS_BODYBUILDING',
+  'WOMENS_PHYSIQUE',
+  'FITNESS',
+]);
 export type DivisionFemale = z.infer<typeof divisionFemaleEnum>;
 
 /** Division (union) */

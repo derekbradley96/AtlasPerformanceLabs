@@ -74,7 +74,7 @@ export function resolvePrepPrecisionAccess({
   }
 
   if (isPersonal(r)) {
-    if (personalPlanTier !== 'enhanced') {
+    if (personalPlanTier !== 'enhanced' && personalPlanTier !== 'free') {
       return { tier: 'hidden', reason: 'personal_basic_no_prep_lite' };
     }
     if (isPersonalPrepGoal(personalPrimaryGoal)) {

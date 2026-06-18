@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { ChevronLeft, User, Users, Dumbbell, Shield, RotateCcw, LogOut, Zap, UserPlus, Copy, Mail, Trash2, ListChecks } from 'lucide-react';
 import UpgradeTriggerSimulator from '@/components/dev/UpgradeTriggerSimulator';
-import { useAuth, ADMIN_EMAIL } from '@/lib/AuthContext';
+import { useAuth } from '@/lib/AuthContext';
 import { APP_MODE, SUPABASE_ENABLED } from '@/lib/config';
 import { stripeServiceUpsert, MOCK_SERVICES } from '@/lib/supabaseStripeApi';
 import { createManualClientStub, getStubClients, resetStubClients, seedRealisticStubClients, seedTestClients } from '@/lib/clientStubStore';
@@ -92,7 +92,7 @@ const hasSupabase = SUPABASE_ENABLED;
 
 export default function AdminDevPanel() {
   const navigate = useNavigate();
-  const { enterAdmin, clearSession, user, exitDemo, setFakeSession, role } = useAuth();
+  const { enterAdmin, clearSession, user, exitDemo, setFakeSession, role, isAdmin } = useAuth();
   const userId = user?.id ?? 'local-trainer';
   const sandboxTrainer = user?.id === 'fake-trainer';
   const hasFakeSession = !!user && (user.id === 'fake-trainer' || user.id === 'fake-client' || user.id === 'fake-solo');
@@ -106,7 +106,7 @@ export default function AdminDevPanel() {
   const [stubStatus, setStubStatus] = useState('on_track');
   const [stubKey, setStubKey] = useState(0);
 
-  const isAdminAccount = user?.email === ADMIN_EMAIL;
+  const isAdminAccount = isAdmin;
   if (!isDev && !isAdminAccount) {
     navigate('/', { replace: true });
     return null;

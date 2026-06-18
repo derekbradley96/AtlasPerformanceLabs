@@ -53,6 +53,7 @@ import {
   buildMergedCoachRow,
 } from '@/lib/coachMarketplaceListingDetails';
 import MarketplaceSoloVsCoachCompare from '@/components/marketplace/MarketplaceSoloVsCoachCompare';
+import CoachReviewsSection from '@/components/marketplace/CoachReviewsSection';
 import { buildDiscoverUrl, normalizeMarketplaceTier } from '@/lib/marketplaceScreenState';
 
 const COACH_TYPE_LABELS = {
@@ -68,50 +69,74 @@ const DEFAULT_ENQUIRY_MESSAGE =
 
 const STICKY_MOBILE_PAD = 108;
 
-function useMarketplaceCoachProfile(slug) {
+const MARKETPLACE_LISTING_SELECT =
+  'id, coach_id, display_name, slug, headline, bio, location, pricing_summary, listing_details, accepts_transformation, accepts_competition, accepts_personal_transitions';
+
+function useMarketplaceCoachProfile(slug, { viewerCoachId = null, viewerReferralCode = null } = {}) {
   const supabase = hasSupabase ? getSupabase() : null;
+  const key = String(slug || '').trim();
+  const refNorm = String(viewerReferralCode || '').trim().toLowerCase();
+  const keyNorm = key.toLowerCase();
   return useQuery({
-    queryKey: ['marketplace-coach-profile', slug],
+    queryKey: ['marketplace-coach-profile', key, viewerCoachId ?? '', refNorm],
     queryFn: async () => {
-      if (!supabase || !slug) return null;
-      const { data: mp, error: mpErr } = await supabase
+      if (!supabase || !key) return null;
+
+      const loadBundle = async (mp) => {
+        if (!mp?.coach_id) return null;
+        const coachId = mp.coach_id;
+        const [profileRes, storiesRes] = await Promise.all([
+          supabase.from('profiles').select('id, coach_focus, referral_code, avatar_url, goal').eq('id', coachId).maybeSingle(),
+          supabase
+            .from('client_result_stories')
+            .select('id, story_type, title, summary, before_image_path, after_image_path, created_at')
+            .eq('coach_id', coachId)
+            .eq('is_public', true)
+            .order('created_at', { ascending: false }),
+        ]);
+        const coachRow = profileRes?.data ?? null;
+        const stories = Array.isArray(storiesRes?.data) ? storiesRes.data : [];
+        const storyIds = stories.map((s) => s.id);
+        let metrics = [];
+        if (storyIds.length > 0) {
+          const { data: m } = await supabase
+            .from('result_story_metrics')
+            .select('story_id, metric_key, metric_label, metric_value, sort_order')
+            .in('story_id', storyIds)
+            .order('sort_order', { ascending: true });
+          metrics = Array.isArray(m) ? m : [];
+        }
+        const storiesWithMetrics = stories.map((s) => ({
+          ...s,
+          metrics: metrics.filter((m) => m.story_id === s.id).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+        }));
+        return { listing: mp, profile: coachRow, stories: storiesWithMetrics };
+      };
+
+      const { data: bySlug, error: errSlug } = await supabase
         .from('coach_marketplace_profiles')
-        .select(
-          'id, coach_id, display_name, slug, headline, bio, location, pricing_summary, listing_details, accepts_transformation, accepts_competition, accepts_personal_transitions'
-        )
-        .eq('slug', slug)
+        .select(MARKETPLACE_LISTING_SELECT)
+        .eq('slug', key)
         .eq('is_public', true)
         .maybeSingle();
-      if (mpErr || !mp) return null;
-      const coachId = mp.coach_id;
-      const [profileRes, storiesRes] = await Promise.all([
-        supabase.from('profiles').select('id, coach_focus, referral_code, avatar_url, goal').eq('id', coachId).maybeSingle(),
-        supabase
-          .from('client_result_stories')
-          .select('id, story_type, title, summary, before_image_path, after_image_path, created_at')
-          .eq('coach_id', coachId)
-          .eq('is_public', true)
-          .order('created_at', { ascending: false }),
-      ]);
-      const coachRow = profileRes?.data ?? null;
-      const stories = Array.isArray(storiesRes?.data) ? storiesRes.data : [];
-      const storyIds = stories.map((s) => s.id);
-      let metrics = [];
-      if (storyIds.length > 0) {
-        const { data: m } = await supabase
-          .from('result_story_metrics')
-          .select('story_id, metric_key, metric_label, metric_value, sort_order')
-          .in('story_id', storyIds)
-          .order('sort_order', { ascending: true });
-        metrics = Array.isArray(m) ? m : [];
+      if (!errSlug && bySlug) return loadBundle(bySlug);
+
+      /** Listing slug was never backfilled; URL uses invite / referral (RLS blocks reading others' profiles by code). */
+      if (viewerCoachId && refNorm && keyNorm === refNorm) {
+        const { data: ownRow, error: ownErr } = await supabase
+          .from('coach_marketplace_profiles')
+          .select(MARKETPLACE_LISTING_SELECT)
+          .eq('coach_id', viewerCoachId)
+          .maybeSingle();
+        if (!ownErr && ownRow) {
+          const bundle = await loadBundle(ownRow);
+          if (bundle) return bundle;
+        }
       }
-      const storiesWithMetrics = stories.map((s) => ({
-        ...s,
-        metrics: metrics.filter((m) => m.story_id === s.id).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
-      }));
-      return { listing: mp, profile: coachRow, stories: storiesWithMetrics };
+
+      return null;
     },
-    enabled: !!supabase && !!slug,
+    enabled: !!supabase && !!key,
   });
 }
 
@@ -133,7 +158,10 @@ export default function CoachMarketplaceProfilePage() {
   const [searchParams] = useSearchParams();
   const { isWideWeb } = usePresentationMode();
   const { user, effectiveRole, profile: authProfile } = useAuth();
-  const { data, isLoading, error } = useMarketplaceCoachProfile(slug);
+  const { data, isLoading, error } = useMarketplaceCoachProfile(slug, {
+    viewerCoachId: user?.id ?? null,
+    viewerReferralCode: authProfile?.referral_code ?? null,
+  });
   const trackedProfileView = useRef(false);
   const [enquireOpen, setEnquireOpen] = useState(false);
   const [enquiryName, setEnquiryName] = useState('');
@@ -759,6 +787,8 @@ export default function CoachMarketplaceProfilePage() {
           </Card>
         </motion.section>
       ) : null}
+
+      <CoachReviewsSection coachId={coachId} compact />
 
       {/* Accepted types */}
       {acceptedTypes.length > 0 ? (

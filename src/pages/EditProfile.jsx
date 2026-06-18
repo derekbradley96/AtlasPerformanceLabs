@@ -3,19 +3,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { toast } from 'sonner';
 import TrainerProfileSettings from '@/pages/settings/TrainerProfileSettings';
 import { useTrainerPermissions } from '@/components/hooks/useTrainerPermissions';
-import AccessDenied from '@/components/AccessDenied';
+import { isCoach } from '@/lib/roles';
 
 export default function EditProfile() {
   const navigate = useNavigate();
   const { user: authUser, isDemoMode, role: authRole, isLoadingAuth } = useAuth();
   const { isAssistant } = useTrainerPermissions();
-  const isTrainer = authRole === 'trainer';
+  const isTrainer = isCoach(authRole);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [formData, setFormData] = useState({
@@ -53,7 +53,17 @@ export default function EditProfile() {
     }
     setSaving(true);
     try {
-      await invokeSupabaseFunction('user-update-profile', formData);
+      const sb = getSupabase();
+      if (!hasSupabase || !sb || !authUser?.id) {
+        toast.error('Cannot save — sign in or configure Supabase.');
+        return;
+      }
+      const displayName = formData.full_name.trim();
+      const { error } = await sb.from('profiles').update({ display_name: displayName }).eq('id', authUser.id);
+      if (error) {
+        toast.error(error.message || 'Failed to save profile');
+        return;
+      }
       toast.success('Profile saved successfully!');
       setHasChanges(false);
       navigate(createPageUrl('Profile'));

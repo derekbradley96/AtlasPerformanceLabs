@@ -3,6 +3,7 @@
  * Short, coach-like, editable. Use with "Send Nudge" to open thread prefilled or copy to clipboard.
  */
 
+import { navigateToThread } from '@/lib/messagesPath';
 export const REENGAGEMENT_TEMPLATES = {
   missed_checkin:
     "Hey — noticed we haven't had a check-in this week. When you get a sec, drop one in so we can keep you on track.",
@@ -60,7 +61,7 @@ export function getReengagementTemplate(reasonsOrItemType) {
 export function sendReengagementNudge({ clientId, template, navigate, toast }) {
   const msg = (template || '').trim() || getReengagementTemplate('low_momentum');
   if (clientId && typeof navigate === 'function') {
-    navigate(`/messages/${clientId}`, { state: { prefilledMessage: msg } });
+    navigateToThread(navigate, clientId, { state: { prefilledMessage: msg } });
     return;
   }
   if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {

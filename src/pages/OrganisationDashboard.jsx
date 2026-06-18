@@ -17,6 +17,7 @@ import {
   Trophy,
   DollarSign,
 } from 'lucide-react';
+import { formatGbpWhole } from '@/lib/coachUpgradeMomentMath';
 
 const COACH_ROLES = ['owner', 'admin', 'coach'];
 
@@ -144,7 +145,7 @@ async function fetchOrganisationDashboard() {
 
 function formatCurrency(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(value));
+  return formatGbpWhole(Number(value));
 }
 
 function MetricCard({ icon: Icon, label, value }) {

@@ -410,3 +410,18 @@ export async function detectProgramStall(clientId, { supabase: externalClient, g
   return data;
 }
 
+/**
+ * Kick off server-side insights refresh for a coach.
+ * Non-blocking UI callers can fire-and-forget this.
+ */
+export async function triggerInsightsRefresh(coachId) {
+  if (!coachId) return { processed: 0, insights: 0 };
+  const supabase = getClient();
+  if (!supabase) return { processed: 0, insights: 0 };
+  const { data, error } = await supabase.functions.invoke('run-client-insights', {
+    body: { coach_id: coachId },
+  });
+  if (error) throw error;
+  return data || { processed: 0, insights: 0 };
+}
+

@@ -5,7 +5,8 @@
  */
 import { getTrainerReviewCounts } from '@/features/reviewEngine/getTrainerReviewFeed';
 import { getCloseoutCounts } from '@/lib/inboxService';
-import { getThreadsForTrainer } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
+import { getThreadsForUser } from '@/lib/messaging/supabaseMessaging';
 
 const PRIORITY_ORDER = [
   { key: 'peak_week', filter: 'comp_prep', title: 'Peak week due today', subtitle: 'Comp prep daily updates' },
@@ -16,14 +17,30 @@ const PRIORITY_ORDER = [
   { key: 'new_leads', filter: 'leads', title: 'New leads', subtitle: 'Follow up on leads' },
 ];
 
+function isDemoTrainerId(trainerId) {
+  const id = trainerId == null ? '' : String(trainerId);
+  return id === 'demo-trainer' || id === 'local-trainer' || id === 'local-coach' || id === 'fake-trainer';
+}
+
 /**
  * @param {string} trainerId
- * @returns {{ title: string, subtitle: string, count: number, filter: string }[]} Top 3 actions (max 3)
+ * @returns {Promise<{ title: string, subtitle: string, count: number, filter: string }[]>} Top 3 actions (max 3)
  */
-export function getNextBestActions(trainerId) {
+export async function getNextBestActions(trainerId) {
   const counts = getTrainerReviewCounts(trainerId);
   const closeout = getCloseoutCounts(trainerId);
-  const threads = getThreadsForTrainer(trainerId);
+
+  const isDemoMode = isDemoTrainerId(trainerId);
+  const supabase = getSupabase();
+  let threads = [];
+  if (supabase && trainerId && !isDemoMode) {
+    try {
+      threads = await getThreadsForUser(supabase, trainerId, 'coach');
+    } catch {
+      threads = [];
+    }
+  }
+
   const unreadSum = (threads || []).reduce((s, t) => s + (t.unread_count || 0), 0);
 
   const values = {

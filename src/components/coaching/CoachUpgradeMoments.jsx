@@ -13,6 +13,7 @@ import {
   eliteTotalOnVolume,
   formatGbpWhole,
   proVersusBasicSavings,
+  ELITE_MONTHLY_GBP,
 } from '@/lib/coachUpgradeMomentMath';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -218,7 +219,8 @@ export function CoachMonthlyFeeSummaryModal({ open, onClose, volumeLast30d, tota
           <DialogTitle style={{ color: colors.text }}>Fee summary</DialogTitle>
         </DialogHeader>
         <p className="text-xs -mt-2" style={{ color: colors.muted }}>
-          Estimates use your plan’s commission rates on payment volume (Basic 10%, Pro £59 + 3%, Elite £79 + 0%). Figures are illustrative; actual billing may vary.
+          Estimates use your plan’s commission rates on payment volume (Basic 10%, Pro £59 + 3%, Elite{' '}
+          {formatGbpWhole(ELITE_MONTHLY_GBP)} + 0%). Figures are illustrative; actual billing may vary.
         </p>
         <div className="space-y-3 text-sm" style={{ color: colors.muted }}>
           <div className="flex justify-between gap-2">

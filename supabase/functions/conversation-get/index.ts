@@ -3,21 +3,21 @@
  * Caller must be the coach or the client in the thread.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const callerId = await getAuthUserId(req);
     if (!callerId) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const id = body.id ?? req.headers.get("X-Conversation-Id");
     if (!id) {
-      return new Response(JSON.stringify({ error: "id required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "id required" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
       return jsonError("Request failed", 500);
     }
     if (!row) {
-      return new Response(JSON.stringify(null), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify(null), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const r = row as Record<string, unknown>;
     const coachId = r.coach_id as string | null;
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
     const isCoach = coachId === callerId;
     const isClient = clientUserId === callerId;
     if (!isCoach && !isClient) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     }
     const out = {
       id: (row as Record<string, unknown>).id,
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       created_at: (row as Record<string, unknown>).created_at,
       updated_at: (row as Record<string, unknown>).updated_at,
     };
-    return new Response(JSON.stringify(out), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(out), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("conversation-get", e);
     return jsonError("Request failed", 500);

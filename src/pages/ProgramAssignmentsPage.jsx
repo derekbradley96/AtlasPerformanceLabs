@@ -12,6 +12,7 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import { isCoach } from '@/lib/roles';
 import { colors, spacing, shell, radii } from '@/ui/tokens';
+import { runProgramNutritionDiagnostic } from '@/lib/diagnostics/programNutritionDiagnostic';
 
 const PAGE_PADDING = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
 
@@ -44,6 +45,17 @@ async function fetchBlocksForClient(supabase, clientId) {
   return data || [];
 }
 
+async function fetchCoachBlocks(supabase, coachId) {
+  if (!supabase || !coachId) return [];
+  const { data, error } = await supabase
+    .from('program_blocks')
+    .select('id, title, total_weeks, created_at, client_id')
+    .or(`coach_id.eq.${coachId},owner_profile_id.eq.${coachId}`)
+    .order('created_at', { ascending: false });
+  if (error) return [];
+  return data || [];
+}
+
 export default function ProgramAssignmentsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -59,10 +71,14 @@ export default function ProgramAssignmentsPage() {
   const [saving, setSaving] = useState(false);
   const [clients, setClients] = useState([]);
   const [blocks, setBlocks] = useState([]);
+  const [showClientOnlyBlocks, setShowClientOnlyBlocks] = useState(false);
   const [clientId, setClientId] = useState(clientIdParam || '');
   const [blockId, setBlockId] = useState(blockIdParam || '');
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [isActive, setIsActive] = useState(true);
+  const [personalizeName, setPersonalizeName] = useState(false);
+  const [clientDisplayName, setClientDisplayName] = useState('');
+  const [assignmentSuccessBanner, setAssignmentSuccessBanner] = useState('');
 
   const isCoachRole = isCoach(effectiveRole);
   const supabase = hasSupabase ? getSupabase() : null;
@@ -87,6 +103,11 @@ export default function ProgramAssignmentsPage() {
     })();
   }, [isCoachRole, loadClients, clientIdParam, blockIdParam]);
 
+  useEffect(() => {
+    if (!import.meta.env.DEV || !coachId) return;
+    runProgramNutritionDiagnostic(coachId, 'coach', clientId).catch(console.error);
+  }, [coachId, clientId]);
+
   // When opening with blockId only, load block to get client_id and pre-fill client.
   useEffect(() => {
     if (!blockIdParam || !supabase) return;
@@ -97,8 +118,9 @@ export default function ProgramAssignmentsPage() {
     return () => { cancelled = true; };
   }, [blockIdParam, supabase]);
 
-  // Load blocks for selected client.
+  // Load blocks for selected client (legacy scoped view).
   useEffect(() => {
+    if (!showClientOnlyBlocks) return undefined;
     if (!clientId || !supabase) {
       setBlocks([]);
       return;
@@ -113,7 +135,24 @@ export default function ProgramAssignmentsPage() {
       }
     });
     return () => { cancelled = true; };
-  }, [clientId, supabase, blockIdParam]);
+  }, [clientId, supabase, blockIdParam, showClientOnlyBlocks]);
+
+  // Preferred path: show coach-owned block library (assignment source-of-truth).
+  useEffect(() => {
+    if (showClientOnlyBlocks) return undefined;
+    if (!supabase || !coachId) {
+      setBlocks([]);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchCoachBlocks(supabase, coachId).then((list) => {
+      if (cancelled) return;
+      setBlocks(list);
+      if (blockIdParam && list.some((b) => b.id === blockIdParam)) setBlockId(blockIdParam);
+      else if (!blockId && list.length > 0) setBlockId(list[0].id);
+    });
+    return () => { cancelled = true; };
+  }, [supabase, coachId, showClientOnlyBlocks, blockIdParam, blockId]);
 
   const handleSubmit = async () => {
     if (!supabase || !clientId || !blockId) {
@@ -134,10 +173,20 @@ export default function ProgramAssignmentsPage() {
         program_block_id: blockId,
         start_date: startDate,
         is_active: !!isActive,
+        client_display_name: personalizeName ? (clientDisplayName || '').trim() || null : null,
       });
       if (insertErr) throw insertErr;
-      toast.success(isActive ? 'Program assigned and set active' : 'Assignment saved');
-      navigate(-1);
+      const selectedClientName = clients.find((c) => c.id === clientId)?.name || 'Client';
+      const selectedProgramTitle =
+        blocks.find((b) => b.id === blockId)?.title || 'Program';
+      const normalizedStartDate = startDate || new Date().toISOString().slice(0, 10);
+      toast.success(`Program assigned — ${selectedClientName} will see this in their app`);
+      setAssignmentSuccessBanner(
+        `✓ ${selectedProgramTitle} assigned to ${selectedClientName} starting ${normalizedStartDate}`
+      );
+      setTimeout(() => {
+        navigate(`/clients/${clientId}?tab=program`);
+      }, 2000);
     } catch (e) {
       toast.error(e?.message || 'Failed to save assignment');
     } finally {
@@ -195,6 +244,22 @@ export default function ProgramAssignmentsPage() {
             )}
           </div>
         )}
+        {assignmentSuccessBanner && (
+          <div
+            style={{
+              marginBottom: spacing[16],
+              padding: spacing[12],
+              borderRadius: 8,
+              background: 'rgba(34, 197, 94, 0.14)',
+              border: '1px solid rgba(34, 197, 94, 0.45)',
+              color: colors.text,
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            {assignmentSuccessBanner}
+          </div>
+        )}
         <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
           <label className="block text-sm font-medium mb-1" style={{ color: colors.muted }}>Client</label>
           <select
@@ -210,16 +275,30 @@ export default function ProgramAssignmentsPage() {
           </select>
 
           <label className="block text-sm font-medium mt-4 mb-1" style={{ color: colors.muted }}>Program block</label>
+          <label className="flex items-center gap-2 mb-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showClientOnlyBlocks}
+              onChange={(e) => setShowClientOnlyBlocks(e.target.checked)}
+              style={{ accentColor: colors.primary }}
+              aria-label="Show client-only blocks"
+            />
+            <span className="text-xs" style={{ color: colors.muted }}>
+              Show only this client's existing blocks
+            </span>
+          </label>
           <select
             value={blockId}
             onChange={(e) => setBlockId(e.target.value)}
             style={inputBase}
-            disabled={!clientId}
+            disabled={!clientId && showClientOnlyBlocks}
             aria-label="Select program block"
           >
             <option value="">— Select block —</option>
             {blocks.map((b) => (
-              <option key={b.id} value={b.id}>{b.title || 'Untitled'} ({b.total_weeks}w)</option>
+              <option key={b.id} value={b.id}>
+                {b.title || 'Untitled'} ({b.total_weeks}w){b.client_id ? ` • Client scoped` : ''}
+              </option>
             ))}
           </select>
           {clientId && blocks.length === 0 && (
@@ -248,6 +327,40 @@ export default function ProgramAssignmentsPage() {
           <p className="text-xs mt-1" style={{ color: colors.muted }}>
             Only one active program per client. Turning this on will deactivate any current assignment.
           </p>
+
+          {clientId ? (
+            <>
+              <label className="flex items-center gap-2 mt-4 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={personalizeName}
+                  onChange={(e) => setPersonalizeName(e.target.checked)}
+                  style={{ accentColor: colors.primary }}
+                  aria-label="Personalize name for client"
+                />
+                <span className="text-sm" style={{ color: colors.text }}>
+                  Personalise for {clients.find((c) => c.id === clientId)?.name || 'client'}
+                </span>
+              </label>
+              {personalizeName ? (
+                <>
+                  <label className="block text-sm font-medium mt-3 mb-1" style={{ color: colors.muted }}>
+                    Client-facing program name
+                  </label>
+                  <input
+                    type="text"
+                    value={clientDisplayName}
+                    onChange={(e) => setClientDisplayName(e.target.value)}
+                    placeholder={`${
+                      clients.find((c) => c.id === clientId)?.name || 'Client'
+                    }'s 12-Week Strength Block`}
+                    style={inputBase}
+                    aria-label="Client-facing program name"
+                  />
+                </>
+              ) : null}
+            </>
+          ) : null}
 
           <button
             type="button"

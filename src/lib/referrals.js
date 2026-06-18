@@ -44,6 +44,19 @@ export function getCoachJoinLinkByCoachId(coachUserId) {
 }
 
 /**
+ * Gym / studio affiliate signup URL — sets tracking via `aff` (preferred) on public auth.
+ * AuthScreen also persists `ref` for compatibility; coach referral links still use `ref` for profile codes.
+ * @param {string|null|undefined} affiliateCode - public.affiliates.affiliate_code when status is active
+ * @returns {string}
+ */
+export function getGymAffiliateSignupLink(affiliateCode) {
+  const code = (affiliateCode ?? '').toString().trim();
+  if (!code) return '';
+  const origin = getAppOrigin().replace(/\/$/, '');
+  return `${origin}/login?mode=signup&public=1&aff=${encodeURIComponent(code)}`;
+}
+
+/**
  * Prefer direct auth invite URL when code is known; otherwise `/join?coach=` (live) or local demo invite link.
  * @param {string|null|undefined} inviteCode
  * @param {string|null|undefined} coachUserId

@@ -107,7 +107,7 @@ export function deriveClientHomeRouteState({ surface, dashboardKey } = {}) {
 }
 
 /**
- * Coach home (`TrainerDashboard`).
+ * Coach home (`CoachHomePage`).
  * @param {{ surface: 'loading'|'empty_roster'|'hub' }} p
  */
 export function deriveCoachHomeRouteState({ surface } = {}) {
@@ -236,7 +236,7 @@ export function deriveProgramDayEditorRouteState({ surface } = {}) {
 }
 
 /**
- * Legacy workout composer (`WorkoutBuilder.jsx`).
+ * Legacy workout composer (removed unrouted page; kept for migration state naming).
  */
 export function deriveWorkoutBuilderLegacyRouteState({ surface } = {}) {
   const raw = String(surface || 'loading').toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -313,7 +313,7 @@ export function deriveTrainerCheckInsHubRouteState({ surface } = {}) {
 }
 
 /**
- * Coach inbox (`Inbox.jsx`).
+ * Coach inbox (`InboxPage.jsx`).
  */
 export function deriveCoachInboxRouteState({ surface } = {}) {
   const raw = String(surface || 'loading').toLowerCase().replace(/[^a-z0-9_]/g, '');

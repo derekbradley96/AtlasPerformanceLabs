@@ -3,13 +3,15 @@
  * Stores in public.beta_support_requests. Used from More and Account.
  */
 import React, { useState } from 'react';
-import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { useMutation } from '@tanstack/react-query';
+import { hasSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import { toGuardRole } from '@/lib/roles';
 import Button from '@/ui/Button';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { X, AlertCircle, HelpCircle, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
+import { insertBetaSupportRequest } from '@/data/betaSupportRepo';
 
 const REQUEST_TYPES = [
   { value: 'urgent_issue', label: 'Report urgent issue', icon: AlertCircle },
@@ -21,49 +23,48 @@ export default function BetaSupportModal({ open, onClose }) {
   const { user, role: rawRole } = useAuth();
   const [requestType, setRequestType] = useState('request_help');
   const [message, setMessage] = useState('');
-  const [submitting, setSubmitting] = useState(false);
 
   const roleForDb = rawRole ? toGuardRole(rawRole) : null;
   const profileId = user?.id ?? null;
 
-  const handleSubmit = async (e) => {
+  const supportMutation = useMutation({
+    mutationFn: async ({ msg, type }) => {
+      await insertBetaSupportRequest({
+        profileId,
+        role: roleForDb,
+        requestType: type,
+        message: msg,
+      });
+    },
+    onSuccess: () => {
+      toast.success("We've received your request. We'll get back to you soon.");
+      setMessage('');
+      setRequestType('request_help');
+      onClose?.();
+    },
+    onError: (err) => {
+      if (err?.message === 'NO_SUPABASE') {
+        toast.info('Support requests are sent when you have an active connection.');
+        onClose?.();
+        return;
+      }
+      toast.error(err?.message || 'Could not send. Try again.');
+    },
+  });
+
+  const handleSubmit = (e) => {
     e.preventDefault();
     const msg = (message || '').trim();
     if (!msg) {
       toast.error('Please describe what you need.');
       return;
     }
-    setSubmitting(true);
-    try {
-      if (!hasSupabase) {
-        toast.info('Support requests are sent when you have an active connection.');
-        setSubmitting(false);
-        onClose?.();
-        return;
-      }
-      const supabase = getSupabase();
-      if (!supabase) {
-        toast.info('Support requests are sent when you have an active connection.');
-        setSubmitting(false);
-        onClose?.();
-        return;
-      }
-      const { error } = await supabase.from('beta_support_requests').insert({
-        profile_id: profileId,
-        role: roleForDb ?? undefined,
-        request_type: requestType,
-        message: msg,
-      });
-      if (error) throw error;
-      toast.success("We've received your request. We'll get back to you soon.");
-      setMessage('');
-      setRequestType('request_help');
+    if (!hasSupabase) {
+      toast.info('Support requests are sent when you have an active connection.');
       onClose?.();
-    } catch (err) {
-      toast.error(err?.message || 'Could not send. Try again.');
-    } finally {
-      setSubmitting(false);
+      return;
     }
+    supportMutation.mutate({ msg, type: requestType });
   };
 
   const handleBackdropClick = (e) => {
@@ -71,6 +72,8 @@ export default function BetaSupportModal({ open, onClose }) {
   };
 
   if (!open) return null;
+
+  const submitting = supportMutation.isPending;
 
   return (
     <div

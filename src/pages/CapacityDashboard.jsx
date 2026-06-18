@@ -39,7 +39,7 @@ export default function CapacityDashboard() {
   const loadSnapshot = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getCapacitySnapshot(trainerId);
+      const data = await getCapacitySnapshot(trainerId, new Date(), { isDemoMode });
       setSnapshot(data);
     } finally {
       setLoading(false);

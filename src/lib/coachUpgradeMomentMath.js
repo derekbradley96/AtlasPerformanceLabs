@@ -1,9 +1,12 @@
 /**
  * Platform fee comparison for coach upgrade moments (GBP, aligns with config/plans Basic 10% vs Pro £59 + 3%).
+ *
+ * Example at £100/client/month: at 12 clients (£1,200 volume), Basic ≈ £120 fees, Pro ≈ £59 + £36 = £95,
+ * Elite = £89 flat — Elite beats Pro from ~12 clients upward at that average.
  */
 
 export const PRO_MONTHLY_GBP = 59;
-export const ELITE_MONTHLY_GBP = 79;
+export const ELITE_MONTHLY_GBP = 89;
 export const BASIC_COMMISSION_RATE = 0.1;
 export const PRO_COMMISSION_RATE = 0.03;
 

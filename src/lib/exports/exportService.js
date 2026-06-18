@@ -3,6 +3,21 @@
  */
 import { jsPDF } from 'jspdf';
 import { getBranding } from '@/lib/branding/brandingRepo';
+import { getClientPhase } from '@/lib/clientPhaseStore';
+import { getClientHealthScore } from '@/lib/healthScoreService';
+import { getClientPerformanceSnapshot } from '@/lib/performanceService';
+import { getAchievementsList } from '@/lib/milestonesStore';
+import { getClientCompProfile, listMedia } from '@/lib/repos/compPrepRepo';
+import { getActionLogForClient } from '@/lib/timeline/actionLogRepo';
+import { getClientTimeline } from '@/lib/timeline/buildTimeline';
+import { formatWeightDeltaKg, formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+import * as sandbox from '@/lib/sandboxStore';
+import { SUPABASE_ENABLED } from '@/lib/config';
+import {
+  getClientById as repoGetClientById,
+  getCheckInsForClient,
+  getPaymentsForClient as repoGetPaymentsForClient,
+} from '@/data/repos/atlasRepo';
 
 function hexToRgb(hex) {
   const m = (hex || '').replace(/^#/, '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
@@ -13,15 +28,31 @@ function setHeaderFill(doc, hex) {
   const [r, g, b] = hexToRgb(hex);
   doc.setFillColor(r, g, b);
 }
-import { getClientById, getClientCheckIns, getPaymentsForClient } from '@/data/selectors';
-import { getClientPhase } from '@/lib/clientPhaseStore';
-import { getClientHealthScore } from '@/lib/healthScoreService';
-import { getClientPerformanceSnapshot } from '@/lib/performanceService';
-import { getAchievementsList } from '@/lib/milestonesStore';
-import { getClientCompProfile, listMedia } from '@/lib/repos/compPrepRepo';
-import { getActionLogForClient } from '@/lib/timeline/actionLogRepo';
-import { getClientTimeline } from '@/lib/timeline/buildTimeline';
-import { formatWeightDeltaKg, formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+
+async function loadClientExportData(clientId, trainerId) {
+  if (!clientId) return { client: null, checkIns: [], payments: [] };
+  if (!SUPABASE_ENABLED) {
+    return {
+      client: sandbox.getClientById(clientId),
+      checkIns: sandbox.listCheckIns(clientId) ?? [],
+      payments: sandbox.listPayments(clientId) ?? [],
+    };
+  }
+  const tid = trainerId || undefined;
+  const [client, checkIns, payments] = await Promise.all([
+    repoGetClientById(clientId, false, tid),
+    getCheckInsForClient(clientId, false, tid),
+    repoGetPaymentsForClient(clientId, false),
+  ]);
+  const merged = client
+    ? { ...client, full_name: client.full_name || client.name }
+    : sandbox.getClientById(clientId);
+  return {
+    client: merged,
+    checkIns: Array.isArray(checkIns) ? checkIns : [],
+    payments: Array.isArray(payments) ? payments : [],
+  };
+}
 
 const MARGIN = 20;
 const HEADER_H = 28;
@@ -120,16 +151,16 @@ export async function generateProgressReport(clientId, trainerId, opts = {}) {
       branding = { ...branding, logoUrl: await flattenLogoWithBackground(branding.logoUrl, branding.accentColor) };
     } catch (_) {}
   }
-  const client = getClientById(clientId);
-  const clientName = client?.full_name ?? 'Client';
+  const { client, checkIns: checkInsRaw } = await loadClientExportData(clientId, trainerId);
+  const clientName = client?.full_name ?? client?.name ?? 'Client';
 
   addReportHeader(doc, branding, 'Progress Report', clientName);
 
-  const health = getClientHealthScore(clientId);
+  const health = getClientHealthScore(clientId, { client, checkins: checkInsRaw });
   const snapshot = getClientPerformanceSnapshot(clientId);
   const phase = clientId ? getClientPhase(clientId, client) : '—';
   const achievements = getAchievementsList(clientId, { byUser: false }).slice(0, 8);
-  const checkIns = getClientCheckIns(clientId)
+  const checkIns = checkInsRaw
     .filter((c) => c.status === 'submitted')
     .sort((a, b) => new Date(b.submitted_at || b.created_date) - new Date(a.submitted_at || a.created_date))
     .slice(0, 4);
@@ -189,8 +220,8 @@ export async function generateCompPrepReport(clientId, trainerId, _opts = {}) {
       branding = { ...branding, logoUrl: await flattenLogoWithBackground(branding.logoUrl, branding.accentColor) };
     } catch (_) {}
   }
-  const client = getClientById(clientId);
-  const clientName = client?.full_name ?? 'Client';
+  const { client } = await loadClientExportData(clientId, trainerId);
+  const clientName = client?.full_name ?? client?.name ?? 'Client';
   const profile = getClientCompProfile(clientId);
   const posingMedia = listMedia(clientId, { category: 'posing' });
 
@@ -249,9 +280,8 @@ export async function generatePaymentSummary(clientId, trainerId, _opts = {}) {
       branding = { ...branding, logoUrl: await flattenLogoWithBackground(branding.logoUrl, branding.accentColor) };
     } catch (_) {}
   }
-  const client = getClientById(clientId);
-  const clientName = client?.full_name ?? 'Client';
-  const payments = getPaymentsForClient(clientId);
+  const { client, payments } = await loadClientExportData(clientId, trainerId);
+  const clientName = client?.full_name ?? client?.name ?? 'Client';
   const actionLog = getActionLogForClient(clientId);
   const reminderCount = actionLog.filter((a) => a.action === 'payment_reminder_sent').length;
 
@@ -260,7 +290,7 @@ export async function generatePaymentSummary(clientId, trainerId, _opts = {}) {
   let y = CONTENT_TOP;
 
   y = sectionTitle(doc, y, 'Summary');
-  const paid = payments.filter((p) => p.status === 'paid');
+  const paid = payments.filter((p) => (p.status || '').toLowerCase() === 'paid');
   const overdue = payments.filter((p) => (p.status || '').toLowerCase() === 'overdue');
   const totalPaid = paid.reduce((s, p) => s + (p.amount ?? 0), 0);
   const monthlyFee = payments[0]?.amount ?? 0;
@@ -289,7 +319,7 @@ export async function generatePaymentSummary(clientId, trainerId, _opts = {}) {
   payments.slice(0, 10).forEach((p) => {
     if (y > CONTENT_BOTTOM) return;
     const status = (p.status || '').toLowerCase();
-    const line = `${formatDate(p.paid_at || p.due_date)}  ${p.amount != null ? `£${p.amount}` : ''}  ${status}`;
+    const line = `${formatDate(p.paid_at || p.due_date || p.created_at || p.date)}  ${p.amount != null ? `£${p.amount}` : ''}  ${status}`;
     doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
     doc.text(line, MARGIN + 2, y);
@@ -312,12 +342,12 @@ export async function generateTimelineReport(clientId, trainerId, opts = {}) {
       branding = { ...branding, logoUrl: await flattenLogoWithBackground(branding.logoUrl, branding.accentColor) };
     } catch (_) {}
   }
-  const client = getClientById(clientId);
-  const clientName = client?.full_name ?? 'Client';
+  const { client } = await loadClientExportData(clientId, trainerId);
+  const clientName = client?.full_name ?? client?.name ?? 'Client';
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const allEvents = await getClientTimeline(clientId, new Date(), { weightUnit: wu });
+  const allEvents = await getClientTimeline(clientId, new Date(), { weightUnit: wu, trainerId });
   const events = allEvents.filter((e) => new Date(e.occurredAt) >= thirtyDaysAgo);
 
   addReportHeader(doc, branding, 'Timeline Summary', clientName);

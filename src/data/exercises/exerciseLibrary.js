@@ -3,6 +3,8 @@
  * Each: id, name, primaryMuscle, secondaryMuscles[], movementPattern, equipment[], tags[], substitutions[] (ids).
  */
 
+import { EXTENDED_EXERCISES } from './exerciseLibraryExtended.js';
+
 const E = (id, name, primaryMuscle, movementPattern, equipment, secondaryMuscles = [], tags = [], substitutions = []) => ({
   id,
   name,
@@ -14,7 +16,7 @@ const E = (id, name, primaryMuscle, movementPattern, equipment, secondaryMuscles
   substitutions,
 });
 
-export const EXERCISES = [
+const CORE_EXERCISES = [
   // Chest
   E('ex-bp', 'Barbell Bench Press', 'Chest', 'Push', ['Barbell'], ['Triceps', 'Shoulders'], ['compound'], ['ex-dbp', 'ex-pushup']),
   E('ex-dbp', 'Dumbbell Bench Press', 'Chest', 'Push', ['Dumbbell'], ['Triceps', 'Shoulders'], [], ['ex-bp']),
@@ -141,9 +143,37 @@ export const EXERCISES = [
   E('ex-21s', '21s Curl', 'Biceps', 'Isolation', ['Barbell', 'Dumbbell'], [], [], ['ex-barbell-curl']),
 ];
 
-export const MUSCLES = ['Chest', 'Back', 'Shoulders', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Biceps', 'Triceps', 'Core'];
-export const MOVEMENT_PATTERNS = ['Push', 'Pull', 'Squat', 'Hinge', 'Lunge', 'Carry', 'Isolation', 'Plyometric', 'Other'];
-export const EQUIPMENT_LIST = ['Barbell', 'Dumbbell', 'Kettlebell', 'Cable', 'Machine', 'Band', 'Bodyweight', 'TRX', 'Medicine Ball', 'Other'];
+export const EXERCISES = [...CORE_EXERCISES, ...EXTENDED_EXERCISES];
+
+export const MUSCLES = [
+  'Chest',
+  'Back',
+  'Shoulders',
+  'Quads',
+  'Hamstrings',
+  'Glutes',
+  'Calves',
+  'Biceps',
+  'Triceps',
+  'Core',
+  'Forearms',
+  'Traps',
+  'Full body',
+];
+export const MOVEMENT_PATTERNS = ['Push', 'Pull', 'Squat', 'Hinge', 'Lunge', 'Carry', 'Isolation', 'Plyometric', 'Rotation', 'Other'];
+export const EQUIPMENT_LIST = [
+  'Barbell',
+  'Dumbbell',
+  'Kettlebell',
+  'Cable',
+  'Machine',
+  'Band',
+  'Bodyweight',
+  'TRX',
+  'Medicine Ball',
+  'Smith Machine',
+  'Other',
+];
 
 /**
  * @param {string} query

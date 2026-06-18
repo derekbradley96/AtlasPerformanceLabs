@@ -102,6 +102,15 @@ export const ATLAS_EXERCISE_TAGS = [
   'machine_preferred',
   'time_efficient',
   'skill_intensive',
+  'bodybuilding',
+  'strength',
+  'cardio',
+  'conditioning',
+  'posing_conditioning',
+  'mobility',
+  'flexibility',
+  'recovery',
+  'comp_prep',
 ];
 
 export const ATLAS_DIFFICULTY = ['beginner', 'intermediate', 'advanced'];
@@ -243,6 +252,15 @@ export const TAG_ALIAS_TO_CANONICAL = new Map([
   ['machine_preferred', 'machine_preferred'],
   ['time_efficient', 'time_efficient'],
   ['skill_intensive', 'skill_intensive'],
+  ['bodybuilding', 'bodybuilding'],
+  ['strength', 'strength'],
+  ['cardio', 'cardio'],
+  ['conditioning', 'conditioning'],
+  ['posing_conditioning', 'posing_conditioning'],
+  ['mobility', 'mobility'],
+  ['flexibility', 'flexibility'],
+  ['recovery', 'recovery'],
+  ['comp_prep', 'comp_prep'],
 ]);
 
 export const PROGRAM_ROLE_ALIAS = new Map([

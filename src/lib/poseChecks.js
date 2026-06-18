@@ -222,7 +222,7 @@ export async function getPoseCheckItems(poseCheckId) {
  * Update a single pose_check_item. Pass only fields to change.
  * Clients typically set `photo_path`; coaches set `coach_rating` / `coach_notes`.
  * @param {string} itemId - pose_check_items.id
- * @param {{ coach_rating?: number | null, coach_notes?: string | null, photo_path?: string | null }} updates
+ * @param {{ coach_rating?: number | null, coach_notes?: string | null, photo_path?: string | null, coach_annotations?: unknown, annotated_image_path?: string | null }} updates
  * @returns {Promise<boolean>}
  */
 export async function updatePoseCheckItem(itemId, updates) {
@@ -234,12 +234,30 @@ export async function updatePoseCheckItem(itemId, updates) {
     if ('coach_rating' in updates) payload.coach_rating = updates.coach_rating;
     if ('coach_notes' in updates) payload.coach_notes = updates.coach_notes;
     if ('photo_path' in updates) payload.photo_path = updates.photo_path;
+    if ('coach_annotations' in updates) payload.coach_annotations = updates.coach_annotations;
+    if ('annotated_image_path' in updates) payload.annotated_image_path = updates.annotated_image_path;
     if (Object.keys(payload).length === 0) return true;
     const { error } = await supabase.from('pose_check_items').update(payload).eq('id', itemId);
     return !error;
   } catch {
     return false;
   }
+}
+
+/**
+ * Upload coach-rendered annotated PNG for a pose_check_item.
+ * @param {{ clientId: string, poseCheckId: string, itemId: string, blob: Blob }}
+ * @returns {Promise<string | null>} storage path
+ */
+export async function uploadPoseCheckAnnotatedPng({ clientId, poseCheckId, itemId, blob }) {
+  if (!hasSupabase || !clientId || !poseCheckId || !itemId || !blob) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const name = `${clientId}/${poseCheckId}/${itemId}-annotated-${Date.now()}.png`;
+  const { error } = await supabase.storage
+    .from(POSE_CHECK_PHOTOS_BUCKET)
+    .upload(name, blob, { contentType: 'image/png', upsert: true });
+  return error ? null : name;
 }
 
 /**

@@ -86,3 +86,6 @@ export function getAthleteProgressInsights(metrics = {}, momentum = {}, trends =
 
   return { insights };
 }
+
+/** Full interpreted weight paragraphs (transformation clients) — see `progressInterpretation.js`. */
+export { interpretWeightProgress, clientGoalFromGoalsField } from './progressInterpretation';

@@ -2,7 +2,7 @@
  * Client onboarding (single existing flow, no duplicates):
  * Entry -> Coach confirmation -> Account -> Basic info -> Plan -> Finalize -> Success.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -15,32 +15,35 @@ import { isProfileOnboardingComplete } from '@/lib/onboardingStatus';
 import { getPostOnboardingPath } from '@/lib/postOnboardingRoutes';
 import Button from '@/ui/Button';
 import Card from '@/ui/Card';
-import { colors, spacing, touchTargetMin } from '@/ui/tokens';
+import { colors, radii, spacing, touchTargetMin } from '@/ui/tokens';
 import { impactLight } from '@/lib/haptics';
 import { deriveClientOnboardingSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { coachOfferServiceRequiresStripeCheckout } from '@/lib/clientPendingPaymentAccess';
+import PillarRating from '@/components/marketplace/PillarRating';
+import { usePresentationMode } from '@/lib/presentationMode';
+import { sendClientWelcomeEmail } from '@/lib/sendWelcomeEmail';
 
 const STEP = {
   ENTRY: 0,
   COACH_CONFIRM: 1,
-  ACCOUNT: 2,
-  BASIC_INFO: 3,
-  PLAN: 4,
-  FINALIZE: 5,
-  COACH_PAY: 6,
-  DONE: 7,
+  BASIC_INFO: 2,
+  PLAN: 3,
+  COACH_PAY: 4,
+  DONE: 5,
 };
+const TOTAL_STEPS = 3;
 
 const GOALS = [
-  { id: 'fat_loss', label: 'Fat loss' },
-  { id: 'muscle', label: 'Muscle' },
-  { id: 'competition', label: 'Competition' },
+  { id: 'fat_loss', icon: '🔥', title: 'Lose fat', subtitle: 'Cut and lean out' },
+  { id: 'muscle', icon: '💪', title: 'Build muscle', subtitle: 'Gain size and strength' },
+  { id: 'competition', icon: '🏆', title: 'Competition', subtitle: 'Get stage ready' },
+  { id: 'general_fitness', icon: '🏃', title: 'General fitness', subtitle: 'Health and energy' },
 ];
 
 const EXPERIENCE_LEVELS = [
-  { id: 'beginner', label: 'Beginner' },
-  { id: 'intermediate', label: 'Intermediate' },
-  { id: 'advanced', label: 'Advanced' },
+  { id: 'beginner', label: 'Beginner', context: 'New to structured training' },
+  { id: 'intermediate', label: 'Intermediate', context: 'Training consistently 1+ years' },
+  { id: 'advanced', label: 'Advanced', context: '3+ years, understand programming' },
 ];
 
 /** Poll server after Stripe return until billing_status flips (webhook can lag). */
@@ -54,6 +57,10 @@ const IMPLICIT_COACH_PACKAGE = Object.freeze({
   name: 'Coaching package',
   priceLabel: 'Confirmed with your coach',
   description: 'Your coach will confirm package details and pricing in the app after you connect.',
+  stripe_price_id: null,
+  price_amount: null,
+  currency: 'gbp',
+  interval: 'month',
 });
 
 function formatMoney(amount, currency = 'gbp') {
@@ -74,14 +81,86 @@ function resolveCoachPackageServiceId(s) {
   return s?.id ?? null;
 }
 
+async function resolveInviteCodeDirect(supabase, normalizedCode) {
+  const { data: edgeData, error: edgeError } = await invokeSupabaseFunction('validateInviteCode', {
+    code: normalizedCode,
+    include_services: true,
+  });
+  if (!edgeError && edgeData && typeof edgeData === 'object' && edgeData.valid) {
+    return { data: edgeData, error: null };
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc('validate_invite_code', {
+    p_code: normalizedCode,
+  });
+  if (!rpcError && rpcData && typeof rpcData === 'object') {
+    return { data: rpcData, error: null };
+  }
+
+  const { data: coachProfile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, display_name, avatar_url, role')
+    .eq('referral_code', normalizedCode)
+    .in('role', ['coach', 'trainer'])
+    .maybeSingle();
+  if (profileError || !coachProfile?.id) {
+    return { data: null, error: profileError || null };
+  }
+
+  return {
+    data: {
+      valid: true,
+      trainer_id: coachProfile.id,
+      coach_id: coachProfile.id,
+      trainer: {
+        id: coachProfile.id,
+        name: coachProfile.display_name || 'Coach',
+        avatar_url: coachProfile.avatar_url || null,
+      },
+    },
+    error: null,
+  };
+}
+
+async function listCoachServices(supabase, profileUserId) {
+  const uid = (profileUserId ?? '').toString().trim();
+  if (!uid) return [];
+  const { data: ac, error: acErr } = await supabase
+    .from('atlas_coaches')
+    .select('id')
+    .eq('user_id', uid)
+    .maybeSingle();
+  if (acErr || !ac?.id) return [];
+  const { data, error } = await supabase
+    .from('atlas_services')
+    .select('id, name, description, price_amount, currency, interval, stripe_price_id')
+    .eq('coach_id', ac.id)
+    .eq('active', true)
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (import.meta.env.DEV) console.warn('[listCoachServices]', error.message);
+    return [];
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+async function listCoachServicesByCode(code) {
+  const normalized = normalizeInviteCode(code);
+  if (!normalized) return [];
+  const { data, error } = await invokeSupabaseFunction('public-coach-profile', { slug: normalized });
+  if (error || !data || typeof data !== 'object') return [];
+  return Array.isArray(data.services) ? data.services : [];
+}
+
 export default function ClientOnboardingFlow() {
   const navigate = useNavigate();
+  const { viewport } = usePresentationMode();
   const [searchParams] = useSearchParams();
   const {
     authReady,
     supabaseUser,
     profile,
-    signUp,
+    updateProfile,
     refreshProfile,
     clientLinkedRow,
     clientLinkedResolved,
@@ -92,17 +171,20 @@ export default function ClientOnboardingFlow() {
   const [booting, setBooting] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [emailConfirmNotice, setEmailConfirmNotice] = useState(false);
 
   const [inviteCode, setInviteCode] = useState('');
   const [coach, setCoach] = useState(null);
+  const [coachProfileLoading, setCoachProfileLoading] = useState(false);
   const [coachServices, setCoachServices] = useState([]);
 
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [age, setAge] = useState('');
+  const [currentWeight, setCurrentWeight] = useState('');
+  const [weightUnit, setWeightUnit] = useState('kg');
   const [goal, setGoal] = useState('');
   const [experienceLevel, setExperienceLevel] = useState('');
+  const [injuriesNotes, setInjuriesNotes] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [selectedPlanId, setSelectedPlanId] = useState(null);
   const [selectedServiceId, setSelectedServiceId] = useState(null);
   const [offerContext, setOfferContext] = useState(null);
@@ -110,12 +192,23 @@ export default function ClientOnboardingFlow() {
   const [paymentPoll, setPaymentPoll] = useState(false);
   const [paymentPollAttempt, setPaymentPollAttempt] = useState(0);
   const [paymentPollTimedOut, setPaymentPollTimedOut] = useState(false);
+  const bootstrappedRef = useRef(false);
+  const hydratedNameRef = useRef(false);
 
-  const showProgress = step >= STEP.COACH_CONFIRM && step <= STEP.COACH_PAY;
-  const progressStep = showProgress ? Math.min(6, Math.max(1, step)) : 0;
-  const progressPct = showProgress ? (progressStep / 6) * 100 : 0;
+  const showProgress = step >= STEP.COACH_CONFIRM && step <= STEP.PLAN;
+  const progressStep = showProgress ? Math.min(TOTAL_STEPS, Math.max(1, step)) : 0;
+  const showDotProgress = viewport !== 'mobile';
 
   const hasCoachPackages = Array.isArray(coachServices) && coachServices.length > 0;
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log('[Onboarding] ClientOnboardingFlow mounted', {
+      onboarding_complete: profile?.onboarding_complete,
+      hasLinkedClient: !!clientLinkedRow?.id,
+      step: 'entry',
+    });
+  }, []);
 
   const planOptions = useMemo(() => {
     if (hasCoachPackages) {
@@ -127,6 +220,10 @@ export default function ClientOnboardingFlow() {
           name: s.name || 'Coaching package',
           priceLabel: `${formatMoney(s.price_amount, s.currency)} / ${s.interval || 'month'}`,
           description: s.description || 'Coaching package from your coach',
+          stripe_price_id: s.stripe_price_id ?? null,
+          price_amount: s.price_amount ?? null,
+          currency: s.currency ?? 'gbp',
+          interval: s.interval ?? 'month',
         };
       });
     }
@@ -145,14 +242,18 @@ export default function ClientOnboardingFlow() {
       return false;
     }
     setLoading(true);
+    setCoachProfileLoading(true);
     setError('');
     try {
-      const { data, error: fnErr } = await invokeSupabaseFunction('validateInviteCode', {
-        code: normalized,
-        include_services: true,
-      });
-      if (fnErr || !data?.valid) {
-        setError(data?.error || fnErr || 'Invalid coach code');
+      const supabase = getSupabase();
+      if (!supabase) {
+        setError('Connection unavailable. Please try again.');
+        return false;
+      }
+
+      const { data, error: lookupError } = await resolveInviteCodeDirect(supabase, normalized);
+      if (lookupError || !data?.valid) {
+        setError(data?.error || lookupError?.message || 'Invalid coach code');
         return false;
       }
       const coachId = data.trainer_id ?? data.coach_id ?? data.trainer?.id;
@@ -165,25 +266,49 @@ export default function ClientOnboardingFlow() {
         id: coachId,
         display_name: data.trainer?.name || data.trainer?.display_name || 'Coach',
         avatar_url: data.trainer?.avatar_url ?? null,
+        full_name: null,
+        coach_focus: null,
+        coach_type: null,
+        coach_tagline: null,
+        bio: null,
+        avg_pillars: null,
+        review_count: 0,
       };
 
       if (hasSupabase) {
-        const supabase = getSupabase();
-        if (supabase) {
-          const { data: pRow } = await supabase
-            .from('profiles')
-            .select('display_name, full_name, avatar_url')
-            .eq('id', coachId)
-            .maybeSingle();
-          if (pRow) {
-            resolvedCoach.display_name = pRow.display_name || pRow.full_name || resolvedCoach.display_name;
-            resolvedCoach.avatar_url = pRow.avatar_url ?? resolvedCoach.avatar_url;
-          }
+        const { data: pRow } = await supabase
+          .from('profiles')
+          .select('display_name, full_name, avatar_url, coach_focus, coach_type, coach_tagline, bio')
+          .eq('id', coachId)
+          .maybeSingle();
+        if (pRow) {
+          resolvedCoach.display_name = pRow.display_name || pRow.full_name || resolvedCoach.display_name;
+          resolvedCoach.avatar_url = pRow.avatar_url ?? resolvedCoach.avatar_url;
+          resolvedCoach.full_name = pRow.full_name ?? null;
+          resolvedCoach.coach_focus = pRow.coach_focus ?? null;
+          resolvedCoach.coach_type = pRow.coach_type ?? null;
+          resolvedCoach.coach_tagline = pRow.coach_tagline ?? null;
+          resolvedCoach.bio = pRow.bio ?? null;
+        }
+        const { data: rRow } = await supabase
+          .from('v_coach_rating_summary')
+          .select('avg_pillars, review_count')
+          .eq('coach_id', coachId)
+          .maybeSingle();
+        if (rRow) {
+          resolvedCoach.avg_pillars = rRow.avg_pillars ?? null;
+          resolvedCoach.review_count = Number(rRow.review_count || 0);
         }
       }
 
       setCoach(resolvedCoach);
-      setCoachServices(Array.isArray(data.services) ? data.services : []);
+      const rawSvc = data.services;
+      const servicesFromLookup = Array.isArray(rawSvc) ? rawSvc : (rawSvc && typeof rawSvc === 'object' ? Object.values(rawSvc) : []);
+      let services = servicesFromLookup.length > 0 ? servicesFromLookup : await listCoachServices(supabase, coachId);
+      if (!Array.isArray(services) || services.length === 0) {
+        services = await listCoachServicesByCode(normalized);
+      }
+      setCoachServices(services);
       setInviteCode(normalized);
       setPendingInvite(normalized, coachId);
       return true;
@@ -192,11 +317,14 @@ export default function ClientOnboardingFlow() {
       return false;
     } finally {
       setLoading(false);
+      setCoachProfileLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (!authReady) return;
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
     let cancelled = false;
     (async () => {
       setBooting(true);
@@ -284,6 +412,7 @@ export default function ClientOnboardingFlow() {
           if (data?.billing_status && String(data.billing_status).toLowerCase() !== 'pending_payment') {
             await refreshProfile();
             clearPendingInvite();
+            toast.success(`Welcome to ${coach?.display_name || 'your coach'}'s coaching 🎯 Your journey starts now.`);
             setStep(STEP.DONE);
             setPaymentPoll(false);
             setPaymentPollTimedOut(false);
@@ -318,8 +447,14 @@ export default function ClientOnboardingFlow() {
   }, [searchParams, navigate]);
 
   useEffect(() => {
-    if (!fullName && profile?.display_name) setFullName(profile.display_name);
-  }, [fullName, profile?.display_name]);
+    if (hydratedNameRef.current) return;
+    const seededName = String(profile?.full_name || profile?.display_name || '').trim();
+    if (!seededName) return;
+    if (!String(fullName || '').trim()) {
+      setFullName(seededName);
+    }
+    hydratedNameRef.current = true;
+  }, [fullName, profile?.display_name, profile?.full_name]);
 
   useEffect(() => {
     if (!selectedPlanId && planOptions.length > 0) {
@@ -334,37 +469,63 @@ export default function ClientOnboardingFlow() {
     if (ok) setStep(STEP.COACH_CONFIRM);
   };
 
-  const handleAccountSubmit = async (e) => {
-    e.preventDefault();
+  const coachTypeLabel = useMemo(() => {
+    const focus = String(coach?.coach_focus || '').toLowerCase();
+    const type = String(coach?.coach_type || '').toLowerCase();
+    if (focus === 'competition' || type === 'prep') return 'Competition prep coach';
+    if (focus === 'transformation' || type === 'fitness') return 'Transformation coach';
+    if (focus === 'integrated' || type === 'hybrid') return 'Integrated coach';
+    return 'Coach';
+  }, [coach]);
+
+  const selectedExperienceContext = useMemo(
+    () => EXPERIENCE_LEVELS.find((x) => x.id === experienceLevel)?.context || '',
+    [experienceLevel]
+  );
+
+  const saveStep2AndContinue = useCallback(async () => {
     impactLight();
-    if (!email.trim() || password.length < 8) {
-      setError('Email and password (8+ chars) are required.');
-      return;
-    }
+    const nextErrors = {};
+    const ageNum = Number(age);
+    const weightNum = Number(currentWeight);
+    if (!String(fullName || '').trim()) nextErrors.fullName = 'Please add your full name.';
+    if (!Number.isFinite(ageNum) || ageNum < 16 || ageNum > 80) nextErrors.age = 'Age must be between 16 and 80.';
+    if (!Number.isFinite(weightNum) || weightNum <= 0) nextErrors.currentWeight = 'Please add your current weight.';
+    if (!goal) nextErrors.goal = 'Please select your goal.';
+    if (!experienceLevel) nextErrors.experienceLevel = 'Please select your experience level.';
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     setLoading(true);
     setError('');
-    setEmailConfirmNotice(false);
     try {
-      const { data, error: suErr } = await signUp(email.trim(), password, { role: 'client' });
-      if (suErr) {
-        const msg = suErr.message || 'Could not create account';
-        if (/already|exists|registered/i.test(msg)) {
-          setError('This email already has an account. Log in to continue onboarding.');
-        } else {
-          setError(msg);
+      const weightKg = weightUnit === 'lb'
+        ? Number((weightNum * 0.45359237).toFixed(2))
+        : weightNum;
+      const patch = {
+        full_name: String(fullName || '').trim(),
+        age: ageNum,
+        weight_kg: weightKg,
+        client_goal: goal,
+        experience_level: experienceLevel,
+        injuries_notes: String(injuriesNotes || '').trim() || null,
+      };
+      if (typeof updateProfile === 'function') {
+        await updateProfile(patch);
+      } else {
+        const supabase = getSupabase();
+        if (supabase && supabaseUser?.id) {
+          await supabase.from('profiles').upsert({ id: supabaseUser.id, ...patch });
         }
-        return;
       }
-      if (!data?.session) {
-        setEmailConfirmNotice(true);
-        toast.success('Check your email, then log in to continue.');
-        return;
-      }
-      setStep(STEP.BASIC_INFO);
+      await refreshProfile();
+      setStep(STEP.PLAN);
+    } catch (e) {
+      setError(e?.message || 'Could not save your details');
     } finally {
       setLoading(false);
     }
-  };
+  }, [age, currentWeight, experienceLevel, fullName, goal, injuriesNotes, refreshProfile, supabaseUser?.id, updateProfile, weightUnit]);
 
   const handleFinalize = async () => {
     impactLight();
@@ -388,12 +549,12 @@ export default function ClientOnboardingFlow() {
     setLoading(true);
     setError('');
     try {
+      const billingStatus = coachOfferServiceRequiresStripeCheckout(selectedPlan) ? 'pending_payment' : 'active';
       const payload = {
         user_id: supabaseUser.id,
         coach_id: coach.id,
         trainer_id: coach.id,
         name: fullName.trim(),
-        full_name: fullName.trim(),
         goals: GOALS.find((g) => g.id === goal)?.label ?? goal,
         previous_experience: EXPERIENCE_LEVELS.find((x) => x.id === experienceLevel)?.label ?? experienceLevel,
         onboarding_notes: [
@@ -402,12 +563,13 @@ export default function ClientOnboardingFlow() {
           `selected_plan_id=${selectedPlan.id}`,
           'onboarding_complete=true',
         ].join('; '),
-        ...(selectedServiceId ? { selected_service_id: selectedServiceId } : {}),
+        selected_service_id: selectedServiceId || null,
+        billing_status: billingStatus,
       };
 
-      const { data: created, error: createErr } = await invokeSupabaseFunction('client-profile-create', payload);
-      if (createErr) {
-        setError(typeof createErr === 'string' ? createErr : 'Could not finalize onboarding');
+      const { data: created, error: createError } = await invokeSupabaseFunction('client-profile-create', payload);
+      if (createError || !created?.id) {
+        setError(createError || 'Could not finalize onboarding');
         return;
       }
 
@@ -415,13 +577,27 @@ export default function ClientOnboardingFlow() {
         await refreshProfile();
       }
 
-      const billing = String(created?.billing_status ?? 'active').toLowerCase();
+      const billing = String(created?.billing_status ?? created?.subscription_status ?? 'active').toLowerCase();
       if (billing === 'pending_payment') {
         setStep(STEP.COACH_PAY);
         return;
       }
+      if (typeof updateProfile === 'function') {
+        await updateProfile({
+          role: 'client',
+          onboarding_complete: true,
+          display_name: String(fullName || '').trim() || profile?.display_name || null,
+        });
+      }
+      await refreshProfile();
       clearPendingInvite();
-      setStep(STEP.DONE);
+      toast.success(`Welcome to ${coach?.display_name || 'your coach'}'s coaching 🎯 Your journey starts now.`);
+      navigate(getPostOnboardingPath('client'), { replace: true });
+      void sendClientWelcomeEmail({
+        name: fullName || profile?.display_name || 'Athlete',
+        email: supabaseUser?.email,
+        coachName: coach?.display_name || coach?.full_name || 'your coach',
+      });
     } catch (_) {
       setError('Network error while finalizing onboarding. Please try again.');
     } finally {
@@ -462,10 +638,8 @@ export default function ClientOnboardingFlow() {
       return;
     }
     if (step === STEP.COACH_CONFIRM) setStep(STEP.ENTRY);
-    else if (step === STEP.ACCOUNT) setStep(STEP.COACH_CONFIRM);
-    else if (step === STEP.BASIC_INFO) setStep(supabaseUser?.id ? STEP.COACH_CONFIRM : STEP.ACCOUNT);
+    else if (step === STEP.BASIC_INFO) setStep(STEP.COACH_CONFIRM);
     else if (step === STEP.PLAN) setStep(STEP.BASIC_INFO);
-    else if (step === STEP.FINALIZE) setStep(hasCoachPackages ? STEP.PLAN : STEP.BASIC_INFO);
     else if (step === STEP.COACH_PAY) {
       navigate('/auth?mode=login&account=client', { replace: true });
     }
@@ -511,12 +685,33 @@ export default function ClientOnboardingFlow() {
 
         {showProgress ? (
           <div className="mb-6">
-            <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-              <div style={{ width: `${progressPct}%`, height: '100%', background: colors.primary, transition: 'width 0.2s ease' }} />
-            </div>
-            <p className="text-[12px] mt-2 font-medium" style={{ color: colors.muted }}>
-              Step {progressStep} of 6
-            </p>
+            {showDotProgress ? (
+              <>
+                <div className="flex items-center justify-center gap-1 mb-2">
+                  {[1, 2, 3].map((n) => (
+                    <React.Fragment key={n}>
+                      <div
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: 999,
+                          border: `2px solid ${step >= n ? colors.primary : colors.border}`,
+                          background: step >= n ? colors.primary : 'transparent',
+                        }}
+                      />
+                      {n < 3 ? <div style={{ width: 56, height: 2, background: step > n ? colors.primary : colors.border }} /> : null}
+                    </React.Fragment>
+                  ))}
+                </div>
+                <p className="text-[11px] text-center" style={{ color: colors.muted }}>
+                  Coach · You · Package
+                </p>
+              </>
+            ) : (
+              <p className="text-[12px] mt-2 font-medium text-center" style={{ color: colors.muted }}>
+                Step {progressStep} of {TOTAL_STEPS}
+              </p>
+            )}
           </div>
         ) : null}
 
@@ -546,150 +741,242 @@ export default function ClientOnboardingFlow() {
           </>
         ) : null}
 
-        {step === STEP.COACH_CONFIRM && coach ? (
+        {step === STEP.COACH_CONFIRM ? (
           <>
-            <h1 className="text-[22px] font-semibold mb-2 text-center">Join {coach.display_name || 'Coach'}</h1>
-            <Card style={{ padding: spacing[16], marginBottom: spacing[16], textAlign: 'center' }}>
-              {coach.avatar_url ? (
-                <img
-                  src={coach.avatar_url}
-                  alt={coach.display_name || 'Coach'}
-                  className="mx-auto rounded-full mb-3"
-                  style={{ width: 64, height: 64, objectFit: 'cover', border: `1px solid ${colors.border}` }}
-                />
-              ) : (
-                <div
-                  className="mx-auto rounded-full mb-3 flex items-center justify-center text-lg font-semibold"
-                  style={{ width: 64, height: 64, background: colors.surface2, border: `1px solid ${colors.border}` }}
-                >
-                  {(coach.display_name || 'C').slice(0, 1).toUpperCase()}
+            <h1 className="text-[22px] font-semibold mb-2">
+              You&apos;re joining {coach?.display_name || coach?.full_name || 'your coach'}
+            </h1>
+            {coachProfileLoading ? (
+              <Card style={{ padding: spacing[16], marginBottom: spacing[16] }}>
+                <div className="animate-pulse">
+                  <div style={{ width: 56, height: 56, borderRadius: 999, background: colors.surface2, marginBottom: spacing[12] }} />
+                  <div style={{ height: 16, width: '70%', background: colors.surface2, borderRadius: 8, marginBottom: spacing[8] }} />
+                  <div style={{ height: 12, width: '40%', background: colors.surface2, borderRadius: 8, marginBottom: spacing[8] }} />
+                  <div style={{ height: 12, width: '90%', background: colors.surface2, borderRadius: 8, marginBottom: spacing[8] }} />
+                  <div style={{ height: 12, width: '85%', background: colors.surface2, borderRadius: 8 }} />
                 </div>
-              )}
-              <p className="font-semibold text-[18px]">{coach.display_name || 'Coach'}</p>
-              <p className="text-[13px] mt-1" style={{ color: colors.muted }}>
-                Code: {inviteCode}
-              </p>
-            </Card>
+              </Card>
+            ) : coach ? (
+              <Card style={{ padding: spacing[16], marginBottom: spacing[16] }}>
+                <div className="flex items-start gap-3 mb-3">
+                  {coach.avatar_url ? (
+                    <img
+                      src={coach.avatar_url}
+                      alt={coach.display_name || 'Coach'}
+                      className="rounded-full"
+                      style={{ width: 56, height: 56, objectFit: 'cover', border: `1px solid ${colors.border}` }}
+                    />
+                  ) : (
+                    <div
+                      className="rounded-full flex items-center justify-center text-lg font-semibold"
+                      style={{ width: 56, height: 56, background: colors.surface2, border: `1px solid ${colors.border}` }}
+                    >
+                      {(coach.display_name || coach.full_name || 'C').slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold text-[18px] m-0 truncate">{coach.display_name || coach.full_name || 'Coach'}</p>
+                      <span className="text-[11px] px-2 py-1 rounded-full shrink-0" style={{ border: `1px solid ${colors.border}`, color: colors.muted }}>
+                        {coachTypeLabel}
+                      </span>
+                    </div>
+                    <p className="text-[13px] mt-1 m-0" style={{ color: colors.muted }}>
+                      {coach.coach_tagline || 'Atlas coach profile'}
+                    </p>
+                  </div>
+                </div>
+                <div className="mb-3">
+                  <PillarRating pillars={coach.avg_pillars} reviewCount={coach.review_count} size="sm" showCount />
+                </div>
+                {coach.bio ? (
+                  <p className="text-[13px] leading-relaxed m-0" style={{ color: colors.textSecondary }}>
+                    {String(coach.bio).slice(0, 200)}
+                  </p>
+                ) : null}
+              </Card>
+            ) : (
+              <Card style={{ padding: spacing[16], marginBottom: spacing[16] }}>
+                <p className="text-[14px]" style={{ color: colors.muted }}>
+                  Coach profile couldn&apos;t load — but your code was valid.
+                </p>
+                <Button variant="primary" className="w-full mt-3" style={{ minHeight: touchTargetMin }} onClick={() => setStep(STEP.BASIC_INFO)}>
+                  Continue anyway →
+                </Button>
+              </Card>
+            )}
+            <p className="text-[15px] text-center mb-3" style={{ color: colors.textSecondary }}>Is this your coach?</p>
             <Button
               variant="primary"
               className="w-full"
               style={{ minHeight: touchTargetMin }}
-              onClick={() => setStep(supabaseUser?.id ? STEP.BASIC_INFO : STEP.ACCOUNT)}
+              onClick={() => setStep(STEP.BASIC_INFO)}
             >
-              Continue
+              Yes, that&apos;s my coach →
             </Button>
-            <Button variant="secondary" className="w-full mt-2" style={{ minHeight: touchTargetMin }} onClick={() => setStep(STEP.ENTRY)}>
-              Change code
+            <Button
+              variant="secondary"
+              className="w-full mt-2"
+              style={{ minHeight: touchTargetMin }}
+              onClick={() => {
+                clearPendingInvite();
+                navigate('/clientcode', { replace: true });
+              }}
+            >
+              No — retype my code
             </Button>
-          </>
-        ) : null}
-
-        {step === STEP.ACCOUNT ? (
-          <>
-            <h1 className="text-[22px] font-semibold mb-2 text-center">Create account</h1>
-            <p className="text-[14px] mb-5 text-center" style={{ color: colors.muted }}>
-              Email and password only - we will keep this quick.
-            </p>
-            {emailConfirmNotice ? (
-              <Card style={{ padding: spacing[16] }}>
-                <p className="text-sm">Check your email to confirm your account, then log in to continue.</p>
-                <Button variant="primary" className="w-full mt-4" onClick={() => navigate('/auth?mode=login&account=client', { replace: true })}>
-                  Go to log in
-                </Button>
-              </Card>
-            ) : (
-              <form onSubmit={handleAccountSubmit} className="flex flex-col gap-3">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email"
-                  className="w-full rounded-xl px-4 py-3 text-[16px] border-none"
-                  style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
-                />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password (8+ characters)"
-                  className="w-full rounded-xl px-4 py-3 text-[16px] border-none"
-                  style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
-                />
-                <Button type="submit" variant="primary" className="w-full" disabled={loading} style={{ minHeight: touchTargetMin }}>
-                  {loading ? <Loader2 className="animate-spin" size={20} /> : 'Continue'}
-                </Button>
-              </form>
-            )}
           </>
         ) : null}
 
         {step === STEP.BASIC_INFO ? (
           <>
-            <h1 className="text-[22px] font-semibold mb-2 text-center">Basic info</h1>
-            <p className="text-[14px] mb-5 text-center" style={{ color: colors.muted }}>
-              Just enough so your coach can personalize your plan.
+            <h1 className="text-[22px] font-semibold mb-2">Tell us about yourself</h1>
+            <p className="text-[14px] mb-5" style={{ color: colors.muted }}>
+              Your coach uses this to set the right programme and targets from day one.
             </p>
+            <label className="text-xs font-semibold mb-1 block" style={{ color: colors.muted }}>Full name</label>
             <input
               type="text"
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="Full name"
-              className="w-full rounded-xl px-4 py-3 text-[16px] mb-4 border-none"
+              onChange={(e) => {
+                setFullName(e.target.value);
+                setFieldErrors((p) => ({ ...p, fullName: '' }));
+              }}
+              placeholder="Your full name"
+              className="w-full rounded-xl px-4 py-3 text-[16px] mb-1 border-none"
               style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
             />
-            <label className="text-xs font-semibold mb-2 block" style={{ color: colors.muted }}>Goal</label>
-            <div className="flex flex-wrap gap-2 mb-4">
+            {fieldErrors.fullName ? <p className="text-[12px] mb-3" style={{ color: colors.danger }}>{fieldErrors.fullName}</p> : <div className="mb-3" />}
+
+            <label className="text-xs font-semibold mb-1 block" style={{ color: colors.muted }}>Age</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={16}
+              max={80}
+              value={age}
+              onChange={(e) => {
+                setAge(e.target.value);
+                setFieldErrors((p) => ({ ...p, age: '' }));
+              }}
+              placeholder="25"
+              className="w-full rounded-xl px-4 py-3 text-[16px] mb-1 border-none"
+              style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
+            />
+            {fieldErrors.age ? <p className="text-[12px] mb-3" style={{ color: colors.danger }}>{fieldErrors.age}</p> : <div className="mb-3" />}
+
+            <label className="text-xs font-semibold mb-1 block" style={{ color: colors.muted }}>Current weight</label>
+            <div className="flex gap-2 mb-1">
+              <input
+                type="number"
+                inputMode="decimal"
+                value={currentWeight}
+                onChange={(e) => {
+                  setCurrentWeight(e.target.value);
+                  setFieldErrors((p) => ({ ...p, currentWeight: '' }));
+                }}
+                placeholder="75"
+                className="flex-1 rounded-xl px-4 py-3 text-[16px] border-none"
+                style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
+              />
+              <div className="rounded-xl p-1 flex" style={{ border: `1px solid ${colors.border}`, background: colors.surface1 }}>
+                {['kg', 'lb'].map((u) => (
+                  <button
+                    key={u}
+                    type="button"
+                    onClick={() => setWeightUnit(u)}
+                    className="px-3 rounded-lg text-[13px] font-semibold"
+                    style={{
+                      minHeight: touchTargetMin - 8,
+                      color: weightUnit === u ? colors.primary : colors.muted,
+                      background: weightUnit === u ? colors.primarySubtle : 'transparent',
+                    }}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {fieldErrors.currentWeight ? <p className="text-[12px] mb-3" style={{ color: colors.danger }}>{fieldErrors.currentWeight}</p> : <div className="mb-3" />}
+
+            <label className="text-xs font-semibold mb-2 block" style={{ color: colors.muted }}>Your goal</label>
+            <div className="grid grid-cols-2 gap-2 mb-1">
               {GOALS.map((g) => (
                 <button
                   key={g.id}
                   type="button"
-                  onClick={() => setGoal(g.id)}
-                  className="rounded-full px-3 py-2 text-[13px] font-medium border"
-                  style={{ borderColor: goal === g.id ? colors.primary : colors.border, background: goal === g.id ? colors.primarySubtle : 'transparent' }}
+                  onClick={() => {
+                    setGoal(g.id);
+                    setFieldErrors((p) => ({ ...p, goal: '' }));
+                  }}
+                  className="rounded-xl border p-3 text-left"
+                  style={{
+                    borderColor: goal === g.id ? colors.primary : colors.border,
+                    background: goal === g.id ? colors.primarySubtle : colors.surface1,
+                  }}
                 >
-                  {g.label}
+                  <p className="text-[14px] font-semibold m-0">{g.icon} {g.title}</p>
+                  <p className="text-[12px] m-0 mt-1" style={{ color: colors.muted }}>{g.subtitle}</p>
                 </button>
               ))}
             </div>
+            {fieldErrors.goal ? <p className="text-[12px] mb-3" style={{ color: colors.danger }}>{fieldErrors.goal}</p> : <div className="mb-3" />}
+
             <label className="text-xs font-semibold mb-2 block" style={{ color: colors.muted }}>Experience level</label>
-            <div className="flex flex-wrap gap-2 mb-5">
+            <div className="grid grid-cols-3 gap-2 mb-1">
               {EXPERIENCE_LEVELS.map((x) => (
                 <button
                   key={x.id}
                   type="button"
-                  onClick={() => setExperienceLevel(x.id)}
-                  className="rounded-full px-3 py-2 text-[13px] font-medium border"
-                  style={{ borderColor: experienceLevel === x.id ? colors.primary : colors.border, background: experienceLevel === x.id ? colors.primarySubtle : 'transparent' }}
+                  onClick={() => {
+                    setExperienceLevel(x.id);
+                    setFieldErrors((p) => ({ ...p, experienceLevel: '' }));
+                  }}
+                  className="rounded-xl px-3 py-3 text-[13px] font-medium border"
+                  style={{ borderColor: experienceLevel === x.id ? colors.primary : colors.border, background: experienceLevel === x.id ? colors.primarySubtle : colors.surface1 }}
                 >
                   {x.label}
                 </button>
               ))}
             </div>
+            {selectedExperienceContext ? (
+              <p className="text-[12px] mb-1" style={{ color: colors.muted }}>{selectedExperienceContext}</p>
+            ) : null}
+            {fieldErrors.experienceLevel ? <p className="text-[12px] mb-3" style={{ color: colors.danger }}>{fieldErrors.experienceLevel}</p> : <div className="mb-3" />}
+
+            <label className="text-xs font-semibold mb-1 block" style={{ color: colors.muted }}>
+              Any injuries or limitations? (optional)
+            </label>
+            <textarea
+              value={injuriesNotes}
+              onChange={(e) => setInjuriesNotes(e.target.value.slice(0, 300))}
+              placeholder="e.g. lower back issue, no heavy squatting"
+              rows={4}
+              className="w-full rounded-xl px-4 py-3 text-[14px] mb-1 border-none resize-none"
+              style={{ background: 'rgba(255,255,255,0.08)', color: colors.text }}
+            />
+            <p className="text-[12px] mb-4" style={{ color: colors.muted }}>
+              Optional — but helps your coach programme safely from the start.
+            </p>
             <Button
               variant="primary"
               className="w-full"
               style={{ minHeight: touchTargetMin }}
-              onClick={() => {
-                impactLight();
-                if (!fullName.trim() || !goal || !experienceLevel) {
-                  setError('Full name, goal, and experience are required.');
-                  return;
-                }
-                setStep(hasCoachPackages ? STEP.PLAN : STEP.FINALIZE);
-              }}
+              onClick={saveStep2AndContinue}
+              disabled={loading}
             >
-              Continue
+              {loading ? <Loader2 className="animate-spin" size={20} /> : 'Save and continue →'}
             </Button>
           </>
         ) : null}
 
         {step === STEP.PLAN ? (
           <>
-            <h1 className="text-[22px] font-semibold mb-2 text-center">Choose your coaching package</h1>
-            <p className="text-[14px] mb-4 text-center" style={{ color: colors.muted }}>
-              Your coach defines these packages and pricing.
+            <h1 className="text-[22px] font-semibold mb-2">Choose {(coach?.display_name || 'your coach')}&apos;s package</h1>
+            <p className="text-[14px] mb-4" style={{ color: colors.muted }}>
+              Your coaching starts when you select a package.
             </p>
-            <div className="flex flex-col gap-2 mb-5">
+            <div className="flex flex-col gap-3 mb-4">
               {planOptions.map((p) => (
                 <button
                   key={p.id}
@@ -698,36 +985,68 @@ export default function ClientOnboardingFlow() {
                     setSelectedPlanId(p.id);
                     setSelectedServiceId(p.serviceId || null);
                   }}
-                  className="rounded-xl border p-3 text-left"
+                  className="rounded-xl border p-4 text-left"
                   style={{
                     borderColor: selectedPlanId === p.id ? colors.primary : colors.border,
                     background: selectedPlanId === p.id ? colors.primarySubtle : colors.surface1,
                   }}
                 >
-                  <p className="font-semibold">{p.name}</p>
-                  <p className="text-sm" style={{ color: colors.muted }}>{p.priceLabel}</p>
-                  <p className="text-xs mt-1" style={{ color: colors.muted }}>{p.description}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold text-[16px] m-0">{p.name}</p>
+                    {selectedPlanId === p.id ? <span style={{ color: colors.primary }}>✓</span> : null}
+                  </div>
+                  <p className="text-[18px] font-semibold mt-1 mb-3">{p.priceLabel}</p>
+                  <p className="text-[13px] m-0">✓ Training plan</p>
+                  <p className="text-[13px] m-0">✓ Weekly check-ins</p>
+                  <p className="text-[13px] m-0">✓ Nutrition plan</p>
+                  <p className="text-[13px] m-0 mb-3">✓ Messaging</p>
+                  {p.description ? <p className="text-xs mt-1 mb-3" style={{ color: colors.muted }}>{p.description}</p> : null}
+                  <Button
+                    variant={selectedPlanId === p.id ? 'primary' : 'secondary'}
+                    type="button"
+                    style={{ width: '100%', minHeight: touchTargetMin - 4 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPlanId(p.id);
+                      setSelectedServiceId(p.serviceId || null);
+                      void handleFinalize();
+                    }}
+                    disabled={loading}
+                  >
+                    {selectedPlanId === p.id ? `Continue with ${p.name} →` : 'Join this package →'}
+                  </Button>
                 </button>
               ))}
             </div>
-            <Button variant="primary" className="w-full" style={{ minHeight: touchTargetMin }} onClick={() => setStep(STEP.FINALIZE)}>
-              Continue
-            </Button>
-          </>
-        ) : null}
-
-        {step === STEP.FINALIZE ? (
-          <>
-            <h1 className="text-[22px] font-semibold mb-2 text-center">Finalise and connect</h1>
-            <Card style={{ padding: spacing[16], marginBottom: spacing[14] }}>
-              <p className="text-sm" style={{ color: colors.muted }}>Coach</p>
-              <p className="font-semibold">{coach?.display_name || 'Coach'}</p>
-              <p className="text-sm mt-2" style={{ color: colors.muted }}>Package</p>
-              <p className="font-semibold">{selectedPlan?.name || 'Selected package'}</p>
-            </Card>
-            <Button variant="primary" className="w-full" style={{ minHeight: touchTargetMin }} onClick={handleFinalize} disabled={loading}>
-              {loading ? <Loader2 className="animate-spin" size={20} /> : 'Create my client profile'}
-            </Button>
+            <p className="text-[12px] mb-2" style={{ color: colors.muted }}>
+              ⚠️ You&apos;ll need to complete payment before your coach can see your full profile and send you a programme.
+            </p>
+            {/* TESTING ONLY — remove this skip button before public launch. See docs/LAUNCH_CHECKLIST.md. */}
+            <button
+              type="button"
+              onClick={async function handleSkipForNow() {
+                const supabase = getSupabase();
+                if (supabase && supabaseUser?.id) {
+                  await supabase.from('profiles').update({ onboarding_complete: true }).eq('id', supabaseUser.id);
+                  await refreshProfile();
+                }
+                toast('You can complete payment from your account settings any time.', { duration: 4000 });
+                navigate(getPostOnboardingPath('client'));
+              }}
+              style={{
+                width: '100%',
+                marginTop: spacing[12],
+                padding: `${spacing[10]}px`,
+                borderRadius: radii.lg,
+                border: `1px dashed ${colors.border}`,
+                background: 'transparent',
+                color: colors.muted,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              Skip for now — I&apos;ll set up payment later
+            </button>
           </>
         ) : null}
 

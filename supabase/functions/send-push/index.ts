@@ -2,20 +2,20 @@
 // Body: { profile_id, title, body, data? }. Requires JWT; for message_received, data.thread_id required and caller must be the other participant in the thread.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId } from "../_shared/auth.ts";
 
 const FCM_LEGACY_URL = "https://fcm.googleapis.com/fcm/send";
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   try {
     const callerId = await getAuthUserId(req);
     if (!callerId) {
       return new Response(
         JSON.stringify({ ok: false, error: "Unauthorized", sent: 0 }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 401, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
     if (!profileId) {
       return new Response(
         JSON.stringify({ ok: false, error: "profile_id required", sent: 0 }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
       if (!threadId) {
         return new Response(
           JSON.stringify({ ok: false, error: "thread_id required in data for message_received", sent: 0 }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       const { data: thread, error: threadErr } = await supabase
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       if (threadErr || !thread) {
         return new Response(
           JSON.stringify({ ok: false, error: "Thread not found", sent: 0 }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       const coachId = (thread as { coach_id?: string }).coach_id ?? null;
@@ -76,20 +76,20 @@ Deno.serve(async (req) => {
       if (!callerIsCoach && !callerIsClient) {
         return new Response(
           JSON.stringify({ ok: false, error: "Forbidden", sent: 0 }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
       if (!recipientIsCoach && !recipientIsClient) {
         return new Response(
           JSON.stringify({ ok: false, error: "Forbidden", sent: 0 }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
     } else {
       // Only message_received is allowed from the app; other types would require separate authorization.
       return new Response(
         JSON.stringify({ ok: false, error: "Forbidden", sent: 0 }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
     if (tokensError || !tokens?.length) {
       return new Response(
         JSON.stringify({ ok: true, sent: 0, reason: "no_tokens" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -109,7 +109,7 @@ Deno.serve(async (req) => {
     if (!fcmKey || typeof fcmKey !== "string" || !fcmKey.trim()) {
       return new Response(
         JSON.stringify({ ok: true, sent: 0, reason: "FCM_SERVER_KEY not set" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -134,13 +134,13 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({ ok: true, sent }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   } catch (e) {
     console.error("send-push", e);
     return new Response(
       JSON.stringify({ ok: false, error: "Request failed", sent: 0 }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

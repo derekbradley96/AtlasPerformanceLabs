@@ -59,6 +59,7 @@ export default function VoiceNoteComposer({
   const setText = onChange || setInternalText;
   const [recording, setRecording] = useState(false);
   const [locked, setLocked] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const [readyBlob, setReadyBlob] = useState(null);
   const [readyMeta, setReadyMeta] = useState(null);
   const [recordStartMs, setRecordStartMs] = useState(0);
@@ -294,10 +295,10 @@ export default function VoiceNoteComposer({
         minHeight: 44,
         height: 44,
         background: colors.surface2,
+        border: `1px solid ${inputFocused ? colors.borderActive : colors.border}`,
         borderRadius: 9999,
         paddingLeft: 6,
         paddingRight: 6,
-        boxShadow: '0 -4px 16px rgba(0,0,0,0.25)',
       }}
     >
       {!showRecordingUI && !showReadyUI && (
@@ -312,9 +313,9 @@ export default function VoiceNoteComposer({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: colors.primary,
-              border: 'none',
-              color: '#fff',
+              background: colors.surface2,
+              border: `1px solid ${colors.border}`,
+              color: colors.muted,
             }}
             aria-label="Attach"
           >
@@ -343,11 +344,14 @@ export default function VoiceNoteComposer({
               paddingLeft: 4,
               paddingRight: 4,
             }}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
           />
           {hasText ? (
             <button
               type="button"
               onClick={handleSendText}
+              disabled={!hasText}
               style={{
                 width: 36,
                 height: 36,
@@ -358,6 +362,7 @@ export default function VoiceNoteComposer({
                 background: colors.primary,
                 border: 'none',
                 color: '#fff',
+                opacity: hasText ? 1 : 0.35,
               }}
               aria-label="Send"
             >
@@ -379,10 +384,12 @@ export default function VoiceNoteComposer({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: 'transparent',
-                border: 'none',
-                color: colors.muted,
+                background: recording || locked ? colors.danger : colors.surface2,
+                border: `1px solid ${colors.border}`,
+                color: recording || locked ? '#fff' : colors.muted,
+                boxShadow: recording || locked ? `0 0 0 4px ${colors.primarySubtle}` : 'none',
               }}
+              className={recording || locked ? 'animate-pulse' : undefined}
               aria-label="Tap or hold to record"
             >
               <Mic size={18} strokeWidth={2} />

@@ -279,6 +279,28 @@ export default function PeakWeekBuilderPage() {
     <div className="min-h-screen" style={{ background: colors.bg, color: colors.text }}>
       <TopBar title="Peak Week Builder" onBack={() => navigate(-1)} />
       <div className="p-4 max-w-2xl mx-auto">
+        <Card
+          style={{
+            padding: spacing[14],
+            marginBottom: spacing[16],
+            border: `1px solid ${colors.primary}66`,
+            background: colors.primarySubtle ?? colors.surface1,
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>
+            Looking for the Peak Week Protocol editor? Use the Peak Week Editor instead.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            disabled={!selectedClientId}
+            onClick={() => selectedClientId && navigate(`/clients/${selectedClientId}/peak-week-editor`)}
+          >
+            Open Peak Week Editor
+          </Button>
+        </Card>
+
         {/* Client selector */}
         <section style={{ marginBottom: spacing[24] }}>
           <label className="block text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>

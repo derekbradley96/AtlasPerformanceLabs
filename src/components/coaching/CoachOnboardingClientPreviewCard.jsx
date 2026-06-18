@@ -11,6 +11,7 @@ import { colors, radii, shadows, spacing } from '@/ui/tokens';
  *   tagline?: string,
  *   taglinePlaceholder?: string,
  *   avatarUrl?: string | null,
+ *   showNewCoachBadge?: boolean,
  * }} props
  */
 export default function CoachOnboardingClientPreviewCard({
@@ -19,6 +20,7 @@ export default function CoachOnboardingClientPreviewCard({
   tagline,
   taglinePlaceholder = 'Add a short tagline later in your marketplace listing',
   avatarUrl,
+  showNewCoachBadge = false,
 }) {
   const [imgBroken, setImgBroken] = useState(false);
   const name = (displayName || '').trim() || 'Your display name';
@@ -85,6 +87,11 @@ export default function CoachOnboardingClientPreviewCard({
           >
             {trimmedTag || taglinePlaceholder}
           </p>
+          {showNewCoachBadge ? (
+            <p className="text-[13px] mt-3 font-medium" style={{ color: colors.muted }}>
+              <span aria-hidden>⭐</span> New coach
+            </p>
+          ) : null}
         </div>
       </div>
     </div>

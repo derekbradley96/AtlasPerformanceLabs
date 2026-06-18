@@ -2,7 +2,7 @@
  * Coach Briefing: daily and weekly. Facts only, same sources as Global Review.
  */
 import { buildTrainerQueue } from '@/lib/reviewQueue/buildQueue';
-import { getClients, getClientById } from '@/data/selectors';
+import { getClients, getClientById } from '@/data/repos/atlasRepo';
 import { getClientHealthScoreSnapshot } from '@/lib/healthScoreService';
 import { getPreviousHealthForRetention } from '@/lib/retention/retentionRepo';
 import { getStoredRetention } from '@/lib/retention/retentionRepo';
@@ -83,6 +83,13 @@ export interface WeeklyBriefing {
 
 export interface GetDailyBriefingOptions {
   onlyCritical?: boolean;
+  /** When omitted, inferred from trainerId (e.g. demo-trainer / fake-trainer). */
+  isDemoMode?: boolean;
+}
+
+function inferDemoMode(trainerId: string, explicit?: boolean): boolean {
+  if (typeof explicit === 'boolean') return explicit;
+  return trainerId === 'demo-trainer' || trainerId === 'fake-trainer';
 }
 
 export async function getDailyBriefing(
@@ -114,7 +121,11 @@ export async function getDailyBriefing(
     priorityScore: i.priorityScore ?? 0,
   }));
 
-  const clients = getClients().filter((c) => c.trainer_id === trainerId);
+  const isDemoMode = inferDemoMode(trainerId, options.isDemoMode);
+  const roster = await getClients(trainerId, isDemoMode);
+  const clients = roster.filter(
+    (c) => String(c.trainer_id ?? '') === String(trainerId) || String((c as { coach_id?: string }).coach_id ?? '') === String(trainerId),
+  );
   let highFatigueCount = 0;
   for (const c of clients) {
     const fatigue = evaluateFatigue(c.id, { now });
@@ -147,7 +158,7 @@ export async function getDailyBriefing(
         if (!stored || stored.item.trainerId !== trainerId) continue;
         const seenAt = new Date(stored.lastSeenAt);
         if (seenAt >= twentyFourHoursAgo) {
-          const client = getClientById(clientId);
+          const client = await getClientById(clientId, isDemoMode, trainerId);
           const reason = stored.item.reasons[0]?.detail ?? 'Retention risk';
           newRetentionFlags.push({
             clientId,
@@ -205,7 +216,12 @@ function getWeekRange(weekStartDate: string): { start: string; end: string } {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
-export function getWeeklyBriefing(trainerId: string, weekStartDate: string): WeeklyBriefing {
+export async function getWeeklyBriefing(
+  trainerId: string,
+  weekStartDate: string,
+  options?: { isDemoMode?: boolean },
+): Promise<WeeklyBriefing> {
+  const isDemoMode = inferDemoMode(trainerId, options?.isDemoMode);
   const { start: weekStart, end: weekEnd } = getWeekRange(weekStartDate);
   const history = getWeeklyCloseoutHistory();
   const closeoutsCompleted = history.filter((h) => h.done).length;
@@ -222,7 +238,10 @@ export function getWeeklyBriefing(trainerId: string, weekStartDate: string): Wee
     });
   } catch {}
 
-  const clients = getClients().filter((c) => c.trainer_id === trainerId);
+  const roster = await getClients(trainerId, isDemoMode);
+  const clients = roster.filter(
+    (c) => String(c.trainer_id ?? '') === String(trainerId) || String((c as { coach_id?: string }).coach_id ?? '') === String(trainerId),
+  );
   let paymentsOverdue = 0;
   let avgHealthScore: number | null = null;
   let healthSum = 0;

@@ -1,6 +1,6 @@
 /**
  * Nutrition editor: client-specific plan form. Upserts to public.nutrition_plans.
- * Route: /trainer/nutrition/:clientId
+ * Route: /coach/nutrition/:clientId (legacy /trainer/nutrition/* redirects here).
  */
 
 import React, { useState, useEffect, useCallback } from 'react';

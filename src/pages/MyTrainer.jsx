@@ -1,9 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
+import { getMyClientProfile } from '@/lib/clientProfiles';
+import { resolveCoachLinkId } from '@/lib/coachLink';
 import { 
   Users, MessageSquare, Calendar, CreditCard, 
   Target, CheckCircle2, AlertCircle, Search, User
@@ -19,24 +21,30 @@ export default function MyTrainer() {
 
   const { data: clientProfile, isLoading: profileLoading, error: profileError } = useQuery({
     queryKey: ['client-profile', user?.id],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('client-profile-list', { user_id: user?.id });
-      const list = Array.isArray(data) ? data : [];
-      return list[0] || null;
-    },
+    queryFn: async () => getMyClientProfile(user?.id),
     enabled: !!user?.id,
     retry: 1,
     staleTime: 30000
   });
 
   const { data: trainer, isLoading: trainerLoading } = useQuery({
-    queryKey: ['trainer-profile', clientProfile?.trainer_id],
+    queryKey: ['trainer-profile', clientProfile?.trainer_id, clientProfile?.coach_id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('trainer-profile-get', { id: clientProfile?.trainer_id });
-      const list = Array.isArray(data) ? data : (data ? [data] : []);
-      return list[0] ?? null;
+      const supabase = getSupabase();
+      const coachId = resolveCoachLinkId(clientProfile);
+      if (!supabase || !coachId) return null;
+      const { data } = await supabase
+        .from('profiles')
+        .select(`
+          id, display_name, avatar_url, bio, role,
+          coach_focus, coach_tagline, city,
+          is_marketplace_listed, referral_code
+        `)
+        .eq('id', coachId)
+        .maybeSingle();
+      return data ?? null;
     },
-    enabled: !!clientProfile?.trainer_id,
+    enabled: !!resolveCoachLinkId(clientProfile),
     retry: 1,
     staleTime: 30000
   });
@@ -44,9 +52,16 @@ export default function MyTrainer() {
   const { data: latestCheckin } = useQuery({
     queryKey: ['latest-checkin-trainer', clientProfile?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('checkin-list', { client_id: clientProfile?.id });
-      const list = Array.isArray(data) ? data : [];
-      return list[0] ?? null;
+      const supabase = getSupabase();
+      if (!supabase || !clientProfile?.id) return null;
+      const { data } = await supabase
+        .from('checkins')
+        .select('id, submitted_at, status, coach_reviewed_at')
+        .eq('client_id', clientProfile.id)
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data ?? null;
     },
     enabled: !!clientProfile?.id,
     retry: 1
@@ -79,7 +94,7 @@ export default function MyTrainer() {
   if (profileLoading) return <PageLoader />;
 
   // No trainer linked
-  if (!clientProfile?.trainer_id) {
+  if (!(clientProfile?.trainer_id || clientProfile?.coach_id)) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 flex items-center justify-center pb-24">
         <EmptyState
@@ -137,11 +152,19 @@ export default function MyTrainer() {
     cancelled: { bg: 'bg-slate-500/20', text: 'text-slate-400', border: 'border-slate-500/30', label: 'Cancelled' }
   };
 
-  const statusStyle = subscriptionStatusColors[clientProfile.subscription_status] || subscriptionStatusColors.pending;
+  const clientBillingStatus = String(clientProfile?.billing_status ?? 'active').toLowerCase();
+  const subscriptionLikeStatus =
+    clientBillingStatus === 'pending_payment'
+      ? 'pending'
+      : clientBillingStatus === 'overdue'
+        ? 'past_due'
+        : clientBillingStatus === 'paused'
+          ? 'cancelled'
+          : 'active';
+  const statusStyle = subscriptionStatusColors[subscriptionLikeStatus] || subscriptionStatusColors.pending;
 
-  const checkinOverdue = latestCheckin && 
-    new Date(latestCheckin.due_date) < new Date() && 
-    latestCheckin.status === 'pending';
+  const pendingReview = latestCheckin?.status === 'submitted' && !latestCheckin?.coach_reviewed_at;
+  const derivedSpecialties = trainer?.coach_focus ? [trainer.coach_focus] : [];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 pb-24">
@@ -173,14 +196,14 @@ export default function MyTrainer() {
           {/* Profile Info */}
           <div className="pt-14 p-6">
             <h2 className="text-xl font-bold text-white mb-1">{trainer.display_name}</h2>
-            {trainer.headline && (
-              <p className="text-slate-400 text-sm mb-4">{trainer.headline}</p>
+            {trainer.coach_tagline && (
+              <p className="text-slate-400 text-sm mb-4">{trainer.coach_tagline}</p>
             )}
 
             {/* Specialties */}
-            {trainer.specialties && trainer.specialties.length > 0 && (
+            {derivedSpecialties.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
-                {trainer.specialties.slice(0, 4).map(spec => (
+                {derivedSpecialties.slice(0, 4).map(spec => (
                   <Badge key={spec} variant="secondary" className="bg-blue-500/10 text-blue-400 border-blue-500/20">
                     {spec}
                   </Badge>
@@ -224,9 +247,7 @@ export default function MyTrainer() {
             className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4"
           >
             <div className="flex items-center gap-2 mb-2">
-              {checkinOverdue ? (
-                <AlertCircle className="w-5 h-5 text-orange-400" />
-              ) : latestCheckin?.status === 'submitted' ? (
+              {pendingReview ? (
                 <CheckCircle2 className="w-5 h-5 text-blue-400" />
               ) : (
                 <Calendar className="w-5 h-5 text-green-400" />
@@ -234,9 +255,7 @@ export default function MyTrainer() {
               <p className="text-sm text-slate-400">Check-in</p>
             </div>
             <p className="text-sm font-semibold text-white">
-              {checkinOverdue 
-                ? 'Overdue'
-                : latestCheckin?.status === 'submitted'
+              {pendingReview
                 ? 'Pending review'
                 : latestCheckin
                 ? 'On track'
@@ -262,25 +281,6 @@ export default function MyTrainer() {
           </motion.div>
         </div>
 
-        {/* What's Included */}
-        {trainer.whats_included && trainer.whats_included.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6"
-          >
-            <h3 className="font-semibold text-white mb-4">What's Included</h3>
-            <div className="space-y-2">
-              {trainer.whats_included.filter(i => i).map((item, index) => (
-                <div key={index} className="flex items-start gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-                  <span className="text-sm text-slate-300">{item}</span>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
       </div>
     </div>
   );

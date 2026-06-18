@@ -1,3 +1,4 @@
+// TODO(refactor): Consider extracting tab sub-components.
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -7,12 +8,13 @@ import {
   ClipboardList, Target, TrendingUp, Utensils, Activity, Moon, CheckSquare,
   Calendar, ImageIcon, Zap,
   Flame,
+  Scale,
 } from 'lucide-react';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
 import { getMyClientProfile } from '@/lib/clientProfiles';
 import { getClientNutritionSnapshot } from '@/lib/clientNutritionPlan';
 import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
 import { getMyClientId, getWeekStartISO } from '@/lib/checkins';
+import { resolveCoachLinkId } from '@/lib/coachLink';
 import { coachFocusAllowsPrepFeatures } from '@/lib/coachFocus';
 import { coachFocusLabel } from '@/lib/data/coachTypeHelpers';
 import { getInProgressSession } from '@/lib/workoutSessionApi';
@@ -23,6 +25,7 @@ import { motion } from 'framer-motion';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { getAthleteProgressInsights } from '@/lib/athleteProgressInsights';
 import { calculateMomentumScore, MOMENTUM_STATUS } from '@/lib/momentumEngine';
+import { syncAthleteDevelopmentScore } from '@/lib/athleteDevelopmentScore';
 import { getRetentionStreaks, getRetentionIdentityCopy } from '@/lib/retentionHabitService';
 import PaymentIssueBanner from '@/components/PaymentIssueBanner';
 import PrepHeader from '@/components/PrepHeader';
@@ -40,6 +43,9 @@ import PersonalLinkedFromSoloBanner from '@/components/personal/PersonalLinkedFr
 import HomePrimaryActionCard from '@/components/dashboards/HomePrimaryActionCard';
 import { atlasMigrationDataAttributes, deriveClientHomeRouteState } from '@/lib/atlasMigrationPhases';
 import { usePresentationMode } from '@/lib/presentationMode';
+import TodayWorkoutHeroCard from '@/components/workout/TodayWorkoutHeroCard';
+import { scheduleWorkoutReminderIfNeeded } from '@/lib/workoutReminder';
+import { interpretWeightProgress, clientGoalFromGoalsField } from '@/lib/progressInterpretation';
 
 const MOMENTUM_CATEGORIES = [
   { key: 'training_score', label: 'Training', icon: Dumbbell },
@@ -73,12 +79,17 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
   const { data: trainer } = useQuery({
     queryKey: ['client-trainer', profile?.trainer_id, profile?.coach_id],
     queryFn: async () => {
-      const linkedCoachId = profile?.trainer_id ?? profile?.coach_id;
-      const { data } = await invokeSupabaseFunction('trainer-profile-get', { id: linkedCoachId });
-      const list = Array.isArray(data) ? data : [data];
-      return list[0] ?? null;
+      const linkedCoachId = resolveCoachLinkId(profile);
+      if (!supabase || !linkedCoachId) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, avatar_url, coach_focus, coach_tagline')
+        .eq('id', linkedCoachId)
+        .maybeSingle();
+      if (error) return null;
+      return data ?? null;
     },
-    enabled: !!(profile?.trainer_id ?? profile?.coach_id),
+    enabled: !!supabase && !!resolveCoachLinkId(profile),
   });
 
   const { data: recentWorkouts = [] } = useQuery({
@@ -209,7 +220,7 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
   useEffect(() => {
     if (!profile?.id || appOpenedTracked.current) return;
     appOpenedTracked.current = true;
-    trackAppOpened(profile.id, profile.trainer_id ?? profile.coach_id).catch(() => {});
+    trackAppOpened(profile.id, resolveCoachLinkId(profile)).catch(() => {});
   }, [profile?.id, profile?.trainer_id, profile?.coach_id]);
 
   useEffect(() => {
@@ -257,6 +268,72 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
       return data ?? null;
     },
     enabled: !!hasSupabase && !!clientIdForMomentum,
+  });
+
+  const dashTransformationWeightSurface =
+    !!profile?.id &&
+    !!(profile?.trainer_id || profile?.coach_id) &&
+    String(profile?.client_type || 'transformation').toLowerCase() !== 'competition';
+
+  const { data: weightLogsRecentDash = [] } = useQuery({
+    queryKey: ['client-unified-weight-4w', profile?.id],
+    queryFn: async () => {
+      if (!supabase || !profile?.id) return [];
+      const since = new Date();
+      since.setDate(since.getDate() - 35);
+      const { data, error } = await supabase
+        .from('client_weight_logs')
+        .select('weight_kg, logged_at, target_weight_kg')
+        .eq('client_id', profile.id)
+        .gte('logged_at', since.toISOString())
+        .order('logged_at', { ascending: false })
+        .limit(24);
+      if (error) return [];
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !!supabase && !!profile?.id && dashTransformationWeightSurface,
+  });
+
+  const dashboardWeightCardModel = React.useMemo(() => {
+    if (!dashTransformationWeightSurface || !profile?.id) return null;
+    const series = weightLogsRecentDash
+      .map((r) => ({ weight: Number(r.weight_kg), date: r.logged_at }))
+      .filter((r) => Number.isFinite(r.weight));
+    const currentWeight =
+      series[0]?.weight ??
+      (progressMetrics?.latest_weight != null ? Number(progressMetrics.latest_weight) : null);
+    if (currentWeight == null || !Number.isFinite(currentWeight)) return null;
+    const startWeight = series.length
+      ? series[series.length - 1].weight
+      : profile?.baseline_weight != null
+        ? Number(profile.baseline_weight)
+        : currentWeight;
+    const targetWeight = weightLogsRecentDash[0]?.target_weight_kg != null ? Number(weightLogsRecentDash[0].target_weight_kg) : null;
+    const interp = interpretWeightProgress({
+      currentWeight,
+      startWeight: Number.isFinite(startWeight) ? startWeight : currentWeight,
+      targetWeight,
+      recentWeights: series,
+      clientGoal: clientGoalFromGoalsField(profile?.goals),
+    });
+    return { currentWeight, interp };
+  }, [
+    dashTransformationWeightSurface,
+    profile?.id,
+    profile?.baseline_weight,
+    profile?.goals,
+    weightLogsRecentDash,
+    progressMetrics?.latest_weight,
+  ]);
+
+  const { data: athleteDevelopment } = useQuery({
+    queryKey: ['athlete-development-score', profile?.id, profile?.user_id, user?.id],
+    queryFn: () =>
+      syncAthleteDevelopmentScore({
+        profileId: profile?.user_id || user?.id,
+        clientId: profile?.id,
+      }),
+    enabled: !!profile?.id && !!(profile?.user_id || user?.id) && !!hasSupabase,
   });
 
   const competitionDailySurfaceEnabled =
@@ -325,6 +402,10 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
   const hasCoachLinked = !!(profile?.trainer_id || profile?.coach_id);
   const showAwaitingProgramCard = hasCoachLinked && !programAssignmentLoading && !programAssignment;
   const hasWorkoutAssignedToday = !!todaysAssignment?.day;
+  const todaysExercises = useMemo(
+    () => (todaysAssignment?.exercises ?? []).map((ex) => ({ ...ex, name: ex.name ?? ex.exercise_name ?? '' })),
+    [todaysAssignment?.exercises]
+  );
   const todayWorkoutName =
     todaysAssignment?.day?.title ||
     todaysAssignment?.block?.title ||
@@ -367,6 +448,16 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
     if (activeWorkout) openActiveWorkoutFromDashboard();
     else navigate('/today');
   }, [activeWorkout, openActiveWorkoutFromDashboard, navigate]);
+
+  useEffect(() => {
+    scheduleWorkoutReminderIfNeeded({
+      role: 'client',
+      profileId: profile?.id,
+      workoutName: todayWorkoutName || 'Your workout',
+      hasWorkoutToday: hasWorkoutAssignedToday,
+      hasStartedWorkoutToday: Boolean(activeWorkout),
+    });
+  }, [profile?.id, todayWorkoutName, hasWorkoutAssignedToday, activeWorkout]);
 
   /** Must run before any conditional return — hooks cannot follow early returns. */
   const clientHomeSubline = useMemo(() => {
@@ -1021,12 +1112,10 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: sectionGap }}>
           <Card style={{ ...standardCard, padding: spacing[16], border: `1px solid ${colors.border}` }}>
             <p style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>
-              {profile?.selected_service_id ? 'Your coaching package is on file' : 'Your coach will assign your plan'}
+              No training program yet
             </p>
             <p style={{ fontSize: 13, color: colors.muted, margin: 0, marginTop: 6, lineHeight: 1.45 }}>
-              {profile?.selected_service_id
-                ? 'When your coach assigns a program block, your workouts will show up in Today and My Program.'
-                : 'You&apos;re connected to your coach. They&apos;ll assign training when ready — check Today for updates or message them with questions.'}
+              Your coach hasn&apos;t assigned your training plan yet. Message them to get started.
             </p>
             <button
               type="button"
@@ -1304,9 +1393,103 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
             secondaryActions={homePrimaryState.secondaryActions}
             icon={homePrimaryState.icon}
           />
+          <div style={{ marginTop: spacing[12] }}>
+            <TodayWorkoutHeroCard
+              workoutName={todayWorkoutName || "Today's session"}
+              exercises={todaysExercises}
+              hasWorkoutToday={hasWorkoutAssignedToday}
+              hasProgramAssigned={hasProgram}
+              onStartWorkout={openTodayOrActiveFromDashboard}
+              onMessageCoach={() => navigate('/messages')}
+              startLabel={activeWorkout ? 'Continue workout' : 'Start workout'}
+            />
+          </div>
         </Card>
       </motion.div>
       )}
+
+      {!showCompetitionDailySurface && dashTransformationWeightSurface && dashboardWeightCardModel ? (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} style={{ marginBottom: sectionGap }}>
+          <Card
+            style={{
+              background: colors.surface,
+              border: `1px solid ${shell.cardBorder}`,
+              borderRadius: shell.cardRadius,
+              padding: spacing[20],
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[8] }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>Bodyweight</h3>
+              <Scale size={20} strokeWidth={2} style={{ color: colors.primary, flexShrink: 0 }} aria-hidden />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing[12], marginTop: spacing[8], flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 34, fontWeight: 800, color: colors.text }}>{dashboardWeightCardModel.currentWeight.toFixed(1)} kg</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
+                {Math.abs(dashboardWeightCardModel.interp.thisWeekChange) < 0.05
+                  ? 'This week: steady'
+                  : dashboardWeightCardModel.interp.thisWeekChange < 0
+                    ? `This week: ↓ ${Math.abs(dashboardWeightCardModel.interp.thisWeekChange).toFixed(1)} kg`
+                    : `This week: ↑ ${dashboardWeightCardModel.interp.thisWeekChange.toFixed(1)} kg`}
+              </span>
+            </div>
+            <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
+              {dashboardWeightCardModel.interp.interpretation}
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/progress')}
+              style={{
+                marginTop: spacing[14],
+                width: '100%',
+                minHeight: touchTargetMin,
+                borderRadius: radii.button,
+                border: `1px solid ${colors.border}`,
+                background: colors.surface2,
+                color: colors.primary,
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: 'pointer',
+              }}
+            >
+              Open progress
+            </button>
+          </Card>
+        </motion.div>
+      ) : !showCompetitionDailySurface && dashTransformationWeightSurface ? (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} style={{ marginBottom: sectionGap }}>
+          <Card
+            style={{
+              background: colors.surface,
+              border: `1px solid ${shell.cardBorder}`,
+              borderRadius: shell.cardRadius,
+              padding: spacing[20],
+            }}
+          >
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>Bodyweight trend</h3>
+            <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+              Log your weight on Progress so Atlas can describe how things are moving in plain language — not just the number on the scale.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/progress')}
+              style={{
+                marginTop: spacing[14],
+                width: '100%',
+                minHeight: touchTargetMin,
+                borderRadius: radii.button,
+                border: 'none',
+                background: colors.primary,
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: 'pointer',
+              }}
+            >
+              Go to progress
+            </button>
+          </Card>
+        </motion.div>
+      ) : null}
 
       {/* Momentum Score */}
       {(profile?.id || clientIdForMomentum) && (
@@ -1420,6 +1603,61 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
           </Card>
         </motion.div>
       )}
+
+      {athleteDevelopment ? (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.065 }} style={{ marginBottom: sectionGap }}>
+          <Card
+            style={{
+              background: colors.surface,
+              border: `1px solid ${shell.cardBorder}`,
+              borderRadius: shell.cardRadius,
+              padding: spacing[20],
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing[8] }}>
+              <div>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                  Athlete Development
+                </p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 34, fontWeight: 800, color: colors.primary }}>
+                  {athleteDevelopment.score}
+                </p>
+              </div>
+              <span style={{ fontSize: 12, padding: '6px 10px', borderRadius: 999, background: colors.primarySubtle, color: colors.primary, fontWeight: 700 }}>
+                {athleteDevelopment.label}
+              </span>
+            </div>
+            <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+              {athleteDevelopment.interpretation}
+            </p>
+            {Array.isArray(athleteDevelopment.trend) && athleteDevelopment.trend.length >= 2 ? (
+              <div style={{ marginTop: spacing[12], border: `1px solid ${colors.border}`, borderRadius: 10, padding: spacing[10], background: colors.surface2 }}>
+                <svg viewBox="0 0 220 50" style={{ width: '100%', height: 50 }}>
+                  <polyline
+                    fill="none"
+                    stroke={colors.primary}
+                    strokeWidth="2.5"
+                    points={athleteDevelopment.trend
+                      .map((p, idx, arr) => {
+                        const values = arr.map((x) => Number(x.overall) || 0);
+                        const min = Math.min(...values);
+                        const max = Math.max(...values);
+                        const span = Math.max(1, max - min);
+                        const x = (idx / Math.max(1, arr.length - 1)) * 220;
+                        const y = 48 - (((Number(p.overall) || 0) - min) / span) * 42;
+                        return `${x},${y}`;
+                      })
+                      .join(' ')}
+                  />
+                </svg>
+                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: colors.muted }}>
+                  Last 12 weeks of momentum feeding your development score.
+                </p>
+              </div>
+            ) : null}
+          </Card>
+        </motion.div>
+      ) : null}
 
       {/* Performance Insights (skipped on competition prep home to reduce scroll noise) */}
       {!showCompetitionDailySurface && (clientIdForMomentum && (performanceInsights.length > 0 || progressMetrics)) && (

@@ -3,7 +3,12 @@
  * peak week daily (one per client per date, only if not completed today).
  * Same source for Home overview counts.
  */
-import { getClients, getClientCheckIns, getNeedsReviewCheckIns, getThreadsForTrainer } from '@/data/selectors';
+import {
+  getTrainerClientsList,
+  listClientCheckInsForInbox,
+  getSubmittedCheckInsNeedingReview,
+  getInboxThreadsForTrainer,
+} from '@/lib/inboxLocalSources';
 import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { getClientMarkedPaid } from '@/lib/clientDetailStorage';
 import { listMedia, getMediaLogsForClients, listCompClientsForTrainer } from '@/lib/repos/compPrepRepo';
@@ -52,20 +57,19 @@ function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
   const wu = normalizeWeightUnit(weightUnit);
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
-  const rawClients = getClients();
-  const clients = Array.isArray(rawClients) ? rawClients.filter((c) => c?.trainer_id === trainerId) : [];
+  const clients = getTrainerClientsList(trainerId) ?? [];
   const clientIds = new Set((clients || []).map((c) => c?.id).filter(Boolean));
   const healthByClient = new Map();
   (clients || []).forEach((c) => {
     if (!c?.id) return;
-    const h = getClientHealthScore(c.id);
+    const h = getClientHealthScore(c.id, { client: c });
     healthByClient.set(c.id, typeof h?.score === 'number' ? h.score : 100);
   });
 
   const items = [];
 
   // Check-ins needing review
-  const needsReview = (getNeedsReviewCheckIns() ?? []).filter((c) => clientIds.has(c?.client_id));
+  const needsReview = (getSubmittedCheckInsNeedingReview() ?? []).filter((c) => clientIds.has(c?.client_id));
   for (const c of needsReview) {
     const client = clients?.find((cl) => cl?.id === c?.client_id);
     const submittedAt = c.submitted_at || c.created_date;
@@ -85,7 +89,7 @@ function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
       subtitle: submittedAt ? new Date(submittedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : undefined,
       summaryLines,
       priorityScore: score,
-      riskScore: getClientRiskScore(c.client_id)?.score ?? 0,
+      riskScore: getClientRiskScore(c.client_id, { client })?.score ?? 0,
       healthScore: healthByClient.get(c.client_id) ?? 100,
     });
   }
@@ -96,7 +100,7 @@ function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
   const compMediaLogs = getMediaLogsForClients(compClientIds) ?? [];
   const compClients = (clients || []).filter((c) => c?.id && compClientIds.includes(c.id)).map((c) => ({ id: c.id, full_name: c?.full_name ?? 'Client' }));
   const hasCheckinToday = (clientId) =>
-    (getClientCheckIns(clientId) ?? []).some((c) => ((c?.submitted_at || c?.created_date) || '').toString().slice(0, 10) === today);
+    (listClientCheckInsForInbox(clientId) ?? []).some((c) => ((c?.submitted_at || c?.created_date) || '').toString().slice(0, 10) === today);
   const compPrepItems = buildCompPrepInboxItems({
     trainerId,
     clients: compClients,
@@ -122,7 +126,7 @@ function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
         subtitle: poseName,
         summaryLines: ['Media submitted'],
         priorityScore: it.priorityScore ?? 78,
-        riskScore: getClientRiskScore(it.clientId)?.score ?? 0,
+        riskScore: getClientRiskScore(it.clientId, { client: clients.find((x) => x?.id === it.clientId) })?.score ?? 0,
         healthScore: healthByClient.get(it.clientId) ?? 100,
       });
     } else if (it.type === 'MISSING_MANDATORY_POSES') {
@@ -138,7 +142,7 @@ function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
         summaryLines: poseNames.length ? [`${poseNames.length} pose(s): ${poseNames.slice(0, 3).join(', ')}${poseNames.length > 3 ? '…' : ''}`] : ['Poses missing'],
         priorityScore: it.priorityScore ?? 65,
         showDate: it.showDate,
-        riskScore: getClientRiskScore(it.clientId)?.score ?? 0,
+        riskScore: getClientRiskScore(it.clientId, { client: clients.find((x) => x?.id === it.clientId) })?.score ?? 0,
         healthScore: healthByClient.get(it.clientId) ?? 100,
         poseNames,
         missingPoseCount: poseNames.length,
@@ -155,7 +159,7 @@ function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
         summaryLines: ['Daily update not logged today'],
         priorityScore: it.priorityScore ?? 82,
         showDate: it.showDate,
-        riskScore: getClientRiskScore(it.clientId)?.score ?? 0,
+        riskScore: getClientRiskScore(it.clientId, { client: clients.find((x) => x?.id === it.clientId) })?.score ?? 0,
         healthScore: healthByClient.get(it.clientId) ?? 100,
       });
     }
@@ -167,13 +171,13 @@ function buildRawTrainerFeedItems(trainerId, weightUnit = 'kg') {
 /** Recently reviewed items (last 14 days) for Done segment. */
 function buildDoneTrainerFeedItems(trainerId, weightUnit = 'kg') {
   const wu = normalizeWeightUnit(weightUnit);
-  const clients = getClients().filter((c) => c.trainer_id === trainerId);
+  const clients = getTrainerClientsList(trainerId);
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 14);
   const cutoffIso = cutoff.toISOString();
   const items = [];
   for (const client of clients) {
-    const checkIns = getClientCheckIns(client.id).filter((c) => c.status === 'submitted' && getCheckinReviewed(c.id));
+    const checkIns = listClientCheckInsForInbox(client.id).filter((c) => c.status === 'submitted' && getCheckinReviewed(c.id));
     for (const c of checkIns) {
       const createdAt = c.submitted_at || c.created_date;
       if (createdAt && createdAt < cutoffIso) continue;
@@ -277,7 +281,7 @@ export function getTrainerReviewFeed(trainerId, options = {}) {
  * checkinsDue, unreadMessages, paymentsOverdue, compPrepPending + breakdown.
  */
 export function getTrainerReviewCounts(trainerId) {
-  const clients = getClients().filter((c) => c.trainer_id === trainerId);
+  const clients = getTrainerClientsList(trainerId);
   const activeFeed = getTrainerReviewFeed(trainerId, { status: 'active', filterType: null });
   const checkinsDue = activeFeed.filter((i) => i.type === 'checkin').length;
   const posingReviewsPending = activeFeed.filter((i) => i.type === 'posing').length;
@@ -285,7 +289,7 @@ export function getTrainerReviewCounts(trainerId) {
   const peakWeekDueToday = activeFeed.filter((i) => i.type === 'peak_week_due').length;
   const compPrepPending = posingReviewsPending + missingMandatoryPosesClients + peakWeekDueToday;
 
-  const unreadMessages = getThreadsForTrainer(trainerId).filter((t) => t.unread_count > 0).length;
+  const unreadMessages = getInboxThreadsForTrainer(trainerId).filter((t) => t.unread_count > 0).length;
   const paymentsOverdue = clients.filter((c) => c.payment_overdue && !getClientMarkedPaid(c.id)).length;
 
   return {

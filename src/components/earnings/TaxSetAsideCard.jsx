@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { colors, spacing } from '@/ui/tokens';
-import { getStoredTaxRate, setStoredTaxRate } from '@/lib/earningsMock';
+import { getStoredTaxRate, setStoredTaxRate } from '@/lib/earningsService';
 
 const CARD_BG = '#111827';
 const BORDER = 'rgba(255,255,255,0.06)';

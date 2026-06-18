@@ -1,6 +1,6 @@
 /**
  * Atlas data repo: single source for trainer-critical data.
- * - When isDemoMode: uses demo mocks only (mockData, programsStore seed, inviteCodeStore seed, earningsMock).
+ * - When isDemoMode: uses demo mocks only (mockData, programsStore seed, inviteCodeStore seed).
  * - When !isDemoMode and VITE_SUPABASE_URL set: fetches from Supabase Edge Functions (functions/v1/*).
  * - No localStorage-as-database except for demo or cached UI prefs.
  */
@@ -8,14 +8,15 @@ import type { Client, ReviewItem, Program, CheckIn, PaymentStatus } from '@/data
 import { invokeSupabaseFunction } from '@/lib/supabaseStripeApi';
 import { getCoach as getCoachApi } from '@/lib/supabaseStripeApi';
 import { SUPABASE_ENABLED } from '@/lib/config';
+import { getSupabase } from '@/lib/supabaseClient';
+import { buildSegmentedInbox } from '@/lib/inboxService';
+import { listClients as supabaseListClients, getClientById as supabaseGetClientById } from '@/data/supabaseClientsRepo';
+import { listForTrainer as supabaseListCheckinsForTrainer, listByClient as supabaseListCheckinsByClient } from '@/data/supabaseCheckinsRepo';
 import { clients as mockClients, checkIns as mockCheckIns, payments as mockPayments, threads as mockThreads } from '@/data/mockData';
 import { getStubClients } from '@/lib/clientStubStore';
 import { getSeedClients, getSeedCheckIns } from '@/lib/seedClientStore';
 import { getPrograms as getProgramsFromStore } from '@/lib/programsStore';
 import { getOrCreateInviteCode, getPendingInvites } from '@/lib/inviteCodeStore';
-import { buildSegmentedInbox } from '@/lib/inboxService';
-import { getEarningsForPeriod } from '@/lib/earningsMock';
-import { getEarningsSummary } from '@/lib/earningsService';
 import { logError } from '@/services/errorLogger';
 
 /** @deprecated Use SUPABASE_ENABLED from @/lib/config */
@@ -23,7 +24,21 @@ function isSupabaseConfigured(): boolean {
   return SUPABASE_ENABLED;
 }
 
-/** Clients for a trainer. Demo or sandbox (fake-trainer): mock + stub + seed filtered by trainer_id. Live: Edge Function atlas-clients-list. */
+function mapSupabaseClientRowToClient(row: Record<string, unknown>, fallbackTrainerId: string): Client {
+  const tid = String(row.trainer_id ?? row.coach_id ?? fallbackTrainerId ?? '').trim();
+  const nameRaw = String(row.name ?? row.full_name ?? '').trim();
+  return {
+    ...row,
+    id: String(row.id ?? ''),
+    trainer_id: tid,
+    full_name: nameRaw || 'Client',
+    email: row.email as string | undefined,
+    subscription_status: (row.billing_status ?? row.subscription_status) as Client['subscription_status'],
+    created_date: (row.created_at ?? row.created_date) as string | undefined,
+  } as Client;
+}
+
+/** Clients for a trainer. Demo or sandbox (fake-trainer): mock + stub + seed filtered by trainer_id. Live: Supabase `clients`. */
 export async function getClients(trainerId: string, isDemoMode: boolean): Promise<Client[]> {
   const useLocalData = isDemoMode || trainerId === 'fake-trainer';
   if (useLocalData) {
@@ -31,14 +46,16 @@ export async function getClients(trainerId: string, isDemoMode: boolean): Promis
     return list.filter((c: { trainer_id?: string }) => c.trainer_id === trainerId) as Client[];
   }
   if (!SUPABASE_ENABLED) return [];
-  const { data, error } = await invokeSupabaseFunction('atlas-clients-list', { trainer_id: trainerId });
-  if (error || !data) return [];
-  const d = data as Record<string, unknown>;
-  const arr = (d?.clients ?? data) ?? [];
-  return Array.isArray(arr) ? (arr as Client[]) : [];
+  try {
+    const rows = await supabaseListClients(trainerId);
+    return (Array.isArray(rows) ? rows : []).map((r) => mapSupabaseClientRowToClient(r as Record<string, unknown>, trainerId));
+  } catch (e) {
+    logError(e instanceof Error ? e : new Error(String(e)), { action: 'atlasRepo.getClients', trainerId });
+    return [];
+  }
 }
 
-/** Single client by id. Demo or sandbox: from getClients find. Live: Edge Function atlas-client-by-id. */
+/** Single client by id. Demo or sandbox: from getClients find. Live: Supabase `clients` (scoped to coach when trainerId is set). */
 export async function getClientById(clientId: string, isDemoMode: boolean, trainerId?: string): Promise<Client | null> {
   const useLocalData = isDemoMode || trainerId === 'fake-trainer';
   if (useLocalData) {
@@ -47,26 +64,30 @@ export async function getClientById(clientId: string, isDemoMode: boolean, train
     return (c as Client) ?? null;
   }
   if (!SUPABASE_ENABLED) return null;
-  const { data, error } = await invokeSupabaseFunction('atlas-client-by-id', { client_id: clientId });
-  if (error || !data) return null;
-  const d = data as Record<string, unknown>;
-  return (d?.client ?? data) as Client | null;
-}
-
-/** Programs (templates + assignments) for trainer. Demo: programsStore (localStorage seed allowed for demo). Live: Edge Function atlas-programs-list. */
-export async function getPrograms(trainerId: string, isDemoMode: boolean): Promise<Program[]> {
-  if (isDemoMode) {
-    return getProgramsFromStore() as unknown as Program[];
+  try {
+    if (trainerId) {
+      const row = await supabaseGetClientById(trainerId, clientId);
+      return row ? mapSupabaseClientRowToClient(row as Record<string, unknown>, trainerId) : null;
+    }
+    const sb = getSupabase();
+    if (!sb) return null;
+    const { data, error } = await sb.from('clients').select('*').eq('id', clientId).maybeSingle();
+    if (error || !data) return null;
+    return mapSupabaseClientRowToClient(data as Record<string, unknown>, trainerId ?? '');
+  } catch (e) {
+    logError(e instanceof Error ? e : new Error(String(e)), { action: 'atlasRepo.getClientById', clientId, trainerId });
+    return null;
   }
-  if (!SUPABASE_ENABLED) return [];
-  const { data, error } = await invokeSupabaseFunction('atlas-programs-list', { trainer_id: trainerId });
-  if (error || !data) return [];
-  const d = data as Record<string, unknown>;
-  const arr = (d?.programs ?? data) ?? [];
-  return Array.isArray(arr) ? (arr as Program[]) : [];
 }
 
-/** Check-ins for a client. Demo or sandbox: mockData.checkIns + seed. Live: Edge Function atlas-checkins-list. */
+/** Programs (templates + assignments) for trainer. Demo + live: programsStore until program_blocks list is wired here. */
+export async function getPrograms(trainerId: string, isDemoMode: boolean): Promise<Program[]> {
+  void trainerId;
+  void isDemoMode;
+  return getProgramsFromStore() as unknown as Program[];
+}
+
+/** Check-ins for a client. Demo or sandbox: mockData.checkIns + seed. Live: Supabase `checkins`. */
 export async function getCheckInsForClient(clientId: string, isDemoMode: boolean, trainerId?: string): Promise<CheckIn[]> {
   const useLocalData = isDemoMode || trainerId === 'fake-trainer';
   if (useLocalData) {
@@ -77,14 +98,25 @@ export async function getCheckInsForClient(clientId: string, isDemoMode: boolean
     ) as CheckIn[];
   }
   if (!SUPABASE_ENABLED) return [];
-  const { data, error } = await invokeSupabaseFunction('atlas-checkins-list', { client_id: clientId });
-  if (error || !data) return [];
-  const d = data as Record<string, unknown>;
-  const arr = (d?.check_ins ?? data) ?? [];
-  return Array.isArray(arr) ? (arr as CheckIn[]) : [];
+  try {
+    let tid = trainerId;
+    if (!tid) {
+      const sb = getSupabase();
+      if (!sb) return [];
+      const { data: crow } = await sb.from('clients').select('trainer_id, coach_id').eq('id', clientId).maybeSingle();
+      const r = crow as { trainer_id?: string; coach_id?: string } | null;
+      tid = (r?.trainer_id || r?.coach_id || '') as string;
+    }
+    if (!tid) return [];
+    const list = await supabaseListCheckinsByClient(tid, clientId);
+    return list as CheckIn[];
+  } catch (e) {
+    logError(e instanceof Error ? e : new Error(String(e)), { action: 'atlasRepo.getCheckInsForClient', clientId });
+    return [];
+  }
 }
 
-/** Check-ins for a trainer (all clients). Demo or sandbox: mockData.checkIns + seed. Live: Edge Function atlas-checkins-list. */
+/** Check-ins for a trainer (all clients). Demo or sandbox: mockData.checkIns + seed. Live: Supabase `checkins`. */
 export async function getCheckInsForTrainer(trainerId: string, isDemoMode: boolean): Promise<CheckIn[]> {
   const useLocalData = isDemoMode || trainerId === 'fake-trainer';
   if (useLocalData) {
@@ -93,14 +125,16 @@ export async function getCheckInsForTrainer(trainerId: string, isDemoMode: boole
     return [...mock, ...seed] as CheckIn[];
   }
   if (!SUPABASE_ENABLED) return [];
-  const { data, error } = await invokeSupabaseFunction('atlas-checkins-list', { trainer_id: trainerId });
-  if (error || !data) return [];
-  const d = data as Record<string, unknown>;
-  const arr = (d?.check_ins ?? data) ?? [];
-  return Array.isArray(arr) ? (arr as CheckIn[]) : [];
+  try {
+    const list = await supabaseListCheckinsForTrainer(trainerId);
+    return list as CheckIn[];
+  } catch (e) {
+    logError(e instanceof Error ? e : new Error(String(e)), { action: 'atlasRepo.getCheckInsForTrainer', trainerId });
+    return [];
+  }
 }
 
-/** Inbox items (segmented). Demo: buildSegmentedInbox. Live: Edge Function atlas-inbox-items or empty. */
+/** Inbox items (segmented). Demo + live: buildSegmentedInbox (local + Supabase-backed sources). */
 export async function getInboxItems(
   trainerId: string,
   isDemoMode: boolean
@@ -108,19 +142,17 @@ export async function getInboxItems(
   if (isDemoMode) {
     const segmented = buildSegmentedInbox(trainerId);
     return {
-      active: (segmented.active ?? []) as ReviewItem[],
-      waiting: (segmented.waiting ?? []) as ReviewItem[],
-      done: (segmented.done ?? []) as ReviewItem[],
+      active: (segmented.active ?? []) as unknown as ReviewItem[],
+      waiting: (segmented.waiting ?? []) as unknown as ReviewItem[],
+      done: (segmented.done ?? []) as unknown as ReviewItem[],
     };
   }
   if (!isSupabaseConfigured()) return { active: [], waiting: [], done: [] };
-  const { data, error } = await invokeSupabaseFunction('atlas-inbox-items', { trainer_id: trainerId });
-  if (error || !data) return { active: [], waiting: [], done: [] };
-  const d = data as Record<string, unknown>;
+  const segmented = buildSegmentedInbox(trainerId);
   return {
-    active: (d?.active ?? []) as ReviewItem[],
-    waiting: (d?.waiting ?? []) as ReviewItem[],
-    done: (d?.done ?? []) as ReviewItem[],
+    active: (segmented.active ?? []) as unknown as ReviewItem[],
+    waiting: (segmented.waiting ?? []) as unknown as ReviewItem[],
+    done: (segmented.done ?? []) as unknown as ReviewItem[],
   };
 }
 
@@ -195,7 +227,7 @@ export async function getCoach(
   return getCoachApi(userId);
 }
 
-/** Earnings summary for period. Demo: earningsService.getEarningsSummary. Live: Edge Function atlas-earnings-summary or stub. */
+/** Earnings summary for period. Demo: mockData.payments aggregate. Live: stub until coach revenue RPC is wired here. */
 export async function getEarningsSummaryForPeriod(
   trainerId: string,
   period: string,
@@ -205,15 +237,37 @@ export async function getEarningsSummaryForPeriod(
   transactions: PaymentStatus[];
   series?: Array<{ date: string; value: number }>;
 }> {
+  void period;
   if (isDemoMode) {
-    const summary = getEarningsSummary(period) as { totals?: { grossRevenue: number; netRevenue: number; pending: number; overdue: number } } | undefined;
-    const periodData = getEarningsForPeriod(period) as unknown as { totals?: { grossRevenue: number; netRevenue: number; pending: number; overdue: number }; transactions?: PaymentStatus[]; series?: Array<{ date: string; value: number }> } | undefined;
+    const periodData = (mockPayments ?? [])
+      .filter((p) => p.trainer_id === trainerId)
+      .map((p) => ({
+        id: p.id,
+        amount: Number(p.amount) || 0,
+        status: p.status,
+        date: p.due_date,
+      })) as PaymentStatus[];
+    const totals = periodData.reduce(
+      (acc, row) => {
+        if (row.status === 'paid') {
+          acc.grossRevenue += Number(row.amount) || 0;
+          acc.netRevenue += Number(row.amount) || 0;
+        } else if (row.status === 'pending') {
+          acc.pending += Number(row.amount) || 0;
+        } else if (row.status === 'overdue') {
+          acc.overdue += Number(row.amount) || 0;
+        }
+        return acc;
+      },
+      { grossRevenue: 0, netRevenue: 0, pending: 0, overdue: 0 }
+    );
     return {
-      totals: summary?.totals ?? periodData?.totals ?? { grossRevenue: 0, netRevenue: 0, pending: 0, overdue: 0 },
-      transactions: (periodData?.transactions ?? []) as PaymentStatus[],
-      series: periodData?.series,
+      totals,
+      transactions: periodData,
+      series: [],
     };
   }
+  void trainerId;
   if (!isSupabaseConfigured()) {
     return {
       totals: { grossRevenue: 0, netRevenue: 0, pending: 0, overdue: 0 },
@@ -221,31 +275,14 @@ export async function getEarningsSummaryForPeriod(
       series: [],
     };
   }
-  const { data, error } = await invokeSupabaseFunction('atlas-earnings-summary', {
-    trainer_id: trainerId,
-    period,
-  });
-  if (error || !data) {
-    return {
-      totals: { grossRevenue: 0, netRevenue: 0, pending: 0, overdue: 0 },
-      transactions: [],
-      series: [],
-    };
-  }
-  const d = data as Record<string, unknown>;
   return {
-    totals: (d?.totals ?? { grossRevenue: 0, netRevenue: 0, pending: 0, overdue: 0 }) as {
-      grossRevenue: number;
-      netRevenue: number;
-      pending: number;
-      overdue: number;
-    },
-    transactions: (d?.transactions ?? []) as PaymentStatus[],
-    series: d?.series as Array<{ date: string; value: number }> | undefined,
+    totals: { grossRevenue: 0, netRevenue: 0, pending: 0, overdue: 0 },
+    transactions: [],
+    series: [],
   };
 }
 
-/** Threads for trainer (for unread counts on client list). Demo: mockData.threads. Live: Edge Function atlas-threads-list. */
+/** Threads for trainer (for unread counts on client list). Demo: mockData.threads. Live: message_threads. */
 export async function getThreadsForTrainer(
   trainerId: string,
   isDemoMode: boolean
@@ -254,14 +291,34 @@ export async function getThreadsForTrainer(
     return mockThreads.filter((t: { trainer_id: string }) => t.trainer_id === trainerId);
   }
   if (!SUPABASE_ENABLED) return [];
-  const { data, error } = await invokeSupabaseFunction('atlas-threads-list', { trainer_id: trainerId });
-  if (error || !data) return [];
-  const d = data as Record<string, unknown>;
-  const arr = (d?.threads ?? data) ?? [];
-  return Array.isArray(arr) ? arr : [];
+  const sb = getSupabase();
+  if (!sb) return [];
+  try {
+    const { data, error } = await sb
+      .from('message_threads')
+      .select('id, client_id, coach_id, updated_at, coach_last_read_at')
+      .eq('coach_id', trainerId)
+      .is('deleted_at', null);
+    if (error || !Array.isArray(data)) return [];
+    return data.map((row: Record<string, unknown>) => {
+      const updated = row.updated_at ? new Date(String(row.updated_at)).getTime() : 0;
+      const readAt = row.coach_last_read_at ? new Date(String(row.coach_last_read_at)).getTime() : 0;
+      const unread = updated > 0 && updated > readAt ? 1 : 0;
+      return {
+        id: String(row.id ?? ''),
+        client_id: String(row.client_id ?? ''),
+        trainer_id: String(row.coach_id ?? trainerId),
+        unread_count: unread,
+        last_message_at: row.updated_at != null ? String(row.updated_at) : undefined,
+      };
+    });
+  } catch (e) {
+    logError(e instanceof Error ? e : new Error(String(e)), { action: 'atlasRepo.getThreadsForTrainer', trainerId });
+    return [];
+  }
 }
 
-/** Payments for a client (for Earnings at-risk). Demo: mockData.payments. Live: from earnings or atlas-payments. */
+/** Payments for a client (for Earnings at-risk). Demo: mockData.payments. Live: client_payments. */
 export async function getPaymentsForClient(
   clientId: string,
   isDemoMode: boolean
@@ -270,11 +327,33 @@ export async function getPaymentsForClient(
     return mockPayments.filter((p: { client_id: string }) => p.client_id === clientId) as PaymentStatus[];
   }
   if (!SUPABASE_ENABLED) return [];
-  const { data, error } = await invokeSupabaseFunction('atlas-payments-list', { client_id: clientId });
-  if (error || !data) return [];
-  const d = data as Record<string, unknown>;
-  const arr = (d?.payments ?? data) ?? [];
-  return Array.isArray(arr) ? (arr as PaymentStatus[]) : [];
+  const sb = getSupabase();
+  if (!sb) return [];
+  try {
+    const { data, error } = await sb
+      .from('client_payments')
+      .select('id, client_id, coach_id, amount, status, paid_at, created_at')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
+    if (error || !Array.isArray(data)) return [];
+    return data.map((row: Record<string, unknown>) => {
+      const st = String(row.status ?? 'pending');
+      const status: PaymentStatus['status'] =
+        st === 'paid' ? 'paid' : st === 'pending' ? 'pending' : 'pending';
+      return {
+        id: String(row.id ?? ''),
+        client_id: String(row.client_id ?? clientId),
+        trainer_id: String(row.coach_id ?? ''),
+        status,
+        amount: Number(row.amount) || 0,
+        paid_at: row.paid_at != null ? String(row.paid_at) : null,
+        date: row.created_at != null ? String(row.created_at) : undefined,
+      } as PaymentStatus;
+    });
+  } catch (e) {
+    logError(e instanceof Error ? e : new Error(String(e)), { action: 'atlasRepo.getPaymentsForClient', clientId });
+    return [];
+  }
 }
 
 export { isSupabaseConfigured };

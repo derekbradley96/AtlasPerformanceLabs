@@ -1,5 +1,10 @@
+/**
+ * LEGACY — 58KB legacy builder. Active builder is ProgramBuilderPageImpl.jsx via ProgramBuilderPage.jsx.
+ * Do not add features here.
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2, GripVertical, Save, Users, Bookmark, X, MoreVertical, ChevronDown, ChevronRight, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -8,7 +13,7 @@ import { getExerciseById as getLibraryExerciseById } from '@/data/exerciseLibrar
 import { saveProgramAsTemplate, getDayTemplates, getProgramTemplates, saveDayAsTemplate } from '@/lib/programTemplatesStore';
 import { addProgramChangeLog } from '@/lib/programChangeLogStore';
 import { logAuditEvent } from '@/lib/auditLogStore';
-import { getClientById } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import { GOALS } from '@/lib/programsStore';
 import ExercisePickerModal from '@/components/programs/ExercisePickerModal';
@@ -16,6 +21,7 @@ import Button from '@/ui/Button';
 import { impactLight } from '@/lib/haptics';
 import { trackFriction } from '@/services/frictionTracker';
 import { colors } from '@/ui/tokens';
+import { isPersonal } from '@/lib/roles';
 
 const HEADER_SAVE_STYLE = { minHeight: 44, minWidth: 44, fontSize: 15, fontWeight: 600, color: colors.accent, background: 'transparent', border: 'none' };
 
@@ -92,7 +98,7 @@ export default function ProgramBuilder() {
   const coachFocus = String(rawCoachFocus || '').toLowerCase();
   const showCompPrepFields = coachFocus === 'competition' || coachFocus === 'integrated';
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? 'trainer-1';
-  const isPersonalUser = user?.user_type === 'personal' || user?.user_type === 'solo';
+  const isPersonalUser = isPersonal(user?.user_type ?? user?.role);
   const programId = searchParams.get('id');
   const assignToClientId = searchParams.get('assignTo') || searchParams.get('clientId');
   const { setHeaderRight, setHeaderTitle } = useOutletContext() || {};
@@ -137,7 +143,24 @@ export default function ProgramBuilder() {
   const program = programId ? getProgramById(programId) : null;
   const availablePrograms = getPrograms().filter((p) => p?.id !== programId);
   const availableTemplates = getProgramTemplates(trainerId);
-  const clientForAssign = assignToClientId ? getClientById(assignToClientId) : null;
+  const supabase = getSupabase();
+  const { data: targetClient } = useQuery({
+    queryKey: ['program-builder-client', assignToClientId],
+    queryFn: async () => {
+      if (!supabase || !assignToClientId) return null;
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name, user_id')
+        .eq('id', assignToClientId)
+        .maybeSingle();
+      if (error || !data) return null;
+      const name = (data.name ?? '').toString().trim() || 'Client';
+      return { ...data, full_name: name, name };
+    },
+    enabled: Boolean(supabase && assignToClientId),
+    staleTime: 10 * 60 * 1000,
+  });
+  const clientForAssign = targetClient ?? null;
   const saveStateRef = useRef(saveState);
   const hasContentRef = useRef(false);
   const abandonPayloadRef = useRef({});
@@ -559,7 +582,7 @@ export default function ProgramBuilder() {
     assignProgramToClient(assignToClientId, programId);
     logAuditEvent({ actorUserId: user?.id ?? 'demo-trainer', ownerTrainerUserId: trainerId, entityType: 'program_assignment', entityId: programId, action: 'program_assigned', after: { clientId: assignToClientId, programId, programName: prog?.name } });
     toast.success(`Program assigned to ${clientForAssign?.full_name || 'client'}`);
-    if (user?.user_type === 'personal' || user?.user_type === 'solo') {
+    if (isPersonal(user?.user_type ?? user?.role)) {
       navigate('/myprogram', { replace: true });
     } else {
       navigate(`/clients/${assignToClientId}`);

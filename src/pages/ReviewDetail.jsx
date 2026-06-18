@@ -1,9 +1,10 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { navigateToThread } from '@/lib/messagesPath';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
 import { toast } from 'sonner';
-import { getClientById, getClientCheckIns } from '@/data/selectors';
+import { resolveClientRecord, listClientCheckInsForInbox } from '@/lib/inboxLocalSources';
 import { safeDate } from '@/lib/format';
 import { setCheckinReviewed } from '@/lib/checkinReviewStorage';
 import { getCompMediaById, markMediaReviewed, listMedia } from '@/lib/repos/compPrepRepo';
@@ -58,8 +59,8 @@ export default function ReviewDetail() {
       const idx = thisWeek ? sorted.indexOf(thisWeek) : -1;
       const lastWeek = idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
       const cid = thisWeek?.client_id || clientId;
-      const cl = cid ? getClientById(cid) : client;
-      const risk = cid ? getClientRiskEvaluation(cid) : null;
+      const cl = cid ? resolveClientRecord(cid) : client;
+      const risk = cid ? getClientRiskEvaluation(cid, { client: cl, checkIns: sorted }) : null;
       if (!thisWeek || !cl) return { reviewItem: null, clientId: cid };
       const item = checkinToReviewItem(thisWeek, lastWeek, cl, risk, viewerWU);
       return { reviewItem: item, clientId: cid };
@@ -94,7 +95,7 @@ export default function ReviewDetail() {
       logAuditEvent({ actorUserId: user?.id ?? 'demo-trainer', ownerTrainerUserId: trainerId, entityType: 'checkin', entityId: id, action: 'review_complete', after: { clientId } });
       const weekStart = (() => {
         if (!clientId) return null;
-        const list = getClientCheckIns(clientId);
+        const list = listClientCheckInsForInbox(clientId);
         const c = list.find((x) => x.id === id);
         return c?.week_start ?? null;
       })();
@@ -152,7 +153,7 @@ export default function ReviewDetail() {
 
   const handleMessageClient = useCallback(
     (prefilled) => {
-      navigate(`/messages/${clientId}`, { state: { prefilledMessage: prefilled || 'Quick reply from your coach' } });
+      navigateToThread(navigate, clientId, { state: { prefilledMessage: prefilled || 'Quick reply from your coach' } });
     },
     [navigate, clientId]
   );
@@ -163,7 +164,7 @@ export default function ReviewDetail() {
 
   const handleSendFeedbackConfirm = useCallback(() => {
     if (pendingSendFeedback?.clientId) {
-      navigate(`/messages/${pendingSendFeedback.clientId}`, { state: { prefilledMessage: pendingSendFeedback.message } });
+      navigateToThread(navigate, pendingSendFeedback.clientId, { state: { prefilledMessage: pendingSendFeedback.message } });
     } else {
       navigate(pendingSendFeedback?.fallbackPath ?? '/review-center');
     }

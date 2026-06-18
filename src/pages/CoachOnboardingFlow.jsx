@@ -1,13 +1,13 @@
 /**
- * Coach onboarding v2: 7-step fast setup.
- * 1) Account 2) Profile 3) Client preview 4) Plan 5) Offer 6) Get paid 7) Client launch.
+ * Coach onboarding v2: 5-step fast setup.
+ * 1) Coach profile 2) Atlas plan 3) Coaching offer 4) Stripe 5) Ready.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { showCoachManualClientAcquisitionTools } from '@/lib/coachClientAcquisition';
 import { useNavigate } from 'react-router-dom';
-import { isCoachMainAppUnblocked } from '@/lib/onboardingStatus';
+import { isCoachMainAppUnblocked, isProfileOnboardingComplete } from '@/lib/onboardingStatus';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight, Copy, CreditCard, ExternalLink, Loader2, ScanEye, Sparkles, User, UserPlus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, CreditCard, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { coachFocusToCoachType, COACH_FOCUS_OPTIONS } from '@/lib/data/coachTypeHelpers';
 import { setCoachProfile } from '@/lib/data/coachProfileRepo';
@@ -20,7 +20,9 @@ import { getSupabase } from '@/lib/supabaseClient';
 import * as atlasRepo from '@/data/repos/atlasRepo';
 import { getCoachClientJoinLinkPrimary } from '@/lib/referrals';
 import { logError } from '@/services/errorLogger';
+import { trackEvent, EVENTS } from '@/lib/analytics';
 import { COACH_ONBOARDING_PLAN_CARDS } from '@/config/plans';
+import { formatCoachPlanCardEffectiveLine } from '@/utils/upgradeTriggers';
 import MeasurementUnitSegments, { HEIGHT_SEGMENT_OPTIONS, WEIGHT_SEGMENT_OPTIONS } from '@/components/measurements/MeasurementUnitSegments';
 import { normalizeHeightUnit, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 import { defaultLoadUnitForLocale } from '@/lib/localeUnitDefaults';
@@ -33,12 +35,111 @@ import {
   DEFAULT_COACH_OFFER,
 } from '@/data/coachOffersRepo';
 import { fetchCoachPayoutReady } from '@/lib/coachStripePayoutStatus';
-import { stripeConnectLink } from '@/lib/supabaseStripeApi';
+import { stripeConnectLink, stripeServiceUpsert } from '@/lib/supabaseStripeApi';
 import { getConnectAccountLinkUrl, setStripeConnected } from '@/lib/stripeConnectStore';
 import CoachOnboardingClientPreviewCard from '@/components/coaching/CoachOnboardingClientPreviewCard';
+import EarningsCalculator from '@/components/pricing/EarningsCalculator';
+import { usePresentationMode } from '@/lib/presentationMode';
+import { sendCoachWelcomeEmail } from '@/lib/sendWelcomeEmail';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
-const TOTAL_STEPS = 7;
-const DRAFT_VERSION = 5;
+const TOTAL_STEPS = 5;
+// DRAFT_VERSION bumped from 7 → 8 (May 2026)
+// Reason: onboarding rebuilt from 7 steps to 5 steps.
+// v7 draft state is incompatible with v5 step structure.
+// Coaches with partial v7 drafts start fresh from step 1.
+// Their Supabase profile data is preserved.
+const DRAFT_VERSION = 8;
+
+function newPackageId() {
+  return `pkg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function defaultPackageIncludes() {
+  return {
+    training: true,
+    nutrition: true,
+    checkins: true,
+    messaging: true,
+    posing: false,
+    peakWeek: false,
+  };
+}
+
+function coachOfferRowToPackage(row) {
+  return {
+    id: newPackageId(),
+    name: row.name || DEFAULT_COACH_OFFER.name,
+    price: String(row.price_monthly ?? DEFAULT_COACH_OFFER.price_monthly),
+    includes: {
+      training: row.includes_training !== false,
+      nutrition: row.includes_nutrition !== false,
+      checkins: row.includes_checkins !== false,
+      messaging: row.includes_messaging !== false,
+      posing: false,
+      peakWeek: false,
+    },
+    description: '',
+  };
+}
+
+function isDefaultSinglePackageSeed(prev) {
+  if (!Array.isArray(prev) || prev.length !== 1) return false;
+  const p = prev[0];
+  return (
+    p.name === DEFAULT_COACH_OFFER.name &&
+    String(p.price) === String(DEFAULT_COACH_OFFER.price_monthly) &&
+    p.includes?.training === true &&
+    p.includes?.nutrition === true &&
+    p.includes?.checkins === true &&
+    p.includes?.messaging === true &&
+    !p.includes?.posing &&
+    !p.includes?.peakWeek &&
+    !(p.description || '').trim()
+  );
+}
+
+/** Rich onboarding-only copy; tier ids align with `COACH_ONBOARDING_PLAN_CARDS`. */
+const COACH_PLAN_STEP_META = {
+  basic: {
+    badge: 'STARTER',
+    commissionLine: '10% commission on client payments',
+    italic: "Use this to get started — you'll outgrow this quickly",
+    features: [
+      'No monthly fee',
+      'Full core product access',
+      'Best for testing your setup, not long-term margin',
+    ],
+    ctaLabel: 'Start with Basic',
+    ctaVariant: 'secondary',
+  },
+  pro: {
+    badge: 'MOST POPULAR',
+    commissionLine: '3% commission on client payments',
+    italic: 'Most coaches switch here within weeks · switches at ~10 clients',
+    features: [
+      'Best balance of fee + commission',
+      'Lower commission as volume grows',
+      'Default tier once roster starts moving',
+    ],
+    ctaLabel: 'Upgrade to Pro',
+    ctaVariant: 'primary',
+  },
+  elite: {
+    badge: 'SCALE TIER',
+    commissionLine: '0% — no commission on payments',
+    italic: 'Built for full rosters · if you are doing real numbers, this is a no-brainer',
+    features: [
+      'Keep 100% of platform-linked revenue above subscription',
+      'Predictable cost at scale',
+      'White-label client app (your brand)',
+      'Priority 4-hour support',
+      'Premium marketplace listing',
+    ],
+    ctaLabel: 'Go Elite',
+    ctaVariant: 'secondary',
+  },
+};
 
 function draftStorageKey(userId) {
   return `atlas_coach_onboarding_v${DRAFT_VERSION}:${userId}`;
@@ -56,6 +157,7 @@ export default function CoachOnboardingFlow() {
     updateProfile,
     setCoachType,
     refreshProfile,
+    signOut,
   } = useAuth();
   const userId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
   const showDevManualClient = showCoachManualClientAcquisitionTools({
@@ -64,17 +166,50 @@ export default function CoachOnboardingFlow() {
     profile,
     supabaseUser,
   });
+  const { viewport } = usePresentationMode();
+  const showDotProgress = viewport !== 'mobile';
+  const [step, setStep] = useState(1);
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.log('[Onboarding] CoachOnboardingFlow mounted', {
+      onboarding_complete: profile?.onboarding_complete,
+      isCoachMainAppUnblocked: isCoachMainAppUnblocked(profile),
+      step: 'will restore from draft',
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isDemoMode && profile && isProfileOnboardingComplete(profile)) {
+      navigate('/home', { replace: true });
+      return;
+    }
     if (isDemoMode) return;
     if (!profile) return;
-    if (isCoachMainAppUnblocked(profile)) {
+    if (!draftHydrated) return;
+    if (step > 1 && step < TOTAL_STEPS) return;
+
+    // Still mid-flow — never redirect out.
+    if (step > 1) return;
+
+    if (isProfileOnboardingComplete(profile)) {
+      navigate('/home', { replace: true });
+      return;
+    }
+
+    // Only established plans can use unblocked -> home behavior.
+    const ps = (profile.onboarding_plan_status ?? '').toString().toLowerCase();
+    const isEstablished =
+      ps === 'active' || ps === 'trialing' || ps === 'completed' || ps === 'paid';
+    if (isEstablished && isCoachMainAppUnblocked(profile)) {
       navigate('/home', { replace: true });
     }
-  }, [isDemoMode, profile, navigate]);
+  }, [isDemoMode, profile, step, draftHydrated, navigate]);
 
-  const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [errorText, setErrorText] = useState('');
   const [fullName, setFullName] = useState(() => profile?.full_name ?? profile?.display_name ?? '');
   const [displayName, setDisplayName] = useState(() => profile?.display_name ?? '');
@@ -103,6 +238,19 @@ export default function CoachOnboardingFlow() {
   const [incCheckins, setIncCheckins] = useState(DEFAULT_COACH_OFFER.includes_checkins);
   const [incMessaging, setIncMessaging] = useState(DEFAULT_COACH_OFFER.includes_messaging);
 
+  const [packages, setPackages] = useState(() => [
+    {
+      id: 'pkg_1',
+      name: DEFAULT_COACH_OFFER.name,
+      price: String(DEFAULT_COACH_OFFER.price_monthly),
+      includes: defaultPackageIncludes(),
+      description: '',
+    },
+  ]);
+  const [step1FieldError, setStep1FieldError] = useState('');
+  /** Package card collapsed state; omitted id = expanded. */
+  const [packageCollapsed, setPackageCollapsed] = useState(() => ({}));
+
   const [stripePayoutStatusLoading, setStripePayoutStatusLoading] = useState(false);
   const [stripePayoutReady, setStripePayoutReady] = useState(false);
   const [stripeConnectLaunching, setStripeConnectLaunching] = useState(false);
@@ -120,23 +268,24 @@ export default function CoachOnboardingFlow() {
   }, [trimmedCode, userId]);
   const hasCoachCode = Boolean(trimmedCode);
   const hasClientSignupLink = Boolean(clientSignupLink);
-  /** Shareable blurb only when we have real content (no placeholder copy). */
-  const inviteMessageForShare = useMemo(() => {
-    const parts = [];
-    if (clientSignupLink) parts.push(`Join my coaching here:\n${clientSignupLink}`);
-    if (trimmedCode) {
-      parts.push(parts.length ? `\n\nUse code: ${trimmedCode}` : `Use code: ${trimmedCode}`);
-    }
-    return parts.join('').trim();
-  }, [clientSignupLink, trimmedCode]);
-  const progressPct = useMemo(() => Math.round((step / TOTAL_STEPS) * 100), [step]);
   const previewCoachTypeLabel = useMemo(() => {
     const opt = COACH_FOCUS_OPTIONS.find((o) => o.focus === coachFocus);
     return opt?.label ?? 'Coach';
   }, [coachFocus]);
 
   useEffect(() => {
-    if (!userId || typeof window === 'undefined') return;
+    if (draftHydrated) return;
+    if (!userId || typeof window === 'undefined') {
+      setDraftHydrated(true);
+      return;
+    }
+    if (isProfileOnboardingComplete(profile)) {
+      try {
+        window.localStorage.removeItem(draftStorageKey(userId));
+      } catch (_) {}
+      setDraftHydrated(true);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(draftStorageKey(userId));
       if (!raw) return;
@@ -156,10 +305,30 @@ export default function CoachOnboardingFlow() {
       if (typeof parsed?.incNutrition === 'boolean') setIncNutrition(parsed.incNutrition);
       if (typeof parsed?.incCheckins === 'boolean') setIncCheckins(parsed.incCheckins);
       if (typeof parsed?.incMessaging === 'boolean') setIncMessaging(parsed.incMessaging);
+      if (Array.isArray(parsed?.packages) && parsed.packages.length > 0) {
+        setPackages(
+          parsed.packages.map((p, i) => ({
+            id: typeof p?.id === 'string' ? p.id : `pkg_${i}`,
+            name: typeof p?.name === 'string' ? p.name : '',
+            price: p?.price != null ? String(p.price) : '',
+            includes: {
+              training: p?.includes?.training !== false,
+              nutrition: p?.includes?.nutrition !== false,
+              checkins: p?.includes?.checkins !== false,
+              messaging: p?.includes?.messaging !== false,
+              posing: !!p?.includes?.posing,
+              peakWeek: !!p?.includes?.peakWeek,
+            },
+            description: typeof p?.description === 'string' ? p.description : '',
+          })),
+        );
+      }
     } catch (_) {
       // ignore corrupt drafts
+    } finally {
+      setDraftHydrated(true);
     }
-  }, [userId]);
+  }, [userId, profile, draftHydrated]);
 
   useEffect(() => {
     if (profile?.height_unit) setMeasureHeightUnit(normalizeHeightUnit(profile.height_unit));
@@ -169,6 +338,7 @@ export default function CoachOnboardingFlow() {
 
   useEffect(() => {
     if (!userId || typeof window === 'undefined') return;
+    if (onboardingComplete) return;
     try {
       window.localStorage.setItem(
         draftStorageKey(userId),
@@ -188,6 +358,7 @@ export default function CoachOnboardingFlow() {
           incNutrition,
           incCheckins,
           incMessaging,
+          packages,
         })
       );
     } catch (_) {
@@ -210,7 +381,20 @@ export default function CoachOnboardingFlow() {
     incNutrition,
     incCheckins,
     incMessaging,
+    packages,
+    onboardingComplete,
   ]);
+
+  useEffect(() => {
+    const p0 = packages[0];
+    if (!p0) return;
+    setOfferName(p0.name);
+    setOfferPrice(String(p0.price ?? ''));
+    setIncTraining(!!p0.includes?.training);
+    setIncNutrition(!!p0.includes?.nutrition);
+    setIncCheckins(!!p0.includes?.checkins);
+    setIncMessaging(!!p0.includes?.messaging);
+  }, [packages]);
 
   useEffect(() => {
     const fromProfile = (profile?.referral_code ?? '').toString().trim();
@@ -249,8 +433,8 @@ export default function CoachOnboardingFlow() {
   }, [userId, isDemoMode, profile?.referral_code, refreshProfile]);
 
   useEffect(() => {
-    if (step !== 7 || !userId || trimmedCode) {
-      if (step !== 7) setInviteEnsureFailed(false);
+    if (step !== 5 || !userId || trimmedCode) {
+      if (step !== 5) setInviteEnsureFailed(false);
       return;
     }
     let cancelled = false;
@@ -284,7 +468,7 @@ export default function CoachOnboardingFlow() {
   }, [step, userId, trimmedCode, isDemoMode, refreshProfile]);
 
   useEffect(() => {
-    if (step !== 7 || !userId || trimmedCode || inviteLoading) return;
+    if (step !== 5 || !userId || trimmedCode || inviteLoading) return;
     const id = window.setInterval(() => {
       atlasRepo.ensureCoachInviteCode(userId, !!isDemoMode, { retries: 3 }).then(async (code) => {
         const c = (code ?? '').toString().trim();
@@ -303,7 +487,7 @@ export default function CoachOnboardingFlow() {
   }, [step, userId, trimmedCode, inviteLoading, isDemoMode, refreshProfile]);
 
   useEffect(() => {
-    if (step !== 6 || !userId) return;
+    if (step !== 4 || !userId) return;
     let cancelled = false;
     setStripePayoutStatusLoading(true);
     fetchCoachPayoutReady(userId, !!isDemoMode)
@@ -322,17 +506,15 @@ export default function CoachOnboardingFlow() {
   }, [step, userId, isDemoMode]);
 
   useEffect(() => {
-    if (step !== 5 || !userId) return;
+    if (step !== 3 || !userId) return;
     let cancelled = false;
     fetchCoachOffer(userId, !!isDemoMode)
       .then((row) => {
         if (cancelled || !row) return;
-        setOfferName(row.name || DEFAULT_COACH_OFFER.name);
-        setOfferPrice(String(row.price_monthly ?? DEFAULT_COACH_OFFER.price_monthly));
-        setIncTraining(row.includes_training !== false);
-        setIncNutrition(row.includes_nutrition !== false);
-        setIncCheckins(row.includes_checkins !== false);
-        setIncMessaging(row.includes_messaging !== false);
+        setPackages((prev) => {
+          if (!isDefaultSinglePackageSeed(prev)) return prev;
+          return [coachOfferRowToPackage(row)];
+        });
       })
       .catch(() => {});
     return () => {
@@ -367,7 +549,13 @@ export default function CoachOnboardingFlow() {
   const persistProfilePatch = useCallback(
     async (patch) => {
       if (!userId) return { error: new Error('No user') };
-      if (hasSupabase && supabaseUser?.id) return updateProfile(patch);
+      if (hasSupabase && supabaseUser?.id) {
+        try {
+          return await updateProfile(patch);
+        } catch (error) {
+          return { error: error instanceof Error ? error : new Error('Could not save profile') };
+        }
+      }
       setCoachProfile(userId, {
         displayName: patch.display_name,
         coach_focus: patch.coach_focus,
@@ -382,7 +570,11 @@ export default function CoachOnboardingFlow() {
 
   const goNext = useCallback(() => {
     impactLight();
-    setStep((s) => Math.min(TOTAL_STEPS, s + 1));
+    setStep((s) => {
+      const next = Math.min(TOTAL_STEPS, s + 1);
+      trackEvent(EVENTS.ONBOARDING_STEP, { step: s, next_step: next });
+      return next;
+    });
   }, []);
 
   const goBack = useCallback(() => {
@@ -390,44 +582,78 @@ export default function CoachOnboardingFlow() {
     setStep((s) => Math.max(1, s - 1));
   }, []);
 
+  const handleHeaderBack = useCallback(() => {
+    if (step === 1) {
+      setShowExitConfirm(true);
+      return;
+    }
+    goBack();
+  }, [step, goBack]);
+
+  const handleUseDifferentAccount = useCallback(async () => {
+    try {
+      if (typeof signOut === 'function') await signOut('/login');
+      navigate('/login?public=1', { replace: true });
+    } catch (error) {
+      logError(error, { screen: 'CoachOnboardingFlow', action: 'useDifferentAccount' });
+      toast.error('Could not sign out. Please try again.');
+    }
+  }, [signOut, navigate]);
+
   const saveCoachProfile = useCallback(async () => {
     const trimmedFullName = (fullName || '').trim();
     const trimmedDisplay = (displayName || '').trim();
-    if (!trimmedFullName) return toast.error('Add full name');
-    if (!trimmedDisplay) return toast.error('Add display name');
+    if (!trimmedFullName || !trimmedDisplay) {
+      setStep1FieldError('Please add your name.');
+      toast.error('Add full name and display name to continue');
+      if (typeof window !== 'undefined') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      return;
+    }
+    setStep1FieldError('');
     if (!coachFocus) return toast.error('Select coach type');
 
     setSaving(true);
     setErrorText('');
     const coachType = coachFocusToCoachType(coachFocus);
-    const result = await persistProfilePatch({
-      full_name: trimmedFullName,
-      display_name: trimmedDisplay,
-      coach_focus: coachFocus,
-      coach_type: coachType,
-      height_unit: normalizeHeightUnit(measureHeightUnit),
-      bodyweight_unit: normalizeWeightUnit(measureWeightUnit),
-      load_unit: normalizeLoadUnit(defaultLoadUnitForLocale()),
-      units: normalizeWeightUnit(measureWeightUnit) === 'lb' ? 'lb' : 'kg',
-    });
-    setSaving(false);
-    if (result?.error) {
-      setErrorText(result.error?.message || 'Could not save profile');
-      return;
-    }
-    if (typeof setCoachType === 'function') setCoachType(coachType);
-    void atlasRepo.ensureCoachInviteCode(userId, !!isDemoMode, { retries: 3 }).then(async (code) => {
-      const c = (code ?? '').toString().trim();
-      if (c) {
-        setInviteCode(c);
-        try {
-          if (typeof refreshProfile === 'function') await refreshProfile();
-        } catch (e) {
-          logError(e, { screen: 'CoachOnboardingFlow', action: 'refreshAfterProfileSave' });
-        }
+    try {
+      const result = await persistProfilePatch({
+        full_name: trimmedFullName,
+        display_name: trimmedDisplay,
+        coach_focus: coachFocus,
+        coach_type: coachType,
+        height_unit: normalizeHeightUnit(measureHeightUnit),
+        bodyweight_unit: normalizeWeightUnit(measureWeightUnit),
+        load_unit: normalizeLoadUnit(defaultLoadUnitForLocale()),
+        units: normalizeWeightUnit(measureWeightUnit) === 'lb' ? 'lb' : 'kg',
+      });
+      if (result?.error) {
+        const message = result.error?.message || 'Could not save profile';
+        setErrorText(message);
+        toast.error(message);
+        return;
       }
-    });
-    goNext();
+      if (typeof setCoachType === 'function') setCoachType(coachType);
+      void atlasRepo.ensureCoachInviteCode(userId, !!isDemoMode, { retries: 3 }).then(async (code) => {
+        const c = (code ?? '').toString().trim();
+        if (c) {
+          setInviteCode(c);
+          try {
+            if (typeof refreshProfile === 'function') await refreshProfile();
+          } catch (e) {
+            logError(e, { screen: 'CoachOnboardingFlow', action: 'refreshAfterProfileSave' });
+          }
+        }
+      });
+      goNext();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save profile';
+      setErrorText(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
   }, [fullName, displayName, coachFocus, measureHeightUnit, measureWeightUnit, persistProfilePatch, setCoachType, userId, isDemoMode, refreshProfile, goNext]);
 
   const savePlanSelection = useCallback(
@@ -458,21 +684,36 @@ export default function CoachOnboardingFlow() {
   );
 
   const saveCoachOffer = useCallback(async () => {
+    for (let i = 0; i < packages.length; i += 1) {
+      const p = packages[i];
+      const nm = (p?.name || '').trim();
+      const pr = Math.floor(Number(String(p?.price ?? '').replace(/[^\d.]/g, '')) || 0);
+      if (!nm) {
+        toast.error(`Add a name for package ${i + 1}`);
+        return;
+      }
+      if (pr < 1) {
+        toast.error(`Add a monthly price greater than £0 for package ${i + 1}`);
+        return;
+      }
+    }
+
     setSaving(true);
     setErrorText('');
-    const name = (offerName || '').trim() || DEFAULT_COACH_OFFER.name;
-    const priceNum = Math.max(1, Math.floor(Number(String(offerPrice).replace(/[^\d.]/g, '')) || DEFAULT_COACH_OFFER.price_monthly));
+    const p0 = packages[0];
+    const name = (p0.name || '').trim() || DEFAULT_COACH_OFFER.name;
+    const priceNum = Math.max(1, Math.floor(Number(String(p0.price).replace(/[^\d.]/g, '')) || DEFAULT_COACH_OFFER.price_monthly));
     const result = await upsertCoachOffer(userId, !!isDemoMode, {
       name,
       price_monthly: priceNum,
       currency: 'GBP',
-      includes_training: incTraining,
-      includes_nutrition: incNutrition,
-      includes_checkins: incCheckins,
-      includes_messaging: incMessaging,
+      includes_training: !!p0.includes?.training,
+      includes_nutrition: !!p0.includes?.nutrition,
+      includes_checkins: !!p0.includes?.checkins,
+      includes_messaging: !!p0.includes?.messaging,
     });
-    setSaving(false);
     if (!result.ok) {
+      setSaving(false);
       setErrorText(result.error || 'Could not save your offer');
       toast.error(result.error || 'Could not save your offer');
       return;
@@ -484,18 +725,41 @@ export default function CoachOnboardingFlow() {
     } else {
       toast.success('Offer saved');
     }
+
+    if (packages.length > 1 && hasSupabase && !isDemoMode && userId) {
+      for (let i = 1; i < packages.length; i += 1) {
+        const p = packages[i];
+        const descParts = [];
+        const d0 = (p.description || '').trim();
+        if (d0) descParts.push(d0);
+        if (p.includes?.posing) descParts.push('Includes posing & comp prep support.');
+        if (p.includes?.peakWeek) descParts.push('Includes peak week protocol.');
+        const description = descParts.length ? descParts.join('\n') : undefined;
+        const gbp = Math.max(1, Math.floor(Number(String(p.price).replace(/[^\d.]/g, '')) || 1));
+        const priceCents = Math.min(999_999_99, Math.max(50, Math.round(gbp * 100)));
+        try {
+          const extra = await stripeServiceUpsert({
+            user_id: userId,
+            name: (p.name || '').trim(),
+            description,
+            price_amount: priceCents,
+            currency: 'gbp',
+            interval: 'month',
+          });
+          if (extra?.error) {
+            logError(new Error(extra.error), { screen: 'CoachOnboardingFlow', action: 'stripeServiceUpsertExtra', index: i });
+            toast.warning(`Extra package "${(p.name || '').trim()}" could not be synced to Stripe yet. You can add it from settings.`);
+          }
+        } catch (e) {
+          logError(e, { screen: 'CoachOnboardingFlow', action: 'stripeServiceUpsertExtraCatch', index: i });
+          toast.warning(`Could not save extra package "${(p.name || '').trim()}". Try again from settings.`);
+        }
+      }
+    }
+
+    setSaving(false);
     goNext();
-  }, [
-    userId,
-    isDemoMode,
-    offerName,
-    offerPrice,
-    incTraining,
-    incNutrition,
-    incCheckins,
-    incMessaging,
-    goNext,
-  ]);
+  }, [userId, isDemoMode, hasSupabase, packages, goNext]);
 
   const handleConnectStripeFromOnboarding = useCallback(async () => {
     if (!userId) return;
@@ -529,6 +793,7 @@ export default function CoachOnboardingFlow() {
   }, [userId, isDemoMode]);
 
   const finishOnboarding = useCallback(async () => {
+    setOnboardingComplete(true);
     setSaving(true);
     setErrorText('');
     if (userId) {
@@ -551,6 +816,7 @@ export default function CoachOnboardingFlow() {
     const result = await persistProfilePatch({ onboarding_complete: true });
     setSaving(false);
     if (result?.error) {
+      setOnboardingComplete(false);
       setErrorText(result.error?.message || 'Could not complete onboarding');
       return;
     }
@@ -564,7 +830,11 @@ export default function CoachOnboardingFlow() {
     }
     impactLight();
     navigate('/home', { replace: true });
-  }, [persistProfilePatch, userId, navigate, isDemoMode, refreshProfile]);
+    void sendCoachWelcomeEmail({
+      name: displayName || fullName || 'Coach',
+      email: user?.email,
+    });
+  }, [persistProfilePatch, userId, navigate, isDemoMode, refreshProfile, user?.id, user?.email, displayName, fullName]);
 
   const copyText = useCallback(async (text, success, fail = 'Could not copy') => {
     if (!text) return;
@@ -575,6 +845,24 @@ export default function CoachOnboardingFlow() {
       toast.error(fail);
     }
   }, []);
+
+  const shareInviteLink = useCallback(async () => {
+    const link = clientSignupLink || joinShortLink;
+    if (!link) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Join my coaching',
+          text: 'Join my coaching on Atlas.',
+          url: link,
+        });
+        return;
+      }
+      await copyText(link, 'Link copied');
+    } catch (_) {
+      // ignore cancelled shares and fallback quietly
+    }
+  }, [clientSignupLink, joinShortLink, copyText]);
 
   const coachOnboardingMigration = useMemo(
     () => deriveCoachOnboardingSurfaceState({ step }),
@@ -606,12 +894,91 @@ export default function CoachOnboardingFlow() {
       }}
     >
       <div style={{ marginBottom: spacing[20] }}>
-        <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-          <div style={{ width: `${progressPct}%`, height: '100%', background: colors.primary, transition: 'width 0.2s ease' }} />
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <button
+            type="button"
+            onClick={handleHeaderBack}
+            className="flex items-center justify-center rounded-xl shrink-0"
+            style={{
+              minWidth: touchTargetMin,
+              minHeight: touchTargetMin,
+              border: `1px solid ${colors.border}`,
+              background: colors.surface1,
+              color: colors.text,
+            }}
+            aria-label="Back"
+          >
+            <ChevronLeft size={22} />
+          </button>
+          {showDotProgress ? (
+            <div className="flex-1 flex flex-col items-center min-w-0 px-1">
+              <div className="flex items-center w-full max-w-[340px] justify-center gap-0">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <React.Fragment key={n}>
+                    <div className="flex flex-col items-center shrink-0">
+                      <div
+                        style={{
+                          width: step > n ? 8 : 12,
+                          height: step > n ? 8 : 12,
+                          borderRadius: 999,
+                          background: step >= n ? colors.primary : 'transparent',
+                          border:
+                            step >= n && step !== n
+                              ? 'none'
+                              : `2px solid ${step === n ? colors.primary : colors.border}`,
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                    {n < 5 ? (
+                      <div
+                        className="flex-1 mx-0.5 sm:mx-1"
+                        style={{
+                          height: 2,
+                          minWidth: 6,
+                          alignSelf: 'center',
+                          marginTop: 0,
+                          borderRadius: 1,
+                          background: step > n ? colors.primary : colors.border,
+                          opacity: step > n ? 0.65 : 1,
+                        }}
+                      />
+                    ) : null}
+                  </React.Fragment>
+                ))}
+              </div>
+              <div className="flex w-full max-w-[340px] justify-between mt-2 px-0">
+                {['Profile', 'Plan', 'Offer', 'Stripe', 'Ready'].map((label, i) => (
+                  <span
+                    key={label}
+                    className="text-[8px] sm:text-[10px] font-medium uppercase tracking-wide text-center leading-tight"
+                    style={{
+                      color: step === i + 1 ? colors.textSecondary : colors.muted,
+                      maxWidth: 56,
+                    }}
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="flex-1 text-center text-[13px] font-semibold m-0 py-2" style={{ color: colors.muted }}>
+              Step {step} of {TOTAL_STEPS}
+            </p>
+          )}
+          <div style={{ width: touchTargetMin }} className="shrink-0" aria-hidden />
         </div>
-        <p className="text-[13px] mt-2 font-medium" style={{ color: colors.muted }}>
-          Step {step} of {TOTAL_STEPS}
-        </p>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={handleUseDifferentAccount}
+            className="text-[13px] font-medium underline underline-offset-2"
+            style={{ color: colors.muted, minHeight: touchTargetMin }}
+          >
+            Use different account
+          </button>
+        </div>
       </div>
 
       {errorText ? (
@@ -622,68 +989,101 @@ export default function CoachOnboardingFlow() {
 
       {step === 1 ? (
         <>
-          <div className="flex items-center justify-center rounded-2xl mb-5" style={{ width: 56, height: 56, background: colors.surface1, border: `1px solid ${colors.border}` }}>
-            <Sparkles size={24} style={{ color: colors.primary }} />
-          </div>
-          <h1 className="text-[22px] font-semibold mb-2">Account ready</h1>
-          <p className="text-[15px] leading-relaxed mb-6" style={{ color: colors.muted }}>
-            Signed in as <strong style={{ color: colors.text }}>{user?.email || 'coach account'}</strong>. Next, we will set your profile, preview how clients see you, plan, coaching offer, optional Stripe payouts, and your client invite in a few minutes.
-          </p>
-          <Button variant="primary" type="button" onClick={goNext} style={{ width: '100%', minHeight: touchTargetMin }}>
-            Start setup <ChevronRight size={18} className="inline ml-1" />
-          </Button>
-        </>
-      ) : null}
-
-      {step === 2 ? (
-        <>
-          <div className="flex items-center justify-center rounded-2xl mb-5" style={{ width: 56, height: 56, background: colors.surface1, border: `1px solid ${colors.border}` }}>
-            <User size={24} style={{ color: colors.primary }} />
-          </div>
-          <h1 className="text-[22px] font-semibold mb-1">Coach profile</h1>
-          <p className="text-[15px] mb-5" style={{ color: colors.muted }}>
-            Set the public coach identity now. Coach type is saved immediately.
+          <h1 className="text-[22px] font-semibold mb-2">Your coach profile</h1>
+          <p className="text-[15px] mb-5 leading-relaxed" style={{ color: colors.muted }}>
+            This is what clients and potential clients see. Set it once — it saves immediately.
           </p>
 
-          <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>Full name</label>
+          {step1FieldError ? (
+            <p className="text-[13px] mb-3 rounded-lg px-3 py-2" style={{ background: 'rgba(239,68,68,0.12)', color: colors.danger }}>
+              {step1FieldError}
+            </p>
+          ) : null}
+
+          <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
+            Full name
+          </label>
           <input
             type="text"
             value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
+            onChange={(e) => {
+              setFullName(e.target.value);
+              if (step1FieldError) setStep1FieldError('');
+            }}
             placeholder="Alex Morgan"
             autoComplete="name"
             className="w-full rounded-xl px-3 py-3 text-[16px] mb-4 border-none"
             style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
           />
 
-          <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>Display name</label>
+          <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
+            Display name
+          </label>
           <input
             type="text"
             value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            onChange={(e) => {
+              setDisplayName(e.target.value);
+              if (step1FieldError) setStep1FieldError('');
+            }}
             placeholder="Coach Alex"
-            className="w-full rounded-xl px-3 py-3 text-[16px] mb-4 border-none"
+            className="w-full rounded-xl px-3 py-3 text-[16px] mb-1 border-none"
             style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
           />
+          <p className="text-[12px] mb-4 leading-relaxed" style={{ color: colors.muted }}>
+            This is how you appear to clients and on your marketplace listing.
+          </p>
 
           <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
-            Public tagline <span style={{ fontWeight: 400 }}>(optional)</span>
+            Public tagline
           </label>
           <input
             type="text"
             value={coachTagline}
-            onChange={(e) => setCoachTagline(e.target.value)}
-            placeholder="e.g. Strength & sustainable fat loss"
+            onChange={(e) => setCoachTagline(e.target.value.slice(0, 120))}
+            placeholder="e.g. Competition prep specialist · PCA & UKBFF · Greater Manchester"
             maxLength={120}
-            className="w-full rounded-xl px-3 py-3 text-[16px] mb-4 border-none"
+            className="w-full rounded-xl px-3 py-3 text-[16px] mb-1 border-none"
             style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
           />
+          <div className="flex justify-between items-center mb-1">
+            <p className="text-[12px] leading-relaxed m-0" style={{ color: colors.muted }}>
+              Shows on your public profile page and marketplace listing.
+            </p>
+            <span className="text-[11px] shrink-0 ml-2" style={{ color: colors.muted }}>
+              {(coachTagline || '').length}/120
+            </span>
+          </div>
 
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
-            How you view client metrics
+          <label className="block text-xs font-semibold mb-2 mt-4" style={{ color: colors.muted }}>
+            Coaching type
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-6">
+            {COACH_FOCUS_OPTIONS.map((opt) => (
+              <button
+                key={opt.focus}
+                type="button"
+                onClick={() => setCoachFocus(opt.focus)}
+                className="text-left rounded-xl border p-3 transition-all"
+                style={{
+                  minHeight: touchTargetMin + 8,
+                  background: coachFocus === opt.focus ? colors.primarySubtle : colors.surface1,
+                  borderColor: coachFocus === opt.focus ? colors.primary : colors.border,
+                }}
+              >
+                <span className="font-semibold block text-[15px]">{opt.label}</span>
+                <span className="text-[12px] block mt-1 leading-snug" style={{ color: colors.muted }}>
+                  {opt.description}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: colors.muted }}>
+            Your display units
           </p>
           <p className="text-[13px] mb-3" style={{ color: colors.muted }}>
-            Client weights are stored in kg; Atlas converts for display using your preferences.
+            Clients enter data in any unit — Atlas converts it for your view.
           </p>
           <MeasurementUnitSegments
             label="Height unit"
@@ -698,31 +1098,8 @@ export default function CoachOnboardingFlow() {
             onChange={(id) => setMeasureWeightUnit(id)}
           />
 
-          <label className="block text-xs font-semibold mb-2" style={{ color: colors.muted }}>Coach type</label>
-          <div className="flex flex-col gap-2 mb-6">
-            {COACH_FOCUS_OPTIONS.map((opt) => (
-              <button
-                key={opt.focus}
-                type="button"
-                onClick={() => setCoachFocus(opt.focus)}
-                className="text-left rounded-xl border p-3 transition-all"
-                style={{
-                  minHeight: touchTargetMin,
-                  background: coachFocus === opt.focus ? colors.primarySubtle : colors.surface1,
-                  borderColor: coachFocus === opt.focus ? colors.primary : colors.border,
-                }}
-              >
-                <span className="font-medium block">{opt.label}</span>
-                <span className="text-sm" style={{ color: colors.muted }}>{opt.description}</span>
-              </button>
-            ))}
-          </div>
-
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
-            Live preview
-          </p>
-          <p className="text-[12px] mb-3 leading-relaxed" style={{ color: colors.muted }}>
-            Updates instantly as you edit — same card clients see in discovery.
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-2 mt-6" style={{ color: colors.muted }}>
+            How clients see you
           </p>
           <div style={{ marginBottom: spacing[20] }}>
             <CoachOnboardingClientPreviewCard
@@ -730,307 +1107,361 @@ export default function CoachOnboardingFlow() {
               coachTypeLabel={previewCoachTypeLabel}
               tagline={coachTagline}
               avatarUrl={profile?.avatar_url ?? null}
+              showNewCoachBadge
             />
           </div>
 
-          <div className="flex flex-col gap-3">
-            <Button variant="primary" type="button" onClick={saveCoachProfile} disabled={saving} style={{ width: '100%', minHeight: touchTargetMin }}>
-              {saving ? <Loader2 size={18} className="animate-spin" /> : <>Continue <ChevronRight size={18} className="inline ml-1" /></>}
-            </Button>
-            <Button variant="secondary" type="button" onClick={goBack} style={{ width: '100%', minHeight: touchTargetMin }}>
-              <ChevronLeft size={18} className="inline mr-1" /> Back
-            </Button>
-          </div>
+          <Button variant="primary" type="button" onClick={saveCoachProfile} disabled={saving} style={{ width: '100%', minHeight: touchTargetMin }}>
+            {saving ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <>
+                Save profile and continue <ChevronRight size={18} className="inline ml-1" />
+              </>
+            )}
+          </Button>
         </>
       ) : null}
 
-      {step === 3 ? (
-        <>
-          <div
-            className="flex items-center justify-center rounded-2xl mb-5"
-            style={{ width: 56, height: 56, background: colors.surface1, border: `1px solid ${colors.border}` }}
-          >
-            <ScanEye size={24} style={{ color: colors.primary }} />
-          </div>
-          <h1 className="text-[22px] font-semibold mb-2 leading-tight">This is how clients will see you</h1>
-          <p className="text-[15px] mb-6 leading-relaxed" style={{ color: colors.muted }}>
-            A quick preview of your public coach card. You can refine photos and bio anytime in your marketplace listing.
-          </p>
-          <div style={{ marginBottom: spacing[20] }}>
-            <CoachOnboardingClientPreviewCard
-              displayName={displayName}
-              coachTypeLabel={previewCoachTypeLabel}
-              tagline={coachTagline}
-              avatarUrl={profile?.avatar_url ?? null}
-            />
-          </div>
-          <div className="flex flex-col gap-3">
-            <Button variant="primary" type="button" onClick={goNext} style={{ width: '100%', minHeight: touchTargetMin }}>
-              Looks good <ChevronRight size={18} className="inline ml-1" />
-            </Button>
-            <Button variant="secondary" type="button" onClick={goBack} style={{ width: '100%', minHeight: touchTargetMin }}>
-              Edit profile
-            </Button>
-          </div>
-        </>
-      ) : null}
-
-      {step === 4 ? (
+      {step === 2 ? (
         <>
           <h1 className="text-[22px] font-semibold mb-2">Choose your Atlas plan</h1>
           <p className="text-[15px] mb-6 leading-relaxed" style={{ color: colors.muted }}>
-            Pick how you want to pay for Atlas. You can start free and upgrade later.
+            Start free and upgrade as your roster grows. No lock-in.
           </p>
 
           <div className="flex flex-col gap-3 mb-6">
             {COACH_ONBOARDING_PLAN_CARDS.map((plan) => {
+              const meta = COACH_PLAN_STEP_META[plan.id];
               const active = selectedPlan === plan.id;
               const isPro = plan.id === 'pro';
+              const ctaVariant = meta?.ctaVariant === 'primary' ? 'primary' : 'secondary';
               return (
-                <button
+                <div
                   key={plan.id}
-                  type="button"
-                  onClick={() => setSelectedPlan(plan.id)}
-                  aria-pressed={active}
                   className="text-left rounded-xl transition-all duration-200"
                   style={{
                     minHeight: touchTargetMin,
                     padding: spacing[16],
                     borderStyle: 'solid',
-                    borderWidth: active ? 2 : 1,
-                    borderColor: active
-                      ? colors.primary
-                      : isPro
-                        ? 'rgba(59, 130, 246, 0.42)'
-                        : colors.border,
+                    borderWidth: active || isPro ? 2 : 1,
+                    borderColor: active ? colors.primary : isPro ? 'rgba(59, 130, 246, 0.42)' : colors.border,
                     background: active ? 'rgba(59, 130, 246, 0.12)' : colors.surface1,
-                    boxShadow: active
-                      ? shadows.brandGlow
-                      : isPro
-                        ? shadows.cardShadow
-                        : 'none',
-                    transform: isPro ? 'scale(1.01)' : undefined,
+                    boxShadow: active ? shadows.brandGlow : isPro ? shadows.cardShadow : 'none',
                   }}
                 >
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <span className="font-semibold text-[16px]" style={{ color: colors.text }}>
                       {plan.name}
                     </span>
-                    {plan.badge ? (
+                    {meta?.badge ? (
                       <span
                         className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0"
                         style={{
-                          background: colors.primarySubtle,
-                          color: colors.primary,
+                          background: isPro ? 'rgba(59,130,246,0.25)' : colors.primarySubtle,
+                          color: isPro ? colors.primary : colors.accent,
+                          border: isPro ? `1px solid rgba(59,130,246,0.45)` : 'none',
                         }}
                       >
-                        {plan.badge}
+                        {meta.badge}
                       </span>
                     ) : null}
                   </div>
                   <p className="text-[26px] font-bold leading-tight mb-1" style={{ color: colors.text }}>
                     {plan.priceLine}
                   </p>
-                  <p className="text-[14px] font-medium mb-3" style={{ color: colors.accent }}>
-                    {plan.commissionLine}
+                  <p className="text-[14px] font-medium mb-1" style={{ color: colors.accent }}>
+                    {meta?.commissionLine ?? plan.commissionLine}
                   </p>
-                  <p className="text-[13px] mb-2" style={{ color: colors.muted }}>
-                    <span className="font-semibold" style={{ color: colors.textSecondary }}>
-                      Best for:{' '}
-                    </span>
-                    {plan.bestFor}
-                  </p>
+                  {meta?.italic ? (
+                    <p className="text-[12px] italic mb-3 leading-snug" style={{ color: colors.muted }}>
+                      {meta.italic}
+                    </p>
+                  ) : null}
                   <p className="text-[11px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: colors.muted }}>
-                    What&apos;s included
+                    Features
                   </p>
-                  <ul className="space-y-1 mb-3 pl-0 list-none">
-                    {plan.included.map((line) => (
-                      <li
-                        key={line}
-                        className="text-[13px] pl-3 relative"
-                        style={{ color: colors.text }}
-                      >
-                        <span
-                          className="absolute left-0 top-[0.45em] w-1 h-1 rounded-full"
-                          style={{ background: colors.muted }}
-                          aria-hidden
-                        />
+                  <ul className="space-y-1 mb-4 pl-0 list-none">
+                    {(meta?.features ?? plan.included).map((line) => (
+                      <li key={line} className="text-[13px] pl-4 relative" style={{ color: colors.text }}>
+                        <span className="absolute left-0 top-[0.15em]" aria-hidden>
+                          ✓
+                        </span>
                         {line}
                       </li>
                     ))}
                   </ul>
-                  <p className="text-[12px] leading-snug pt-2 border-t" style={{ color: colors.muted, borderColor: colors.border }}>
-                    {plan.note}
+                  <p className="text-[12px] leading-snug mb-3" style={{ color: colors.textSecondary }}>
+                    {formatCoachPlanCardEffectiveLine({
+                      planTierId: plan.id,
+                      clientCount: connectedClientsCount,
+                      monthlyRevenueEstimate: null,
+                    })}
                   </p>
-                </button>
+                  <Button
+                    variant={ctaVariant}
+                    type="button"
+                    disabled={saving}
+                    onClick={() => {
+                      setSelectedPlan(plan.id);
+                      void savePlanSelection('selected', plan.id);
+                    }}
+                    style={{ width: '100%', minHeight: touchTargetMin }}
+                  >
+                    {saving && selectedPlan === plan.id ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      meta?.ctaLabel ?? `Choose ${plan.name}`
+                    )}
+                  </Button>
+                </div>
               );
             })}
           </div>
 
-          <div
-            className="rounded-xl p-4 mb-4"
-            style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
-          >
-            <p className="text-[13px] font-semibold mb-2" style={{ color: colors.text }}>
-              How Atlas pricing works
-            </p>
-            <p className="text-[13px] leading-relaxed mb-2" style={{ color: colors.muted }}>
-              Basic lets you start with no monthly fee; Atlas takes 10% commission from client payments.
-            </p>
-            <p className="text-[13px] leading-relaxed mb-2" style={{ color: colors.muted }}>
-              Pro lowers commission to 3% for coaches who are growing.
-            </p>
-            <p className="text-[13px] leading-relaxed" style={{ color: colors.muted }}>
-              Elite removes commission completely for established coaches.
-            </p>
-          </div>
+          <EarningsCalculator embed />
 
-          <p className="text-[12px] mb-6 text-center leading-relaxed" style={{ color: colors.muted }}>
-            As your client base grows, Pro and Elite usually increase your take-home revenue.
+          <p className="text-[12px] mt-4 mb-4 text-center leading-relaxed" style={{ color: colors.muted }}>
+            Start free and switch any time. Your clients and programmes stay with you on all plans.
           </p>
 
-          <div
-            className="rounded-xl p-4 mb-4"
-            style={{ background: 'rgba(59, 130, 246, 0.08)', border: `1px solid ${colors.border}` }}
-          >
-            <p className="text-[13px] font-semibold mb-1" style={{ color: colors.text }}>
-              What Basic does and does not include
-            </p>
-            <p className="text-[13px] leading-relaxed" style={{ color: colors.muted }}>
-              Basic covers day-to-day coaching: roster, programs, nutrition, messaging, and check-ins. Surfaces such as
-              the command center, advanced analytics, revenue analytics, training intelligence, and capacity tools
-              unlock on <strong style={{ color: colors.text }}>Pro or Elite</strong> — you can upgrade anytime in Plan
-              &amp; Billing.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
             <Button
-              variant="primary"
+              variant="secondary"
               type="button"
-              disabled={!selectedPlan || saving}
-              onClick={() => savePlanSelection('selected', selectedPlan)}
+              disabled={saving}
+              onClick={() => savePlanSelection('plan_not_selected')}
               style={{ width: '100%', minHeight: touchTargetMin }}
             >
-              {saving ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                `Continue with ${COACH_ONBOARDING_PLAN_CARDS.find((p) => p.id === selectedPlan)?.name ?? 'plan'}`
-              )}
+              Skip for now
             </Button>
-            <div className="flex flex-col gap-1.5">
-              <Button
-                variant="secondary"
-                type="button"
-                disabled={saving}
-                onClick={() => savePlanSelection('plan_not_selected')}
-                style={{ width: '100%', minHeight: touchTargetMin }}
-              >
-                Skip for now
-              </Button>
-              <p className="text-[11px] text-center px-1 leading-snug" style={{ color: colors.muted }}>
-                Testing mode only. Payment setup can be completed later.
-              </p>
-            </div>
-            <Button variant="secondary" type="button" onClick={goBack} style={{ width: '100%', minHeight: touchTargetMin }}>
-              <ChevronLeft size={18} className="inline mr-1" /> Back
-            </Button>
+            <p className="text-[11px] text-center px-1 leading-snug" style={{ color: colors.muted }}>
+              Testing mode only. Payment setup can be completed later.
+            </p>
           </div>
         </>
       ) : null}
 
-      {step === 5 ? (
+      {step === 3 ? (
         <>
-          <h1 className="text-[22px] font-semibold mb-2">Set your coaching offer</h1>
+          <h1 className="text-[22px] font-semibold mb-2">Your coaching offer</h1>
           <p className="text-[15px] mb-6 leading-relaxed" style={{ color: colors.muted }}>
-            This is what clients will pay for when they join you.
+            What clients pay for when they join you. You can add multiple packages.
           </p>
 
-          <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
-            Package name
-          </label>
-          <input
-            type="text"
-            value={offerName}
-            onChange={(e) => setOfferName(e.target.value)}
-            placeholder="Online coaching"
-            className="w-full rounded-xl px-3 py-3 text-[16px] mb-4 border-none"
-            style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
-          />
+          <div className="flex flex-col gap-4 mb-4">
+            {packages.map((pkg, idx) => {
+              const expanded = packageCollapsed[pkg.id] !== true;
+              return (
+                <Card
+                  key={pkg.id}
+                  style={{
+                    padding: spacing[14],
+                    borderRadius: radii.lg ?? 12,
+                    border: `1px solid ${colors.border}`,
+                    background: colors.surface1,
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <button
+                      type="button"
+                      className="flex-1 text-left flex items-center gap-2 min-w-0"
+                      onClick={() =>
+                        setPackageCollapsed((o) => ({
+                          ...o,
+                          [pkg.id]: expanded,
+                        }))
+                      }
+                      style={{ color: colors.text, minHeight: touchTargetMin - 8 }}
+                    >
+                      <span className="text-[14px] font-semibold truncate">
+                        Package {idx + 1}
+                        {!expanded && (pkg.name || '').trim() ? (
+                          <span className="font-normal" style={{ color: colors.muted }}>
+                            {' '}
+                            — {(pkg.name || '').trim()}
+                          </span>
+                        ) : null}
+                      </span>
+                      <ChevronRight
+                        size={18}
+                        className="shrink-0 transition-transform"
+                        style={{
+                          transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                          color: colors.muted,
+                        }}
+                        aria-hidden
+                      />
+                    </button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {packages.length > 1 ? (
+                        <button
+                          type="button"
+                          className="text-[13px] font-semibold px-2 py-1 rounded-lg"
+                          style={{ color: colors.danger, minHeight: 36 }}
+                          onClick={() =>
+                            setPackages((prev) => (prev.length <= 1 ? prev : prev.filter((p) => p.id !== pkg.id)))
+                          }
+                          aria-label={`Remove package ${idx + 1}`}
+                        >
+                          ✕
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
 
-          <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
-            Price (monthly, GBP)
-          </label>
-          <div className="flex items-center gap-2 mb-5">
-            <span className="text-[18px] font-semibold" style={{ color: colors.text }}>
-              £
-            </span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              value={offerPrice}
-              onChange={(e) => setOfferPrice(e.target.value)}
-              className="flex-1 rounded-xl px-3 py-3 text-[16px] border-none"
-              style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
-            />
+                  {expanded ? (
+                    <>
+                      <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
+                        Package name
+                      </label>
+                      <input
+                        type="text"
+                        value={pkg.name}
+                        onChange={(e) =>
+                          setPackages((prev) =>
+                            prev.map((p) => (p.id === pkg.id ? { ...p, name: e.target.value } : p)),
+                          )
+                        }
+                        placeholder="Online coaching"
+                        className="w-full rounded-xl px-3 py-3 text-[16px] mb-4 border-none"
+                        style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
+                      />
+
+                      <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
+                        Monthly price (£)
+                      </label>
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="text-[18px] font-semibold" style={{ color: colors.text }}>
+                          £
+                        </span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          step={1}
+                          value={pkg.price}
+                          onChange={(e) =>
+                            setPackages((prev) =>
+                              prev.map((p) => (p.id === pkg.id ? { ...p, price: e.target.value } : p)),
+                            )
+                          }
+                          className="flex-1 rounded-xl px-3 py-3 text-[16px] border-none"
+                          style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
+                        />
+                      </div>
+
+                      <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
+                        What&apos;s included
+                      </p>
+                      <div className="flex flex-col gap-2 mb-4">
+                        {[
+                          { key: 'training', label: 'Training plan' },
+                          { key: 'nutrition', label: 'Nutrition plan' },
+                          { key: 'checkins', label: 'Weekly check-ins' },
+                          { key: 'messaging', label: 'Messaging' },
+                          { key: 'posing', label: 'Posing & comp prep' },
+                          { key: 'peakWeek', label: 'Peak week protocol' },
+                        ].map(({ key, label }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() =>
+                              setPackages((prev) =>
+                                prev.map((p) =>
+                                  p.id === pkg.id
+                                    ? {
+                                        ...p,
+                                        includes: { ...p.includes, [key]: !p.includes[key] },
+                                      }
+                                    : p,
+                                ),
+                              )
+                            }
+                            aria-pressed={!!pkg.includes[key]}
+                            className="w-full text-left rounded-xl border px-3 py-3 flex items-center justify-between gap-2 transition-colors"
+                            style={{
+                              minHeight: touchTargetMin - 2,
+                              background: pkg.includes[key] ? colors.primarySubtle : colors.surface2,
+                              borderColor: pkg.includes[key] ? colors.primary : colors.border,
+                              color: colors.text,
+                            }}
+                          >
+                            <span className="text-[14px] font-medium">
+                              {pkg.includes[key] ? '✓' : '○'} {label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
+                        Short description (optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={pkg.description}
+                        onChange={(e) =>
+                          setPackages((prev) =>
+                            prev.map((p) => (p.id === pkg.id ? { ...p, description: e.target.value } : p)),
+                          )
+                        }
+                        placeholder="Ideal for transformation clients"
+                        className="w-full rounded-xl px-3 py-3 text-[16px] border-none"
+                        style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
+                      />
+                    </>
+                  ) : null}
+                </Card>
+              );
+            })}
           </div>
 
-          <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
-            Includes
+          {packages.length < 4 ? (
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() =>
+                setPackages((prev) => [
+                  ...prev,
+                  {
+                    id: newPackageId(),
+                    name: '',
+                    price: '',
+                    includes: defaultPackageIncludes(),
+                    description: '',
+                  },
+                ])
+              }
+              style={{ width: '100%', minHeight: touchTargetMin, marginBottom: spacing[14] }}
+            >
+              + Add another package
+            </Button>
+          ) : null}
+
+          <p className="text-[13px] mb-4 leading-relaxed" style={{ color: colors.muted }}>
+            💡 Most coaches start with one package. You can always add more from your account settings.
           </p>
-          <div className="flex flex-col gap-2 mb-6">
-            {[
-              { label: 'Training plan', on: incTraining, set: setIncTraining },
-              { label: 'Nutrition plan', on: incNutrition, set: setIncNutrition },
-              { label: 'Check-ins', on: incCheckins, set: setIncCheckins },
-              { label: 'Messaging', on: incMessaging, set: setIncMessaging },
-            ].map(({ label, on, set }) => (
-              <button
-                key={label}
-                type="button"
-                onClick={() => set((v) => !v)}
-                aria-pressed={on}
-                className="w-full text-left rounded-xl border px-3 py-3 flex items-center justify-between gap-2 transition-colors"
-                style={{
-                  minHeight: touchTargetMin,
-                  background: on ? colors.primarySubtle : colors.surface1,
-                  borderColor: on ? colors.primary : colors.border,
-                  color: colors.text,
-                }}
-              >
-                <span className="text-[14px] font-medium">{label}</span>
-                <span className="text-[12px] font-semibold" style={{ color: on ? colors.primary : colors.muted }}>
-                  {on ? 'On' : 'Off'}
-                </span>
-              </button>
-            ))}
-          </div>
 
           <div className="flex flex-col gap-3">
-            <Button
-              variant="primary"
-              type="button"
-              onClick={saveCoachOffer}
-              disabled={saving}
-              style={{ width: '100%', minHeight: touchTargetMin }}
-            >
-              {saving ? <Loader2 size={18} className="animate-spin" /> : <>Continue <ChevronRight size={18} className="inline ml-1" /></>}
+            <Button variant="primary" type="button" onClick={saveCoachOffer} disabled={saving} style={{ width: '100%', minHeight: touchTargetMin }}>
+              {saving ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <>
+                  Save packages and continue <ChevronRight size={18} className="inline ml-1" />
+                </>
+              )}
             </Button>
             {import.meta.env.DEV ? (
               <Button variant="secondary" type="button" onClick={devSkipOffer} disabled={saving} style={{ width: '100%', minHeight: touchTargetMin }}>
                 Skip — use default offer (dev only)
               </Button>
             ) : null}
-            <Button variant="secondary" type="button" onClick={goBack} style={{ width: '100%', minHeight: touchTargetMin }}>
-              <ChevronLeft size={18} className="inline mr-1" /> Back
-            </Button>
           </div>
         </>
       ) : null}
 
-      {step === 6 ? (
+      {step === 4 ? (
         <>
           <div
             className="flex items-center justify-center rounded-2xl mb-5"
@@ -1038,7 +1469,7 @@ export default function CoachOnboardingFlow() {
           >
             <CreditCard size={24} style={{ color: colors.primary }} />
           </div>
-          <h1 className="text-[22px] font-semibold mb-1">Get paid</h1>
+          <h1 className="text-[22px] font-semibold mb-1">Connect Stripe to get paid</h1>
           <p className="text-[15px] mb-5 leading-relaxed" style={{ color: colors.muted }}>
             Connect Stripe to receive payments from clients.
           </p>
@@ -1095,13 +1526,10 @@ export default function CoachOnboardingFlow() {
               You can connect this later in Settings.
             </p>
           </Card>
-          <Button variant="secondary" type="button" onClick={goBack} style={{ width: '100%', minHeight: touchTargetMin }}>
-            <ChevronLeft size={18} className="inline mr-1" /> Back
-          </Button>
         </>
       ) : null}
 
-      {step === 7 ? (
+      {step === 5 ? (
         <>
           {inviteEnsureFailed && !hasCoachCode && !inviteLoading ? (
             <Card
@@ -1120,229 +1548,176 @@ export default function CoachOnboardingFlow() {
             </Card>
           ) : null}
 
-          {/* Section 1 — activation hero */}
+          <h1 className="text-[22px] font-semibold mb-6 leading-tight" style={{ color: colors.text }}>
+            You&apos;re ready to accept clients 🎯
+          </h1>
+
+          <p className="text-[15px] font-semibold mb-2" style={{ color: colors.text }}>
+            Your coaching link is ready
+          </p>
+
           <Card
             style={{
-              padding: spacing[20],
-              marginBottom: spacing[20],
+              padding: spacing[16],
+              marginBottom: spacing[14],
               borderRadius: radii.lg ?? 12,
-              border: `1px solid ${colors.primary}55`,
-              background: `linear-gradient(165deg, rgba(59,130,246,0.14) 0%, ${colors.surface1} 55%)`,
-              boxShadow: shadows.cardShadow,
+              border: `1px solid ${colors.primary}44`,
+              background: colors.surface1,
             }}
           >
-            <p className="text-[11px] font-bold uppercase tracking-[0.12em] mb-2" style={{ color: colors.accent }}>
-              Coach setup complete
+            <p className="text-[13px] font-semibold mb-3 flex items-center gap-2" style={{ color: colors.text }}>
+              <span aria-hidden>🔗</span> Your coaching link
             </p>
-            <h1 className="text-[22px] font-semibold mb-3 leading-tight" style={{ color: colors.text }}>
-              You&apos;re ready to accept clients
-            </h1>
-            <p className="text-[15px] leading-relaxed mb-2" style={{ color: colors.textSecondary }}>
-              Share your client signup link first — it always works. Your coach code appears here when it&apos;s ready; both stay the
-              same every time you sign in.
-            </p>
-            <p className="text-[15px] leading-relaxed mb-6" style={{ color: colors.muted }}>
-              Athletes always join through your link or coach code, then complete client onboarding before they appear on your roster.
-            </p>
-            {inviteLoading && !hasCoachCode ? (
-              <p className="text-[13px] flex items-center gap-2 mb-4" style={{ color: colors.muted }}>
-                <Loader2 size={16} className="animate-spin shrink-0" aria-hidden />
-                Finishing your invite…
+            {inviteLoading && !clientSignupLink ? (
+              <p className="text-[12px] flex items-center gap-2 mb-4" style={{ color: colors.muted }}>
+                <Loader2 size={14} className="animate-spin" />
+                Generating link…
               </p>
-            ) : null}
-            <div className="flex flex-col gap-3">
-              {hasClientSignupLink ? (
-                <Button
-                  variant="primary"
-                  type="button"
-                  onClick={() => copyText(clientSignupLink, 'Link copied')}
-                  style={{ width: '100%', minHeight: touchTargetMin }}
-                >
-                  <Copy size={18} className="inline mr-2" />
-                  Copy client signup link
-                </Button>
-              ) : null}
-              {!hasCoachCode && hasClientSignupLink ? (
-                <p className="text-[12px] text-center leading-relaxed px-1" style={{ color: colors.muted }}>
-                  Your code is generating. Use your link for now.
-                </p>
-              ) : null}
-              {hasCoachCode ? (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={() => copyText(trimmedCode, 'Code copied')}
-                  style={{ width: '100%', minHeight: touchTargetMin }}
-                >
-                  <Copy size={18} className="inline mr-2" />
-                  Copy coach code
-                </Button>
-              ) : null}
-              <Button
-                variant={!hasClientSignupLink ? 'primary' : 'secondary'}
-                type="button"
-                onClick={() => navigate('/get-clients?onboarding=1', { replace: false })}
-                style={{ width: '100%', minHeight: touchTargetMin }}
-              >
-                <UserPlus size={18} className="inline mr-2" />
-                Invite clients — link, code &amp; QR
-              </Button>
-              {showDevManualClient ? (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={() => navigate('/clients', { replace: false })}
-                  style={{ width: '100%', minHeight: touchTargetMin, opacity: 0.92 }}
-                >
-                  Dev: open Clients (manual add)
-                </Button>
-              ) : null}
-              {hasClientSignupLink ? (
+            ) : (
+              <>
                 <button
                   type="button"
-                  className="text-center text-[14px] font-medium py-2 border-none bg-transparent cursor-pointer"
-                  style={{ color: colors.accent, minHeight: touchTargetMin }}
-                  onClick={() => window.open(clientSignupLink, '_blank', 'noopener,noreferrer')}
+                  className="w-full text-left font-mono text-[13px] sm:text-[14px] break-all mb-4 py-2 rounded-lg px-2 -mx-2"
+                  style={{ color: colors.text, background: 'rgba(255,255,255,0.04)' }}
+                  onClick={() => copyText(clientSignupLink || joinShortLink, 'Link copied')}
+                  disabled={!clientSignupLink && !joinShortLink}
                 >
-                  <span className="inline-flex items-center justify-center gap-1.5">
-                    <ExternalLink size={16} className="inline shrink-0" />
-                    Preview client signup flow
-                  </span>
+                  {clientSignupLink || joinShortLink || 'Link will appear shortly'}
                 </button>
-              ) : null}
-            </div>
-          </Card>
-
-          {hasCoachCode ? (
-            <Card style={{ padding: spacing[16], marginBottom: spacing[16], borderRadius: radii.lg ?? 12, border: `1px solid ${colors.border}` }}>
-              <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
-                Coach code
-              </p>
-              <p className="font-mono text-[20px] font-semibold tracking-wide mb-3" style={{ color: colors.text }}>
-                {trimmedCode}
-              </p>
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => copyText(trimmedCode, 'Code copied')}
-                style={{ width: '100%', minHeight: touchTargetMin }}
-              >
-                <Copy size={16} className="inline mr-2" />
-                Copy code
-              </Button>
-              <p className="text-[12px] mt-3" style={{ color: colors.muted }}>
-                Clients can enter this code during signup.
-              </p>
-            </Card>
-          ) : null}
-
-          {hasClientSignupLink ? (
-            <Card style={{ padding: spacing[16], marginBottom: spacing[16], borderRadius: radii.lg ?? 12, border: `1px solid ${colors.border}` }}>
-              <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
-                Client join link
-              </p>
-              <p className="font-mono text-[12px] sm:text-[13px] break-all mb-3 leading-relaxed" style={{ color: colors.text }}>
-                {clientSignupLink}
-              </p>
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => copyText(clientSignupLink, 'Link copied')}
-                style={{ width: '100%', minHeight: touchTargetMin }}
-              >
-                <Copy size={16} className="inline mr-2" />
-                Copy link
-              </Button>
-              {joinShortLink ? (
-                <p className="text-[11px] mt-3 leading-relaxed" style={{ color: colors.muted }}>
-                  Short path:{' '}
-                  <span className="font-mono break-all" style={{ color: colors.textSecondary }}>
-                    {joinShortLink}
-                  </span>
-                </p>
-              ) : null}
-            </Card>
-          ) : null}
-
-          {inviteMessageForShare ? (
-            <Card style={{ padding: spacing[16], marginBottom: spacing[16], borderRadius: radii.lg ?? 12, border: `1px solid ${colors.border}` }}>
-              <p className="text-[11px] font-bold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
-                Invite message
-              </p>
-              <div
-                className="rounded-xl p-3 mb-3"
-                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
-              >
-                <p className="text-[13px] whitespace-pre-line leading-relaxed" style={{ color: colors.text }}>
-                  {inviteMessageForShare}
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => copyText(inviteMessageForShare, 'Message copied')}
-                style={{ width: '100%', minHeight: touchTargetMin }}
-              >
-                <Copy size={16} className="inline mr-2" />
-                Copy invite message
-              </Button>
-            </Card>
-          ) : null}
-
-          {/* Section 3 — how clients join */}
-          <Card style={{ padding: spacing[16], marginBottom: spacing[20], borderRadius: radii.lg ?? 12, border: `1px solid ${colors.border}` }}>
-            <p className="text-[13px] font-semibold mb-2" style={{ color: colors.text }}>
-              Here&apos;s how clients join you
-            </p>
-            <ol className="list-none space-y-3 pl-0 m-0">
-              {[
-                'Share your client join link, coach code, or QR — they start signup tied to you.',
-                'They finish Atlas client onboarding (account + plan with you).',
-                'They show up in Clients as active roster members — then assign programs and check-ins.',
-              ].map((line, i) => (
-                <li key={line} className="flex gap-3 text-[14px] leading-relaxed" style={{ color: colors.textSecondary }}>
-                  <span
-                    className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[13px] font-bold"
-                    style={{ background: colors.primarySubtle, color: colors.accent }}
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => copyText(clientSignupLink || joinShortLink, 'Link copied')}
+                    disabled={!clientSignupLink && !joinShortLink}
+                    style={{ flex: 1, minHeight: touchTargetMin - 4 }}
                   >
-                    {i + 1}
-                  </span>
-                  <span style={{ paddingTop: 2 }}>{line}</span>
-                </li>
-              ))}
-            </ol>
+                    <Copy size={14} className="inline mr-1" />
+                    Copy link
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={shareInviteLink}
+                    disabled={!clientSignupLink && !joinShortLink}
+                    style={{ flex: 1, minHeight: touchTargetMin - 4 }}
+                  >
+                    Share
+                  </Button>
+                </div>
+              </>
+            )}
           </Card>
 
-          {!launchLoading ? (
-            <p className="text-[12px] mb-4 text-center" style={{ color: colors.muted }}>
-              {connectedClientsCount === 0
-                ? 'No clients yet — your first invite starts here.'
-                : `${connectedClientsCount} client${connectedClientsCount === 1 ? '' : 's'} on Atlas`}
-            </p>
-          ) : (
-            <p className="text-[12px] mb-4 text-center" style={{ color: colors.muted }}>
-              Checking your roster…
-            </p>
-          )}
+          <p className="text-[13px] mb-8 leading-relaxed" style={{ color: colors.muted }}>
+            Share this with anyone who wants to train with you. When they sign up using your link, they join your roster automatically.
+          </p>
 
-          {/* Section 4 — closing / navigation (secondary to hero activation) */}
-          <div className="flex flex-col gap-3">
-            <Button variant="secondary" type="button" onClick={goBack} style={{ width: '100%', minHeight: touchTargetMin }}>
-              <ChevronLeft size={18} className="inline mr-1" /> Back
-            </Button>
+          <p className="text-[14px] font-semibold mb-2" style={{ color: colors.text }}>
+            Or share your code directly
+          </p>
+          <div
+            className="flex flex-wrap items-center gap-2 mb-2 rounded-xl px-3 py-3"
+            style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+          >
+            <span className="font-mono text-[18px] font-semibold tracking-wide" style={{ color: colors.text }}>
+              {hasCoachCode ? trimmedCode : inviteLoading ? '…' : '—'}
+            </span>
             <Button
-              variant="primary"
+              variant="secondary"
               type="button"
-              onClick={finishOnboarding}
-              disabled={saving}
-              style={{ width: '100%', minHeight: touchTargetMin }}
+              className="ml-auto"
+              onClick={() => copyText(trimmedCode, 'Code copied')}
+              disabled={!hasCoachCode}
+              style={{ minHeight: touchTargetMin - 6 }}
             >
-              {saving ? <Loader2 size={18} className="animate-spin inline mr-2" /> : null}
-              Go to dashboard
+              <Copy size={14} className="inline mr-1" />
+              Copy
             </Button>
           </div>
+          <p className="text-[12px] mb-8" style={{ color: colors.muted }}>
+            Clients can also enter this code manually on the Atlas sign up page.
+          </p>
+
+          <p className="text-[13px] font-semibold mb-3" style={{ color: colors.text }}>
+            What happens next
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+            {[
+              {
+                emoji: '📋',
+                title: 'Review check-ins',
+                body: "They'll submit weekly check-ins for your review.",
+                to: '/review-center',
+              },
+              {
+                emoji: '📊',
+                title: 'Build a programme',
+                body: "Set your first client's training plan before they even sign up.",
+                to: '/programs',
+              },
+              {
+                emoji: '💬',
+                title: 'Message clients',
+                body: 'Clients can message you directly from their app.',
+                to: '/messages',
+              },
+            ].map((item) => (
+              <button
+                key={item.to}
+                type="button"
+                onClick={() => navigate(item.to)}
+                className="text-left rounded-xl border p-4 transition-colors"
+                style={{
+                  borderColor: colors.border,
+                  background: colors.surface1,
+                  minHeight: touchTargetMin + 24,
+                  color: colors.text,
+                }}
+              >
+                <p className="text-[16px] font-semibold mb-2 m-0">
+                  <span className="mr-1">{item.emoji}</span> {item.title}
+                </p>
+                <p className="text-[12px] leading-relaxed m-0" style={{ color: colors.muted }}>
+                  {item.body}
+                </p>
+              </button>
+            ))}
+          </div>
+
+          {showDevManualClient ? (
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => navigate('/clients', { replace: false })}
+              style={{ width: '100%', minHeight: touchTargetMin, opacity: 0.92, marginBottom: spacing[12] }}
+            >
+              Dev: open Clients (manual add)
+            </Button>
+          ) : null}
+
+          <Button
+            variant="primary"
+            type="button"
+            onClick={finishOnboarding}
+            disabled={saving}
+            style={{ width: '100%', minHeight: touchTargetMin }}
+          >
+            {saving ? <Loader2 size={18} className="animate-spin inline mr-2" /> : null}
+            Go to my dashboard →
+          </Button>
         </>
       ) : null}
+      <ConfirmDialog
+        open={showExitConfirm}
+        title="Exit setup?"
+        message="You can resume later — your progress is saved."
+        confirmLabel="Exit"
+        cancelLabel="Stay"
+        variant="danger"
+        onConfirm={() => { setShowExitConfirm(false); navigate('/home', { replace: true }); }}
+        onCancel={() => setShowExitConfirm(false)}
+      />
     </div>
   );
 }

@@ -50,9 +50,9 @@ describe('autoProgramBuilder', () => {
     expect(split.dayTitles).toHaveLength(4);
   });
 
-  it('builds explainable starter program for Personal Enhanced', () => {
+  it('builds explainable starter program for coach (Personal auto-gen disabled by policy)', () => {
     const program = generateStarterProgram({
-      role: 'personal',
+      role: 'coach',
       personalPlanTier: 'enhanced',
       goal: 'muscle',
       daysPerWeek: 3,

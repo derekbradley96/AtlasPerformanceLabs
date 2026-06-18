@@ -40,3 +40,30 @@ export async function notificationSuccess() {
     else if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
   } catch (e) {}
 }
+
+// Semantic API
+export const hapticNavigation = hapticLight;
+export const hapticSelection = selectionChanged;
+export const hapticSuccess = notificationSuccess;
+
+export async function hapticWarning() {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      await Haptics.notification({ type: 2 });
+    } else if (navigator.vibrate) {
+      navigator.vibrate([10, 30, 10, 30]);
+    }
+  } catch (_) {}
+}
+
+export async function hapticAchievement() {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      await Haptics.impact({ style: ImpactStyle.Heavy });
+      await new Promise((r) => setTimeout(r, 100));
+      await Haptics.impact({ style: ImpactStyle.Light });
+    } else if (navigator.vibrate) {
+      navigator.vibrate([30, 50, 20]);
+    }
+  } catch (_) {}
+}

@@ -10,6 +10,34 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Keyboard focus: visible ring without changing mouse-click appearance */
+a:focus-visible,
+button:focus-visible,
+[role='button']:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:not([tabindex='-1']):focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.85);
+  outline-offset: 2px;
+}
+
+/* Prevent keyboard from hiding focused inputs on iOS */
+input:focus,
+textarea:focus,
+select:focus {
+  scroll-margin-bottom: 120px;
+}
+
+@keyframes atlas-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes atlas-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 /* Retro Corporate Neon theme (single source: src/ui/tokens.js) */
 :root {
   --tabbar-height: 76px;
@@ -36,6 +64,12 @@
   --atlas-page-padding: 16px;
   --atlas-section-spacing: 16px;
   --tabbar-height: 76px;
+}
+
+/* Sentry / GlitchTip user-feedback widget (optional SDK injection). Atlas uses BetaFeedbackModal instead. */
+#sentry-feedback,
+sentry-feedback {
+  display: none !important;
 }
 
 /* Atlas typography hierarchy (use on all role-based pages) */
@@ -365,6 +399,19 @@ svg {
   padding: 12px 16px 8px;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  /* Chrome: prevent scroll event capture by parent containers */
+  isolation: isolate;
+  will-change: scroll-position;
+}
+
+/* When a page owns its own scroll, the shell must not
+   capture wheel events. This targets the shell's inner
+   scroll container when it's set to overflow-hidden. */
+.no-outer-scroll > .chat-messages,
+.overflow-hidden .chat-messages {
+  /* Chrome: allow wheel events to reach the inner scroller */
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 /* iOS 17 style blur input bar */
 .chat-input-bar {

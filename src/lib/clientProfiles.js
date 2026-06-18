@@ -11,9 +11,9 @@ export async function getMyClientProfile(userId) {
   if (!supabase) return null;
 
   const selectWithDelivery =
-    'id, user_id, coach_id, trainer_id, name, created_at, client_type, delivery_context, selected_service_id, billing_status';
+    'id, user_id, coach_id, trainer_id, name, created_at, client_type, delivery_context, selected_service_id, billing_status, goals, baseline_weight, checkin_template_id';
   const selectLegacy =
-    'id, user_id, coach_id, trainer_id, name, created_at, client_type, selected_service_id, billing_status';
+    'id, user_id, coach_id, trainer_id, name, created_at, client_type, selected_service_id, billing_status, goals, baseline_weight, checkin_template_id';
 
   const loadClients = async () => {
     let { data, error } = await supabase
@@ -22,7 +22,7 @@ export async function getMyClientProfile(userId) {
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
     const msg = String(error?.message || '');
-    if (error && /delivery_context|billing_status|schema cache|PGRST204/i.test(msg)) {
+    if (error && /delivery_context|billing_status|goals|baseline_weight|schema cache|PGRST204/i.test(msg)) {
       const retry = await supabase
         .from('clients')
         .select(selectLegacy)

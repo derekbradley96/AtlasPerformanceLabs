@@ -4,7 +4,7 @@
  */
 
 const BUCKET = 'message_media';
-const SIGNED_URL_EXPIRY_SEC = 60 * 60 * 24; // 24h for playback
+const SIGNED_URL_EXPIRY_SEC = 60 * 60 * 24 * 7; // 7d for playback
 
 /**
  * Get file extension from mime type (webm, m4a).
@@ -52,6 +52,7 @@ function getImageExtension(fileName = '', mimeType = '') {
 export async function compressImage(file) {
   if (!file || typeof window === 'undefined' || typeof document === 'undefined') return file;
   if (String(file.type || '').includes('gif')) return file; // keep GIF animation
+  try {
   const bitmap = await createImageBitmap(file);
   const maxWidth = 1600;
   const scale = bitmap.width > maxWidth ? maxWidth / bitmap.width : 1;
@@ -65,6 +66,9 @@ export async function compressImage(file) {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', 0.8);
   });
+  } catch (_) {
+    return file;
+  }
 }
 
 /**
@@ -78,6 +82,30 @@ export async function uploadImageBlob({ supabase, threadId, messageId, blob, mim
   const path = `${threadId}/${messageId}.${ext}`;
   const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
     contentType: mimeType || 'image/jpeg',
+    upsert: true,
+  });
+  if (error) throw error;
+  return path;
+}
+
+export function getVideoExtension(fileName = '', mimeType = '') {
+  const n = String(fileName || '').toLowerCase();
+  if (n.endsWith('.mp4') || mimeType.includes('mp4')) return 'mp4';
+  if (n.endsWith('.mov') || mimeType.includes('quicktime')) return 'mov';
+  return 'webm';
+}
+
+export async function uploadVideoBlob({
+  supabase, threadId, messageId, blob,
+  mimeType = 'video/mp4', fileName = ''
+}) {
+  if (!supabase || !threadId || !messageId || !blob) {
+    throw new Error('uploadVideoBlob: required args missing');
+  }
+  const ext = getVideoExtension(fileName, mimeType);
+  const path = `${threadId}/${messageId}_video.${ext}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
+    contentType: mimeType || 'video/mp4',
     upsert: true,
   });
   if (error) throw error;

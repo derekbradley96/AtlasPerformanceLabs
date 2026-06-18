@@ -21,6 +21,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { HabitCardSkeleton } from '@/components/ui/LoadingState';
 import { hapticLight } from '@/lib/haptics';
 import { toast } from 'sonner';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 const CATEGORIES = [
   { value: 'steps', label: 'Steps' },
@@ -66,6 +67,7 @@ export default function ClientHabitsPage() {
   const [clientName, setClientName] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [habitToDelete, setHabitToDelete] = useState(null);
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -415,7 +417,7 @@ export default function ClientHabitsPage() {
                             <span className="text-xs" style={{ color: colors.muted }}>Active</span>
                           </label>
                           <Button variant="ghost" size="sm" onClick={() => { hapticLight(); openEdit(h); }}>Edit</Button>
-                          <Button variant="ghost" size="sm" className="text-red-400" onClick={() => { hapticLight(); if (window.confirm('Remove this habit?')) deleteMutation.mutate(h.id); }}>
+                          <Button variant="ghost" size="sm" className="text-red-400" onClick={() => { hapticLight(); setHabitToDelete(h.id); }}>
                             <Trash2 size={14} />
                           </Button>
                         </div>
@@ -428,6 +430,16 @@ export default function ClientHabitsPage() {
           )}
         </section>
       </div>
+      <ConfirmDialog
+        open={habitToDelete !== null}
+        title="Remove habit?"
+        message="This habit and its log history will be removed."
+        confirmLabel="Remove"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => { deleteMutation.mutate(habitToDelete); setHabitToDelete(null); }}
+        onCancel={() => setHabitToDelete(null)}
+      />
     </div>
   );
 }

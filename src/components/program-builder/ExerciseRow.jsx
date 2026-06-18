@@ -1,13 +1,17 @@
 /**
  * Single exercise card: name, sets, reps, rest, expandable advanced fields. Premium motion + haptics.
  */
-import React, { useState, memo, useRef } from 'react';
+import React, { useState, memo, useRef, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { ChevronUp, ChevronDown, Trash2, Copy, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Card from '@/ui/Card';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { standardCard } from '@/ui/pageLayout';
 import { impactLight, selectionChanged } from '@/lib/haptics';
+import { EXERCISES as LIB_EXERCISES } from '@/data/exercises/exerciseLibrary';
+import { getPosesForExercise } from '@/lib/data/poseLibraryData';
+import { PREP_EDUCATION_OPTIONS } from '@/lib/prepEducationContent';
 
 const INPUT_PADDING = { padding: `${spacing[10]}px ${spacing[12]}px` };
 const baseInputStyle = {
@@ -27,6 +31,73 @@ function parseStepperInt(raw, minVal) {
   const n = parseInt(String(raw), 10);
   if (Number.isNaN(n)) return null;
   return Math.max(minVal, n);
+}
+
+function parseSetsConfig(raw) {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isValidTempoInput(raw) {
+  if (raw == null || raw === '') return true;
+  return /^\d+-\d+-\d+$/.test(String(raw).trim());
+}
+
+function tempoPreview(raw) {
+  if (!raw || !isValidTempoInput(raw)) return '';
+  const [eccentric, pause, concentric] = String(raw).split('-').map((n) => Number(n));
+  return `${eccentric}s down · ${pause}s pause · ${concentric}s up`;
+}
+
+function estimateTryWeightKg(exerciseName, experienceLevel) {
+  const name = String(exerciseName || '').toLowerCase();
+  const level = String(experienceLevel || 'intermediate').toLowerCase();
+  const benchLike = /bench|press/.test(name);
+  const squatLike = /squat|leg press/.test(name);
+  const deadliftLike = /deadlift|rdl|hinge/.test(name);
+  const rowLike = /row|pulldown|pull-up|chin-up/.test(name);
+  const map = {
+    beginner: { bench: 40, squat: 50, deadlift: 60, row: 35, base: 25 },
+    intermediate: { bench: 60, squat: 80, deadlift: 100, row: 50, base: 35 },
+    advanced: { bench: 90, squat: 120, deadlift: 150, row: 70, base: 45 },
+  };
+  const profile = map[level] || map.intermediate;
+  if (benchLike) return profile.bench;
+  if (squatLike) return profile.squat;
+  if (deadliftLike) return profile.deadlift;
+  if (rowLike) return profile.row;
+  return profile.base;
+}
+
+function buildDefaultSetsConfig(exercise, options = {}) {
+  const count = Math.max(1, Number(exercise?.sets) || 1);
+  const reps = exercise?.reps != null ? String(exercise.reps) : '';
+  const defaultWeight = options.lastWeight ?? null;
+  return Array.from({ length: count }, (_, i) => ({
+    set_number: i + 1,
+    weight_kg: defaultWeight,
+    reps,
+    rir: null,
+    notes: '',
+  }));
+}
+
+function formatWeeksAgo(dateIso) {
+  if (!dateIso) return null;
+  const when = new Date(dateIso);
+  if (Number.isNaN(when.getTime())) return null;
+  const diffMs = Date.now() - when.getTime();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const weeks = Math.max(0, Math.round(diffMs / weekMs));
+  if (weeks <= 0) return 'this week';
+  if (weeks === 1) return '1 week ago';
+  return `${weeks} weeks ago`;
 }
 
 function StepperField({ value, placeholder, onChange, min = 0, ariaLabel, invalid = false }) {
@@ -103,12 +174,34 @@ function ExerciseRowInner({
   onCopyPrevious,
   hasPrevious = false,
   suggestions = [],
+  previousPerformance = null,
   notesPlaceholder = 'Notes (optional)',
   saving,
   personalEditorMode = 'default',
+  personalExperienceLevel = 'intermediate',
   onSmartSwap,
+  showPrepEducationPicker = false,
+  isAssignedProgramLive = false,
+  supersetOptions = [],
+  onLinkSuperset,
+  onRemoveSuperset,
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedSetRowIndex, setSelectedSetRowIndex] = useState(null);
+  const exerciseLibraryId = useMemo(() => {
+    const raw = exercise.exercise_library_id;
+    if (raw) return String(raw);
+    const n = String(exercise.exercise_name || '').trim().toLowerCase();
+    if (!n) return '';
+    const hit = LIB_EXERCISES.find((e) => String(e.name || '').trim().toLowerCase() === n);
+    return hit?.id ? String(hit.id) : '';
+  }, [exercise.exercise_library_id, exercise.exercise_name]);
+
+  const poseTrainingHits = useMemo(
+    () => (exerciseLibraryId ? getPosesForExercise(exerciseLibraryId) : []),
+    [exerciseLibraryId],
+  );
+
   const isPersonalBasic = personalEditorMode === 'personal_basic';
   const isPersonalEnhanced = personalEditorMode === 'personal_enhanced';
   const canMoveUp = index > 0 && !saving;
@@ -118,10 +211,107 @@ function ExerciseRowInner({
   const repsNum = exercise.reps != null && exercise.reps !== '' ? Number(exercise.reps) : null;
   const setsInvalid = setsNum !== null && (isNaN(setsNum) || setsNum < 0);
   const repsInvalid = repsNum !== null && (isNaN(repsNum) || repsNum < 0);
+  const prescribedWeightRaw =
+    exercise?.prescribed_weight
+    ?? exercise?.prescribed_weight_kg
+    ?? exercise?.target_weight
+    ?? exercise?.target_weight_kg
+    ?? exercise?.load_kg
+    ?? exercise?.weight
+    ?? null;
+  const prescribedWeight = prescribedWeightRaw == null ? null : Number(prescribedWeightRaw);
+  const lastWeight = previousPerformance?.weight == null ? null : Number(previousPerformance.weight);
+  const lastReps = previousPerformance?.reps == null ? null : Number(previousPerformance.reps);
+  const lastDateText = formatWeeksAgo(previousPerformance?.date);
+  const currentSetsConfig = useMemo(() => parseSetsConfig(exercise?.sets_config), [exercise?.sets_config]);
+  const individualTargetsEnabled = Array.isArray(currentSetsConfig) && currentSetsConfig.length > 0;
+  const tryWeightKg = useMemo(
+    () => estimateTryWeightKg(exercise?.exercise_name, personalExperienceLevel),
+    [exercise?.exercise_name, personalExperienceLevel],
+  );
+  const tempoValue = String(exercise?.tempo || '').trim();
+  const tempoValid = isValidTempoInput(tempoValue);
+  const tempoHint = tempoPreview(tempoValue);
+  const showTempoBadge = tempoValue && tempoValid;
+  const showSupersetBadge = !!exercise?.superset_group;
+  const showWarmupBadge = !!exercise?.is_warmup_parent;
 
   const toggleAdvanced = () => {
     impactLight();
     setShowAdvanced((v) => !v);
+  };
+
+  const updateSetsConfig = (nextRows) => {
+    const normalized = nextRows.map((row, idx) => ({
+      set_number: idx + 1,
+      weight_kg: row.weight_kg == null || row.weight_kg === '' ? null : Number(row.weight_kg),
+      reps: row.reps == null ? '' : String(row.reps),
+      rir: row.rir == null || row.rir === '' ? null : Number(row.rir),
+      notes: row.notes ? String(row.notes) : '',
+    }));
+    onUpdate(exercise.id, {
+      sets_config: normalized,
+      sets: normalized.length,
+      reps: normalized[0]?.reps || exercise?.reps || null,
+    });
+  };
+
+  const toggleIndividualTargets = () => {
+    if (individualTargetsEnabled) {
+      onUpdate(exercise.id, { sets_config: null });
+      return;
+    }
+    onUpdate(exercise.id, { sets_config: buildDefaultSetsConfig(exercise, { lastWeight }) });
+  };
+
+  const updateSetCell = (rowIdx, key, value) => {
+    const rows = [...(currentSetsConfig || buildDefaultSetsConfig(exercise, { lastWeight }))];
+    const row = { ...(rows[rowIdx] || {}) };
+    row[key] = value;
+    rows[rowIdx] = row;
+    updateSetsConfig(rows);
+  };
+
+  const addSetAfter = (rowIdx) => {
+    const rows = [...(currentSetsConfig || buildDefaultSetsConfig(exercise, { lastWeight }))];
+    const source = rows[rowIdx] || { weight_kg: null, reps: '', rir: null, notes: '' };
+    rows.splice(rowIdx + 1, 0, {
+      set_number: rowIdx + 2,
+      weight_kg: source.weight_kg ?? null,
+      reps: source.reps ?? '',
+      rir: source.rir ?? null,
+      notes: source.notes ?? '',
+    });
+    updateSetsConfig(rows);
+    setSelectedSetRowIndex(rowIdx + 1);
+  };
+
+  const duplicateSetRow = (rowIdx) => {
+    const rows = [...(currentSetsConfig || buildDefaultSetsConfig(exercise, { lastWeight }))];
+    const source = rows[rowIdx] || { weight_kg: null, reps: '', rir: null, notes: '' };
+    rows.splice(rowIdx + 1, 0, {
+      set_number: rowIdx + 2,
+      weight_kg: source.weight_kg ?? null,
+      reps: source.reps ?? '',
+      rir: source.rir ?? null,
+      notes: source.notes ?? '',
+    });
+    updateSetsConfig(rows);
+  };
+
+  const fillDownFromRow = (rowIdx) => {
+    const rows = [...(currentSetsConfig || buildDefaultSetsConfig(exercise, { lastWeight }))];
+    const source = rows[rowIdx];
+    if (!source) return;
+    for (let i = rowIdx + 1; i < rows.length; i += 1) {
+      rows[i] = {
+        ...rows[i],
+        weight_kg: source.weight_kg ?? null,
+        reps: source.reps ?? '',
+        rir: source.rir ?? null,
+      };
+    }
+    updateSetsConfig(rows);
   };
 
   return (
@@ -191,18 +381,53 @@ function ExerciseRowInner({
               aria-label="Exercise name"
               aria-invalid={nameEmpty}
             />
+            {(showTempoBadge || showSupersetBadge || showWarmupBadge) ? (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: -4 }}>
+                {showTempoBadge ? (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: colors.primary, border: `1px solid ${colors.primary}`, borderRadius: 999, padding: '2px 8px' }}>[T]</span>
+                ) : null}
+                {showSupersetBadge ? (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: colors.warning, border: `1px solid ${colors.warning}`, borderRadius: 999, padding: '2px 8px' }}>[S] {String(exercise.superset_group || '').toUpperCase()}</span>
+                ) : null}
+                {showWarmupBadge ? (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: colors.success, border: `1px solid ${colors.success}`, borderRadius: 999, padding: '2px 8px' }}>[W]</span>
+                ) : null}
+              </div>
+            ) : null}
             <datalist id={`exercise-suggestions-${exercise.id}`}>
               {(suggestions || []).slice(0, 12).map((name) => (
                 <option key={name} value={name} />
               ))}
             </datalist>
+            {poseTrainingHits.length > 0 && (
+              <div className="flex flex-col gap-1 mt-1">
+                <p className="text-[11px] leading-snug" style={{ color: colors.muted, margin: 0 }}>
+                  <span style={{ fontWeight: 600, color: colors.text }}>Builds stage shots:</span>{' '}
+                  {poseTrainingHits.map((h, idx) => (
+                    <span key={h.poseId}>
+                      {idx > 0 ? ' · ' : ''}
+                      <Link
+                        to={`/comp-prep/poses/${encodeURIComponent(h.poseId)}`}
+                        title={h.interpretation}
+                        onClick={() => void impactLight()}
+                        className="underline-offset-2 hover:underline"
+                        style={{ color: colors.accent, fontWeight: 600 }}
+                      >
+                        {h.poseName}
+                      </Link>
+                    </span>
+                  ))}
+                </p>
+              </div>
+            )}
             {nameEmpty && (
               <p className="text-[11px]" style={{ color: colors.danger, margin: 0, opacity: 0.9 }}>
                 Name required
               </p>
             )}
 
-            <div className="grid gap-2" style={{ gridTemplateColumns: isPersonalBasic ? '1fr 1fr' : '1fr 1fr 1fr' }}>
+            {!individualTargetsEnabled ? (
+              <div className="grid gap-2" style={{ gridTemplateColumns: isPersonalBasic ? '1fr 1fr' : '1fr 1fr 1fr' }}>
               <div>
                 <p style={fieldLabel}>Sets</p>
                 <StepperField
@@ -237,7 +462,94 @@ function ExerciseRowInner({
                   />
                 </div>
               )}
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => !individualTargetsEnabled && onUpdate(exercise.id, { sets_config: null })}
+                style={{
+                  border: `1px solid ${!individualTargetsEnabled ? colors.primary : colors.border}`,
+                  background: !individualTargetsEnabled ? colors.primarySubtle : colors.surface1,
+                  color: !individualTargetsEnabled ? colors.primary : colors.text,
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: '6px 10px',
+                }}
+              >
+                Use same targets for all sets
+              </button>
+              <button
+                type="button"
+                onClick={toggleIndividualTargets}
+                style={{
+                  border: `1px solid ${individualTargetsEnabled ? colors.primary : colors.border}`,
+                  background: individualTargetsEnabled ? colors.primarySubtle : colors.surface1,
+                  color: individualTargetsEnabled ? colors.primary : colors.text,
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: '6px 10px',
+                }}
+              >
+                Set individual targets per set
+              </button>
             </div>
+            {individualTargetsEnabled ? (
+              <div style={{ border: `1px solid ${colors.border}`, borderRadius: 10, overflow: 'hidden' }}>
+                {isPersonalBasic || isPersonalEnhanced ? (
+                  <p style={{ margin: 0, padding: '8px 10px', fontSize: 11, color: colors.muted, borderBottom: `1px solid ${colors.border}`, background: colors.surface1 }}>
+                    {lastWeight != null
+                      ? `Last session: ${lastWeight}kg${lastReps != null ? ` × ${lastReps}` : ''}`
+                      : `Try ${tryWeightKg}kg to start, then adjust as needed.`}
+                  </p>
+                ) : null}
+                <div style={{ display: 'grid', gridTemplateColumns: '54px 88px 84px 70px 1fr', gap: 6, padding: 8, background: colors.surface2, fontSize: 11, color: colors.muted, fontWeight: 700 }}>
+                  <div>Set</div>
+                  <div>Weight</div>
+                  <div>Reps</div>
+                  <div>RIR</div>
+                  <div>Notes</div>
+                </div>
+                {(currentSetsConfig || []).map((row, rowIdx) => (
+                  <div key={`set-row-${rowIdx}`} onClick={() => setSelectedSetRowIndex(rowIdx)} style={{ display: 'grid', gridTemplateColumns: '54px 88px 84px 70px 1fr', gap: 6, padding: 8, borderTop: `1px solid ${colors.border}` }}>
+                    <div style={{ fontSize: 12, color: colors.muted, display: 'flex', alignItems: 'center' }}>{rowIdx + 1}</div>
+                    <input value={row.weight_kg ?? ''} onChange={(e) => updateSetCell(rowIdx, 'weight_kg', e.target.value === '' ? null : Number(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSetAfter(rowIdx); } }} placeholder={lastWeight == null && rowIdx === 0 ? `Try ${tryWeightKg}` : 'kg'} style={{ ...getInputStyle(), fontSize: 12, padding: '6px 8px' }} />
+                    <input value={row.reps ?? ''} onChange={(e) => updateSetCell(rowIdx, 'reps', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSetAfter(rowIdx); } }} placeholder="8-12" style={{ ...getInputStyle(), fontSize: 12, padding: '6px 8px' }} />
+                    <input value={row.rir ?? ''} onChange={(e) => updateSetCell(rowIdx, 'rir', e.target.value === '' ? null : Number(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSetAfter(rowIdx); } }} placeholder="2" style={{ ...getInputStyle(), fontSize: 12, padding: '6px 8px' }} />
+                    <input value={row.notes ?? ''} onChange={(e) => updateSetCell(rowIdx, 'notes', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSetAfter(rowIdx); } }} placeholder="Optional" style={{ ...getInputStyle(), fontSize: 12, padding: '6px 8px' }} />
+                  </div>
+                ))}
+                <button type="button" onClick={() => addSetAfter(Math.max(0, (currentSetsConfig || []).length - 1))} style={{ width: '100%', textAlign: 'left', border: 'none', borderTop: `1px solid ${colors.border}`, background: colors.surface1, color: colors.primary, fontWeight: 700, fontSize: 12, padding: '8px 10px' }}>
+                  + Add set
+                </button>
+                {selectedSetRowIndex != null ? (
+                  <div style={{ display: 'flex', gap: 8, padding: 8, borderTop: `1px solid ${colors.border}`, background: colors.surface2 }}>
+                    <button type="button" onClick={() => duplicateSetRow(selectedSetRowIndex)} style={{ border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, borderRadius: 8, fontSize: 12, fontWeight: 600, padding: '6px 10px' }}>Duplicate</button>
+                    <button type="button" onClick={() => fillDownFromRow(selectedSetRowIndex)} style={{ border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, borderRadius: 8, fontSize: 12, fontWeight: 600, padding: '6px 10px' }}>Fill down from here</button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {lastWeight != null && (
+              <div style={{ marginTop: -2 }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>
+                  Last logged: {lastWeight}kg{lastReps != null ? ` × ${lastReps} reps` : ''}{lastDateText ? ` (${lastDateText})` : ''}
+                </p>
+                {prescribedWeight != null ? (
+                  prescribedWeight < lastWeight ? (
+                    <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: '#b67a2a' }}>
+                      ⚠ Target is below their last logged weight
+                    </p>
+                  ) : prescribedWeight > lastWeight ? (
+                    <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: colors.success }}>
+                      ↑ Progressive overload
+                    </p>
+                  ) : null
+                ) : null}
+              </div>
+            )}
 
             <div>
               <p style={fieldLabel}>Notes</p>
@@ -251,6 +563,42 @@ function ExerciseRowInner({
                 aria-label="Notes"
               />
             </div>
+            {isAssignedProgramLive ? (
+              <div>
+                <p style={fieldLabel}>Reason for change (optional — client will see this)</p>
+                <input
+                  type="text"
+                  placeholder="Reason for change"
+                  value={exercise.coach_update_note || ''}
+                  onChange={(e) => onUpdate(exercise.id, { coach_update_note: e.target.value || null })}
+                  style={{ ...getInputStyle(), width: '100%', fontSize: 13 }}
+                  aria-label="Reason for change"
+                />
+              </div>
+            ) : null}
+
+            {showPrepEducationPicker ? (
+              <div>
+                <p style={fieldLabel}>Add reason for this change</p>
+                <select
+                  aria-label="Prep education tag"
+                  value={exercise.prep_instruction_explanation_key || ''}
+                  onChange={(e) =>
+                    onUpdate(exercise.id, {
+                      prep_instruction_explanation_key: e.target.value ? e.target.value : null,
+                    })
+                  }
+                  style={{ ...getInputStyle(), width: '100%', fontSize: 13 }}
+                >
+                  <option value="">None</option>
+                  {PREP_EDUCATION_OPTIONS.map((k) => (
+                    <option key={k} value={k}>
+                      {k.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <motion.button
@@ -347,15 +695,26 @@ function ExerciseRowInner({
                         />
                       </div>
                       <div>
-                        <p style={fieldLabel}>Tempo</p>
+                        <p style={fieldLabel}>Tempo (optional)</p>
                         <input
                           type="text"
-                          placeholder="3-1-2-0"
-                          value={exercise.tempo || ''}
-                          onChange={(e) => onUpdate(exercise.id, { tempo: e.target.value || null })}
-                          style={{ ...getInputStyle(), width: '100%', fontSize: 13, padding: `${spacing[8]}px ${spacing[8]}px` }}
+                          placeholder="e.g. 3-1-1"
+                          value={tempoValue}
+                          onChange={(e) => {
+                            const next = String(e.target.value || '').replace(/[^\d-]/g, '');
+                            onUpdate(exercise.id, { tempo: next || null });
+                          }}
+                          style={{ ...getInputStyle(!tempoValid ? colors.danger : shell.cardBorder), width: '100%', fontSize: 13, padding: `${spacing[8]}px ${spacing[8]}px` }}
                           aria-label="Tempo"
                         />
+                        <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: colors.muted }}>
+                          eccentric - pause - concentric
+                        </p>
+                        {tempoHint ? (
+                          <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: colors.textSecondary }}>
+                            {tempoHint}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     <input
@@ -371,6 +730,47 @@ function ExerciseRowInner({
                       style={{ ...getInputStyle(), width: '100%' }}
                       aria-label="Load or percentage"
                     />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: spacing[8], alignItems: 'end' }}>
+                      <div>
+                        <p style={fieldLabel}>Superset</p>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const partnerId = e.target.value;
+                            if (partnerId) onLinkSuperset?.(exercise.id, partnerId);
+                          }}
+                          style={{ ...getInputStyle(), width: '100%' }}
+                        >
+                          <option value="">Link to superset {'->'}</option>
+                          {(supersetOptions || []).map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {showSupersetBadge ? (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveSuperset?.(exercise.id)}
+                          style={{ border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, borderRadius: 8, minHeight: 36, padding: '0 10px', fontSize: 12, fontWeight: 600 }}
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(exercise?.is_warmup_parent)}
+                        onChange={(e) => onUpdate(exercise.id, { is_warmup_parent: e.target.checked })}
+                        disabled={!(exercise?.weight_kg != null || prescribedWeight != null)}
+                      />
+                      <span style={{ fontSize: 12, color: colors.text }}>Auto warm-up sets</span>
+                    </label>
+                    {Boolean(exercise?.is_warmup_parent) && (exercise?.weight_kg != null || prescribedWeight != null) ? (
+                      <p style={{ margin: 0, fontSize: 11, color: colors.muted, lineHeight: 1.45 }}>
+                        Warm-up sets (auto-generated at session start): W1 {(Number(exercise?.weight_kg ?? prescribedWeight) * 0.5).toFixed(1)}kg x 8, W2 {(Number(exercise?.weight_kg ?? prescribedWeight) * 0.75).toFixed(1)}kg x 5, W3 {(Number(exercise?.weight_kg ?? prescribedWeight) * 0.9).toFixed(1)}kg x 2.
+                      </p>
+                    ) : null}
                   </div>
                 </motion.div>
               )}

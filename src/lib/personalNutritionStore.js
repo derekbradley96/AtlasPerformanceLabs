@@ -1,4 +1,5 @@
 import { safeGetJson, safeSetJson } from '@/lib/storageSafe';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 const TARGETS_KEY = 'atlas_personal_nutrition_targets_v1';
 const MEALS_KEY = 'atlas_personal_meal_logs_v1';
@@ -28,19 +29,59 @@ function setMealsMap(next) {
  * Returns a normalized target object compatible with UI progress components:
  * { calories, protein_g, carbs_g, fats_g } or null
  */
-export function getPersonalNutritionTarget(userId) {
+export async function getPersonalNutritionTarget(userId) {
   if (!userId) return null;
+
+  const localKey = `atlas_personal_nutrition_targets_v1_${userId}`;
+  const cached = safeGetJson(localKey);
+  if (cached?.calories) {
+    return {
+      calories: Number(cached.calories ?? 0) || 0,
+      protein_g: cached.protein_g != null ? Number(cached.protein_g) : null,
+      carbs_g: cached.carbs_g != null ? Number(cached.carbs_g) : null,
+      fats_g: cached.fats_g != null ? Number(cached.fats_g) : null,
+      updatedAt: cached.updatedAt ?? null,
+    };
+  }
+
   const map = getTargetsMap();
   const raw = map?.[userId];
-  if (!raw) return null;
+  if (raw) {
+    const normalized = {
+      calories: Number(raw.calories ?? raw.target_calories ?? 0) || 0,
+      protein_g: raw.protein_g ?? raw.target_protein_g ?? null,
+      carbs_g: raw.carbs_g ?? raw.target_carbs_g ?? null,
+      fats_g: raw.fats_g ?? raw.target_fats_g ?? null,
+      updatedAt: raw.updatedAt ?? null,
+    };
+    if (normalized.calories) {
+      safeSetJson(localKey, normalized);
+      return normalized;
+    }
+  }
 
-  return {
-    calories: Number(raw.calories ?? raw.target_calories ?? 0) || 0,
-    protein_g: raw.protein_g ?? raw.target_protein_g ?? null,
-    carbs_g: raw.carbs_g ?? raw.target_carbs_g ?? null,
-    fats_g: raw.fats_g ?? raw.target_fats_g ?? null,
-    updatedAt: raw.updatedAt ?? null,
+  if (!hasSupabase) return null;
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from('profiles')
+    .select(
+      'nutrition_calories, nutrition_protein_g, nutrition_carbs_g, nutrition_fats_g, nutrition_targets_updated_at'
+    )
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!data?.nutrition_calories) return null;
+
+  const target = {
+    calories: Number(data.nutrition_calories) || 0,
+    protein_g: data.nutrition_protein_g != null ? Number(data.nutrition_protein_g) : null,
+    carbs_g: data.nutrition_carbs_g != null ? Number(data.nutrition_carbs_g) : null,
+    fats_g: data.nutrition_fats_g != null ? Number(data.nutrition_fats_g) : null,
+    updatedAt: data.nutrition_targets_updated_at ?? null,
   };
+  safeSetJson(localKey, target);
+  return target;
 }
 
 /**
@@ -63,7 +104,32 @@ export function upsertPersonalNutritionTarget(userId, payload) {
   map[userId] = next;
   setTargetsMap(map);
 
-  return getPersonalNutritionTarget(userId);
+  if (hasSupabase) {
+    const supabase = getSupabase();
+    if (supabase && userId) {
+      const updatePayload = {
+        nutrition_calories: payload?.calories ?? payload?.target_calories ?? null,
+        nutrition_protein_g: payload?.protein_g ?? payload?.target_protein_g ?? null,
+        nutrition_carbs_g: payload?.carbs_g ?? payload?.target_carbs_g ?? null,
+        nutrition_fats_g: payload?.fats_g ?? payload?.target_fats_g ?? null,
+        nutrition_targets_updated_at: new Date().toISOString(),
+      };
+      void (async () => {
+        const { error } = await supabase.from('profiles').update(updatePayload).eq('id', userId);
+        if (error && import.meta.env?.DEV) {
+          console.warn('[personalNutritionStore] profiles nutrition update failed', error);
+        }
+      })();
+    }
+  }
+
+  return {
+    calories: Number(next.calories ?? 0) || 0,
+    protein_g: next.protein_g != null ? Number(next.protein_g) : null,
+    carbs_g: next.carbs_g != null ? Number(next.carbs_g) : null,
+    fats_g: next.fats_g != null ? Number(next.fats_g) : null,
+    updatedAt: next.updatedAt ?? null,
+  };
 }
 
 export function listPersonalMealLogs(userId, mealDateISO) {

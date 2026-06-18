@@ -20,6 +20,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { PaymentTableSkeleton, SubscriptionCardSkeleton } from '@/components/ui/LoadingState';
 import { hapticLight } from '@/lib/haptics';
 import { toast } from 'sonner';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 function subscriptionStatusBadge(status) {
   const s = (status || '').toLowerCase();
@@ -151,18 +152,26 @@ export default function ClientBillingPage() {
   const isOverdue = nextBillingDate && nextBillingDate < today;
   const clientName = client?.full_name || client?.name || 'Client';
 
+  const [billingConfirm, setBillingConfirm] = useState({ open: false, title: '', message: '', action: null });
+
   const handlePause = (sub) => {
     hapticLight();
-    if (window.confirm('Pause this subscription? The client will not be billed until you resume.')) {
-      updateSubscriptionStatus.mutate({ subscriptionId: sub.id, status: 'paused' });
-    }
+    setBillingConfirm({
+      open: true,
+      title: 'Pause subscription?',
+      message: 'The client will not be billed until you resume.',
+      action: () => updateSubscriptionStatus.mutate({ subscriptionId: sub.id, status: 'paused' }),
+    });
   };
 
   const handleCancel = (sub) => {
     hapticLight();
-    if (window.confirm('Cancel this subscription? This cannot be undone.')) {
-      updateSubscriptionStatus.mutate({ subscriptionId: sub.id, status: 'cancelled' });
-    }
+    setBillingConfirm({
+      open: true,
+      title: 'Cancel subscription?',
+      message: 'This cannot be undone.',
+      action: () => updateSubscriptionStatus.mutate({ subscriptionId: sub.id, status: 'cancelled' }),
+    });
   };
 
   const handleMarkPaymentSubmit = (e) => {
@@ -333,6 +342,16 @@ export default function ClientBillingPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={billingConfirm.open}
+        title={billingConfirm.title}
+        message={billingConfirm.message}
+        confirmLabel="Confirm"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => { billingConfirm.action?.(); setBillingConfirm((s) => ({ ...s, open: false })); }}
+        onCancel={() => setBillingConfirm((s) => ({ ...s, open: false }))}
+      />
     </div>
   );
 }

@@ -4,39 +4,71 @@
  * Resolves coach_id from slug (referral_code) and inserts into coach_referral_events.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { z } from "https://esm.sh/zod@3.23.8";
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { checkEdgeRateLimit, getClientIp, verifyTurnstileToken } from "../_shared/publicSecurity.ts";
 
-const ALLOWED_EVENT_TYPES = ["result_story_viewed", "enquiry_started"];
+const metadataSchema = z
+  .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+  .refine((value) => Object.keys(value).length <= 20, "metadata too large");
+const payloadSchema = z.object({
+  slug: z.string().trim().min(1).max(80),
+  event_type: z.enum(["result_story_viewed", "enquiry_started"]),
+  metadata: metadataSchema.optional().default({}),
+  captcha_token: z.string().trim().max(4096).optional().nullable(),
+}).strict();
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !supabaseServiceKey) {
       return new Response(
         JSON.stringify({ error: "Server not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const slug = typeof body?.slug === "string" ? body.slug.trim() : "";
-    const eventTypeRaw = typeof body?.event_type === "string" ? body.event_type.trim().toLowerCase() : "";
-    const metadata = body?.metadata && typeof body.metadata === "object" ? body.metadata : {};
-
-    if (!slug) {
-      return new Response(
-        JSON.stringify({ error: "slug required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const rawBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const parsed = payloadSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(JSON.stringify({ error: "Invalid request payload" }), {
+        status: 400,
+        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+      });
     }
-    if (!ALLOWED_EVENT_TYPES.includes(eventTypeRaw)) {
-      return new Response(
-        JSON.stringify({ error: "event_type must be one of: " + ALLOWED_EVENT_TYPES.join(", ") }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const body = parsed.data;
+    const slug = body.slug.trim();
+    const eventTypeRaw = body.event_type.trim().toLowerCase();
+    const metadata = body.metadata ?? {};
+
+    const rate = await checkEdgeRateLimit({
+      req,
+      scope: "track-referral-event",
+      keyPart: `${slug.toLowerCase()}:${eventTypeRaw}`,
+      maxHits: 30,
+      windowSeconds: 60,
+    });
+    if (!rate.allowed) {
+      return new Response(JSON.stringify({ error: "Too many requests" }), {
+        status: 429,
+        headers: {
+          ...getCorsHeaders(req),
+          "Content-Type": "application/json",
+          "Retry-After": String(rate.retryAfterSeconds),
+        },
+      });
+    }
+
+    const ip = getClientIp(req);
+    const captchaOk = await verifyTurnstileToken(body.captcha_token ?? "", ip);
+    if (!captchaOk) {
+      return new Response(JSON.stringify({ error: "Captcha verification failed" }), {
+        status: 400,
+        headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
+      });
     }
 
     const normalized = slug.toLowerCase();
@@ -66,7 +98,7 @@ Deno.serve(async (req) => {
     if (!coachId) {
       return new Response(
         JSON.stringify({ ok: false, error: "Coach not found" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -81,19 +113,19 @@ Deno.serve(async (req) => {
       console.error("track-referral-event insert:", error);
       return new Response(
         JSON.stringify({ error: "Failed to record event" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
     return new Response(
       JSON.stringify({ ok: true }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   } catch (err) {
     console.error("track-referral-event:", err);
     return new Response(
       JSON.stringify({ error: "Request failed" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

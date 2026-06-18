@@ -1,5 +1,6 @@
 import React from 'react';
 import { Capacitor } from '@capacitor/core';
+import * as Sentry from '@sentry/react';
 import { colors, spacing } from '@/ui/tokens';
 import { saveCrash, getLastCrashJson } from '@/lib/crashLog';
 import { captureUiError } from '@/services/errorLogger';
@@ -44,6 +45,9 @@ export class ErrorBoundary extends React.Component {
     const clientId = getClientIdFromPath(pathname, hash);
     const isNative = Capacitor?.isNativePlatform?.() ?? false;
     const sessionUserId = typeof this.props.getSessionUserId === 'function' ? this.props.getSessionUserId() : undefined;
+    try {
+      Sentry.captureException(error);
+    } catch (_) {}
     try {
       saveCrash(error, info);
     } catch (_) {}
@@ -123,6 +127,9 @@ export class ErrorBoundary extends React.Component {
           </div>
         );
       }
+      const { errorMessage, errorStack, componentStack, detailsExpanded } = this.state;
+      /** Production web hid diagnostics behind `isDev`, which is always false here — unreachable. Native needs the real message to debug App Store / TestFlight builds. */
+      const showProdDiagnostics = Capacitor?.isNativePlatform?.() ?? false;
       return (
         <div
           className="min-h-[40vh] flex flex-col items-center justify-center px-6"
@@ -142,36 +149,19 @@ export class ErrorBoundary extends React.Component {
             }}
           >
             <p className="text-[17px] font-semibold mb-2" style={{ color: colors.text }}>
-              Something went wrong
+              Something went wrong on this screen
             </p>
-            {this.state.errorMessage ? (
-              <pre className="text-[12px] mb-4 overflow-auto max-h-24 rounded p-2" style={{ color: colors.muted, background: colors.surface1, border: `1px solid ${colors.border}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {String(this.state.errorMessage).slice(0, 300)}
-              </pre>
-            ) : null}
-            <p className="text-[14px] mb-6" style={{ color: colors.muted }}>
-              This screen could not be loaded. Tap below to try again or go back.
+            <p className="text-[14px] mb-6" style={{ color: colors.muted, lineHeight: 1.45 }}>
+              This is usually a temporary issue. Try going back and opening it again.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <button
                 type="button"
-                onClick={this.handleRetry}
+                onClick={() => typeof window !== 'undefined' && window.history.length > 1 && window.history.back()}
                 className="w-full py-3 rounded-xl font-medium text-[15px] border-none"
                 style={{
                   background: colors.accent,
                   color: '#fff',
-                }}
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                onClick={() => typeof window !== 'undefined' && window.history.length > 1 && window.history.back()}
-                className="w-full py-3 rounded-xl font-medium text-[15px]"
-                style={{
-                  background: 'transparent',
-                  color: colors.text,
-                  border: `1px solid ${colors.border}`,
                 }}
               >
                 Go back
@@ -179,38 +169,82 @@ export class ErrorBoundary extends React.Component {
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof window !== 'undefined') {
-                    if (window.location.hash != null && window.location.hash.length > 0) {
-                      window.location.hash = '#/home';
-                    } else {
-                      window.location.href = '/home';
-                    }
-                  }
+                  if (typeof window !== 'undefined') window.location.reload();
                 }}
-                className="w-full py-3 rounded-xl font-medium text-[15px] mt-2"
+                className="w-full py-3 rounded-xl font-medium text-[15px]"
+                style={{
+                  background: 'transparent',
+                  color: colors.text,
+                  border: `1px solid ${colors.border}`,
+                }}
+              >
+                Reload app
+              </button>
+              <button
+                type="button"
+                onClick={this.handleRetry}
+                className="w-full py-3 rounded-xl font-medium text-[15px] mt-1"
                 style={{
                   background: 'transparent',
                   color: colors.muted,
                   border: `1px solid ${colors.border}`,
                 }}
               >
-                Go home
+                Try this screen again
               </button>
-              {isDev && (
-                <button
-                  type="button"
-                  onClick={this.handleCopyErrorDetails}
-                  className="w-full py-2 rounded-xl font-medium text-[13px]"
-                  style={{
-                    background: 'transparent',
-                    color: colors.muted,
-                    border: `1px solid ${colors.border}`,
-                    marginTop: 8,
-                  }}
-                >
-                  Copy error details
-                </button>
-              )}
+              {showProdDiagnostics ? (
+                <>
+                  {errorMessage ? (
+                    <p
+                      className="text-[12px] mt-2 text-left leading-snug"
+                      style={{ color: colors.muted, wordBreak: 'break-word' }}
+                    >
+                      {errorMessage}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={this.toggleDetails}
+                    className="w-full py-2 rounded-xl font-medium text-[13px]"
+                    style={{
+                      background: 'transparent',
+                      color: colors.muted,
+                      border: `1px solid ${colors.border}`,
+                      marginTop: 8,
+                    }}
+                  >
+                    {detailsExpanded ? 'Hide' : 'Show'} technical details
+                  </button>
+                  {detailsExpanded ? (
+                    <pre
+                      className="text-[11px] mt-2 overflow-auto max-h-48 rounded p-2 text-left"
+                      style={{
+                        color: colors.muted,
+                        background: colors.surface1,
+                        border: `1px solid ${colors.border}`,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {String(errorMessage || '')}
+                      {errorStack ? `\n\n--- stack ---\n${errorStack}` : ''}
+                      {componentStack ? `\n\n--- components ---\n${componentStack}` : ''}
+                    </pre>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={this.handleCopyErrorDetails}
+                    className="w-full py-2 rounded-xl font-medium text-[13px]"
+                    style={{
+                      background: 'transparent',
+                      color: colors.muted,
+                      border: `1px solid ${colors.border}`,
+                    }}
+                  >
+                    Copy error details
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { getTrainerProfile, setTrainerProfile } from '@/lib/trainerFoundation/trainerProfileRepo';
 import { getCoachProfile, setCoachProfile } from '@/lib/data/coachProfileRepo';
@@ -12,6 +13,7 @@ import { impactLight } from '@/lib/haptics';
 import { PLANS, CURRENCY, resolveCoachPlanTier } from '@/config/plans';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { desktopRhythm, cardContentRhythm } from '@/ui/pageLayout';
+import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 
 const BIO_MAX = 800;
 const RESPONSE_TIME_OPTIONS = [
@@ -53,7 +55,9 @@ export default function TrainerProfileSettings() {
   const cardRhythm = cardContentRhythm(isDesktopWeb);
   const cardPadding = isDesktopWeb ? spacing[24] : spacing[20];
   const { user, isDemoMode } = useAuth();
+  const queryClient = useQueryClient();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
+  const supabase = hasSupabase ? getSupabase() : null;
   const fileInputRef = useRef(null);
   const bannerInputRef = useRef(null);
 
@@ -80,6 +84,7 @@ export default function TrainerProfileSettings() {
   const [portfolioModalIndex, setPortfolioModalIndex] = useState(null);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [responseDrafts, setResponseDrafts] = useState({});
 
   useEffect(() => {
     if (!trainerId) return;
@@ -275,6 +280,54 @@ export default function TrainerProfileSettings() {
       setSaving(false);
     }
   }, [trainerId, form]);
+
+  const { data: receivedReviews = [] } = useQuery({
+    queryKey: ['coach-reviews-received', trainerId],
+    queryFn: async () => {
+      if (!supabase || !trainerId) return [];
+      const { data, error } = await supabase
+        .from('coach_reviews')
+        .select('id, pillars, tags, review_text, coach_response, created_at, reviewer_profile_id')
+        .eq('coach_id', trainerId)
+        .order('created_at', { ascending: false });
+      if (error) return [];
+      const rows = Array.isArray(data) ? data : [];
+      const reviewerIds = [...new Set(rows.map((r) => r.reviewer_profile_id).filter(Boolean))];
+      const { data: reviewers } = await supabase
+        .from('profiles')
+        .select('id, full_name, display_name')
+        .in('id', reviewerIds);
+      const reviewerMap = new Map((reviewers || []).map((r) => [r.id, r]));
+      return rows.map((r) => ({
+        ...r,
+        reviewerName: reviewerMap.get(r.reviewer_profile_id)?.full_name || reviewerMap.get(r.reviewer_profile_id)?.display_name || 'Atlas athlete',
+      }));
+    },
+    enabled: Boolean(supabase && trainerId),
+  });
+
+  const respondMutation = useMutation({
+    mutationFn: async ({ reviewId, responseText }) => {
+      if (!supabase) return;
+      const clean = String(responseText || '').slice(0, 300);
+      const { error } = await supabase
+        .from('coach_reviews')
+        .update({
+          coach_response: clean || null,
+          coach_responded_at: clean ? new Date().toISOString() : null,
+        })
+        .eq('id', reviewId)
+        .eq('coach_id', trainerId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Response saved');
+      queryClient.invalidateQueries({ queryKey: ['coach-reviews-received', trainerId] });
+    },
+    onError: (err) => {
+      toast.error(err?.message || 'Could not save response');
+    },
+  });
 
   if (!trainerId) return null;
 
@@ -647,6 +700,55 @@ export default function TrainerProfileSettings() {
               </div>
             ))}
           </div>
+        </Card>
+
+        <Card style={{ padding: cardPadding }}>
+          <h2 className="text-lg font-semibold mb-4" style={{ color: colors.text }}>Reviews</h2>
+          {receivedReviews.length === 0 ? (
+            <p className="text-sm" style={{ color: colors.muted }}>No reviews yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {receivedReviews.map((review) => {
+                const draft = responseDrafts[review.id] ?? review.coach_response ?? '';
+                return (
+                  <div key={review.id} className="rounded-xl border p-4" style={{ borderColor: colors.border, background: 'rgba(255,255,255,0.03)' }}>
+                    <p className="text-sm font-semibold" style={{ color: colors.text }}>{review.reviewerName}</p>
+                    <p className="text-xs mt-1" style={{ color: colors.muted }}>{review.pillars} Pillars</p>
+                    {review.review_text ? (
+                      <p className="text-sm mt-2" style={{ color: colors.text }}>{review.review_text}</p>
+                    ) : null}
+                    {Array.isArray(review.tags) && review.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {review.tags.map((tag) => (
+                          <span key={`${review.id}-${tag}`} className="text-xs px-2 py-1 rounded-full" style={{ background: colors.surface2, color: colors.muted }}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setResponseDrafts((prev) => ({ ...prev, [review.id]: e.target.value.slice(0, 300) }))}
+                      rows={2}
+                      placeholder="Thanks for the kind words - it was great working with you on your prep!"
+                      className="w-full rounded-lg border px-3 py-2 text-sm mt-3"
+                      style={{ borderColor: colors.border, background: colors.card, color: colors.text }}
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                      <p className="text-xs" style={{ color: colors.muted }}>{String(draft).length}/300</p>
+                      <Button
+                        variant="secondary"
+                        onClick={() => respondMutation.mutate({ reviewId: review.id, responseText: draft })}
+                        disabled={respondMutation.isPending}
+                      >
+                        Respond
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
 

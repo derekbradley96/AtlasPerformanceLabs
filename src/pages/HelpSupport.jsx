@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { useAuth } from '@/lib/AuthContext';
+import { resolveCoachPlanTier, isEliteTier } from '@/config/plans';
 import { ArrowLeft, Mail, Book, MessageSquare, ExternalLink, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
+import { isCoach } from '@/lib/roles';
 
 export default function HelpSupport() {
   const navigate = useNavigate();
-  const { user: authUser, isDemoMode, isLoadingAuth } = useAuth();
+  const { user: authUser, profile, coachBrand, isDemoMode, isLoadingAuth } = useAuth();
   const [expandedFaq, setExpandedFaq] = useState(null);
   const displayUser = authUser;
 
@@ -88,7 +90,11 @@ export default function HelpSupport() {
     }
   ];
 
-  const faqs = (displayUser?.user_type === 'coach' || displayUser?.user_type === 'trainer') ? trainerFaqs : clientFaqs;
+  const faqs = isCoach(displayUser?.user_type ?? displayUser?.role) ? trainerFaqs : clientFaqs;
+  const coachPlanTier = resolveCoachPlanTier(profile, authUser);
+  const eliteCoachSupport =
+    isCoach(displayUser?.user_type ?? displayUser?.role) && isEliteTier(coachPlanTier);
+  const hideAtlasFooter = coachBrand?.name && isEliteTier(coachBrand?.coachPlanTier);
 
   if (!isDemoMode && loading) return <PageLoader />;
   if (!displayUser) return <PageLoader />;
@@ -105,6 +111,15 @@ export default function HelpSupport() {
         </button>
         <h1 className="text-2xl font-bold text-white">Help & Support</h1>
       </div>
+
+      {eliteCoachSupport ? (
+        <div className="max-w-md mx-auto mb-6 rounded-2xl border border-amber-500/40 bg-amber-950/35 p-4">
+          <p className="text-sm font-semibold text-amber-100">⚡ Elite Support — we respond within 4 hours</p>
+          <p className="text-xs text-amber-100/80 mt-2">
+            Email <a className="underline font-medium text-amber-50" href="mailto:support@motion.app">support@motion.app</a> from the address on your Atlas account and include &quot;Elite&quot; in the subject line so we can prioritise your ticket.
+          </p>
+        </div>
+      ) : null}
 
       {/* Quick Links */}
       <div className="max-w-md mx-auto space-y-4 mb-8">
@@ -170,7 +185,8 @@ export default function HelpSupport() {
       </div>
 
       {/* Version Info */}
-      <div className="max-w-md mx-auto text-center">
+      <div className="max-w-md mx-auto text-center space-y-1">
+        {!hideAtlasFooter ? <p className="text-[11px] text-slate-500">Powered by Atlas</p> : null}
         <p className="text-xs text-slate-600">Atlas Performance Labs v1.0.0</p>
       </div>
     </div>

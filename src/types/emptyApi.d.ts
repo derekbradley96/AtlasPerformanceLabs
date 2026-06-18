@@ -1,8 +1,8 @@
 /**
- * Type declarations for @/lib/emptyApi (excluded from tsconfig).
+ * Type declarations for @/lib/base44LegacyStub (excluded from tsconfig).
  * base44.entities is a Proxy; declare entity names used in the app.
  */
-declare module '@/lib/emptyApi' {
+declare module '@/lib/base44LegacyStub' {
   interface EntityMethods {
     list: (...args: unknown[]) => Promise<unknown[]>;
     filter: (query?: unknown, order?: string, limit?: number) => Promise<unknown[]>;

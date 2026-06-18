@@ -3,13 +3,13 @@
  * into a unified priority-sorted list.
  */
 import {
-  getNeedsReviewCheckIns,
-  getClients,
-  getThreadsForTrainer,
-  getMessagesByClientId,
-  getClientCheckIns,
-  getThreadByClientId,
-} from '@/data/selectors';
+  getSubmittedCheckInsNeedingReview,
+  getTrainerClientsList,
+  getInboxThreadsForTrainer,
+  getInboxMessagesByClientId,
+  listClientCheckInsForInbox,
+  getInboxThreadByClientId,
+} from '@/lib/inboxLocalSources';
 import { getClientMarkedPaid } from '@/lib/clientDetailStorage';
 import { getPendingConsultations } from '@/lib/consultationStore';
 import { getLeadsForTrainer, getAllLeads } from '@/lib/leadsStore';
@@ -27,6 +27,7 @@ import { listCompClientsForTrainer, getMediaLogsForClients } from '@/lib/repos/c
 import { getAllPoses } from '@/lib/repos/poseLibraryRepo';
 import { safeDate } from '@/lib/format';
 import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 const BASE_SCORE = {
   payment_failed: 100,
@@ -40,6 +41,11 @@ const BASE_SCORE = {
 const AGE_CAP = 40;
 const AGE_FACTOR = 0.5;
 const WAITING_ON_TRAINER_BOOST = 20;
+const SUPABASE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isRealSupabaseThread(thread) {
+  return !!(thread?.id && SUPABASE_UUID_RE.test(String(thread.id)));
+}
 
 function hoursSince(iso) {
   const t = safeDate(iso)?.getTime();
@@ -64,7 +70,7 @@ function formatAgeLabel(iso) {
 
 /** Last message in thread from client? (thread has client_id; messages sorted by created_date) */
 function isLastMessageFromClient(clientId) {
-  const msgs = getMessagesByClientId(clientId);
+  const msgs = getInboxMessagesByClientId(clientId);
   if (!msgs.length) return false;
   const last = msgs[msgs.length - 1];
   return last?.sender === 'client';
@@ -74,13 +80,12 @@ function isLastMessageFromClient(clientId) {
  * Get counts per category for Daily Closeout. Same sources as inbox.
  */
 export function getCloseoutCounts(trainerId) {
-  const clientsRaw = getClients() ?? [];
-  const clients = (Array.isArray(clientsRaw) ? clientsRaw : []).filter((c) => c?.trainer_id === trainerId);
-  const needsReviewRaw = getNeedsReviewCheckIns() ?? [];
+  const clients = getTrainerClientsList(trainerId) ?? [];
+  const needsReviewRaw = getSubmittedCheckInsNeedingReview() ?? [];
   const needsReview = Array.isArray(needsReviewRaw) ? needsReviewRaw : [];
   const checkinReview = needsReview.filter((c) => clients.some((cl) => cl?.id === c?.client_id)).length;
   const overduePayments = clients.filter((c) => c?.payment_overdue && !getClientMarkedPaid(c?.id)).length;
-  const trainerThreadsRaw = getThreadsForTrainer(trainerId) ?? [];
+  const trainerThreadsRaw = getInboxThreadsForTrainer(trainerId) ?? [];
   const trainerThreads = Array.isArray(trainerThreadsRaw) ? trainerThreadsRaw : [];
   const unreadMessages = trainerThreads.filter((t) => (t?.unread_count ?? 0) > 0).length;
   const pendingConsultsRaw = typeof getPendingConsultations === 'function' ? getPendingConsultations() : [];
@@ -99,13 +104,95 @@ export function getCloseoutCounts(trainerId) {
   };
 }
 
+export async function getCloseoutCountsFromSupabase(coachId) {
+  const defaultCounts = {
+    checkinReview: 0,
+    unreadMessages: 0,
+    overduePayments: 0,
+    newLeads: 0,
+    total: 0,
+    completed: 4,
+  };
+  if (!coachId || !hasSupabase) return defaultCounts;
+  const supabase = getSupabase();
+  if (!supabase) return defaultCounts;
+
+  const { data: clients, error: clientsError } = await supabase
+    .from('clients')
+    .select('id')
+    .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`)
+    .limit(200);
+
+  if (clientsError || !Array.isArray(clients)) return defaultCounts;
+  const clientIds = clients.map((row) => row?.id).filter(Boolean);
+  if (clientIds.length === 0) return defaultCounts;
+
+  const checkinsPromise = supabase
+    .from('checkins')
+    .select('id', { count: 'exact', head: true })
+    .in('client_id', clientIds)
+    .eq('status', 'submitted')
+    .is('reviewed_at', null);
+
+  const overduePaymentsPromise = supabase
+    .from('client_billing')
+    .select('id', { count: 'exact', head: true })
+    .in('client_id', clientIds)
+    .eq('billing_status', 'overdue');
+
+  const unreadThreadsPromise = supabase
+    .from('message_threads')
+    .select('id, coach_last_read_at, updated_at')
+    .in('client_id', clientIds)
+    .is('deleted_at', null);
+
+  const [checkinsResult, overdueResult, unreadResult, leadsResult] = await Promise.allSettled([
+    checkinsPromise,
+    overduePaymentsPromise,
+    unreadThreadsPromise,
+    Promise.resolve({ count: 0, error: null }),
+  ]);
+
+  const countFromSettled = (result) => {
+    if (!result || result.status !== 'fulfilled') return 0;
+    const value = result.value;
+    if (!value || value.error) return 0;
+    return typeof value.count === 'number' ? value.count : 0;
+  };
+
+  const checkinReview = countFromSettled(checkinsResult);
+  const overduePayments = countFromSettled(overdueResult);
+  const newLeads = countFromSettled(leadsResult);
+
+  let unreadMessages = 0;
+  if (unreadResult?.status === 'fulfilled' && !unreadResult.value?.error) {
+    const rows = Array.isArray(unreadResult.value?.data) ? unreadResult.value.data : [];
+    unreadMessages = rows.filter((thread) => {
+      if (!thread?.updated_at) return false;
+      const updated = new Date(thread.updated_at).getTime();
+      if (!Number.isFinite(updated) || updated <= 0) return false;
+      const lastRead = thread.coach_last_read_at ? new Date(thread.coach_last_read_at).getTime() : 0;
+      return updated > lastRead;
+    }).length;
+  }
+
+  const total = checkinReview + unreadMessages + overduePayments + newLeads;
+  return {
+    checkinReview,
+    unreadMessages,
+    overduePayments,
+    newLeads,
+    total,
+    completed: [checkinReview, unreadMessages, overduePayments, newLeads].filter((n) => n === 0).length,
+  };
+}
+
 /** Build raw inbox items from all sources (no overrides applied). */
 export function buildRawInboxItems(trainerId, weightUnit = 'kg') {
   const wu = normalizeWeightUnit(weightUnit);
   const items = [];
-  const clientsRaw = getClients() ?? [];
-  const clients = (Array.isArray(clientsRaw) ? clientsRaw : []).filter((c) => c?.trainer_id === trainerId);
-  const needsReviewRaw = getNeedsReviewCheckIns() ?? [];
+  const clients = getTrainerClientsList(trainerId) ?? [];
+  const needsReviewRaw = getSubmittedCheckInsNeedingReview() ?? [];
   const needsReview = Array.isArray(needsReviewRaw) ? needsReviewRaw : [];
   const filteredNeedsReview = needsReview.filter((c) => clients.some((cl) => cl?.id === c?.client_id));
   filteredNeedsReview.forEach((checkin) => {
@@ -175,9 +262,9 @@ export function buildRawInboxItems(trainerId, weightUnit = 'kg') {
     if (!client?.id) return;
     const retention = getRetentionRiskForClient(client.id, {
       getClientById: (id) => (clients ?? []).find((x) => x?.id === id),
-      getClientCheckIns,
-      getThreadByClientId,
-      getMessagesByClientId,
+      getClientCheckIns: listClientCheckInsForInbox,
+      getThreadByClientId: getInboxThreadByClientId,
+      getMessagesByClientId: getInboxMessagesByClientId,
       getClientMarkedPaid,
       getAchievementsList: (id, opts) => getAchievementsList(id, opts),
     });
@@ -211,12 +298,12 @@ export function buildRawInboxItems(trainerId, weightUnit = 'kg') {
 
   const atRiskClients = (clients ?? []).filter((c) => {
     if (!c?.id) return false;
-    const health = getClientHealthScore(c.id);
+    const health = getClientHealthScore(c.id, { client: c });
     return health?.status === 'at_risk';
   });
   (atRiskClients ?? []).forEach((client) => {
     if (!client?.id) return;
-    const health = getClientHealthScore(client.id);
+    const health = getClientHealthScore(client.id, { client });
     const why = (health?.reasons ?? []).slice(0, 2).join(' · ') || 'Health score low';
     const score = BASE_SCORE.at_risk + ageBoost(hoursSince(client?.last_check_in_at || client?.created_date));
     items.push({
@@ -245,16 +332,19 @@ export function buildRawInboxItems(trainerId, weightUnit = 'kg') {
     });
   });
 
-  const trainerThreadsRaw = getThreadsForTrainer(trainerId) ?? [];
+  const trainerThreadsRaw = getInboxThreadsForTrainer(trainerId) ?? [];
   const trainerThreads = Array.isArray(trainerThreadsRaw) ? trainerThreadsRaw : [];
   trainerThreads.forEach((thread) => {
+    // Only add real Supabase threads to inbox.
+    // Sandbox/mock threads have non-UUID ids and no real messages.
+    if (!isRealSupabaseThread(thread)) return;
     if ((thread?.unread_count ?? 0) <= 0) return;
     const client = (clients ?? []).find((c) => c?.id === thread?.client_id);
     if (!client) return;
     const lastAt = thread.last_message_at || thread.last_message_preview;
     const base = BASE_SCORE.unread_message;
     let score = base + ageBoost(hoursSince(lastAt));
-    if (isLastMessageFromClient(thread.client_id)) score += WAITING_ON_TRAINER_BOOST;
+    if (isLastMessageFromClient(thread.client_id)) score += WAITING_ON_TRAINER_BOOST; // uses getInboxMessagesByClientId
     items.push({
       id: thread.id || thread.client_id,
       type: 'UNREAD_MESSAGE',
@@ -262,9 +352,11 @@ export function buildRawInboxItems(trainerId, weightUnit = 'kg') {
       leadId: null,
       title: client?.full_name ?? 'Message',
       subtitle: (thread.last_message_preview || '').slice(0, 50),
-      badge: { label: `${thread.unread_count} unread`, tone: 'info' },
-      badgeLabel: `${thread.unread_count} unread`,
-      badgeTone: 'info',
+      ...(thread.unread_count > 0 ? {
+        badge: { label: `${thread.unread_count} unread`, tone: 'info' },
+        badgeLabel: `${thread.unread_count} unread`,
+        badgeTone: 'info',
+      } : {}),
       priorityBadge: score >= 60 ? 'Med' : 'Low',
       ageLabel: formatAgeLabel(lastAt),
       priorityScore: score,
@@ -359,7 +451,7 @@ export function buildRawInboxItems(trainerId, weightUnit = 'kg') {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const hasCheckinToday = (clientId) =>
-    getClientCheckIns(clientId).some((c) => ((c.submitted_at || c.created_date) || '').toString().slice(0, 10) === today);
+    listClientCheckInsForInbox(clientId).some((c) => ((c.submitted_at || c.created_date) || '').toString().slice(0, 10) === today);
   const compPrepItems = buildCompPrepInboxItems({
     trainerId,
     clients: compClients,

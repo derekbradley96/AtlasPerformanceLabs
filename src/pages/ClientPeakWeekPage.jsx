@@ -15,8 +15,9 @@ import EmptyState from '@/components/ui/EmptyState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
 import { CardSkeleton } from '@/components/ui/LoadingState';
 import { Button } from '@/components/ui/button';
-import { Calendar, CheckCircle, Circle, Clock3 } from 'lucide-react';
+import { Calendar, CheckCircle, Circle, Clock3, ListChecks } from 'lucide-react';
 import { hapticLight } from '@/lib/haptics';
+import { toast } from 'sonner';
 
 function buildPlanSnapshot(day) {
   if (!day) return null;
@@ -100,7 +101,7 @@ export default function ClientPeakWeekPage() {
       if (!supabase || !clientId) return null;
       const { data } = await supabase
         .from('peak_weeks')
-        .select('id, show_date, division')
+        .select('id, show_date, division, contest_prep_id')
         .eq('client_id', clientId)
         .eq('is_active', true)
         .order('show_date', { ascending: false })
@@ -161,6 +162,9 @@ export default function ClientPeakWeekPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['peak_week_day_status_today', todayDay?.id, clientId] });
+    },
+    onError: (error) => {
+      toast.error(error?.message || "Couldn't update checklist");
     },
   });
   const daysOut = useMemo(
@@ -246,6 +250,9 @@ export default function ClientPeakWeekPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['peak_week_day_status_today', todayDay?.id, clientId] });
+    },
+    onError: (error) => {
+      toast.error(error?.message || "Couldn't mark update as seen");
     },
   });
 
@@ -413,6 +420,17 @@ export default function ClientPeakWeekPage() {
                 <p className="text-xs mt-1" style={{ color: colors.muted }}>
                   Follow the targets below for the calendar day that matches today. Your coach sets Day -7 through show day.
                 </p>
+                {peakWeek?.contest_prep_id && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-3 w-full justify-center gap-2"
+                    style={{ minHeight: touchTargetMin }}
+                    onClick={() => { hapticLight(); navigate(`/prep/${peakWeek.contest_prep_id}/show-checklist`); }}
+                  >
+                    <ListChecks size={16} /> Show day checklist
+                  </Button>
+                )}
               </div>
             )}
 

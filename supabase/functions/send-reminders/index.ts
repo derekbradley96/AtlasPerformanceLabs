@@ -1,8 +1,11 @@
 // Scheduled job: evaluate reminder triggers and insert into public.notifications for clients.
-// Uses service role. Schedule via Supabase Dashboard → Scheduled Triggers (e.g. daily 08:00 and 18:00 UTC).
+// Uses service role.
+// Recommended schedule: every 30 minutes
+// Supabase Dashboard -> Edge Functions -> Schedules
+// Cron: */30 * * * *
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 const TRIGGER_COPY: Record<string, { title: string; message: string }> = {
   workout_due: {
@@ -67,8 +70,99 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function normalizeCurrencyAmount(value: unknown): string {
+  const amount = Number(value) || 0;
+  return `£${Math.round(amount)}`;
+}
+
+async function handleScheduledCheckinReminders(
+  supabase: SupabaseClient,
+  now: Date
+): Promise<number> {
+  const dayOfWeek = now.getUTCDay(); // 0=Sun 6=Sat
+  const currentTime = now.toISOString().slice(11, 16); // "HH:MM"
+
+  const { data: templates } = await supabase
+    .from('checkin_templates')
+    .select(`
+      id, schedule_day_of_week, schedule_time,
+      reminder_advance_minutes,
+      clients!clients_checkin_template_id_fkey(
+        id, user_id, full_name
+      )
+    `)
+    .eq('schedule_day_of_week', dayOfWeek)
+    .eq('is_active', true)
+    .not('schedule_time', 'is', null);
+
+  if (!templates?.length) return 0;
+
+  let sent = 0;
+  for (const template of templates) {
+    const scheduleTime = String((template as { schedule_time?: string | null })?.schedule_time || '');
+    if (!scheduleTime) continue;
+
+    const [h, m] = scheduleTime.split(':').map(Number);
+    const scheduleMinutes = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+    const reminderAdvanceMinutes = Number((template as { reminder_advance_minutes?: number | null })?.reminder_advance_minutes ?? 60) || 60;
+    const reminderMinutes = scheduleMinutes - reminderAdvanceMinutes;
+    const reminderHour = Math.floor(reminderMinutes / 60);
+    const reminderMin = reminderMinutes % 60;
+    const reminderTime =
+      `${String(reminderHour).padStart(2, '0')}:${String(reminderMin).padStart(2, '0')}`;
+
+    const [ch, cm] = currentTime.split(':').map(Number);
+    const currentMinutes = (Number.isFinite(ch) ? ch : 0) * 60 + (Number.isFinite(cm) ? cm : 0);
+    const diff = Math.abs(currentMinutes - reminderMinutes);
+    if (diff > 30) continue;
+
+    const assignedClients = ((template as { clients?: Array<{ id?: string; user_id?: string | null }> }).clients ?? []);
+    for (const client of assignedClients) {
+      if (!client?.user_id || !client?.id) continue;
+      const weekStart = getWeekStartUTC(now);
+      const { data: existing } = await supabase
+        .from('checkins')
+        .select('id')
+        .eq('client_id', client.id)
+        .gte('submitted_at', `${weekStart}T00:00:00Z`)
+        .limit(1);
+      if (existing?.length) continue;
+
+      await supabase.from('notifications').insert({
+        profile_id: client.user_id,
+        type: 'checkin_due',
+        title: 'Check-in reminder',
+        message: `Your check-in opens in ${reminderAdvanceMinutes} minutes.`,
+        is_read: false,
+        category: 'coaching',
+        created_at: new Date().toISOString(),
+        data: {
+          type: 'checkin_due',
+          deep_link: '/submit-checkin',
+          reminder_time: reminderTime,
+          template_id: (template as { id?: string }).id ?? null,
+        },
+      });
+      sent++;
+    }
+  }
+  return sent;
+}
+
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
+
+  // Set CRON_SECRET in Supabase Edge Function secrets.
+  // In Supabase Dashboard > Edge Functions > Schedules, set the HTTP header:
+  // Authorization: Bearer <your-CRON_SECRET>
+  // Validate cron caller secret
+  if (req.method !== "OPTIONS") {
+    const authHeader = req.headers.get('Authorization');
+    const cronSecret = Deno.env.get('CRON_SECRET');
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+  }
 
   try {
     const supabase = createClient(
@@ -84,8 +178,15 @@ Deno.serve(async (req) => {
     const nextDay = new Date(now);
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const nextDayISO = nextDay.toISOString().slice(0, 10);
+    const sevenDaysAgoStartIso = `${addDays(today, -7)}T00:00:00Z`;
+    const sevenDaysAgoEndIso = `${addDays(today, -6)}T00:00:00Z`;
+    const fourWeeksAgo = new Date(now);
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    const fourWeeksAgoMinus1 = new Date(fourWeeksAgo);
+    fourWeeksAgoMinus1.setDate(fourWeeksAgoMinus1.getDate() - 1);
 
     type Pair = {
+      client_id?: string;
       user_id: string;
       trigger_type: string;
       title?: string;
@@ -94,17 +195,144 @@ Deno.serve(async (req) => {
       dedupe_key?: string;
     };
     const toSend: Pair[] = [];
+    const scheduledCheckinInserted = await handleScheduledCheckinReminders(supabase, now);
 
-    // Load all clients with user_id once for lookups
-    const { data: clientRows } = await supabase.from("clients").select("id, user_id");
+    // Load all clients with user_id once for lookups (coach ids needed for coach-side automations)
+    const { data: clientRows } = await supabase
+      .from("clients")
+      .select("id, user_id, coach_id, trainer_id, name, full_name");
     const clientById = new Map((clientRows ?? []).map((c) => [c.id, c]));
 
-    // 1) checkin_due: clients with user_id and no checkin for current week
+    // 1) checkin_due (legacy fallback): clients with user_id and no checkin for current week
     const allClients = clientRows ?? [];
     const { data: checkinsThisWeek } = await supabase.from("checkins").select("client_id").eq("week_start", weekStart);
     const hasCheckin = new Set((checkinsThisWeek ?? []).map((r) => r.client_id));
     for (const c of allClients) {
-      if (c.user_id && !hasCheckin.has(c.id)) toSend.push({ user_id: c.user_id, trigger_type: "checkin_due" });
+      if (!c.user_id || hasCheckin.has(c.id)) continue;
+      let customMessage = TRIGGER_COPY.checkin_due.message;
+      try {
+        const { data: recentCheckin } = await supabase
+          .from("checkins")
+          .select("weight, submitted_at, created_at")
+          .eq("client_id", c.id)
+          .order("submitted_at", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        const lastWeight = Number(recentCheckin?.weight);
+        if (Number.isFinite(lastWeight) && lastWeight > 0) {
+          customMessage = `Your check-in is due. Last week: ${lastWeight.toFixed(1)}kg. How are you tracking this week?`;
+        }
+      } catch (_) {}
+      toSend.push({
+        user_id: c.user_id,
+        client_id: c.id,
+        trigger_type: "checkin_due",
+        message: customMessage,
+        data: { type: "checkin_due", client_id: c.id, deep_link: "/checkins" },
+      });
+    }
+
+    // 1b) Review prompt: 7 days after a coach relationship ended.
+    const { data: removals7d } = await supabase
+      .from("client_coach_removals")
+      .select("id, client_id, coach_id, created_at")
+      .gte("created_at", sevenDaysAgoStartIso)
+      .lt("created_at", sevenDaysAgoEndIso);
+    if (Array.isArray(removals7d) && removals7d.length > 0) {
+      const coachIds = [...new Set(removals7d.map((r) => r.coach_id).filter(Boolean))];
+      const { data: coachProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, display_name")
+        .in("id", coachIds);
+      const coachNameById = new Map<string, string>();
+      for (const c of coachProfiles ?? []) {
+        const id = String((c as { id?: string }).id || "");
+        const name = String((c as { full_name?: string | null; display_name?: string | null }).full_name || (c as { display_name?: string | null }).display_name || "your coach");
+        if (id) coachNameById.set(id, name);
+      }
+
+      for (const removal of removals7d) {
+        const client = clientById.get(removal.client_id);
+        if (!client?.user_id) continue;
+        const coachName = coachNameById.get(String(removal.coach_id)) || "your coach";
+        toSend.push({
+          user_id: client.user_id,
+          client_id: removal.client_id,
+          trigger_type: "coach_review_prompt",
+          title: "How was your coaching experience?",
+          message: `How was your experience with ${coachName}? Leave a review to help other athletes.`,
+          data: {
+            type: "coach_review_prompt",
+            coach_id: removal.coach_id,
+            client_id: removal.client_id,
+            deep_link: `/review/coach/${removal.coach_id}`,
+          },
+          dedupe_key: `coach_review_prompt:${removal.id}`,
+        });
+      }
+    }
+
+    // 1c) Review prompt: around 4 weeks into an active coach relationship (28 days +/- 1 day).
+    const { data: eligibleClients } = await supabase
+      .from("clients")
+      .select("id, user_id, coach_id, trainer_id, created_at")
+      .gte("created_at", fourWeeksAgoMinus1.toISOString())
+      .lte("created_at", fourWeeksAgo.toISOString())
+      .not("coach_id", "is", null);
+    if (Array.isArray(eligibleClients) && eligibleClients.length > 0) {
+      const coachIds = [
+        ...new Set(
+          eligibleClients
+            .map((c) => String(c.coach_id || c.trainer_id || "").trim())
+            .filter(Boolean)
+        ),
+      ];
+      const { data: coachProfiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, display_name")
+        .in("id", coachIds);
+      const coachNameById = new Map<string, string>();
+      for (const c of coachProfiles ?? []) {
+        const id = String((c as { id?: string }).id || "");
+        const name = String(
+          (c as { full_name?: string | null; display_name?: string | null }).full_name ||
+            (c as { display_name?: string | null }).display_name ||
+            "your coach"
+        );
+        if (id) coachNameById.set(id, name);
+      }
+
+      for (const client of eligibleClients) {
+        if (!client?.user_id) continue;
+        const coachId = String(client.coach_id || client.trainer_id || "").trim();
+        if (!coachId) continue;
+        const { data: existingReview } = await supabase
+          .from("coach_reviews")
+          .select("id")
+          .eq("reviewer_client_id", client.id)
+          .eq("coach_id", coachId)
+          .maybeSingle();
+        if (existingReview) continue;
+
+        const coachName = coachNameById.get(coachId) || "your coach";
+        toSend.push({
+          user_id: client.user_id,
+          client_id: client.id,
+          trigger_type: "review_prompt_4_weeks",
+          title: "How is your coaching going?",
+          message: `You've been training with ${coachName} for 4 weeks. Leave a Pillar rating to help other athletes find the right coach.`,
+          data: {
+            type: "review_prompt_4_weeks",
+            coach_id: coachId,
+            client_id: client.id,
+            deep_link: `/review/coach/${coachId}`,
+            push_title: "How is your coaching going? 🏛️",
+            push_body: `4 weeks with ${coachName} — share your experience to help other athletes.`,
+          },
+          dedupe_key: `review_prompt_4_weeks:${client.id}:${coachId}`,
+        });
+      }
     }
 
     // 2) prep_pose_check_due: clients with active contest_prep and no pose_check this week
@@ -124,11 +352,235 @@ Deno.serve(async (req) => {
     // 3) billing_due: clients with billing_status = 'overdue' or next_due_date <= today
     const { data: billingClients } = await supabase
       .from("clients")
-      .select("id, user_id")
+      .select("id, user_id, billing_status, next_due_date")
       .not("user_id", "is", null)
       .or("billing_status.eq.overdue,next_due_date.lte." + today);
     for (const c of billingClients ?? []) {
-      if (c.user_id) toSend.push({ user_id: c.user_id, trigger_type: "billing_due" });
+      if (!c.user_id) continue;
+      let overdueAmount = 0;
+      try {
+        const { data: overduePayments } = await supabase
+          .from("client_payments")
+          .select("amount")
+          .eq("client_id", c.id)
+          .in("status", ["overdue", "pending"]);
+        overdueAmount = (overduePayments ?? []).reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+      } catch (_) {}
+      const amountText = normalizeCurrencyAmount(overdueAmount || 0);
+      toSend.push({
+        user_id: c.user_id,
+        client_id: c.id,
+        trigger_type: "billing_due",
+        message: `Payment of ${amountText} is overdue. Tap to update your payment method.`,
+        data: { type: "billing_due", client_id: c.id, amount_due: overdueAmount || 0, deep_link: "/billing" },
+      });
+    }
+
+    // --- Coach pending messages: warm drafts for approval (payment 3d+ overdue, missed check-in, low adherence) ---
+    const sevenDaysAgoIso = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentPayCoachNotifs } = await supabase
+      .from("notifications")
+      .select("id, data")
+      .eq("type", "payment_reminder_auto")
+      .gte("created_at", sevenDaysAgoIso);
+    const paymentAutoClientIds = new Set<string>();
+    for (const r of recentPayCoachNotifs ?? []) {
+      const cid = (r?.data as { client_id?: string } | null)?.client_id;
+      if (cid) paymentAutoClientIds.add(cid);
+    }
+
+    const { data: recentDraftNotifs } = await supabase
+      .from("notifications")
+      .select("id, data")
+      .eq("type", "coach_pending_draft")
+      .gte("created_at", sevenDaysAgoIso);
+    const draftDedupe = new Set<string>();
+    for (const r of recentDraftNotifs ?? []) {
+      const d = r?.data as { client_id?: string; trigger_type?: string } | null;
+      if (d?.client_id && d?.trigger_type) draftDedupe.add(`${d.client_id}:${d.trigger_type}`);
+    }
+
+    const firstNameFromClient = (c: { name?: string | null; full_name?: string | null }) => {
+      const raw = (c?.name || c?.full_name || "").trim();
+      return raw.split(/\s+/)[0] || "there";
+    };
+
+    const coachIdOfClient = (c: { coach_id?: string | null; trainer_id?: string | null }) =>
+      String(c.coach_id || c.trainer_id || "").trim();
+
+    const draftBody = (fn: string, trig: string) => {
+      if (trig === "missed_checkin") {
+        return `Hey ${fn}, haven't seen your check-in this week — hope everything's okay. Send it over when you can, no pressure.`;
+      }
+      if (trig === "low_adherence") {
+        return `Hey ${fn}, nutrition's been a bit harder these last couple of weeks — totally normal. Let me know if we should adjust your targets. Happy to make it easier.`;
+      }
+      return `Hey ${fn}, just flagging that I haven't seen your payment come through yet — no stress, let me know if anything is up and we'll sort it.`;
+    };
+
+    async function hasOpenPending(clientId: string, trigger: string) {
+      const { data } = await supabase
+        .from("pending_coach_messages")
+        .select("id")
+        .eq("client_id", clientId)
+        .eq("trigger_type", trigger)
+        .is("dismissed_at", null)
+        .is("approved_at", null)
+        .limit(1);
+      return !!(data && data.length);
+    }
+
+    async function insertCoachPendingDraft(opts: {
+      coachId: string;
+      clientId: string;
+      clientName: string;
+      trigger: "payment_overdue" | "missed_checkin" | "low_adherence";
+      notifType: "payment_reminder_auto" | "coach_pending_draft";
+    }) {
+      const { coachId, clientId, clientName, trigger, notifType } = opts;
+      if (await hasOpenPending(clientId, trigger)) return;
+
+      const { data: clientRow } = await supabase
+        .from("clients")
+        .select("id, name, full_name")
+        .eq("id", clientId)
+        .maybeSingle();
+      const fn = firstNameFromClient(clientRow || { name: clientName, full_name: null });
+      const draft = draftBody(fn, trigger);
+
+      const { data: inserted, error: insErr } = await supabase
+        .from("pending_coach_messages")
+        .insert({
+          coach_id: coachId,
+          client_id: clientId,
+          trigger_type: trigger,
+          draft_message: draft,
+        })
+        .select("id")
+        .single();
+      if (insErr || !inserted?.id) {
+        console.error("pending_coach_messages insert", insErr);
+        return;
+      }
+
+      const title =
+        trigger === "payment_overdue"
+          ? "Payment reminder ready"
+          : trigger === "missed_checkin"
+            ? "Check-in nudge ready"
+            : "Client adherence nudge ready";
+      const message =
+        trigger === "payment_overdue"
+          ? `Payment reminder ready to send to ${clientName} — tap to review and send`
+          : `Draft message ready for ${clientName} — tap to review and send`;
+
+      const { error: nErr } = await supabase.from("notifications").insert({
+        profile_id: coachId,
+        type: notifType,
+        title,
+        message,
+        data: {
+          client_id: clientId,
+          pending_message_id: inserted.id,
+          trigger_type: trigger,
+          deep_link: `/messages/${clientId}`,
+        },
+        is_read: false,
+        category: "action_required",
+        entity_id: clientId,
+      });
+      if (nErr) console.error("coach pending notification", nErr);
+    }
+
+    const overduePaymentCutoff = addDays(today, -3);
+    const { data: overdueBilling } = await supabase
+      .from("client_billing")
+      .select("client_id, next_payment_date, billing_status")
+      .eq("billing_status", "overdue")
+      .lte("next_payment_date", overduePaymentCutoff)
+      .not("next_payment_date", "is", null);
+
+    const overdueBillClientIds = [...new Set((overdueBilling ?? []).map((r) => r.client_id).filter(Boolean))];
+    if (overdueBillClientIds.length) {
+      const { data: billClients } = await supabase
+        .from("clients")
+        .select("id, name, full_name, coach_id, trainer_id, user_id")
+        .in("id", overdueBillClientIds);
+      for (const c of billClients ?? []) {
+        const coach = coachIdOfClient(c);
+        if (!coach || !c.user_id) continue;
+        if (paymentAutoClientIds.has(c.id)) continue;
+        const displayName = (c.name || c.full_name || "Client").trim() || "Client";
+        await insertCoachPendingDraft({
+          coachId: coach,
+          clientId: c.id,
+          clientName: displayName,
+          trigger: "payment_overdue",
+          notifType: "payment_reminder_auto",
+        });
+      }
+    }
+
+    const lateWeekThreshold = addDays(weekStart, 3);
+    if (today >= lateWeekThreshold) {
+      for (const c of allClients) {
+        if (!c.user_id) continue;
+        if (hasCheckin.has(c.id)) continue;
+        const coach = coachIdOfClient(c as { coach_id?: string | null; trainer_id?: string | null });
+        if (!coach) continue;
+        const dedupe = `${c.id}:missed_checkin`;
+        if (draftDedupe.has(dedupe)) continue;
+        const displayName = (c.name || c.full_name || "Client").trim() || "Client";
+        await insertCoachPendingDraft({
+          coachId: coach,
+          clientId: c.id,
+          clientName: displayName,
+          trigger: "missed_checkin",
+          notifType: "coach_pending_draft",
+        });
+        draftDedupe.add(dedupe);
+      }
+    }
+
+    const prevWeekStart = addDays(weekStart, -7);
+    const prev2WeekStart = addDays(weekStart, -14);
+    const { data: adhRows } = await supabase
+      .from("checkins")
+      .select("client_id, week_start, nutrition_adherence")
+      .in("week_start", [prevWeekStart, prev2WeekStart])
+      .not("nutrition_adherence", "is", null);
+
+    const weekAdhByClient = new Map<string, Record<string, number>>();
+    for (const row of adhRows ?? []) {
+      const cid = String((row as { client_id?: string }).client_id || "");
+      const ws = String((row as { week_start?: string }).week_start || "");
+      const v = Number((row as { nutrition_adherence?: unknown }).nutrition_adherence);
+      if (!cid || !ws || !Number.isFinite(v)) continue;
+      const map = weekAdhByClient.get(cid) ?? {};
+      map[ws] = Math.max(map[ws] ?? 0, v);
+      weekAdhByClient.set(cid, map);
+    }
+
+    for (const [clientId, map] of weekAdhByClient) {
+      const w1 = map[prevWeekStart];
+      const w2 = map[prev2WeekStart];
+      if (w1 == null || w2 == null) continue;
+      if (w1 >= 60 || w2 >= 60) continue;
+      const c = clientById.get(clientId);
+      if (!c?.user_id) continue;
+      const coach = coachIdOfClient(c as { coach_id?: string | null; trainer_id?: string | null });
+      if (!coach) continue;
+      const dedupe = `${clientId}:low_adherence`;
+      if (draftDedupe.has(dedupe)) continue;
+      const displayName = (c.name || c.full_name || "Client").trim() || "Client";
+      await insertCoachPendingDraft({
+        coachId: coach,
+        clientId,
+        clientName: displayName,
+        trigger: "low_adherence",
+        notifType: "coach_pending_draft",
+      });
+      draftDedupe.add(dedupe);
     }
 
     // 4) habit_due: clients with at least one active habit and at least one habit not logged for today
@@ -198,9 +650,44 @@ Deno.serve(async (req) => {
       if ((completed ?? []).length > 0) continue;
       const c = clientById.get(a.client_id);
       if (c?.user_id) {
+        let title = isEvening ? TRIGGER_COPY.workout_evening_reminder.title : TRIGGER_COPY.workout_due.title;
+        let message = isEvening ? TRIGGER_COPY.workout_evening_reminder.message : TRIGGER_COPY.workout_due.message;
+        try {
+          const { data: dayMeta } = await supabase
+            .from("program_days")
+            .select("name")
+            .eq("id", programDayId)
+            .maybeSingle();
+          const { data: exercises } = await supabase
+            .from("program_exercises")
+            .select("exercise_name, sets, reps, sort_order")
+            .eq("day_id", programDayId)
+            .order("sort_order", { ascending: true })
+            .limit(8);
+          const exerciseList = Array.isArray(exercises) ? exercises : [];
+          const firstExercise = exerciseList[0];
+          const dayName = String(dayMeta?.name || '').trim() || 'Today';
+          if (exerciseList.length > 0) {
+            const sets = Number(firstExercise?.sets) || 0;
+            const reps = Number(firstExercise?.reps) || 0;
+            title = `${dayName} ready — ${exerciseList.length} exercise${exerciseList.length === 1 ? '' : 's'}`;
+            message = firstExercise?.exercise_name
+              ? `Starts with ${firstExercise.exercise_name}${sets > 0 && reps > 0 ? ` ${sets}×${reps}` : ''}. Tap to begin your session.`
+              : message;
+          }
+        } catch (_) {}
         toSend.push({
+          client_id: a.client_id,
           user_id: c.user_id,
           trigger_type: isEvening ? "workout_evening_reminder" : "workout_due",
+          title,
+          message,
+          data: {
+            type: isEvening ? "workout_evening_reminder" : "workout_due",
+            client_id: a.client_id,
+            program_day_id: programDayId,
+            deep_link: "/today",
+          },
         });
       }
     }
@@ -311,6 +798,32 @@ Deno.serve(async (req) => {
       }
     }
 
+    const userIdToCoachIdForNotifs = new Map<string, string>();
+    const coachIdsForBranding = new Set<string>();
+    for (const c of allClients) {
+      const uid = String((c as { user_id?: string | null }).user_id || "").trim();
+      if (!uid) continue;
+      const cid = coachIdOfClient(c as { coach_id?: string | null; trainer_id?: string | null });
+      if (cid) {
+        userIdToCoachIdForNotifs.set(uid, cid);
+        coachIdsForBranding.add(cid);
+      }
+    }
+    const coachBrandByCoachId = new Map<string, { brand_name: string | null; plan_tier: string | null }>();
+    if (coachIdsForBranding.size > 0) {
+      const { data: coachProfiles } = await supabase
+        .from("profiles")
+        .select("id, plan_tier, brand_name")
+        .in("id", [...coachIdsForBranding]);
+      for (const p of coachProfiles ?? []) {
+        const id = String((p as { id: string }).id);
+        coachBrandByCoachId.set(id, {
+          brand_name: (p as { brand_name?: string | null }).brand_name ?? null,
+          plan_tier: (p as { plan_tier?: string | null }).plan_tier ?? null,
+        });
+      }
+    }
+
     // Already-sent today: (profile_id, type) or (profile_id, dedupe_key) set (notifications table uses profile_id)
     const { data: existing } = await supabase
       .from("notifications")
@@ -337,8 +850,14 @@ Deno.serve(async (req) => {
       const copy = TRIGGER_COPY[trigger_type] ?? { title: "Reminder", message: "You have an action due." };
       const title = customTitle ?? copy.title;
       const message = customMessage ?? copy.message;
-      const data = customData ?? {};
-      if (dedupe_key) (data as Record<string, unknown>).dedupe_key = dedupe_key;
+      const data = (customData ?? {}) as Record<string, unknown>;
+      if (dedupe_key) data.dedupe_key = dedupe_key;
+      const coachIdForUser = userIdToCoachIdForNotifs.get(String(user_id));
+      const brandCtx = coachIdForUser ? coachBrandByCoachId.get(coachIdForUser) : undefined;
+      if (brandCtx) {
+        data.coach_brand_name = brandCtx.brand_name;
+        data.coach_plan_tier = brandCtx.plan_tier;
+      }
       const { error } = await supabase.from("notifications").insert({
         profile_id: profileId,
         type: trigger_type,
@@ -359,15 +878,16 @@ Deno.serve(async (req) => {
         ok: true,
         evaluated: toSend.length,
         inserted,
+        scheduled_checkin_inserted: scheduledCheckinInserted,
         by_trigger: byTrigger,
       }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
     );
   } catch (e) {
     console.error("send-reminders", e);
     return new Response(JSON.stringify({ error: "Request failed" }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
     });
   }
 });

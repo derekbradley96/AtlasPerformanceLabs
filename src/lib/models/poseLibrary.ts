@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { Federation } from './compPrep';
 
 /** Stable pose IDs (snake_case) */
 export const poseIdSchema = z.string();
@@ -10,9 +9,16 @@ export const sexEnum = z.enum(['MALE', 'FEMALE']);
 export type Sex = z.infer<typeof sexEnum>;
 
 /** Male divisions */
-export const divisionMaleEnum = z.enum(['BODYBUILDING', 'CLASSIC', 'PHYSIQUE']);
+export const divisionMaleEnum = z.enum(['BODYBUILDING', 'CLASSIC', 'PHYSIQUE', 'WHEELCHAIR_OPEN']);
 /** Female divisions */
-export const divisionFemaleEnum = z.enum(['BIKINI', 'FIGURE', 'WELLNESS']);
+export const divisionFemaleEnum = z.enum([
+  'BIKINI',
+  'FIGURE',
+  'WELLNESS',
+  'WOMENS_BODYBUILDING',
+  'WOMENS_PHYSIQUE',
+  'FITNESS',
+]);
 export const divisionEnum = z.union([divisionMaleEnum, divisionFemaleEnum]);
 export type Division = z.infer<typeof divisionEnum>;
 
@@ -34,12 +40,20 @@ export const hotspotSchema = z.object({
 });
 export type Hotspot = z.infer<typeof hotspotSchema>;
 
-/** Judge notes per federation */
+/** Judge notes per federation (string id matches UI / profile federation labels). */
 export const judgeNotesEntrySchema = z.object({
-  federation: z.enum(['PCA', '2BROS', 'OTHER']),
+  federation: z.string(),
   bullets: z.array(z.string()),
 });
 export type JudgeNotesEntry = z.infer<typeof judgeNotesEntrySchema>;
+
+/** Library exercise id (see `exerciseLibrary.js`) linked to a pose for training carryover. */
+export const poseExerciseLinkSchema = z.object({
+  exerciseId: z.string(),
+  reason: z.string(),
+  priority: z.enum(['primary', 'secondary']),
+});
+export type PoseExerciseLink = z.infer<typeof poseExerciseLinkSchema>;
 
 /** Pose */
 export const poseSchema = z.object({
@@ -54,5 +68,11 @@ export const poseSchema = z.object({
   judgeNotes: z.array(judgeNotesEntrySchema),
   commonMistakes: z.array(z.string()),
   tips: z.array(z.string()),
+  /** Coach-read verbal cues (default / conditioning-focused). */
+  coachingScript: z.string().optional(),
+  /** Optional softer presentation cues for Bikini / Wellness clients. */
+  coachingScriptPresentation: z.string().optional(),
+  /** Exercises that build muscles and patterns used in this pose (4–8 typical). */
+  poseExerciseLinks: z.array(poseExerciseLinkSchema).optional(),
 });
 export type Pose = z.infer<typeof poseSchema>;

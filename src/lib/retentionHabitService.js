@@ -238,6 +238,9 @@ export async function maybeCreateRetentionNudge({
   signals,
   now = new Date(),
 }) {
+  if (import.meta.env.DEV) {
+    console.log('[RetentionService] triggered');
+  }
   if (!profileId || !signals) return null;
   const bucket = getTimeBucket(now);
   const trigger = signals.noWorkoutToday

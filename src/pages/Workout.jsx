@@ -1,9 +1,15 @@
+/*
+LEGACY — not reachable from active routing. Uses
+invokeSupabaseFunction which may reference undeployed Edge
+Functions. Safe to delete after confirming no active path
+reaches this component.
+*/
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { isPersonal } from '@/lib/roles';
 import { PERSONAL_PROGRAM_BUILDER } from '@/lib/personalBuilderNav';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { fetchWorkoutListRowsForUser } from '@/lib/workoutSessionApi';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
 import { Plus, Dumbbell, Play, Trash2 } from 'lucide-react';
@@ -25,8 +31,7 @@ export default function Workout() {
   const { data: savedWorkouts = [], isLoading } = useQuery({
     queryKey: ['saved-workouts', user?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-list', { user_id: user?.id, status: 'completed' });
-      const list = Array.isArray(data) ? data : [];
+      const list = await fetchWorkoutListRowsForUser(user?.id, { status: 'completed', limit: 50 });
       const seen = new Set();
       return list.filter((w) => {
         if (seen.has(w.name)) return false;
@@ -39,16 +44,13 @@ export default function Workout() {
 
   const { data: workoutTemplates = [] } = useQuery({
     queryKey: ['workout-templates', user?.id],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-template-list', { user_id: user?.id });
-      return Array.isArray(data) ? data : [];
-    },
+    queryFn: async () => [],
     enabled: !!user?.id
   });
 
   const deleteWorkoutMutation = useMutation({
-    mutationFn: async (id) => {
-      await invokeSupabaseFunction('workout-template-delete', { id });
+    mutationFn: async () => {
+      // Legacy page — templates are not persisted server-side here.
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['workout-templates']);

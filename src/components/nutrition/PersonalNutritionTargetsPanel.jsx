@@ -49,9 +49,9 @@ function applyRebalanceToSetters({
 
 /**
  * Targets + macro presets (shared by /nutrition-targets and Personal Nutrition hub).
- * @param {{ user: object, variant?: 'full'|'setup'|'compact', onSaved?: () => void }} props
+ * @param {{ user: object, variant?: 'full'|'setup'|'compact', onSaved?: () => void, suggestedCalories?: number | null }} props
  */
-export default function PersonalNutritionTargetsPanel({ user, variant = 'full', onSaved }) {
+export default function PersonalNutritionTargetsPanel({ user, variant = 'full', onSaved, suggestedCalories = null }) {
   const queryClient = useQueryClient();
   const [calories, setCalories] = useState('');
   const [protein, setProtein] = useState('');
@@ -75,6 +75,7 @@ export default function PersonalNutritionTargetsPanel({ user, variant = 'full', 
   });
   const calDebounceRef = useRef(null);
   const hydrateKeyRef = useRef(null);
+  const suggestedCaloriesAppliedRef = useRef(false);
 
   const { data: pageData, isLoading } = useQuery({
     queryKey: nutritionTargetsPageQueryKey(user?.id),
@@ -148,6 +149,33 @@ export default function PersonalNutritionTargetsPanel({ user, variant = 'full', 
 
     setHydrated(true);
   }, [user?.id, isLoading, merged, pageData?.weightKg]);
+
+  useEffect(() => {
+    suggestedCaloriesAppliedRef.current = false;
+  }, [user?.id, suggestedCalories]);
+
+  useEffect(() => {
+    if (!hydrated || !suggestedCalories || suggestedCaloriesAppliedRef.current) return;
+    const n = Number(suggestedCalories);
+    if (!Number.isFinite(n) || n <= 0) return;
+    suggestedCaloriesAppliedRef.current = true;
+    const rounded = Math.round(n);
+    setCalories(String(rounded));
+    const m = computePersonalMacroGrams(rounded, pageData?.weightKg ?? null, 'balanced');
+    setProtein(String(m.protein_g));
+    setCarbs(String(m.carbs_g));
+    setFats(String(m.fats_g));
+    setLocks(DEFAULT_LOCKS);
+    Object.assign(latest.current, {
+      calories: String(rounded),
+      protein: String(m.protein_g),
+      carbs: String(m.carbs_g),
+      fats: String(m.fats_g),
+      locks: DEFAULT_LOCKS,
+      presetId: 'balanced',
+      weightKg: pageData?.weightKg ?? null,
+    });
+  }, [hydrated, suggestedCalories, pageData?.weightKg]);
 
   useEffect(() => {
     return () => {

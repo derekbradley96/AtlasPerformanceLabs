@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { Brain, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import ExerciseTrendCard from './ExerciseTrendCard';
 import { EmptyState, PageLoader } from '@/components/ui/LoadingState';

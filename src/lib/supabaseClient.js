@@ -26,7 +26,40 @@ export function getSupabase() {
     const url = getEnv('VITE_SUPABASE_URL');
     const anonKey = getEnv('VITE_SUPABASE_ANON_KEY');
     if (!url || !anonKey) return null;
-    clientInstance = createSupabaseClient(url, anonKey);
+    const baseOptions = {
+      realtime: {
+        params: {
+          // Maximum events per second per channel.
+          // 10 is sufficient for chat — prevents rate limiting.
+          eventsPerSecond: 10,
+        },
+        // Heartbeat every 30s keeps the WebSocket alive
+        // through NAT timeouts and mobile network transitions.
+        heartbeatIntervalMs: 30000,
+        // Reconnect up to 5 times before giving up (the
+        // useChatThreadRealtime hook handles further reconnects).
+        reconnectAfterMs: (tries) => [500, 1000, 2000, 5000, 10000][tries] ?? 10000,
+        timeout: 20000,
+      },
+      global: {
+        headers: {
+          'x-atlas-app': 'web',
+        },
+      },
+    };
+    try {
+      clientInstance = createSupabaseClient(url, anonKey, {
+        ...baseOptions,
+        auth: {
+          multiTab: true,
+        },
+      });
+    } catch (initializationError) {
+      console.warn('[Supabase] multiTab auth initialization failed, using fallback client.', initializationError);
+      clientInstance = createSupabaseClient(url, anonKey, {
+        ...baseOptions,
+      });
+    }
     return clientInstance;
   } catch {
     return null;

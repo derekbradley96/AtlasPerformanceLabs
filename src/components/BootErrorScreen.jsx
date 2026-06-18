@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { colors } from '@/ui/tokens';
 
 export default function BootErrorScreen({ bootError: bootErrorProp }) {
-  const { logout, clearLoadingFlags, bootError: authBootError } = useAuth();
+  const { signOut, clearLoadingFlags, bootError: authBootError } = useAuth();
   const navigate = useNavigate();
   const bootError = bootErrorProp ?? authBootError;
 
@@ -17,7 +17,7 @@ export default function BootErrorScreen({ bootError: bootErrorProp }) {
     window.location.reload();
   };
   const handleSignOut = async () => {
-    if (typeof logout === 'function') await logout();
+    if (typeof signOut === 'function') await signOut('/login');
     navigate('/auth', { replace: true });
   };
 

@@ -4,16 +4,15 @@ import { createPageUrl } from '@/utils';
 import { PageLoader } from '@/components/ui/LoadingState';
 import SkeletonCard from '@/components/ui/SkeletonCard';
 import { useAuth } from '@/lib/AuthContext';
-import { isInternalAdmin } from '@/lib/internalAccess';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Edit2, LogOut, Mail, Shield } from 'lucide-react';
-import { getUserRole } from '@/lib/roles';
+import { getUserRole, displayRoleLabel } from '@/lib/roles';
 import { toast } from 'sonner';
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { user: authUser, supabaseUser, profile, isDemoMode, logout, isLoadingAuth, coachFocus } = useAuth();
+  const { user: authUser, profile, isDemoMode, signOut, isLoadingAuth, coachFocus, isAdmin } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
 
   const displayUser = authUser;
@@ -22,7 +21,7 @@ export default function Profile() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      await logout(true);
+      await signOut('/login');
     } catch (error) {
       setLoggingOut(false);
       toast.error('Could not log out. Try again.');
@@ -38,7 +37,14 @@ export default function Profile() {
     if (isDemoMode) return;
     const nextRole = roles[(currentRoleIndex + 1) % roles.length];
     try {
-      await invokeSupabaseFunction('user-update-role', { user_type: nextRole });
+      const supabase = getSupabase();
+      if (supabase && displayUser?.id) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ role: nextRole })
+          .eq('id', displayUser.id);
+        if (error) throw error;
+      }
       window.location.reload();
     } catch (error) {
       console.error('Failed to switch role:', error);
@@ -148,7 +154,7 @@ export default function Profile() {
             </div>
             <div className="flex justify-between">
               <span>Role</span>
-              <span className="text-white capitalize">{currentRole || '—'}</span>
+              <span className="text-white">{displayRoleLabel(currentRole)}</span>
             </div>
             {displayUser.created_date && (
               <div className="flex justify-between">
@@ -165,13 +171,13 @@ export default function Profile() {
         </div>
 
         {/* Admin / Dev Panel: always visible for admin email, plus dev tools in dev */}
-        {isInternalAdmin(supabaseUser || displayUser) && (
+        {isAdmin && (
           <div className="app-card p-6 border-purple-500/30 bg-purple-500/10">
             <h3 className="text-sm font-semibold text-purple-400 uppercase tracking-wide mb-4 flex items-center gap-2">
               <Shield className="w-4 h-4" />
-              {isInternalAdmin(supabaseUser || displayUser) ? 'Admin' : 'Dev Tools'}
+              {isAdmin ? 'Admin' : 'Dev Tools'}
             </h3>
-            {isInternalAdmin(supabaseUser || displayUser) && (
+            {isAdmin && (
               <Button
                 onClick={() => navigate('/admin')}
                 className="w-full bg-purple-500 hover:bg-purple-600 text-white mb-3"
@@ -187,7 +193,7 @@ export default function Profile() {
               <Shield className="w-4 h-4 mr-2" />
               Open Admin Panel
             </Button>
-            {isInternalAdmin(supabaseUser || displayUser) && (
+            {isAdmin && (
               <Button
                 onClick={handleRoleSwitch}
                 variant="outline"

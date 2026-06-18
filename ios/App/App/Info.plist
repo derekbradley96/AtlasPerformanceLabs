@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Atlas Performance Labs</string>
+	<string>Atlas</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -35,17 +35,29 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Atlas uses your camera to scan food barcodes and capture progress and posing photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Atlas reads photos to let you attach progress photos to your check-ins and pose submissions.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Atlas saves your progress comparison images and result cards to your photo library.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Atlas sends check-in reminders, coach feedback notifications, and workout reminders.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Atlas uses motion data to count your steps and estimate activity during workouts.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use Face ID to sign in to Atlas quickly and securely.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Atlas reads your steps, sleep, and weight from Apple Health to pre-fill your daily check-in and readiness data.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Atlas saves your workout data and body weight to Apple Health to keep your health records complete.</string>
 </dict>
 </plist>

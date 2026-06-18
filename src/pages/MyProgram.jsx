@@ -1,13 +1,15 @@
 import React from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
-import { normalizeRole, isClient, isCoach } from '@/lib/roles';
+import { normalizeRole, isCoach } from '@/lib/roles';
 import { getMyClientProfile } from '@/lib/clientProfiles';
 import { getClientNutritionSnapshot } from '@/lib/clientNutritionPlan';
-import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
+import { getActiveProgramAssignmentForClient, getAssignedWorkoutForToday } from '@/lib/programAssignments';
+import { resolveCoachLinkId } from '@/lib/coachLink';
+import { runProgramNutritionDiagnostic } from '@/lib/diagnostics/programNutritionDiagnostic';
 import { 
   Dumbbell, Calendar, Target, MessageSquare, 
   ChevronRight, Apple
@@ -17,6 +19,7 @@ import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
 import { motion } from 'framer-motion';
 import PersonalMyProgram from './PersonalMyProgram';
 import { atlasMigrationDataAttributes, deriveMyProgramRouteState } from '@/lib/atlasMigrationPhases';
+import { useEffect } from 'react';
 
 function ClientMyProgram() {
   const navigate = useNavigate();
@@ -27,7 +30,7 @@ function ClientMyProgram() {
   const { data: clientProfile, isLoading: profileLoading, error: profileError } = useQuery({
     queryKey: ['client-profile', user?.id],
     queryFn: async () => getMyClientProfile(user?.id),
-    enabled: !!user?.id && isClient(effectiveRole),
+    enabled: !!user?.id,
     retry: 1,
     staleTime: 30000
   });
@@ -42,6 +45,18 @@ function ClientMyProgram() {
     staleTime: 30000
   });
 
+  const { data: activeAssignment } = useQuery({
+    queryKey: ['active-program-assignment', clientProfile?.id],
+    queryFn: async () => {
+      const supabase = hasSupabase ? getSupabase() : null;
+      if (!supabase || !clientProfile?.id) return null;
+      return getActiveProgramAssignmentForClient(supabase, clientProfile.id);
+    },
+    enabled: !!clientProfile?.id,
+    retry: 1,
+    staleTime: 30000,
+  });
+
   const { data: nutritionPlan } = useQuery({
     queryKey: ['nutrition-plan', clientProfile?.id],
     queryFn: async () => getClientNutritionSnapshot(clientProfile?.id),
@@ -53,15 +68,25 @@ function ClientMyProgram() {
   const { data: trainer } = useQuery({
     queryKey: ['trainer', clientProfile?.trainer_id, clientProfile?.coach_id],
     queryFn: async () => {
-      const linkedCoachId = clientProfile?.trainer_id ?? clientProfile?.coach_id;
-      const { data } = await invokeSupabaseFunction('trainer-profile-get', { id: linkedCoachId });
-      const list = Array.isArray(data) ? data : [];
-      return list[0] ?? data ?? null;
+      const supabase = getSupabase();
+      const linkedCoachId = resolveCoachLinkId(clientProfile);
+      if (!supabase || !linkedCoachId) return null;
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, display_name, avatar_url, coach_tagline')
+        .eq('id', linkedCoachId)
+        .maybeSingle();
+      return data ?? null;
     },
-    enabled: !!(clientProfile?.trainer_id ?? clientProfile?.coach_id),
+    enabled: !!resolveCoachLinkId(clientProfile),
     retry: 1,
     staleTime: 30000
   });
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || !user?.id) return;
+    runProgramNutritionDiagnostic(user.id, 'client', clientProfile?.id).catch(console.error);
+  }, [user?.id, clientProfile?.id]);
 
   // Error state
   if (error === 'timeout' || error === 'user_fetch' || profileError) {
@@ -108,14 +133,21 @@ function ClientMyProgram() {
   }
 
   const hasTrainer = !!(clientProfile?.trainer_id || clientProfile?.coach_id);
-  const assignmentRow = assignment?.assignment ?? assignment ?? null;
-  const programView = assignment?.block
+  const assignmentRow = assignment?.assignment ?? assignment ?? activeAssignment?.assignment ?? null;
+  const blockView = assignment?.block ?? activeAssignment?.block ?? null;
+  const programView = blockView
     ? {
-        name: assignment.block.title || 'Program',
-        duration_weeks: assignment.block.total_weeks || 1,
+        name: blockView.title || 'Program',
+        duration_weeks: blockView.total_weeks || 1,
         goal: null,
       }
-    : null;
+    : assignmentRow
+      ? {
+          name: 'Your Program',
+          duration_weeks: 1,
+          goal: null,
+        }
+      : null;
 
   if (!hasTrainer) {
     const mpM = deriveMyProgramRouteState({ roleView: 'client', surface: 'no_trainer' });
@@ -210,11 +242,16 @@ function ClientMyProgram() {
               <Target className="w-6 h-6 text-blue-400" />
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-bold text-white mb-1">{programView.name}</h2>
+              <h2 className="text-lg font-bold text-white mb-1">{blockView?.title || programView.name}</h2>
               <p className="text-sm text-slate-300">
                 Week {currentWeekNumber} of {programView.duration_weeks}
                 {programView.goal ? ` • ${String(programView.goal).replace('_', ' ')}` : ''}
               </p>
+              {activeAssignment?.assignment?.start_date ? (
+                <p className="text-xs text-slate-400 mt-1">
+                  Week {currentWeekNumber} of {Math.max(1, Number(blockView?.total_weeks) || 1)}
+                </p>
+              ) : null}
             </div>
           </div>
           
@@ -228,6 +265,17 @@ function ClientMyProgram() {
               <p className="text-sm text-slate-200">{assignmentRow.notes}</p>
             </div>
           )}
+          {activeAssignment?.block?.id && clientProfile?.id ? (
+            <Button
+              variant="ghost"
+              className="w-full mt-3 text-blue-300 hover:text-blue-200"
+              onClick={() =>
+                navigate(`/program-viewer?clientId=${clientProfile.id}&blockId=${activeAssignment.block.id}`)
+              }
+            >
+              View full program
+            </Button>
+          ) : null}
         </motion.div>
 
         {/* This Week's Schedule */}
@@ -275,7 +323,7 @@ function ClientMyProgram() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-lg font-bold text-white mb-1">Today's Workout</h3>
+                <h3 className="text-lg font-bold text-white mb-1">{blockView?.title || "Today's Workout"}</h3>
                 <p className="text-sm text-slate-300">You're scheduled to train today!</p>
               </div>
               <Dumbbell className="w-8 h-8 text-green-400" />

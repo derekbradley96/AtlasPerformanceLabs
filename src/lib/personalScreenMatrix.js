@@ -35,8 +35,8 @@ export function resolvePersonalUXContext(auth = {}) {
     ?? '';
   return {
     tier,
-    isEnhanced: tier === 'enhanced',
-    isBasic: tier !== 'enhanced',
+    isEnhanced: tier === 'enhanced' || tier === 'free',
+    isBasic: tier !== 'enhanced' && tier !== 'free',
     goalBucket,
     goalAxis,
     isPrepGoal: goalAxis === 'prep',

@@ -79,7 +79,7 @@ export default function ChatInputBar({
         </div>
       )}
       <div
-        className="flex items-center gap-2"
+        className="flex items-center gap-2 w-full"
         style={{
           minHeight: touchTargetMin,
           height: INPUT_HEIGHT,

@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Camera, Layout, ChevronRight, Award } from 'lucide-react';
-import { getClientById } from '@/data/selectors';
-import { getClientCheckIns } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
+import * as sandbox from '@/lib/sandboxStore';
 import { setCompPrepClient } from '@/lib/compPrepStore';
 import { getFederationCriteria } from '@/lib/compPrep/federationCriteria';
 import { computeStageReadiness } from '@/lib/intelligence/stageReadiness';
@@ -17,8 +18,47 @@ const PHASE_LABELS = { off_season: 'Off season', prep: 'Prep', peak_week: 'Peak 
 export default function CompPrepClient() {
   const { clientId } = useParams();
   const navigate = useNavigate();
-  const client = useMemo(() => (clientId ? getClientById(clientId) : null), [clientId]);
-  const checkins = useMemo(() => (clientId ? getClientCheckIns(clientId) : []), [clientId]);
+  const supabase = getSupabase();
+
+  const { data: client = null, isLoading: clientLoading } = useQuery({
+    queryKey: ['comp-client', clientId],
+    queryFn: async () => {
+      if (!clientId) return null;
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name, user_id, coach_id, trainer_id')
+          .eq('id', clientId)
+          .maybeSingle();
+        if (error || !data) return null;
+        return { ...data, full_name: data.name ?? data.full_name };
+      }
+      const c = sandbox.getClientById(clientId);
+      return c ? { ...c, full_name: c.full_name ?? c.name } : null;
+    },
+    enabled: !!clientId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const { data: checkins = [] } = useQuery({
+    queryKey: ['comp-checkins', clientId],
+    queryFn: async () => {
+      if (!clientId) return [];
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('checkins')
+          .select('id, submitted_at, status, weight_kg, photos')
+          .eq('client_id', clientId)
+          .order('submitted_at', { ascending: false })
+          .limit(12);
+        if (error) return [];
+        return data || [];
+      }
+      return sandbox.listCheckIns(clientId) ?? [];
+    },
+    enabled: !!clientId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const [federation, setFederation] = useState(client?.federation ?? '');
   const [division, setDivision] = useState(client?.division ?? '');
@@ -58,6 +98,14 @@ export default function CompPrepClient() {
       comp_notes: compNotes || null,
     });
   };
+
+  if (clientLoading) {
+    return (
+      <div className="app-screen p-4" style={{ background: colors.bg, color: colors.muted }}>
+        <p>Loading…</p>
+      </div>
+    );
+  }
 
   if (!client) {
     return (

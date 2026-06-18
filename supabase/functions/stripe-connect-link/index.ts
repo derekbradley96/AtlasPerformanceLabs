@@ -1,7 +1,7 @@
 // Stripe Connect onboarding link: create coach/account if none, return URL. Caller = coach (JWT only).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
 import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe.ts";
@@ -9,7 +9,7 @@ import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
 
   try {
     const callerId = await getAuthUserId(req);
@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
       refresh_url: refreshUrl,
     });
 
-    return new Response(JSON.stringify({ url: accountLink.url }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ url: accountLink.url }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("stripe-connect-link", e);
     return jsonError("Request failed", 500);

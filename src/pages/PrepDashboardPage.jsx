@@ -13,6 +13,7 @@ import { weightTrendArrow } from '@/lib/prepDashboardEngine';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Card from '@/ui/Card';
+import EmptyState from '@/ui/EmptyState';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { colors, shell, spacing, shadows } from '@/ui/tokens';
 
@@ -46,7 +47,7 @@ function buildPrepDashboardReturnUrl(searchParams, clientId) {
   const next = new URLSearchParams(searchParams);
   if (clientId) next.set('client', clientId);
   const qs = next.toString();
-  return qs ? `/prep-dashboard?${qs}` : '/prep-dashboard';
+  return qs ? `/prep-dashboard/roster?${qs}` : '/prep-dashboard/roster';
 }
 
 function prepPrecisionHref(clientId, searchParams) {
@@ -100,7 +101,7 @@ function PrepClientCard({ row, onOpen, selected, prepPrecisionHref }) {
   const cid = client?.id;
   const phaseLabel =
     phaseBucket === 'peak_week' ? 'Peak week' : phaseBucket === 'prep' ? 'Prep' : 'Off-season';
-  const flag = insights[0];
+  const flag = Array.isArray(insights) ? insights[0] : null;
 
   return (
     <button
@@ -213,8 +214,10 @@ function DetailPanel({ row, onClose, isDesktop, prepPrecisionHref }) {
   const cid = client?.id;
   const name = client?.name || client?.full_name || 'Client';
 
-  const waterSeries = prepDailies.map((d) => Number(d.water_actual_ml)).filter((n) => Number.isFinite(n));
-  const sodiumSeries = prepDailies.map((d) => Number(d.sodium_actual_mg)).filter((n) => Number.isFinite(n));
+  const safePrepDailies = Array.isArray(prepDailies) ? prepDailies : [];
+  const safeInsights = Array.isArray(insights) ? insights : [];
+  const waterSeries = safePrepDailies.map((d) => Number(d.water_actual_ml)).filter((n) => Number.isFinite(n));
+  const sodiumSeries = safePrepDailies.map((d) => Number(d.sodium_actual_mg)).filter((n) => Number.isFinite(n));
   const weightBars = (latestCheckins || []).map((c) => Number(c.weight)).filter((n) => Number.isFinite(n)).slice(0, 6).reverse();
 
   const panelStyle = isDesktop
@@ -274,7 +277,7 @@ function DetailPanel({ row, onClose, isDesktop, prepPrecisionHref }) {
       <section style={{ marginBottom: spacing[16] }}>
         <h3 style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Insights</h3>
         <ul style={{ margin: 0, paddingLeft: 18, color: colors.textSecondary, fontSize: 13, lineHeight: 1.5 }}>
-          {(insights.length ? insights : ['No urgent flags.']).map((t, i) => (
+          {(safeInsights.length ? safeInsights : ['No urgent flags.']).map((t, i) => (
             <li key={i} style={{ marginBottom: 4 }}>{t}</li>
           ))}
         </ul>
@@ -348,7 +351,7 @@ function DetailPanel({ row, onClose, isDesktop, prepPrecisionHref }) {
       <section>
         <h3 style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Coach actions</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[8] }}>
-          <Button variant="secondary" onClick={() => navigate(`/trainer/nutrition/${cid}`)}>
+          <Button variant="secondary" onClick={() => navigate(`/coach/nutrition/${cid}`)}>
             <Target className="w-4 h-4 mr-2" />
             Adjust macros (nutrition editor)
           </Button>
@@ -368,6 +371,7 @@ function DetailPanel({ row, onClose, isDesktop, prepPrecisionHref }) {
 }
 
 export default function PrepDashboardPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, coachFocus } = useAuth();
   const { isDesktopWeb } = usePresentationMode();
@@ -402,6 +406,10 @@ export default function PrepDashboardPage() {
     queryFn: () => fetchPrepDashboardData(trainerId, coachFocus),
     enabled: !!trainerId,
   });
+
+  useEffect(() => {
+    document.title = 'Prep Dashboard — Atlas';
+  }, []);
 
   const rows = data?.prepClients ?? [];
 
@@ -447,6 +455,11 @@ export default function PrepDashboardPage() {
     }
     return list;
   }, [rows, search, phaseFilter, statusFilter, checkinFilter, priorityPreset]);
+
+  const selected = useMemo(() => {
+    if (!clientIdParam) return null;
+    return rows.find((r) => r?.client?.id === clientIdParam) ?? null;
+  }, [rows, clientIdParam]);
 
   const patchSearchParams = useCallback(
     (mutate) => {
@@ -601,7 +614,7 @@ export default function PrepDashboardPage() {
         </select>
         <select
           value={checkinFilter}
-          onChange={(e) => { setCheckinFilter(e.target.value); setPriorityPreset(null); }}
+          onChange={(e) => setCheckinFilterUrl(e.target.value)}
           style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '8px 10px', fontSize: 13 }}
         >
           {CHECKIN_FILTERS.map((f) => (
@@ -675,9 +688,19 @@ export default function PrepDashboardPage() {
             }}
           >
             {filtered.length === 0 ? (
-              <Card style={{ padding: spacing[20], border: `1px solid ${colors.border}` }}>
-                <p style={{ margin: 0, color: colors.muted }}>No clients match filters. Add competition-delivery clients or adjust filters.</p>
-              </Card>
+              rows.length === 0 ? (
+                <EmptyState
+                  title="No competition clients yet"
+                  description="Add a client and select Competition Prep as their journey to get started."
+                  icon={Target}
+                  actionLabel="Add client"
+                  onAction={() => navigate('/get-clients')}
+                />
+              ) : (
+                <Card style={{ padding: spacing[20], border: `1px solid ${colors.border}` }}>
+                  <p style={{ margin: 0, color: colors.muted }}>No clients match filters. Adjust filters to see your prep roster.</p>
+                </Card>
+              )
             ) : (
               filtered.map((row) => (
                 <PrepClientCard

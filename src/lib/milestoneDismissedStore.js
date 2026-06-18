@@ -4,6 +4,8 @@
  * value: { [milestoneKey]: timestampDismissed }
  */
 
+import { isCoach } from '@/lib/roles';
+
 const KEY = 'atlas_milestones_dismissed_v1';
 
 function safeParse(fallback) {
@@ -72,7 +74,7 @@ export function createShownThisSessionSet() {
  * @param {Set<string>} shownThisSession - add to this when showing
  */
 export function shouldShowMilestone(role, record, dismissedMap, shownThisSession) {
-  if (role === 'coach' || role === 'trainer') return false;
+  if (isCoach(role)) return false;
   if (!record) return false;
   const milestoneKey = makeMilestoneKey({
     clientId: record.clientId,

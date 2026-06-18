@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { invokeSupabaseFunction } from '@/lib/supabaseApi';
+import { fetchWorkoutListRowsForUser } from '@/lib/workoutSessionApi';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
@@ -20,8 +20,8 @@ export default function SoloDashboard({ user }) {
   const { data: recentWorkouts = [] } = useQuery({
     queryKey: ['recent-workouts', user?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-list', { user_id: user?.id, status: 'completed' });
-      return Array.isArray(data) ? data.slice(0, 10) : [];
+      const rows = await fetchWorkoutListRowsForUser(user?.id, { status: 'completed', limit: 20 });
+      return Array.isArray(rows) ? rows.slice(0, 10) : [];
     },
     enabled: !!user?.id
   });
@@ -29,8 +29,7 @@ export default function SoloDashboard({ user }) {
   const { data: activeWorkout } = useQuery({
     queryKey: ['active-workout', user?.id],
     queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-list', { user_id: user?.id, status: 'in_progress' });
-      const list = Array.isArray(data) ? data : [];
+      const list = await fetchWorkoutListRowsForUser(user?.id, { status: 'in_progress', limit: 5 });
       return list[0] || null;
     },
     enabled: !!user?.id
@@ -38,10 +37,7 @@ export default function SoloDashboard({ user }) {
 
   const { data: templates = [] } = useQuery({
     queryKey: ['workout-templates'],
-    queryFn: async () => {
-      const { data } = await invokeSupabaseFunction('workout-template-list', { is_public: true });
-      return Array.isArray(data) ? data : [];
-    }
+    queryFn: async () => [],
   });
 
   // Calculate this week's stats
@@ -231,15 +227,15 @@ export default function SoloDashboard({ user }) {
           <p className="font-medium text-white text-sm">Progress</p>
           <p className="text-xs text-slate-500">Track gains</p>
         </Link>
-        <Link to="/program-builder?personal=1" className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800 transition-colors">
+        <Link to="/personal-plan-builder" className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 hover:bg-slate-800 transition-colors">
           <Calendar className="w-5 h-5 text-blue-400 mb-2" />
-          <p className="font-medium text-white text-sm">Program</p>
-          <p className="text-xs text-slate-500">Build in Program Builder</p>
+          <p className="font-medium text-white text-sm">Build my plan</p>
+          <p className="text-xs text-slate-500">Create a 4-week programme</p>
         </Link>
       </div>
 
       {/* Coaching Upgrade Prompt */}
-      {trigger && (
+      {trigger && recentWorkouts.length >= 3 && (
         <CoachingUpgradeCard trigger={trigger} reason={reason} variant="card" />
       )}
     </div>

@@ -76,7 +76,7 @@ function RoleRow({ icon, title, onPress, isLast }) {
 export default function RoleLogin() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { role, selectRole, logout, enterAdmin, isHydratingAppState } = useAuth();
+  const { role, selectRole, signOut, enterAdmin, isHydratingAppState } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const allowAdminBypass = isDev && searchParams.get('admin') === '1';
@@ -98,7 +98,7 @@ export default function RoleLogin() {
 
   const handleLogout = async () => {
     await lightHaptic();
-    logout(false);
+    signOut('/login');
   };
 
   const handleAdminJump = async (dashboard) => {

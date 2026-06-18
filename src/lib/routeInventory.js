@@ -99,7 +99,7 @@ export const ROUTE_TABLE = [
   { path: '/entervitecode', roles: 'any', label: 'Enter Invite Code' },
   { path: '/mytrainer', roles: 'any', label: 'My Trainer' },
   { path: '/becomeatrainer', roles: 'any', label: 'Become a Trainer' },
-  { path: '/trainerpublicprofile', roles: 'any', label: 'Trainer Public Profile' },
+  { path: '/trainerpublicprofile', roles: 'any', label: 'Trainer public profile (redirects to /coach/:slug)' },
   { path: '/onboardingrole', roles: 'any', label: 'Onboarding Role' },
   { path: '/trainingintelligence', roles: 'coach', label: 'Training Intelligence' },
   { path: '/progressphotos', roles: 'any', label: 'Progress Photos' },

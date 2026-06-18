@@ -179,3 +179,52 @@ export async function calculateProgramComplianceTrend(clientId) {
   });
 }
 
+export function inferWeightPhases(weightLogs = [], prepRows = []) {
+  const rows = Array.isArray(weightLogs) ? weightLogs : [];
+  if (rows.length < 8) return [];
+  const phases = [];
+  const byDate = rows
+    .map((r) => ({ date: String(r.logged_at || r.created_at || r.date || '').slice(0, 10), weight: Number(r.weight_kg ?? r.weight) }))
+    .filter((r) => r.date && Number.isFinite(r.weight))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const windowSize = 56; // 8 weeks
+  for (let i = 0; i + windowSize - 1 < byDate.length; i += 28) {
+    const slice = byDate.slice(i, i + windowSize);
+    const start = slice[0];
+    const end = slice[slice.length - 1];
+    const delta = end.weight - start.weight;
+    if (delta <= -2) {
+      phases.push({ type: 'cut', start: start.date, end: end.date });
+    } else if (delta >= 2) {
+      phases.push({ type: 'build', start: start.date, end: end.date });
+    }
+  }
+  (Array.isArray(prepRows) ? prepRows : []).forEach((row) => {
+    const s = String(row?.start_date || row?.created_at || '').slice(0, 10);
+    const e = String(row?.show_date || row?.end_date || row?.updated_at || '').slice(0, 10);
+    if (s) phases.push({ type: 'prep', start: s, end: e || s });
+  });
+  return phases;
+}
+
+export function buildWeightInterpretation({ startKg, currentKg, weeks, targetKg }) {
+  if (!Number.isFinite(startKg) || !Number.isFinite(currentKg)) {
+    return 'Log bodyweight consistently to unlock your long-term trend interpretation.';
+  }
+  const delta = currentKg - startKg;
+  const abs = Math.abs(delta);
+  const direction = delta < 0 ? 'down' : delta > 0 ? 'up' : 'flat';
+  const weekSpan = Math.max(1, Number(weeks) || 1);
+  const rate = abs / weekSpan;
+  const targetLine = Number.isFinite(targetKg)
+    ? ` Target is ${targetKg.toFixed(1)}kg.`
+    : '';
+  if (direction === 'down') {
+    return `You started at ${startKg.toFixed(1)}kg and are now ${currentKg.toFixed(1)}kg — down ${abs.toFixed(1)}kg over ${weekSpan} weeks (${rate.toFixed(2)}kg/week). This is within a healthy cut pace.${targetLine}`;
+  }
+  if (direction === 'up') {
+    return `You started at ${startKg.toFixed(1)}kg and are now ${currentKg.toFixed(1)}kg — up ${abs.toFixed(1)}kg over ${weekSpan} weeks (${rate.toFixed(2)}kg/week). This aligns with a build phase when performance is climbing.${targetLine}`;
+  }
+  return `You started at ${startKg.toFixed(1)}kg and are now ${currentKg.toFixed(1)}kg. Weight is stable over ${weekSpan} weeks.${targetLine}`;
+}
+

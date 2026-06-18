@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 
 /**
@@ -7,7 +7,6 @@ import { useAuth } from '@/lib/AuthContext';
  */
 export default function OnboardingGate({ children }) {
   const { isDemoMode, role, isAdminBypass, user } = useAuth();
-  const navigate = useNavigate();
   const isDev = import.meta.env.DEV;
 
   if (isDemoMode) return children;
@@ -18,8 +17,7 @@ export default function OnboardingGate({ children }) {
   const hasRole = !!userRole;
 
   if (!hasRole && !isDev) {
-    navigate('/auth', { replace: true });
-    return null;
+    return <Navigate to="/auth" replace />;
   }
 
   return children;

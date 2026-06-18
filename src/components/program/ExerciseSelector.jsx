@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery } from '@tanstack/react-query';
 import { X, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';

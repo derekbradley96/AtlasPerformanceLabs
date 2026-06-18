@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/lib/emptyApi';
+import { base44 } from '@/lib/base44LegacyStub';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, UserPlus, Trash2, Loader2 } from 'lucide-react';

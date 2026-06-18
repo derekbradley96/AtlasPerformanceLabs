@@ -1,3 +1,5 @@
+// REDIRECT TARGET — see `/coach/:slug` route (PublicCoachProfilePage).
+// TODO: Delete after confirming no deep links point to the old path.
 import React, { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { getTrainerProfileByUsername } from '@/lib/trainerFoundation/trainerProfileRepo';

@@ -1,16 +1,42 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronDown, ChevronUp } from 'lucide-react';
-import { getClientById } from '@/data/selectors';
+import { getSupabase } from '@/lib/supabaseClient';
+import * as sandbox from '@/lib/sandboxStore';
 import { getPosesForDivision } from '@/lib/compPrep/poseSets';
+import { getClientCompProfile } from '@/lib/repos/compPrepRepo';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 
 export default function CompPrepPosing() {
   const { clientId } = useParams();
   const navigate = useNavigate();
-  const client = useMemo(() => (clientId ? getClientById(clientId) : null), [clientId]);
-  const poses = useMemo(() => getPosesForDivision(client?.division ?? ''), [client?.division]);
+  const supabase = getSupabase();
+
+  const { data: client = null, isLoading: clientLoading } = useQuery({
+    queryKey: ['comp-client', clientId],
+    queryFn: async () => {
+      if (!clientId) return null;
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name, user_id, coach_id, trainer_id')
+          .eq('id', clientId)
+          .maybeSingle();
+        if (error || !data) return null;
+        return { ...data, full_name: data.name ?? data.full_name };
+      }
+      const c = sandbox.getClientById(clientId);
+      return c ? { ...c, full_name: c.full_name ?? c.name } : null;
+    },
+    enabled: !!clientId,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const profile = clientId ? getClientCompProfile(clientId) : null;
+  const division = profile?.division ?? '';
+  const poses = useMemo(() => getPosesForDivision(division), [division]);
 
   const [expandedId, setExpandedId] = useState(null);
   const [coachingNotes, setCoachingNotes] = useState({});
@@ -18,6 +44,14 @@ export default function CompPrepPosing() {
   const setNote = (poseId, value) => {
     setCoachingNotes((prev) => ({ ...prev, [poseId]: value }));
   };
+
+  if (clientLoading) {
+    return (
+      <div className="app-screen p-4" style={{ background: colors.bg, color: colors.muted }}>
+        <p>Loading…</p>
+      </div>
+    );
+  }
 
   if (!client) {
     return (
@@ -27,7 +61,7 @@ export default function CompPrepPosing() {
     );
   }
 
-  if (!client.division) {
+  if (!division) {
     return (
       <div
         className="app-screen min-w-0 max-w-full overflow-x-hidden"
@@ -83,7 +117,7 @@ export default function CompPrepPosing() {
         <h1 className="text-lg font-semibold">Posing</h1>
       </div>
       <p className="text-sm mb-4" style={{ color: colors.muted }}>
-        {client.full_name || client.name} · {client.division}
+        {client.full_name || client.name} · {division}
       </p>
 
       <div className="space-y-2">

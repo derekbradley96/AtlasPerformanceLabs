@@ -3,11 +3,11 @@
  * Caller passes trainerId = getTrainerId(session) (session.user.id when authed). Never use "local-trainer" in Supabase.
  */
 
-import { hasSupabase } from '@/lib/supabaseClient';
+import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import * as localStore from '@/data/localClientsStore';
 import * as supabaseRepo from '@/data/supabaseClientsRepo';
 
-const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV;
+const isDev = import.meta.env.DEV;
 
 let localClearedForSession = false;
 function clearLocalDemoClientsOnLoginOnce(): void {
@@ -116,16 +116,16 @@ export async function getClients(trainerId: string, options?: { isDemoMode?: boo
     localClearedForSession = false; // Reset so next time we use Supabase we clear local again (e.g. after logout → login).
     const list = getLocalClientsSync();
     const local = list.filter((c: unknown) => (c as { trainer_id?: string })?.trainer_id === trainerId);
-    console.log('[ATLAS] listClients trainerId=', trainerId, 'source=local count=', local.length);
+    if (isDev) console.log('[ATLAS] listClients trainerId=', trainerId, 'source=local count=', local.length);
     return local.map((c) => toUI(c as localStore.Client));
   }
 
   clearLocalDemoClientsOnLoginOnce();
   try {
-    console.log('[ATLAS] listClients trainerId=', trainerId, 'query: from(clients).eq(trainer_id).order(created_at, false)');
+    if (isDev) console.log('[ATLAS] listClients trainerId=', trainerId, 'query: from(clients).eq(trainer_id).order(created_at, false)');
     const remote = await supabaseRepo.listClients(trainerId);
     const rows = Array.isArray(remote) ? remote : [];
-    console.log('[ATLAS] listClients source=SUPABASE count=', rows.length);
+    if (isDev) console.log('[ATLAS] listClients source=SUPABASE count=', rows.length);
     return rows.map((r) => toUI(fromSupabaseRow(r)));
   } catch (e) {
     const err = e as Error & { code?: string; details?: string };
@@ -254,17 +254,26 @@ export async function getClientAsync(
   const useSupabase = useSupabaseForTrainer(trainerId);
   if (useSupabase) {
     try {
-      console.log('[ATLAS] getClientById trainerId=', trainerId, 'id=', id, 'query: from(clients).eq(trainer_id).eq(id)');
-      const row = await supabaseRepo.getClientById(trainerId, id);
+      if (isDev) console.log('[ATLAS] getClientById trainerId=', trainerId, 'id=', id, 'query: from(clients).eq(trainer_id).eq(id)');
+      let row = await supabaseRepo.getClientById(trainerId, id);
+      if (!row && hasSupabase && getSupabase()) {
+        const sb = getSupabase();
+        const { data: byIdOnly, error: byIdErr } = await sb!
+          .from('clients')
+          .select('*')
+          .eq('id', id)
+          .maybeSingle();
+        if (!byIdErr && byIdOnly) row = byIdOnly as supabaseRepo.SupabaseClientRow;
+      }
       const result = row ? toUI(fromSupabaseRow(row)) : null;
-      console.log('[ATLAS] getClientById result=', result ? 'found' : 'null');
+      if (isDev) console.log('[ATLAS] getClientById result=', result ? 'found' : 'null');
       if (result) return result;
 
       // Fallback: if the route id refers to a locally-seeded client (e.g. demo/sandbox ids),
       // allow opening it even while authed. This prevents ClientDetail crashing when UI shows local clients.
       const localFallback = getClientById(id);
       if (localFallback) {
-        console.log('[ATLAS] getClientById fallback=LOCAL found');
+        if (isDev) console.log('[ATLAS] getClientById fallback=LOCAL found');
         return localFallback;
       }
 

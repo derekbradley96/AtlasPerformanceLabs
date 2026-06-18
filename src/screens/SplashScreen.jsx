@@ -68,11 +68,9 @@ export default function SplashScreen() {
 
   useEffect(() => {
     if (!authReady || !splashMinElapsed) return;
-    if (import.meta.env.DEV) {
-      console.log('[SPLASH] authReady');
-      console.log('[SPLASH] hasSupabase', hasSupabase);
-      console.log('[SPLASH] authenticated', isSupabaseAuthed);
-    }
+    if (import.meta.env.DEV) console.log('[SPLASH] authReady');
+    if (import.meta.env.DEV) console.log('[SPLASH] hasSupabase', hasSupabase);
+    if (import.meta.env.DEV) console.log('[SPLASH] authenticated', isSupabaseAuthed);
     if (!hasSupabase) {
       if (import.meta.env.DEV) console.log('[SPLASH] route -> /auth');
       navigate('/auth', { replace: true });

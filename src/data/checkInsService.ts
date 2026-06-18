@@ -8,7 +8,7 @@ import * as localRepo from '@/data/localCheckinsRepo';
 import * as supabaseRepo from '@/data/supabaseCheckinsRepo';
 import type { CheckIn } from '@/data/models';
 
-const isDev = typeof import.meta !== 'undefined' && import.meta.env?.DEV;
+const isDev = import.meta.env.DEV;
 
 function useSupabaseForTrainer(trainerId: string): boolean {
   return !!(hasSupabase && trainerId && trainerId !== 'local-trainer');

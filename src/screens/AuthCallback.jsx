@@ -17,7 +17,9 @@ import { colors, spacing } from '@/ui/tokens';
 import { isProfileOnboardingComplete } from '@/lib/onboardingStatus';
 import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { resolveIncompleteOnboardingDestination } from '@/lib/auth/postAuthNavigation';
+import { resolveAuthCallbackPendingState } from '@/lib/auth/authCallbackState';
 import { getPendingInvite } from '@/pages/ClientCode';
+import { normalizeRole } from '@/lib/roles';
 
 function parseHashParams(hash) {
   if (!hash || !hash.startsWith('#')) return {};
@@ -26,10 +28,12 @@ function parseHashParams(hash) {
 }
 
 function getDashboardPath(role) {
-  const r = (role ?? '').toString().toLowerCase();
-  if (r === 'coach' || r === 'trainer') return '/home';
+  const raw = (role ?? '').toString().trim();
+  if (!raw) return '/home';
+  const r = normalizeRole(raw);
+  if (r === 'coach') return '/home';
   if (r === 'client') return '/client-dashboard';
-  if (r === 'personal' || r === 'solo') return '/solo-dashboard';
+  if (r === 'personal') return '/solo-dashboard';
   return '/home';
 }
 
@@ -39,27 +43,46 @@ export default function AuthCallback() {
   const { supabaseUser, profile, role, profileLoadError } = useAuth();
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState('');
+  const [callbackHandled, setCallbackHandled] = useState(false);
+  const [profileWaitTimedOut, setProfileWaitTimedOut] = useState(false);
+  const [authUserWaitTimedOut, setAuthUserWaitTimedOut] = useState(false);
   const hasSetSessionFromUrl = useRef(false);
 
   const typeQuery = searchParams.get('type');
   const isRecovery = typeQuery === 'recovery';
 
-  // 1) On mount: parse URL and set session from tokens (hash or token_hash)
+  // 1) On mount: OAuth PKCE (?code=), hash tokens, or token_hash — then session is available to AuthContext.
   useEffect(() => {
-    if (!hasSupabase || !supabase || hasSetSessionFromUrl.current) return;
+    if (!hasSupabase || !supabase || hasSetSessionFromUrl.current) {
+      setCallbackHandled(true);
+      return;
+    }
 
     let cancelled = false;
     const hash = window.location.hash;
     const hashParams = parseHashParams(hash);
     const access_token = hashParams.access_token;
     const refresh_token = hashParams.refresh_token;
-    const type = hashParams.type;
     const token_hash = searchParams.get('token_hash') || hashParams.token_hash;
     const typeFromHash = hashParams.type;
+    let oauthCode = searchParams.get('code');
+    if (!oauthCode && hash.includes('code=')) {
+      const qIdx = hash.indexOf('?');
+      if (qIdx >= 0) oauthCode = new URLSearchParams(hash.slice(qIdx + 1)).get('code');
+    }
 
     const run = async () => {
       try {
-        if (access_token && refresh_token) {
+        if (oauthCode) {
+          const { error: pkceError } = await supabase.auth.exchangeCodeForSession(window.location.href);
+          if (cancelled) return;
+          if (pkceError) {
+            setError(pkceError.message || 'Sign-in link expired or invalid');
+            setStatus('error');
+            return;
+          }
+          hasSetSessionFromUrl.current = true;
+        } else if (access_token && refresh_token) {
           const { error: sessionError } = await supabase.auth.setSession({
             access_token,
             refresh_token,
@@ -104,17 +127,20 @@ export default function AuthCallback() {
           setError(err?.message || 'Something went wrong');
           setStatus('error');
         }
+      } finally {
+        if (!cancelled) setCallbackHandled(true);
       }
     };
 
-    run();
+    void run();
     return () => { cancelled = true; };
-  }, [searchParams]);
+  }, [searchParams, typeQuery]);
 
   // 2) Route by auth state: no session -> /login, session+no profile -> /onboarding, complete profile -> /home.
   useEffect(() => {
-    if (status === 'error') return;
+    if (!callbackHandled || status === 'error') return;
     if (!supabaseUser) {
+      if (!authUserWaitTimedOut) return;
       navigate(LOGIN_PUBLIC_PATH, { replace: true });
       return;
     }
@@ -144,7 +170,25 @@ export default function AuthCallback() {
       return;
     }
     navigate(getDashboardPath(profile.role), { replace: true });
-  }, [supabaseUser, profile, role, profileLoadError, isRecovery, status, navigate]);
+  }, [callbackHandled, supabaseUser, profile, role, profileLoadError, isRecovery, status, authUserWaitTimedOut, navigate]);
+
+  useEffect(() => {
+    setAuthUserWaitTimedOut(false);
+    if (!callbackHandled || status === 'error' || supabaseUser) return undefined;
+    const timer = setTimeout(() => {
+      setAuthUserWaitTimedOut(true);
+    }, 7000);
+    return () => clearTimeout(timer);
+  }, [callbackHandled, status, supabaseUser]);
+
+  useEffect(() => {
+    setProfileWaitTimedOut(false);
+    if (!callbackHandled || status === 'error' || !supabaseUser || profile || profileLoadError === 'PROFILE_MISSING') return undefined;
+    const timer = setTimeout(() => {
+      setProfileWaitTimedOut(true);
+    }, 9000);
+    return () => clearTimeout(timer);
+  }, [callbackHandled, status, supabaseUser, profile, profileLoadError]);
 
   if (!hasSupabase || !supabase) {
     return (
@@ -202,6 +246,83 @@ export default function AuthCallback() {
         >
           Back to sign in
         </button>
+      </div>
+    );
+  }
+
+  const pendingState = resolveAuthCallbackPendingState({
+    status,
+    callbackHandled,
+    supabaseUser,
+    profile,
+    profileLoadError,
+    profileWaitTimedOut,
+    authUserWaitTimedOut,
+  });
+
+  if (pendingState === 'stalled') {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-6"
+        style={{
+          background: colors.bg,
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        {supabaseUser ? (
+          <>
+            <p className="text-center mb-3" style={{ color: colors.text, maxWidth: 420 }}>
+              We are taking longer than expected to finish sign-in.
+            </p>
+            <p className="text-center mb-5" style={{ color: colors.muted, maxWidth: 460 }}>
+              You can continue to onboarding now, or retry sign-in if this keeps happening.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-center mb-3" style={{ color: colors.text, maxWidth: 420 }}>
+              We could not finish authentication from this callback.
+            </p>
+            <p className="text-center mb-5" style={{ color: colors.muted, maxWidth: 460 }}>
+              Retry sign in to request a fresh session.
+            </p>
+          </>
+        )}
+        <div className="flex gap-3">
+          {supabaseUser ? (
+            <button
+              type="button"
+              onClick={() => navigate('/onboarding', { replace: true })}
+              style={{
+                padding: `${spacing[12]}px ${spacing[20]}px`,
+                background: colors.accent,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Continue
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => navigate(LOGIN_PUBLIC_PATH, { replace: true })}
+            style={{
+              padding: `${spacing[12]}px ${spacing[20]}px`,
+              background: 'transparent',
+              color: colors.text,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Retry sign in
+          </button>
+        </div>
       </div>
     );
   }

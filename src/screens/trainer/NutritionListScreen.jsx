@@ -1,6 +1,6 @@
 /**
  * Nutrition list: trainer's clients with active plan badge and quick status.
- * Route: /trainer/nutrition
+ * Route: /coach/nutrition (legacy /trainer/nutrition redirects here).
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -109,7 +109,7 @@ export default function NutritionListScreen() {
   const handleClientPress = useCallback(
     (clientId) => {
       impactLight();
-      navigate(`/trainer/nutrition/${clientId}`);
+      navigate(`/coach/nutrition/${clientId}`);
     },
     [navigate]
   );

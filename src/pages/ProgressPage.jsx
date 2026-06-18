@@ -2,9 +2,11 @@
  * Progress page: coaching trends for client, coach (viewing a client), and personal.
  * Uses v_client_progress_metrics and v_client_progress_trends. Atlas shell, recharts for trends.
  */
+// TODO(refactor): Extract useProgressData hook.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   TrendingUp,
   TrendingDown,
@@ -15,7 +17,7 @@ import {
   Calendar,
   ArrowRight,
 } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, ReferenceDot } from 'recharts';
 import { useAuth } from '@/lib/AuthContext';
 import { isClient, isCoach, isPersonal } from '@/lib/roles';
 
@@ -70,6 +72,13 @@ import {
   getPersonalProgressEmptySurfaceCopy,
   getPersonalScreenFeatures,
 } from '@/lib/personalScreenMatrix';
+import { syncAthleteDevelopmentScore } from '@/lib/athleteDevelopmentScore';
+import { getMyClientProfile } from '@/lib/clientProfiles';
+import { fetchActivePersonalContestPrep } from '@/lib/personalContestPrepApi';
+import { getWeeksOutFromShow } from '@/lib/prepProtocols';
+import { getCoachClientJoinLinkPrimary } from '@/lib/referrals';
+import { sharePlainText } from '@/lib/nativeShare';
+import { inferWeightPhases, buildWeightInterpretation } from '@/lib/progressTrendEngine';
 
 const PAGE_PADDING = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
 
@@ -205,13 +214,17 @@ export default function ProgressPage() {
   const { id: clientIdParam } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, profile, effectiveRole, coachFocus } = useAuth();
+  const { user, profile, effectiveRole, coachFocus, refreshProfile } = useAuth();
   const { isWideWeb } = usePresentationMode();
   const rhythm = desktopRhythm(isWideWeb);
   const supabase = hasSupabase ? getSupabase() : null;
   const isCoachView = isCoach(effectiveRole) && clientIdParam != null;
   const isPersonalView = !isCoachView && isPersonal(effectiveRole);
   const showPrepSection = isCoachView && coachFocusAllowsPrepFeatures(coachFocus);
+
+  useEffect(() => {
+    document.title = isCoachView && clientIdParam ? 'Client progress — Atlas' : 'Progress — Atlas';
+  }, [isCoachView, clientIdParam]);
 
   const personalProgressUx = useMemo(
     () => (isPersonalView ? resolvePersonalUXContext({ profile, user }) : null),
@@ -247,6 +260,42 @@ export default function ProgressPage() {
 
   const clientId = isCoachView ? clientIdParam : clientIdFromUser.data ?? null;
 
+  const { data: clientReferralContext } = useQuery({
+    queryKey: ['progress-client-referral', clientId],
+    queryFn: async () => {
+      if (!supabase || !clientId) return null;
+      const { data: c } = await supabase.from('clients').select('coach_id, trainer_id').eq('id', clientId).maybeSingle();
+      const cid = c?.coach_id || c?.trainer_id;
+      if (!cid) return null;
+      const { data: p } = await supabase.from('profiles').select('referral_code, display_name, full_name').eq('id', cid).maybeSingle();
+      const code = (p?.referral_code || '').trim();
+      const name = (p?.display_name || p?.full_name || 'your coach').trim();
+      const link = getCoachClientJoinLinkPrimary(code, cid);
+      if (!link) return null;
+      return { coachName: name, signupLink: link };
+    },
+    enabled: Boolean(supabase && clientId && !isCoachView && isClient(effectiveRole)),
+  });
+
+  const { data: trainingWeeksCount = 0 } = useQuery({
+    queryKey: ['progress-client-training-weeks', clientId],
+    queryFn: async () => {
+      if (!supabase || !clientId) return 0;
+      const { data } = await supabase
+        .from('workout_sessions')
+        .select('completed_at')
+        .eq('client_id', clientId)
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      const first = data?.completed_at ? new Date(data.completed_at).getTime() : 0;
+      if (!first) return 0;
+      return Math.max(0, Math.floor((Date.now() - first) / (7 * 24 * 60 * 60 * 1000)));
+    },
+    enabled: Boolean(supabase && clientId && !isCoachView && isClient(effectiveRole)),
+  });
+
   const { data: personalNutritionMerged } = useQuery({
     queryKey: personalNutritionTargetsQueryKey(user?.id),
     queryFn: () => fetchMergedPersonalNutritionTargets(user?.id),
@@ -259,16 +308,131 @@ export default function ProgressPage() {
     enabled: Boolean(supabase && user?.id && isPersonalView),
   });
 
+  const { data: activePersonalPrep } = useQuery({
+    queryKey: ['personal-contest-prep-active', user?.id],
+    queryFn: () => fetchActivePersonalContestPrep(user.id),
+    enabled: Boolean(supabase && user?.id && isPersonalView),
+  });
+
+  const { data: personalLinkedClient } = useQuery({
+    queryKey: ['personal-linked-client-progress', user?.id],
+    queryFn: () => getMyClientProfile(user.id),
+    enabled: Boolean(supabase && user?.id && isPersonalView),
+  });
+
+  const showPeakCoachUpsell = useMemo(() => {
+    if (!isPersonalView || !personalDash || !profile) return false;
+    const joinedWeeksAgo = profile.created_at
+      ? Math.floor((Date.now() - new Date(profile.created_at).getTime()) / (7 * 24 * 60 * 60 * 1000))
+      : 0;
+    const ws = personalDash.weightSeries;
+    let weightChangeKg = 0;
+    if (Array.isArray(ws) && ws.length >= 2) {
+      const sorted = [...ws].sort((a, b) => new Date(a.iso || a.at) - new Date(b.iso || b.at));
+      weightChangeKg = Number(sorted[sorted.length - 1]?.weight) - Number(sorted[0]?.weight);
+    }
+    return shouldShowCoachUpsell({
+      joinedWeeksAgo,
+      workoutsCompleted: Number(personalDash.completedAllTime ?? personalDash.completedLast28d ?? 0),
+      weightChangeKg,
+      hasSeenUpsell: Boolean(profile.coach_upsell_seen_at),
+      hasCoach: Boolean(personalLinkedClient?.coach_id || personalLinkedClient?.trainer_id),
+      clientGoal: profile.goal || profile.personal_goal || '',
+    });
+  }, [isPersonalView, personalDash, profile, personalLinkedClient]);
+
+  const { data: coachUpsellPreview = [] } = useQuery({
+    queryKey: ['coach-upsell-preview-rows', user?.id, profile?.goal, profile?.personal_goal],
+    queryFn: () => fetchCoachUpsellPreviewRows(supabase, profile?.goal || profile?.personal_goal || ''),
+    enabled: Boolean(supabase && user?.id && isPersonalView && showPeakCoachUpsell),
+  });
+
+  const todayYmdProgress = useMemo(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, []);
+
+  const personalPrepWeeksOut = useMemo(() => {
+    if (!activePersonalPrep?.show_date) return null;
+    return getWeeksOutFromShow(activePersonalPrep, todayYmdProgress);
+  }, [activePersonalPrep, todayYmdProgress]);
+
+  const showSoloDismissedCoachCta = Boolean(
+    isPersonalView
+    && activePersonalPrep?.id
+    && profile?.coach_discovery_prompt_seen_at
+    && !personalLinkedClient?.coach_id
+    && !personalLinkedClient?.trainer_id
+    && personalPrepWeeksOut != null
+    && personalPrepWeeksOut >= 6
+    && personalPrepWeeksOut <= 10,
+  );
+
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ['v_client_progress_metrics', clientId],
     queryFn: () => fetchProgressMetrics(supabase, clientId),
     enabled: !!supabase && !!clientId,
   });
 
+  const { data: clientProfileBridge } = useQuery({
+    queryKey: ['progress-client-profile-bridge', clientId],
+    queryFn: async () => {
+      if (!supabase || !clientId) return null;
+      const { data } = await supabase.from('clients').select('id, user_id').eq('id', clientId).maybeSingle();
+      return data || null;
+    },
+    enabled: !!supabase && !!clientId && !isPersonalView,
+  });
+
+  const adsProfileId = isPersonalView ? user?.id : clientProfileBridge?.user_id;
+  const adsClientId = isPersonalView ? null : clientId;
+  const { data: athleteDev } = useQuery({
+    queryKey: ['progress-athlete-dev-score', adsProfileId, adsClientId],
+    queryFn: () => syncAthleteDevelopmentScore({ profileId: adsProfileId, clientId: adsClientId }),
+    enabled: !!adsProfileId && !!hasSupabase,
+  });
+
   const { data: trends = [], isLoading: trendsLoading } = useQuery({
     queryKey: ['v_client_progress_trends', clientId],
     queryFn: () => fetchProgressTrends(supabase, clientId),
     enabled: !!supabase && !!clientId,
+  });
+
+  const { data: weightLogsYear = [] } = useQuery({
+    queryKey: ['progress-weight-logs-year', clientId, user?.id, isPersonalView],
+    queryFn: async () => {
+      if (!supabase) return [];
+      const start = new Date();
+      start.setDate(start.getDate() - 365);
+      let q = supabase
+        .from('client_weight_logs')
+        .select('id, client_id, user_id, weight_kg, logged_at, created_at, target_weight_kg')
+        .gte('logged_at', start.toISOString())
+        .order('logged_at', { ascending: true })
+        .limit(500);
+      if (isPersonalView) q = q.eq('user_id', user?.id);
+      else q = q.eq('client_id', clientId);
+      const { data } = await q;
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !!supabase && !!(isPersonalView ? user?.id : clientId),
+  });
+
+  const { data: prepRows = [] } = useQuery({
+    queryKey: ['progress-prep-phases', clientId],
+    queryFn: async () => {
+      if (!supabase || !clientId) return [];
+      const { data } = await supabase
+        .from('contest_prep')
+        .select('id, start_date, end_date, show_date, created_at, updated_at')
+        .eq('client_id', clientId)
+        .order('start_date', { ascending: true });
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: !!supabase && !!clientId && !isPersonalView,
   });
 
   const filteredTrends = useMemo(() => filterTrendsByRange(trends, timeframe), [trends, timeframe]);
@@ -393,6 +557,49 @@ export default function ProgressPage() {
         }),
     [filteredTrends, viewerWeightUnit]
   );
+  const weightChart365Data = useMemo(() => {
+    const source = Array.isArray(weightLogsYear) ? weightLogsYear : [];
+    return source
+      .map((t) => {
+        const kg = Number(t.weight_kg);
+        if (!Number.isFinite(kg)) return null;
+        return {
+          date: formatShortDate(t.logged_at || t.created_at),
+          dateKey: String(t.logged_at || t.created_at || '').slice(0, 10),
+          weight: weightKgToChartValue(kg, viewerWeightUnit),
+          weightKg: kg,
+          targetWeightKg: Number(t.target_weight_kg) || null,
+        };
+      })
+      .filter(Boolean);
+  }, [weightLogsYear, viewerWeightUnit]);
+  const weightPhases = useMemo(() => inferWeightPhases(weightLogsYear, prepRows), [weightLogsYear, prepRows]);
+  const weightMilestones = useMemo(() => {
+    if (!weightChart365Data.length) return null;
+    const first = weightChart365Data[0];
+    const current = weightChart365Data[weightChart365Data.length - 1];
+    const sortedByWeight = [...weightChart365Data].sort((a, b) => a.weightKg - b.weightKg);
+    return {
+      first,
+      current,
+      lowest: sortedByWeight[0],
+      highest: sortedByWeight[sortedByWeight.length - 1],
+      target: [...weightChart365Data].reverse().find((x) => Number.isFinite(Number(x.targetWeightKg)))?.targetWeightKg ?? null,
+    };
+  }, [weightChart365Data]);
+  const weightInterpretation = useMemo(() => {
+    if (!weightMilestones?.first || !weightMilestones?.current) return null;
+    const weeks = Math.max(
+      1,
+      Math.round((new Date(weightMilestones.current.dateKey).getTime() - new Date(weightMilestones.first.dateKey).getTime()) / (86400000 * 7))
+    );
+    return buildWeightInterpretation({
+      startKg: weightMilestones.first.weightKg,
+      currentKg: weightMilestones.current.weightKg,
+      weeks,
+      targetKg: weightMilestones.target,
+    });
+  }, [weightMilestones]);
 
   const complianceChartData = useMemo(
     () =>
@@ -477,6 +684,50 @@ export default function ProgressPage() {
         >
           <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
           <PersonalColumn variant={isWideWeb ? 'home' : 'wide'}>
+          <section style={{ marginBottom: rhythm.section }}>
+            <p style={{ margin: `0 0 ${spacing[8]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+              Strength bests
+            </p>
+            <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
+              <div style={{ display: 'grid', gap: spacing[8] }}>
+                {['Back squat', 'Deadlift', 'Barbell bench press', 'Overhead press', 'Barbell row'].map((lift) => (
+                  <div key={lift} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: `1px solid ${shell.cardBorder}`, borderRadius: 10, padding: spacing[10] }}>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 14, color: colors.text, fontWeight: 700 }}>{lift}</p>
+                      <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                        {dash.completedLast28d > 0 ? 'New PR momentum building - keep progressive overload.' : 'Log workouts to establish your PR baseline.'}
+                      </p>
+                    </div>
+                    <span style={{ fontSize: 11, color: colors.success, fontWeight: 700 }}>PR</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          <section style={{ marginBottom: rhythm.section }}>
+            <p style={{ margin: `0 0 ${spacing[8]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+              Workout consistency (12 weeks)
+            </p>
+            <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(14,minmax(0,1fr))', gap: 4 }}>
+                {Array.from({ length: 84 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      height: 12,
+                      borderRadius: 3,
+                      background: idx % Math.max(2, Math.round(84 / Math.max(1, dash.completedLast28d || 1))) === 0 ? colors.success : colors.surface2,
+                      opacity: idx % Math.max(2, Math.round(84 / Math.max(1, dash.completedLast28d || 1))) === 0 ? 1 : 0.35,
+                    }}
+                  />
+                ))}
+              </div>
+              <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.muted }}>
+                {dash.completedLast28d >= 8 ? `${dash.completedLast28d} sessions in the last 4 weeks - consistent and compounding.` : `${dash.completedLast28d} sessions in the last 4 weeks - add 1-2 more weekly to lock consistency.`}
+              </p>
+            </Card>
+          </section>
             <section style={{ marginBottom: spacing[24] }}>
               <ProgressSummarySkeleton />
             </section>
@@ -567,7 +818,7 @@ export default function ProgressPage() {
 
   if (isPersonalView) {
     const dash = personalDash ?? EMPTY_PERSONAL_PROGRESS_DASHBOARD;
-    const isEnhancedTier = resolvePersonalPlanTier(profile, user) === 'enhanced';
+    const isEnhancedTier = ['enhanced', 'free'].includes(resolvePersonalPlanTier(profile, user));
     const hasNt = hasPersonalNutritionTargets(personalNutritionMerged);
     const ntSummary = formatPersonalNutritionTargetsSummary(personalNutritionMerged);
     const nut7Avg =
@@ -601,6 +852,21 @@ export default function ProgressPage() {
         >
           <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
           <PersonalColumn variant={isWideWeb ? 'home' : 'wide'}>
+          {athleteDev ? (
+            <section style={{ marginBottom: rhythm.section }}>
+              <Card style={{ padding: rhythm.cardPadding, border: `1px solid ${colors.primary}`, boxShadow: supportCardShadow }}>
+                <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Athlete Development Score
+                </p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 44, fontWeight: 800, color: colors.primary }}>
+                  {athleteDev.score}
+                </p>
+                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.muted }}>
+                  {athleteDev.interpretation}
+                </p>
+              </Card>
+            </section>
+          ) : null}
           <section style={{ marginBottom: rhythm.section }}>
             <Card
               style={{
@@ -972,24 +1238,184 @@ export default function ProgressPage() {
             )}
           </section>
 
-          <section style={{ marginBottom: rhythm.section, textAlign: 'center' }}>
-            <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>
-              Want a coach later?{' '}
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(
-                    buildPersonalCoachTierSelectionUrl({
-                      source: 'from_general_discovery',
-                    })
-                  )
-                }
-                style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
+          {showPeakCoachUpsell ? (
+            <section style={{ marginBottom: rhythm.section }}>
+              <Card
+                style={{
+                  padding: rhythm.cardPadding,
+                  boxShadow: supportCardShadow,
+                  border: `1px solid ${colors.primary}44`,
+                  background: `linear-gradient(160deg, rgba(59,130,246,0.2) 0%, ${colors.surface1} 50%, ${colors.card} 100%)`,
+                }}
               >
-                Discover coaches
-              </button>
-            </p>
-          </section>
+                <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                  Ready to go further?
+                </p>
+                {(() => {
+                  const g = String(profile?.goal || profile?.personal_goal || '').toLowerCase();
+                  const isLose = g.includes('lose') || g.includes('fat') || g.includes('cut');
+                  const ws = dash.weightSeries || [];
+                  let weightChangeKg = 0;
+                  if (ws.length >= 2) {
+                    const sorted = [...ws].sort((a, b) => new Date(a.iso || a.at) - new Date(b.iso || b.at));
+                    weightChangeKg = Number(sorted[sorted.length - 1]?.weight) - Number(sorted[0]?.weight);
+                  }
+                  const absKg = Math.abs(weightChangeKg);
+                  const joinedWeeksAgo = profile?.created_at
+                    ? Math.floor((Date.now() - new Date(profile.created_at).getTime()) / (7 * 24 * 60 * 60 * 1000))
+                    : 0;
+                  const goalParam =
+                    isLose ? 'lose_fat' : g.includes('build') || g.includes('muscle') ? 'build_muscle' : 'lose_fat';
+                  const markSeen = async () => {
+                    if (!supabase || !user?.id) return;
+                    await supabase.from('profiles').update({ coach_upsell_seen_at: new Date().toISOString() }).eq('id', user.id);
+                    await refreshProfile?.();
+                  };
+                  return (
+                    <>
+                      <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 16, fontWeight: 800, color: colors.text, lineHeight: 1.35 }}>
+                        You&apos;ve {isLose ? `lost ${absKg.toFixed(1)} kg` : `gained ${absKg.toFixed(1)} kg`} in{' '}
+                        {joinedWeeksAgo || 'several'} weeks on your own. That&apos;s real progress.
+                      </p>
+                      <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.55 }}>
+                        Coaches using Atlas typically help clients move faster with less guesswork — accountability, form
+                        feedback, and a programme built around you.
+                      </p>
+                      <p style={{ margin: `${spacing[12]}px 0 0`, fontSize: 12, fontWeight: 700, color: colors.text }}>
+                        Coaches matched to your goal
+                      </p>
+                      <div style={{ marginTop: spacing[10], display: 'grid', gap: spacing[10] }}>
+                        {coachUpsellPreview.map((row) => (
+                          <button
+                            key={row.id}
+                            type="button"
+                            onClick={() => {
+                              void markSeen();
+                              if (row.slug?.trim()) navigate(`/marketplace/coach/${encodeURIComponent(row.slug.trim())}`);
+                              else navigate(`/discover?goal=${encodeURIComponent(goalParam)}`);
+                            }}
+                            style={{
+                              display: 'flex',
+                              gap: spacing[10],
+                              alignItems: 'center',
+                              textAlign: 'left',
+                              border: `1px solid ${shell.cardBorder}`,
+                              borderRadius: radii.card,
+                              padding: spacing[10],
+                              background: colors.surface1,
+                              color: colors.text,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {row.avatar_url ? (
+                              <img src={row.avatar_url} alt="" style={{ width: 44, height: 44, borderRadius: 12, objectFit: 'cover' }} />
+                            ) : (
+                              <div style={{ width: 44, height: 44, borderRadius: 12, background: colors.surface2 }} />
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
+                                {row.display_name || row.full_name || 'Coach'}
+                              </p>
+                              <div style={{ marginTop: 4 }}>
+                                <PillarRating
+                                  pillars={row.avg_pillars}
+                                  reviewCount={row.avg_pillars != null ? Math.max(Number(row.review_count) || 0, 1) : 0}
+                                  size="sm"
+                                  showNumber
+                                />
+                              </div>
+                              {row.pricing_summary ? (
+                                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>{row.pricing_summary}</p>
+                              ) : null}
+                              {row.headline ? (
+                                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.textSecondary, lineHeight: 1.4 }}>
+                                  {row.headline}
+                                </p>
+                              ) : null}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await markSeen();
+                          navigate(`/discover?goal=${encodeURIComponent(goalParam)}`);
+                        }}
+                        style={{
+                          marginTop: spacing[14],
+                          width: '100%',
+                          minHeight: touchTargetMin,
+                          borderRadius: radii.button,
+                          border: 'none',
+                          background: colors.primary,
+                          color: '#fff',
+                          fontSize: 15,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Explore coaches
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void markSeen()}
+                        style={{
+                          marginTop: spacing[8],
+                          width: '100%',
+                          border: 'none',
+                          background: 'transparent',
+                          color: colors.muted,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Not now
+                      </button>
+                      <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 11, color: colors.muted, lineHeight: 1.45 }}>
+                        Your data and history stay with you whether or not you work with a coach. Your progress is yours.
+                      </p>
+                    </>
+                  );
+                })()}
+              </Card>
+            </section>
+          ) : null}
+
+          {showSoloDismissedCoachCta ? (
+            <section style={{ marginBottom: rhythm.section }}>
+              <Card style={{ padding: rhythm.cardPadding, border: `1px dashed ${colors.border}`, background: colors.surface1 }}>
+                <p style={{ margin: 0, fontSize: 14, color: colors.text, fontWeight: 600 }}>
+                  Want expert guidance for your show?
+                </p>
+                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+                  Browse competition prep coaches matched to your division.
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(
+                      `/discover?type=competition&division=${encodeURIComponent(activePersonalPrep?.division || 'bikini')}`,
+                    )
+                  }
+                  style={{
+                    marginTop: spacing[12],
+                    border: 'none',
+                    background: colors.primary,
+                    color: '#fff',
+                    borderRadius: radii.button,
+                    padding: '10px 16px',
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    minHeight: touchTargetMin,
+                  }}
+                >
+                  Browse competition prep coaches
+                </button>
+              </Card>
+            </section>
+          ) : null}
           </PersonalColumn>
         </div>
       </PersonalCanvas>
@@ -1047,6 +1473,17 @@ export default function ProgressPage() {
     >
       <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
       <div style={{ ...PAGE_PADDING, paddingTop: spacing[16] }}>
+        {athleteDev ? (
+          <section style={{ marginBottom: spacing[16] }}>
+            <Card style={{ padding: spacing[16], border: `1px solid ${colors.primary}`, background: `linear-gradient(160deg, ${colors.primarySubtle} 0%, ${colors.surface1} 70%)` }}>
+              <p style={{ margin: 0, fontSize: 11, color: colors.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Athlete Development Score
+              </p>
+              <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 42, fontWeight: 800, color: colors.primary }}>{athleteDev.score}</p>
+              <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted }}>{athleteDev.interpretation}</p>
+            </Card>
+          </section>
+        ) : null}
         {/* Timeframe filter */}
         <div style={{ marginBottom: spacing[16] }}>
           <TimeframeFilter value={timeframe} onChange={setTimeframe} />
@@ -1147,15 +1584,15 @@ export default function ProgressPage() {
         )}
 
         {/* Weight trend */}
-        {weightChartData.length >= 1 ? (
+        {(weightChart365Data.length >= 1 || weightChartData.length >= 1) ? (
           <section style={{ marginBottom: spacing[24] }}>
             <Card style={{ padding: spacing[16] }}>
               <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, margin: 0, marginBottom: spacing[12], textTransform: 'uppercase', letterSpacing: '0.04em', color: colors.muted }}>
                 Weight trend
               </h3>
-              <div style={{ height: 180 }}>
+              <div style={{ height: 220 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={weightChartData}>
+                  <AreaChart data={weightChart365Data.length ? weightChart365Data : weightChartData}>
                     <defs>
                       <linearGradient id="progressWeightGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor={colors.primary} stopOpacity={0.3} />
@@ -1175,18 +1612,69 @@ export default function ProgressPage() {
                       formatter={(value, _name, item) => [formatWeightForViewer(item?.payload?.weightKg, viewerWeightUnit), 'Weight']}
                       labelFormatter={formatShortDate}
                     />
+                    {weightPhases.map((phase, idx) => (
+                      <ReferenceArea
+                        key={`${phase.type}-${phase.start}-${idx}`}
+                        x1={formatShortDate(phase.start)}
+                        x2={formatShortDate(phase.end)}
+                        y1="auto"
+                        y2="auto"
+                        fill={
+                          phase.type === 'prep'
+                            ? 'rgba(245, 158, 11, 0.15)'
+                            : phase.type === 'build'
+                              ? 'rgba(16, 185, 129, 0.14)'
+                              : 'rgba(59, 130, 246, 0.14)'
+                        }
+                        strokeOpacity={0}
+                      />
+                    ))}
                     <Area type="monotone" dataKey="weight" stroke={colors.primary} strokeWidth={2} fill="url(#progressWeightGrad)" />
+                    {weightMilestones?.lowest ? (
+                      <ReferenceDot x={weightMilestones.lowest.date} y={weightKgToChartValue(weightMilestones.lowest.weightKg, viewerWeightUnit)} r={3.5} fill={colors.success} />
+                    ) : null}
+                    {weightMilestones?.highest ? (
+                      <ReferenceDot x={weightMilestones.highest.date} y={weightKgToChartValue(weightMilestones.highest.weightKg, viewerWeightUnit)} r={3.5} fill={colors.warning} />
+                    ) : null}
+                    {weightMilestones?.current ? (
+                      <ReferenceDot x={weightMilestones.current.date} y={weightKgToChartValue(weightMilestones.current.weightKg, viewerWeightUnit)} r={4.5} fill={colors.primary} />
+                    ) : null}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+              <div style={{ marginTop: spacing[10], display: 'flex', flexWrap: 'wrap', gap: spacing[8] }}>
+                {weightPhases.some((p) => p.type === 'prep') ? <span style={{ fontSize: 11, color: colors.warning }}>Prep phase</span> : null}
+                {weightPhases.some((p) => p.type === 'build') ? <span style={{ fontSize: 11, color: colors.success }}>Build phase</span> : null}
+                {weightPhases.some((p) => p.type === 'cut') ? <span style={{ fontSize: 11, color: colors.primary }}>Cut phase</span> : null}
+              </div>
+              {weightMilestones ? (
+                <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                  First: {formatWeightForViewer(weightMilestones.first.weightKg, viewerWeightUnit)} · Lowest: {formatWeightForViewer(weightMilestones.lowest.weightKg, viewerWeightUnit)} · Highest: {formatWeightForViewer(weightMilestones.highest.weightKg, viewerWeightUnit)} · Current: {formatWeightForViewer(weightMilestones.current.weightKg, viewerWeightUnit)}
+                </p>
+              ) : null}
+              {weightInterpretation ? (
+                <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.text, lineHeight: 1.45 }}>
+                  {weightInterpretation}
+                </p>
+              ) : null}
             </Card>
           </section>
         ) : (
           <section style={{ marginBottom: spacing[24] }}>
-            <Card style={{ padding: spacing[24] }}>
-              <p style={{ fontSize: 14, fontWeight: 600, color: colors.muted, margin: 0, marginBottom: spacing[8], textTransform: 'uppercase', letterSpacing: '0.04em' }}>Weight trend</p>
-              <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>{isCoachView ? 'No check-ins in this period. Trends will show once the client submits check-ins.' : 'No check-ins in this period. Submit a check-in to see your weight trend.'}</p>
-            </Card>
+            {isCoachView ? (
+              <Card style={{ padding: spacing[24] }}>
+                <p style={{ fontSize: 14, fontWeight: 600, color: colors.muted, margin: 0, marginBottom: spacing[8], textTransform: 'uppercase', letterSpacing: '0.04em' }}>Weight trend</p>
+                <p style={{ fontSize: 14, color: colors.muted, margin: 0 }}>No weight data in this period yet. Trends will show once the client logs weight on check-ins.</p>
+              </Card>
+            ) : (
+              <EmptyState
+                icon={Scale}
+                title="No weight logged yet"
+                description="Log your weight each morning for a trend chart."
+                actionLabel={"Log today's weight"}
+                onAction={() => navigate('/clientcheckin')}
+              />
+            )}
           </section>
         )}
 
@@ -1301,6 +1789,43 @@ export default function ProgressPage() {
             </Card>
           </section>
         )}
+
+        {!isCoachView && isClient(effectiveRole) && clientId && trainingWeeksCount >= 4 && clientReferralContext?.signupLink ? (
+          <section style={{ marginBottom: spacing[24] }}>
+            <Card style={{ padding: spacing[16], border: `1px solid ${colors.primary}44`, background: colors.primarySubtle }}>
+              <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Tell a friend</p>
+              <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 15, fontWeight: 700, color: colors.text }}>
+                You&apos;ve been training for {trainingWeeksCount}+ weeks and you&apos;re making real progress.
+              </p>
+              <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 14, color: colors.textSecondary, lineHeight: 1.45 }}>
+                Know someone who&apos;d love results like this?
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  const n = trainingWeeksCount;
+                  const text = `I've been training on Atlas for ${n}+ weeks — loving the progress. Here's how to join ${clientReferralContext.coachName}: ${clientReferralContext.signupLink}`;
+                  const ok = await sharePlainText(text, 'Share your journey');
+                  if (!ok) toast.error('Could not share');
+                }}
+                style={{
+                  marginTop: spacing[10],
+                  border: 'none',
+                  background: colors.primary,
+                  color: '#fff',
+                  borderRadius: 10,
+                  minHeight: 44,
+                  padding: '0 14px',
+                  fontWeight: 700,
+                  width: '100%',
+                  cursor: 'pointer',
+                }}
+              >
+                Share your journey
+              </button>
+            </Card>
+          </section>
+        ) : null}
 
         {/* Coaching insights */}
         {insights.length > 0 && (

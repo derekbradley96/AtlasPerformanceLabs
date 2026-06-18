@@ -4,7 +4,7 @@
  */
 import { normalizeRole } from '@/lib/roles';
 
-/** @typedef {'coach'|'client'|'personal'|'trainer'|'solo'} NormalizedOnboardingRole */
+/** @typedef {'coach'|'client'|'personal'} NormalizedOnboardingRole */
 
 /**
  * @param {string|null|undefined} role - profiles.role or effective role
@@ -12,9 +12,9 @@ import { normalizeRole } from '@/lib/roles';
  */
 export function getPostOnboardingPath(role) {
   const r = normalizeRole(role);
-  if (r === 'coach' || r === 'trainer') return '/home';
+  if (r === 'coach') return '/home';
   if (r === 'client') return '/client-dashboard';
-  if (r === 'personal' || r === 'solo') return '/home';
+  if (r === 'personal') return '/home';
   return '/home';
 }
 

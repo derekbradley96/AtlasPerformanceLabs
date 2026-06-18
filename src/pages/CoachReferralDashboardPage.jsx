@@ -6,6 +6,7 @@
 import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { Capacitor } from '@capacitor/core';
 import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
@@ -13,11 +14,12 @@ import { colors, spacing } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import {
-  getCoachReferralLink,
+  getCoachClientJoinLinkPrimary,
   getCoachPublicProfileLink,
   copyReferralLinkToClipboard,
   trackReferralEvent,
 } from '@/lib/referrals';
+import * as atlasRepo from '@/data/repos/atlasRepo';
 import {
   Copy,
   Share2,
@@ -110,7 +112,7 @@ async function fetchReferralDashboard(coachId) {
 
 export default function CoachReferralDashboardPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const coachId = user?.id ?? null;
 
   const { data, isLoading } = useQuery({
@@ -120,8 +122,18 @@ export default function CoachReferralDashboardPage() {
   });
 
   const coach = data?.referralCode != null ? { referral_code: data.referralCode } : null;
-  const referralLink = getCoachReferralLink(coach ?? {});
+  const referralLink = getCoachClientJoinLinkPrimary(data?.referralCode ?? '', coachId);
   const publicProfileLink = getCoachPublicProfileLink(coach ?? {});
+
+  const ensureShareableLink = useCallback(async () => {
+    if (!coachId) return '';
+    const existingCode = (data?.referralCode ?? '').toString().trim();
+    if (existingCode) return getCoachClientJoinLinkPrimary(existingCode, coachId);
+    const generatedCode = await atlasRepo.ensureCoachInviteCode(coachId, !!isDemoMode, { retries: 5 });
+    const normalized = (generatedCode || '').toString().trim();
+    if (!normalized) return '';
+    return getCoachClientJoinLinkPrimary(normalized, coachId);
+  }, [coachId, data?.referralCode, isDemoMode]);
 
   const handleCopyLink = useCallback(async () => {
     const ok = await copyReferralLinkToClipboard(referralLink);
@@ -170,6 +182,56 @@ export default function CoachReferralDashboardPage() {
       }
     }
   }, [publicProfileLink, referralLink, data?.referralCode, coachId]);
+
+  const handleShareYourLink = useCallback(async () => {
+    const link = await ensureShareableLink();
+    if (!link) {
+      toast.error('Referral link not ready yet');
+      return;
+    }
+    const message = `I'm using Atlas Performance Labs to manage my coaching business — check it out: ${link}`;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const { Share } = await import(/* @vite-ignore */ '@capacitor/share');
+        await Share.share({
+          title: 'Atlas Performance Labs',
+          text: message,
+          dialogTitle: 'Share your referral link',
+        });
+        toast.success('Share sheet opened');
+        if (data?.referralCode) {
+          trackReferralEvent(data.referralCode, 'referral_link_shared', { source: 'coach_referral_dashboard_native_share' }, coachId);
+        }
+        return;
+      }
+      const copied = await copyReferralLinkToClipboard(link);
+      if (!copied) {
+        toast.error('Could not copy link');
+        return;
+      }
+      toast.success('Link copied to clipboard!');
+      if (data?.referralCode) {
+        trackReferralEvent(data.referralCode, 'referral_link_copied', { source: 'coach_referral_dashboard_web_share' }, coachId);
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast.error('Could not share link');
+    }
+  }, [ensureShareableLink, data?.referralCode, coachId]);
+
+  const handleShareOnInstagram = useCallback(async () => {
+    const link = await ensureShareableLink();
+    if (!link) {
+      toast.error('Referral link not ready yet');
+      return;
+    }
+    const copied = await copyReferralLinkToClipboard(link);
+    if (!copied) {
+      toast.error('Could not copy link');
+      return;
+    }
+    window.open('https://instagram.com', '_blank', 'noopener,noreferrer');
+    toast.success('Link copied to clipboard!');
+  }, [ensureShareableLink]);
 
   const handleOpenPublicProfile = useCallback(() => {
     if (publicProfileLink) window.open(publicProfileLink, '_blank');
@@ -229,14 +291,16 @@ export default function CoachReferralDashboardPage() {
           <h2 className="text-sm font-semibold mb-2" style={{ color: colors.text }}>
             Your referral code
           </h2>
-          {stats.referralCode ? (
+          {referralLink ? (
             <>
-              <p className="text-lg font-mono font-semibold mb-2" style={{ color: colors.accent }}>
-                {stats.referralCode}
-              </p>
               <p className="text-xs mb-3 break-all" style={{ color: colors.muted }}>
                 {referralLink}
               </p>
+              {stats.referralCode ? (
+                <p className="text-lg font-mono font-semibold mb-2" style={{ color: colors.accent }}>
+                  {stats.referralCode}
+                </p>
+              ) : null}
               <Button
                 variant="secondary"
                 onClick={handleCopyLink}
@@ -370,6 +434,23 @@ export default function CoachReferralDashboardPage() {
           Actions
         </h2>
         <div className="flex flex-col gap-2">
+          <Button
+            className="w-full justify-start"
+            onClick={handleShareYourLink}
+          >
+            <Share2 size={18} className="mr-2" />
+            Share your link
+          </Button>
+          {!Capacitor.isNativePlatform() ? (
+            <Button
+              variant="secondary"
+              className="w-full justify-start"
+              onClick={handleShareOnInstagram}
+            >
+              <ExternalLink size={18} className="mr-2" />
+              Share on Instagram
+            </Button>
+          ) : null}
           <Button
             variant="secondary"
             className="w-full justify-start"
