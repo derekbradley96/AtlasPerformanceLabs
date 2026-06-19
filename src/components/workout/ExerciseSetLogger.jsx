@@ -26,6 +26,54 @@ function rirLabel(v) {
 
 const RIR_OPTIONS = [0, 1, 2, 3, 4];
 
+const PLATE_SIZES = [20, 15, 10, 5, 2.5, 1.25];
+
+function calcPlates(weightKg, barKg = 20) {
+  const total = parseFloat(weightKg);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  if (total <= barKg) return { bar: total, perSide: [], total, barOnly: true };
+  let remaining = Math.round(((total - barKg) / 2) * 1000) / 1000;
+  const perSide = [];
+  for (const p of PLATE_SIZES) {
+    const n = Math.floor(remaining / p + 0.001);
+    if (n > 0) {
+      perSide.push({ weight: p, count: n });
+      remaining = Math.round((remaining - n * p) * 1000) / 1000;
+    }
+  }
+  return { bar: barKg, perSide, total, remainder: remaining > 0.05 ? remaining : 0 };
+}
+
+function PlateDisplay({ weightKg, barKg = 20 }) {
+  const result = calcPlates(weightKg, barKg);
+  if (!result) return null;
+  return (
+    <div style={{ background: '#1a1a2e', borderRadius: 8, padding: '8px 10px', fontSize: 12, color: '#8b8ba0', lineHeight: 1.5 }}>
+      {result.barOnly ? (
+        <span>Bar only ({result.bar}kg)</span>
+      ) : (
+        <>
+          <span style={{ fontWeight: 700, color: '#e0e0f0' }}>{result.bar}kg bar</span>
+          {result.perSide.map(({ weight, count }) => (
+            <span key={weight}> + {count > 1 ? `${count}×` : ''}{weight}kg</span>
+          ))}
+          <span style={{ opacity: 0.7 }}> each side</span>
+          {result.remainder > 0 && (
+            <span style={{ color: '#f59e0b' }}> (+{result.remainder}kg unmatched)</span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const FLAG_QUICK_OPTIONS = [
+  { label: "Can't do it today", note: "[FLAG] Could not perform this exercise today." },
+  { label: 'Pain / injury', note: '[FLAG] Felt pain or discomfort — please review.' },
+  { label: 'No equipment', note: '[FLAG] Equipment not available today.' },
+  { label: 'Too heavy', note: '[FLAG] Weight felt too heavy — may need adjusting.' },
+];
+
 export default function ExerciseSetLogger({
   exercise,
   sessionId,
@@ -47,6 +95,7 @@ export default function ExerciseSetLogger({
 }) {
   const [exerciseNote, setExerciseNote] = useState('');
   const [savingSet, setSavingSet] = useState(false);
+  const [platesOpenForSet, setPlatesOpenForSet] = useState(null);
   const notesSavedRef = useRef('');
 
   const allSessionSets = Array.isArray(sessionSets) && sessionSets.length > 0 ? sessionSets : sets;
@@ -105,8 +154,8 @@ export default function ExerciseSetLogger({
     setDraftBySet((prev) => ({ ...prev, [setNumber]: { ...(prev[setNumber] || {}), ...partial } }));
   };
 
-  const saveExerciseNote = async () => {
-    const note = String(exerciseNote || '').trim();
+  const saveExerciseNote = async (noteOverride) => {
+    const note = String(noteOverride ?? exerciseNote ?? '').trim();
     if (!sessionId || !exercise?.id || !note || notesSavedRef.current === note) return;
     const sb = getSupabase();
     if (!sb) return;
@@ -233,7 +282,11 @@ export default function ExerciseSetLogger({
                 ) : active ? (
                   <div style={{ marginTop: spacing[6], display: 'grid', gap: spacing[8] }}>
                     <div style={{ display: 'grid', gridTemplateColumns: showPreviousSession ? '1fr 1fr 72px' : '1fr 1fr', gap: spacing[6] }}>
-                      <input value={draft.weight ?? suggestedWeight} onChange={(e) => syncDraft(setNumber, { weight: e.target.value })} placeholder={String(suggestedWeight || '')} style={{ scrollMarginBottom: 120, minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, textAlign: 'center' }} />
+                      <div style={{ display: 'flex', alignItems: 'stretch', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, overflow: 'hidden', minHeight: touchTargetMin }}>
+                        <button type="button" onPointerDown={(e) => { e.preventDefault(); const cur = parseFloat(draft.weight ?? suggestedWeight) || 0; syncDraft(setNumber, { weight: String(Math.max(0, Math.round((cur - 2.5) * 100) / 100) ) }); }} style={{ width: 34, background: 'transparent', border: 'none', borderRight: `1px solid ${colors.border}`, color: colors.muted, fontWeight: 700, fontSize: 18, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>−</button>
+                        <input value={draft.weight ?? suggestedWeight} onChange={(e) => syncDraft(setNumber, { weight: e.target.value })} placeholder={String(suggestedWeight || '')} style={{ scrollMarginBottom: 120, flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: colors.text, textAlign: 'center' }} />
+                        <button type="button" onPointerDown={(e) => { e.preventDefault(); const cur = parseFloat(draft.weight ?? suggestedWeight) || 0; syncDraft(setNumber, { weight: String(Math.round((cur + 2.5) * 100) / 100) }); }} style={{ width: 34, background: 'transparent', border: 'none', borderLeft: `1px solid ${colors.border}`, color: colors.muted, fontWeight: 700, fontSize: 18, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>+</button>
+                      </div>
                       <input value={draft.reps ?? suggestedReps} onChange={(e) => syncDraft(setNumber, { reps: e.target.value.replace(/[^0-9]/g, '') })} placeholder={String(suggestedReps || '')} style={{ scrollMarginBottom: 120, minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, textAlign: 'center' }} />
                       {showPreviousSession ? (
                         <div style={{ display: 'grid', alignItems: 'center', justifyItems: 'center', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.muted, fontSize: 10 }}>
@@ -273,6 +326,23 @@ export default function ExerciseSetLogger({
                     </div>
                     {selectedRir != null ? <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>{rirLabel(selectedRir)}</p> : null}
                     {caution ? <p style={{ margin: 0, fontSize: 11, color: colors.warning }}>This felt close to max - coach may adjust next session</p> : null}
+                    {(() => {
+                      const currentWeightKg = parseFloat(draft.weight ?? suggestedWeight) || 0;
+                      const platesOpen = platesOpenForSet === setNumber;
+                      if (currentWeightKg <= 0) return null;
+                      return (
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => setPlatesOpenForSet(platesOpen ? null : setNumber)}
+                            style={{ fontSize: 11, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: platesOpen ? spacing[4] : 0 }}
+                          >
+                            {platesOpen ? 'Hide plates' : '🏋️ Show plates'}
+                          </button>
+                          {platesOpen && <PlateDisplay weightKg={currentWeightKg} />}
+                        </div>
+                      );
+                    })()}
                     <button
                       type="button"
                       onClick={() => completeSet(row, idx)}
@@ -286,7 +356,7 @@ export default function ExerciseSetLogger({
                         fontWeight: 700,
                       }}
                     >
-                      Log set
+                      {savingSet ? 'Saving…' : 'Log set ✓'}
                     </button>
                   </div>
                 ) : (
@@ -300,7 +370,33 @@ export default function ExerciseSetLogger({
         );
       })}
       <div style={{ marginTop: spacing[6] }}>
-        <p style={{ margin: `0 0 ${spacing[6]}px`, fontSize: 12, color: colors.muted, fontWeight: 600 }}>Add a note for your coach (optional)</p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[4] }}>
+          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 600 }}>Note for your coach</p>
+          <div style={{ display: 'flex', gap: spacing[4], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {FLAG_QUICK_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                type="button"
+                onClick={() => {
+                  setExerciseNote(opt.note);
+                  saveExerciseNote(opt.note);
+                }}
+                style={{
+                  fontSize: 10,
+                  padding: `3px ${spacing[6]}px`,
+                  borderRadius: 20,
+                  border: `1px solid ${exerciseNote === opt.note ? colors.warning : colors.border}`,
+                  background: exerciseNote === opt.note ? 'rgba(245,158,11,0.12)' : colors.surface2,
+                  color: exerciseNote === opt.note ? colors.warning : colors.muted,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <input
           type="text"
           value={exerciseNote}
@@ -311,12 +407,17 @@ export default function ExerciseSetLogger({
             width: '100%',
             minHeight: touchTargetMin,
             borderRadius: 10,
-            border: `1px solid ${colors.border}`,
+            border: `1px solid ${exerciseNote.startsWith('[FLAG]') ? colors.warning : colors.border}`,
             background: colors.surface2,
             color: colors.text,
             padding: `0 ${spacing[10]}px`,
           }}
         />
+        {exerciseNote.startsWith('[FLAG]') && (
+          <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: colors.warning }}>
+            Your coach will see this flag when they review your session.
+          </p>
+        )}
       </div>
     </div>
   );
