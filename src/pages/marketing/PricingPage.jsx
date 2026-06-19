@@ -20,8 +20,6 @@ const ELITE_FEATURE_ICONS = {
 };
 
 const ASSUMED_LABEL = 'Example: average £100 / client / month through Atlas';
-const PERSONAL_ENHANCED_PRICE = 14.99;
-
 /** Monthly volume (£) processed → fee under each plan */
 function planCosts(monthlyVolume) {
   const basic = 0 + monthlyVolume * 0.1;
@@ -232,11 +230,12 @@ function PricingTabSwitcher({ value, onChange }) {
 }
 
 function PersonalPricingSection() {
-  const compareRows = [
-    { label: 'How you train', basic: 'Manual structure you control', enhanced: 'Smarter structure and faster drafts' },
-    { label: 'Decisions', basic: 'You decide every adjustment', enhanced: 'Clearer next steps when you want them' },
-    { label: 'Noise', basic: 'Minimal', enhanced: 'Still minimal—no clutter' },
-    { label: 'Best for', basic: 'Building consistency first', enhanced: 'Turning consistency into momentum' },
+  const personalFeatures = [
+    'Program creation and workout logging',
+    'Nutrition targets and food logging',
+    'Check-ins, habits, and progress tracking',
+    'Barcode scan and quick add',
+    'Manual adjustments you control',
   ];
 
   return (
@@ -250,141 +249,48 @@ function PersonalPricingSection() {
       >
         <div className="max-w-3xl mx-auto">
           <h1 className="text-3xl sm:text-4xl md:text-[2.75rem] font-bold leading-tight mb-4">
-            Train your way, upgrade when you&apos;re ready
+            Personal training — free
           </h1>
           <p className="text-base sm:text-lg md:text-xl leading-relaxed" style={{ color: colors.muted }}>
-            Basic is free for manual training and tracking. Enhanced adds smarter guidance, clearer next steps, and faster decisions when you want more support.
+            Log workouts, track nutrition, and follow your own plan. No subscription required.
           </p>
         </div>
       </header>
 
-      <section className="px-4 py-12 sm:py-16 max-w-5xl mx-auto">
-        <div className="grid gap-6 md:grid-cols-2">
-          <div
-            className="relative flex flex-col rounded-2xl border p-6 sm:p-8"
-            style={{ borderColor: colors.border, background: colors.surface1 }}
+      <section className="px-4 py-12 sm:py-16 max-w-2xl mx-auto">
+        <div
+          className="relative flex flex-col rounded-2xl border p-6 sm:p-8"
+          style={{
+            borderColor: colors.primary,
+            background: 'rgba(59, 130, 246, 0.08)',
+            boxShadow: '0 14px 56px rgba(59, 130, 246, 0.18)',
+          }}
+        >
+          <span
+            className="inline-block self-start text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-md mb-4"
+            style={{ background: colors.primary, color: '#fff' }}
           >
-            <span
-              className="inline-block self-start text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-md mb-4"
-              style={{ background: colors.surface2, color: colors.muted }}
-            >
-              Personal Basic
-            </span>
-            <h2 className="text-xl font-bold mb-1">Free</h2>
-            <p className="text-sm mb-4" style={{ color: colors.muted }}>
-              Manual-first training with full core tracking.
-            </p>
-            <ul className="space-y-2.5 mb-6 flex-1">
-              {[
-                'Manual program creation',
-                'Workout logging',
-                'Nutrition targets + logging',
-                'Check-ins, habits, progress dashboard',
-                'Barcode scan / quick add',
-                'Manual adjustments',
-              ].map((h) => (
-                <li key={h} className="flex gap-2 text-sm" style={{ color: colors.muted }}>
-                  <Check className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: colors.primary }} />
-                  {h}
-                </li>
-              ))}
-            </ul>
-            <Link
-              to={SIGNUP_PUBLIC_PATH}
-              className="inline-flex items-center justify-center w-full py-3.5 rounded-xl text-base font-semibold transition-opacity hover:opacity-90"
-              style={{ background: 'transparent', color: colors.text, border: `1px solid ${colors.border}` }}
-            >
-              Start free
-            </Link>
-          </div>
-          <div
-            className="relative flex flex-col rounded-2xl border p-6 sm:p-8"
-            style={{
-              borderColor: colors.primary,
-              background: 'rgba(59, 130, 246, 0.08)',
-              boxShadow: '0 14px 56px rgba(59, 130, 246, 0.18)',
-            }}
-          >
-            <span
-              className="inline-block self-start text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-md mb-4"
-              style={{ background: colors.primary, color: '#fff' }}
-            >
-              Personal Enhanced
-            </span>
-            <div className="mb-1">
-              <span className="text-3xl sm:text-4xl font-bold">£{PERSONAL_ENHANCED_PRICE.toFixed(2)}</span>
-              <span className="text-sm font-normal ml-1" style={{ color: colors.muted }}>
-                /month
-              </span>
-            </div>
-            <p className="text-sm mb-4" style={{ color: colors.muted }}>
-              Optional guidance when you want smarter support—not a requirement to train well.
-            </p>
-            <ul className="space-y-2.5 mb-6 flex-1">
-              {[
-                'Faster week builds from your context',
-                'Smarter exercise picks as you train',
-                'Feedback that sharpens your choices over time',
-                'Adaptive suggestions tied to how you feel',
-                'Macro nudges when your data supports them',
-                'Clear next steps without extra noise',
-              ].map((h) => (
-                <li key={h} className="flex gap-2 text-sm" style={{ color: colors.muted }}>
-                  <Check className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: colors.primary }} />
-                  {h}
-                </li>
-              ))}
-            </ul>
-            <Link
-              to={SIGNUP_PUBLIC_PATH}
-              className="inline-flex items-center justify-center w-full py-3.5 rounded-xl text-base font-semibold transition-opacity hover:opacity-90"
-              style={{ background: colors.primary, color: '#fff', border: 'none' }}
-            >
-              Upgrade to Enhanced
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-4 py-12 sm:py-16 border-t" style={{ borderColor: colors.border, background: colors.surface }}>
-        <div className="max-w-5xl mx-auto">
-          <h2 className="text-[1.55rem] sm:text-3xl font-bold text-center mb-3 leading-tight" style={{ color: colors.text }}>
-            Compare how you train
-          </h2>
-          <p className="text-center text-[0.95rem] sm:text-lg mb-8 sm:mb-10 max-w-3xl mx-auto leading-relaxed" style={{ color: colors.muted }}>
-            Start free, upgrade only if it earns its place in your week.
+            Personal
+          </span>
+          <h2 className="text-3xl sm:text-4xl font-bold mb-1">Free</h2>
+          <p className="text-sm mb-4" style={{ color: colors.muted }}>
+            Full personal training toolkit — programs, logging, nutrition, and progress in one place.
           </p>
-          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 rounded-xl border" style={{ borderColor: colors.border }}>
-            <table className="w-full text-sm min-w-[520px]">
-              <thead>
-                <tr style={{ background: colors.surface1, borderBottom: `1px solid ${colors.border}` }}>
-                  <th className="text-left py-3 px-3 sm:px-4 font-semibold"> </th>
-                  <th className="text-left py-3 px-3 sm:px-4 font-semibold">Personal Basic</th>
-                  <th className="text-left py-3 px-3 sm:px-4 font-semibold">Personal Enhanced</th>
-                </tr>
-              </thead>
-              <tbody>
-                {compareRows.map((row) => (
-                  <tr key={row.label} style={{ borderBottom: `1px solid ${colors.border}` }}>
-                    <td className="py-3 px-3 sm:px-4 font-medium whitespace-nowrap">{row.label}</td>
-                    <td className="py-3 px-3 sm:px-4" style={{ color: colors.muted }}>{row.basic}</td>
-                    <td className="py-3 px-3 sm:px-4" style={{ color: colors.muted }}>{row.enhanced}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div
-            className="mt-6 rounded-xl p-4 sm:p-5 border text-sm leading-relaxed"
-            style={{ borderColor: colors.border, background: colors.surface1, color: colors.muted }}
+          <ul className="space-y-2.5 mb-6 flex-1">
+            {personalFeatures.map((h) => (
+              <li key={h} className="flex gap-2 text-sm" style={{ color: colors.muted }}>
+                <Check className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: colors.primary }} />
+                {h}
+              </li>
+            ))}
+          </ul>
+          <Link
+            to={SIGNUP_PUBLIC_PATH}
+            className="inline-flex items-center justify-center w-full py-3.5 rounded-xl text-base font-semibold transition-opacity hover:opacity-90"
+            style={{ background: colors.primary, color: '#fff', border: 'none' }}
           >
-            <p className="font-medium mb-2" style={{ color: colors.text }}>
-              What Basic covers vs what Enhanced adds
-            </p>
-            <p>
-              Basic gives you the full manual toolkit to train consistently. Enhanced adds a guidance layer on top—so you can move faster when you want help turning consistency into clearer next steps.
-            </p>
-          </div>
+            Start free
+          </Link>
         </div>
       </section>
 
@@ -397,10 +303,10 @@ function PersonalPricingSection() {
       >
         <div className="max-w-xl mx-auto">
           <h2 className="text-2xl sm:text-3xl font-bold mb-6 leading-tight">
-            Start free. Upgrade when it helps.
+            Start free. Train on your terms.
           </h2>
           <p className="text-base sm:text-lg mb-6" style={{ color: colors.muted }}>
-            No pressure—just a cleaner path to consistent training.
+            No paid tier — just a cleaner path to consistent training.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Link

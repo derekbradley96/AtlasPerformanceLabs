@@ -262,16 +262,6 @@ export default function PersonalMoreDesktopLayout({
                   >
                     {personalTierLabel}
                   </span>
-                  {isBasicTier ? (
-                    <button
-                      type="button"
-                      onClick={onUpgrade}
-                      className="rounded-full px-3 py-1 text-xs font-bold"
-                      style={{ background: colors.primary, color: '#fff', border: 'none', cursor: 'pointer', minHeight: 32 }}
-                    >
-                      Upgrade to Enhanced
-                    </button>
-                  ) : null}
                 </div>
               </div>
             </div>

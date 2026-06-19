@@ -49,6 +49,7 @@ const ROUTE_TITLES = {
   '/findtrainer': 'Find a coach',
   '/mytrainer': 'My Trainer',
   '/myprogram': 'My Program',
+  '/personal-my-program': 'My programme',
   '/clientdetail': 'Client',
   '/clientcheckin': 'Check-in',
   '/conversationthread': 'Conversation',

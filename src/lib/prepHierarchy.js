@@ -38,7 +38,7 @@ export const PrepHierarchyLevel = {
 /** Capabilities by level (documentation + runtime checks). */
 export const PREP_LEVEL_CAPABILITIES = {
   [PrepHierarchyLevel.PERSONAL_ENHANCED_PREP_LITE]: {
-    label: 'Prep-lite (Personal Enhanced)',
+    label: 'Prep-lite (Personal)',
     includes: ['macro_targets', 'water_target_actual', 'sodium_target_actual', 'light_meal_timing', 'optional_day_types', 'simple_consistency'],
     excludes: ['auto_prep_decisions', 'peak_week_execution', 'physique_interpretation', 'aggressive_auto_adjust', 'coach_flags_engine'],
   },

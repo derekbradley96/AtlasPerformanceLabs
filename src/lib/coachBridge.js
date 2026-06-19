@@ -253,9 +253,9 @@ export function deriveCoachBridgeMoment(input = {}) {
     && c28 >= 6
     && streakN < 2;
 
-  const isEnhanced = tier === 'enhanced';
+  const isGuidedPersonal = tier === 'enhanced' || tier === 'free';
 
-  if (!isEnhanced) {
+  if (!isGuidedPersonal) {
     if (surface === 'home') {
       if (prep) return prepMoment('from_prep');
       if (repeatedWeekGap) return repeatedInconsistencyMoment('from_accountability');

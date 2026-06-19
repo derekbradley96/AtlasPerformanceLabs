@@ -290,31 +290,30 @@ export function getPersonalHomeNutritionHints(ctx, m) {
 /** @param {ReturnType<typeof resolvePersonalUXContext>} ctx */
 export function getPersonalMoreHubCopy(ctx) {
   const a = ctx.goalAxis;
-  const tier = ctx.isEnhanced ? 'Enhanced' : 'Basic';
   if (a === 'prep') {
     return {
-      helperLine: `${tier}: profile, phase-friendly settings, nutrition, and alerts — manual-first on Basic, guided layers on Enhanced.`,
+      helperLine: 'Profile, phase-friendly settings, nutrition, and alerts — Account & settings is your control centre.',
     };
   }
   if (a === 'cut') {
     return {
-      helperLine: `${tier}: profile, cut-friendly targets, training, and alerts — Account & settings is your control centre.`,
+      helperLine: 'Profile, cut-friendly targets, training, and alerts — Account & settings is your control centre.',
     };
   }
   if (a === 'build') {
     return {
-      helperLine: `${tier}: profile, training, recovery context, and alerts — tune everything from Account & settings.`,
+      helperLine: 'Profile, training, recovery context, and alerts — tune everything from Account & settings.',
     };
   }
   return {
-    helperLine: `${tier}: profile, goals, training, nutrition, and alerts — all in Account & settings.`,
+    helperLine: 'Profile, goals, training, nutrition, and alerts — all in Account & settings.',
   };
 }
 
 const NUTRITION_PAGE_SUB = {
   build: 'Targets, logging, and fuel status for your training goal.',
   cut: 'Targets, logging, and adherence for your cut.',
-  prep: 'Targets, logging, and phase-aware fuel (Enhanced adds prep-lite precision when relevant).',
+  prep: 'Targets, logging, and phase-aware fuel when relevant.',
   general: 'Targets, logging, and daily fuel status.',
 };
 

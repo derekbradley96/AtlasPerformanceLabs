@@ -64,61 +64,24 @@ const ENHANCED_ONLY = new Set([
   PERSONAL_FEATURES.NEXT_BEST_ACTION_PROMPTS,
 ]);
 
-/** Outcome-led copy: what changes for the user, not feature bullets. */
-const UPGRADE_COPY_BY_KIND = Object.freeze({
-  default: {
-    title: 'Clearer training decisions',
-    body: 'When you are ready, Enhanced adds a light guidance layer—so you spend less energy deciding what to do next.',
-  },
-  builder_empty: {
-    title: 'Build the week faster',
-    body: 'If you want a full week sketched from your goal and equipment—without the blank-page moment—Enhanced can draft it for you to edit.',
-  },
-  post_workout: {
-    title: 'Turn sessions into momentum',
-    body: 'Enhanced can connect today’s work to your next sessions so progress feels obvious, not scattered.',
-  },
-  progress: {
-    title: 'See the story in your numbers',
-    body: 'Enhanced helps translate trends into the next best move—so Progress is easier to act on.',
-  },
-  frustration: {
-    title: 'When consistency wobbles',
-    body: 'Enhanced can suggest small adjustments so you do not have to troubleshoot the plan alone.',
-  },
-  feature_access: {
-    title: 'Use guidance on demand',
-    body: 'Try Enhanced when you want help building or adapting—your core logging stays free.',
-  },
-  weekly_usage: {
-    title: 'You are showing up',
-    body: 'If you want the app to meet that effort with smarter nudges, Enhanced is the next step—only when you want it.',
-  },
-  progress_milestone: {
-    title: 'You have earned leverage',
-    body: 'You have enough signal now. Enhanced helps you use it without adding noise to your week.',
-  },
-});
-
 /**
- * Gates Enhanced-only capabilities (auto builder, adaptive nudges, etc.).
- * Depends on `profiles` billing fields (`plan_tier`/`personal_plan_tier`) — keep Stripe/webhooks in sync.
+ * Personal feature access — tier gating retired; personal users resolve to `free`.
  */
 export function canUsePersonalFeature({ profile, user, feature }) {
   const tier = resolvePersonalPlanTier(profile, user);
-  const hasEnhancedAccess = tier === 'enhanced' || tier === 'free';
   if (BASIC_FEATURES.has(feature)) return true;
-  if (ENHANCED_ONLY.has(feature)) return hasEnhancedAccess;
+  if (ENHANCED_ONLY.has(feature)) return tier === 'free' || tier === 'enhanced';
   return true;
 }
 
-/**
- * @param {string} [kind]
- * @returns {{ title: string, body: string }}
- */
-export function getPersonalUpgradeCopy(kind = 'default') {
-  const k = String(kind || 'default').trim().toLowerCase();
-  return UPGRADE_COPY_BY_KIND[k] || UPGRADE_COPY_BY_KIND.default;
+/** @deprecated Personal Enhanced removed — no upgrade copy. */
+export function getPersonalUpgradeCopy(_kind = 'default') {
+  return { title: '', body: '' };
+}
+
+/** Personal Enhanced removed — upgrade prompts disabled. */
+export function canShowPersonalUpgradePrompt(_type, _now = Date.now(), _profile = null) {
+  return false;
 }
 
 /** Map onboarding confidence → experience tier for macros / defaults. */
@@ -157,25 +120,6 @@ export function getPersonalActiveDays({ profile, user, now = new Date() } = {}) 
   if (!start) return 0;
   const diffMs = Math.max(0, now.getTime() - start.getTime());
   return Math.floor(diffMs / (24 * 60 * 60 * 1000));
-}
-
-/**
- * @param {string} type
- * @param {number} [now]
- * @param {object|null} [profile] Optional: adjusts cooldown from onboarding confidence.
- */
-export function canShowPersonalUpgradePrompt(type, now = Date.now(), profile = null) {
-  const safeType = String(type || '').trim().toLowerCase();
-  if (!safeType) return false;
-  const base = PROMPT_COOLDOWN_BY_TYPE_MS[safeType] || 24 * 60 * 60 * 1000;
-  const cooldown = Math.round(base * getConfidenceCooldownMultiplier(profile));
-  try {
-    const key = `${PROMPT_STORAGE_PREFIX}${safeType}`;
-    const last = Number(localStorage.getItem(key) || 0);
-    return !last || now - last >= cooldown;
-  } catch {
-    return true;
-  }
 }
 
 export function markPersonalUpgradePromptShown(type, now = Date.now()) {

@@ -7,37 +7,38 @@ import {
   getPersonalNutritionPageCopy,
 } from '@/lib/personalScreenMatrix';
 
-function ctx({ goal = 'muscle', tier = 'basic' } = {}) {
+function ctx({ goal = 'muscle', tier = 'free' } = {}) {
   return resolvePersonalUXContext({
-    profile: { personal_goal: goal, personal_plan_tier: tier },
-    user: {},
+    profile: { role: 'personal', personal_goal: goal, personal_plan_tier: tier },
+    user: { role: 'personal' },
   });
 }
 
 describe('personalScreenMatrix', () => {
-  it('maps goals to axes and tier flags (6 combinations smoke)', () => {
-    const basicBuild = ctx({ goal: 'build_muscle', tier: 'basic' });
-    expect(basicBuild.goalAxis).toBe('build');
-    expect(basicBuild.isBasic).toBe(true);
-    expect(basicBuild.isPrepGoal).toBe(false);
+  it('maps goals to axes and tier flags (personal is always free)', () => {
+    const build = ctx({ goal: 'build_muscle', tier: 'free' });
+    expect(build.goalAxis).toBe('build');
+    expect(build.tier).toBe('free');
+    expect(build.isEnhanced).toBe(true);
+    expect(build.isPrepGoal).toBe(false);
 
-    const enhancedCut = ctx({ goal: 'lose_fat', tier: 'enhanced' });
-    expect(enhancedCut.goalAxis).toBe('cut');
-    expect(enhancedCut.isEnhanced).toBe(true);
+    const cut = ctx({ goal: 'lose_fat', tier: 'basic' });
+    expect(cut.goalAxis).toBe('cut');
+    expect(cut.tier).toBe('free');
+    expect(cut.isEnhanced).toBe(true);
 
-    const basicPrep = ctx({ goal: 'prep', tier: 'basic' });
-    expect(basicPrep.goalAxis).toBe('prep');
-    const f = getPersonalScreenFeatures(basicPrep);
-    expect(f.showPrepPrecisionNutrition).toBe(false);
+    const prep = ctx({ goal: 'prep', tier: 'free' });
+    expect(prep.goalAxis).toBe('prep');
+    expect(getPersonalScreenFeatures(prep).showPrepPrecisionNutrition).toBe(true);
 
-    const enhancedPrep = ctx({ goal: 'competition', tier: 'enhanced' });
-    expect(enhancedPrep.isPrepGoal).toBe(true);
-    expect(getPersonalScreenFeatures(enhancedPrep).showPrepPrecisionNutrition).toBe(true);
+    const competition = ctx({ goal: 'competition', tier: 'free' });
+    expect(competition.isPrepGoal).toBe(true);
+    expect(getPersonalScreenFeatures(competition).showPrepPrecisionNutrition).toBe(true);
   });
 
   it('does not leak prep nutrition subtitle into build', () => {
-    const build = getPersonalNutritionPageCopy(ctx({ goal: 'hypertrophy', tier: 'enhanced' })).pageSubtitle;
-    const prep = getPersonalNutritionPageCopy(ctx({ goal: 'prep', tier: 'enhanced' })).pageSubtitle;
+    const build = getPersonalNutritionPageCopy(ctx({ goal: 'hypertrophy', tier: 'free' })).pageSubtitle;
+    const prep = getPersonalNutritionPageCopy(ctx({ goal: 'prep', tier: 'free' })).pageSubtitle;
     expect(build.toLowerCase()).not.toContain('prep-lite');
     expect(prep.toLowerCase()).toContain('phase');
   });

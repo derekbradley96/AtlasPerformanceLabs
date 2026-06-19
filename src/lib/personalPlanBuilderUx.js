@@ -62,9 +62,9 @@ export function personalHubNoPlanBody(opts = {}) {
   return 'Build your own structure from scratch.';
 }
 
-/** Secondary line under primary CTA on My plan (Basic, no cloud program). */
+/** @deprecated Personal tier removed — use personalHubNoPlanBody only. */
 export function personalHubNoPlanEnhancedHint() {
-  return 'Want help getting started? Enhanced builds this for you.';
+  return '';
 }
 
 export function personalHubCloudSubtitle() {

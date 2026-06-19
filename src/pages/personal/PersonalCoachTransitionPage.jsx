@@ -82,7 +82,7 @@ export default function PersonalCoachTransitionPage() {
               }}
             >
               <p style={{ margin: 0, fontSize: 13, color: colors.text, lineHeight: 1.5, fontWeight: 600 }}>
-                Basic helps you track. Enhanced helps you stay structured. A coach helps you actually get there faster.
+                Personal helps you track and stay structured. A coach helps you actually get there faster.
               </p>
             </Card>
 
@@ -141,7 +141,7 @@ export default function PersonalCoachTransitionPage() {
 
             <div style={{ marginBottom: spacing[12] }}>
               <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: colors.muted, letterSpacing: 0.04, textTransform: 'uppercase' }}>
-                Enhanced vs coaching
+                Personal vs coaching
               </p>
               <div style={{ marginTop: spacing[10] }}>
                 <MarketplaceSoloVsCoachCompare isWideWeb={isWideWeb} />

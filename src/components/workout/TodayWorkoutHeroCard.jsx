@@ -17,24 +17,43 @@ export default function TodayWorkoutHeroCard({
   hasProgramAssigned = false,
   onStartWorkout,
   onMessageCoach,
+  onNoProgramAction,
   startLabel = 'Start workout',
+  /** @type {'client'|'personal'} */
+  audience = 'client',
+  noProgramTitle = 'No plan yet',
+  noProgramBody = 'Create your programme to see today\'s session and exercises here.',
+  noProgramCtaLabel = 'Create your plan',
 }) {
   const topExercises = useMemo(
     () => (Array.isArray(exercises) ? exercises.filter((x) => x?.name).slice(0, 3) : []),
     [exercises]
   );
   const extraCount = Math.max(0, (Array.isArray(exercises) ? exercises.length : 0) - topExercises.length);
+  const isPersonal = audience === 'personal';
 
   let title = "Today's workout";
   let body = estimateWorkoutLine(exercises);
   let showStart = hasWorkoutToday;
-  let showMessageCoach = false;
+  let showEmptyProgramCta = false;
+  let emptyProgramHandler = onNoProgramAction || onMessageCoach;
+  let emptyProgramLabel = noProgramCtaLabel;
 
   if (!hasProgramAssigned) {
-    title = 'No training program yet';
-    body = "Your coach hasn't assigned your training plan yet. Message them to get started.";
-    showStart = false;
-    showMessageCoach = true;
+    if (isPersonal) {
+      title = noProgramTitle;
+      body = noProgramBody;
+      showStart = false;
+      showEmptyProgramCta = true;
+      emptyProgramLabel = noProgramCtaLabel;
+    } else {
+      title = 'No training program yet';
+      body = "Your coach hasn't assigned your training plan yet. Message them to get started.";
+      showStart = false;
+      showEmptyProgramCta = true;
+      emptyProgramLabel = 'Message coach';
+      emptyProgramHandler = onMessageCoach;
+    }
   } else if (!hasWorkoutToday) {
     title = 'Rest day today';
     body = 'Rest day today — recovery is part of the plan 💪';
@@ -46,7 +65,7 @@ export default function TodayWorkoutHeroCard({
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[10] }}>
         <div style={{ minWidth: 0 }}>
           <p style={{ margin: 0, fontSize: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.4 }}>
-            Today's workout
+            Today&apos;s workout
           </p>
           <h3 style={{ margin: `${spacing[6]}px 0 0`, fontSize: 20, color: colors.text, lineHeight: 1.2 }}>
             {hasWorkoutToday ? (workoutName || "Today's session") : title}
@@ -99,18 +118,18 @@ export default function TodayWorkoutHeroCard({
         </button>
       ) : null}
 
-      {showMessageCoach ? (
+      {showEmptyProgramCta && typeof emptyProgramHandler === 'function' ? (
         <button
           type="button"
-          onClick={onMessageCoach}
+          onClick={emptyProgramHandler}
           style={{
             width: '100%',
             marginTop: spacing[12],
             minHeight: touchTargetMin + 4,
             borderRadius: radii.button,
-            border: `1px solid ${colors.border}`,
-            background: colors.surface2,
-            color: colors.text,
+            border: `1px solid ${isPersonal ? colors.primary : colors.border}`,
+            background: isPersonal ? colors.primary : colors.surface2,
+            color: isPersonal ? '#fff' : colors.text,
             fontSize: 14,
             fontWeight: 600,
             display: 'inline-flex',
@@ -119,8 +138,8 @@ export default function TodayWorkoutHeroCard({
             gap: 8,
           }}
         >
-          <MessageSquare size={16} />
-          Message coach
+          {isPersonal ? <Dumbbell size={16} /> : <MessageSquare size={16} />}
+          {emptyProgramLabel}
         </button>
       ) : null}
     </Card>

@@ -6,17 +6,17 @@ export default function SoloVsCoachCompare() {
   return (
     <Card style={{ padding: spacing[14], border: `1px solid ${colors.border}`, background: colors.surface1 }}>
       <p style={{ margin: 0, fontSize: 12, color: colors.text, fontWeight: 600, lineHeight: 1.4 }}>
-        Enhanced helps you stay structured. Coaching helps you transform.
+        Personal helps you stay structured. Coaching helps you transform.
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing[12], marginTop: spacing[12] }}>
         <div>
           <p style={{ margin: 0, fontSize: 11, color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-            Enhanced
+            Personal (free)
           </p>
           <ul style={{ margin: `${spacing[8]}px 0 0`, paddingLeft: 16, color: colors.muted, fontSize: 13, lineHeight: 1.45 }}>
-            <li>Starter structure</li>
-            <li>Guidance prompts</li>
-            <li>Consistency tracking</li>
+            <li>Your own structure</li>
+            <li>Logging and tracking</li>
+            <li>Consistency tools</li>
             <li>Trend awareness</li>
           </ul>
         </div>

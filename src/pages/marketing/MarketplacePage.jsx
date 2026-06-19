@@ -102,7 +102,7 @@ export default function MarketplacePage() {
             <ul className="space-y-2 text-sm sm:text-base leading-relaxed mb-6" style={{ color: colors.muted }}>
               <li>Free entry: log training and food, see progress</li>
               <li>Build programs manually at your pace</li>
-              <li>Optional Enhanced for drafts and adaptive nudges</li>
+              <li>Free programs, logging, and progress tracking</li>
             </ul>
             <Link
               to={SIGNUP_PUBLIC_PATH}

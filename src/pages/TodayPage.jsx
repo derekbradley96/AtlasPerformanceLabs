@@ -27,7 +27,9 @@ import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
 import { calculatePrepProgress } from '@/lib/prepProgressTracking';
 import { shouldShowCoachUpsell } from '@/lib/coachUpsellTiming';
+import { getPersonalGoalBucketFromProfile, personalHomeTrainingCardCopy } from '@/lib/personalGoalCopy';
 import { useTodayPageData } from '@/hooks/useTodayPageData';
+import { listPersonalMealLogs } from '@/lib/personalNutritionStore';
 
 function getISOWeek() {
   const d = new Date();
@@ -85,10 +87,15 @@ function TodayWorkoutHeroSection({
   hasProgramAssigned,
   onStartWorkout,
   onMessageCoach,
+  onNoProgramAction,
   startLabel = 'Start workout',
   accent = colors.primary,
   restLabel = null,
   isDesktopWeb = false,
+  audience = 'client',
+  noProgramTitle,
+  noProgramBody,
+  noProgramCtaLabel,
 }) {
   return (
     <Card style={baseCardStyle(accent)}>
@@ -100,7 +107,12 @@ function TodayWorkoutHeroSection({
         hasProgramAssigned={hasProgramAssigned}
         onStartWorkout={onStartWorkout}
         onMessageCoach={onMessageCoach}
+        onNoProgramAction={onNoProgramAction}
         startLabel={startLabel}
+        audience={audience}
+        noProgramTitle={noProgramTitle}
+        noProgramBody={noProgramBody}
+        noProgramCtaLabel={noProgramCtaLabel}
       />
       {restLabel ? (
         <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted }}>{restLabel}</p>
@@ -425,6 +437,7 @@ function ClientCompToday({ data }) {
 
 function PersonalTransformToday({ data, isDesktopWeb }) {
   const { navigate } = data;
+  const noPlanCopy = personalHomeTrainingCardCopy('no_plan', data.personalGoalBucket);
   const todayDay = new Date().getDay();
   const todayHour = new Date().getHours();
   const showWeeklyScore =
@@ -434,13 +447,26 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
     <>
       <Card style={baseCardStyle()}>
         <SectionTitle>Macro ring</SectionTitle>
-        <p style={{ margin: 0, fontSize: 13, color: colors.text }}>{data.nutritionLine}</p>
-        {data.nutritionInterpretationLine ? (
-          <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted }}>{data.nutritionInterpretationLine}</p>
-        ) : null}
-        <Button type="button" onClick={() => navigate('/nutrition?openScanner=1')} style={{ marginTop: spacing[10] }}>
-          Log a meal →
-        </Button>
+        {data.hasNutritionTargets ? (
+          <>
+            <p style={{ margin: 0, fontSize: 13, color: colors.text }}>{data.nutritionLine}</p>
+            {data.nutritionInterpretationLine ? (
+              <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted }}>{data.nutritionInterpretationLine}</p>
+            ) : null}
+            <Button type="button" onClick={() => navigate('/nutrition?openScanner=1')} style={{ marginTop: spacing[10] }}>
+              Log a meal →
+            </Button>
+          </>
+        ) : (
+          <>
+            <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>
+              Set your calorie and macro targets to track progress on Today.
+            </p>
+            <Button type="button" onClick={() => navigate('/nutrition')} style={{ marginTop: spacing[10] }}>
+              Set nutrition targets →
+            </Button>
+          </>
+        )}
       </Card>
       <Card style={baseCardStyle()}>
         <SectionTitle>Weight log tile</SectionTitle>
@@ -499,11 +525,15 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
         hasWorkoutToday={data.hasWorkoutToday}
         hasProgramAssigned={data.hasProgramAssigned}
         onStartWorkout={data.onStartWorkout}
-        onMessageCoach={() => navigate('/program-builder')}
+        onNoProgramAction={() => navigate('/program-builder?personal=1')}
         startLabel="Start workout →"
         accent={colors.primary}
         restLabel={data.adaptiveSuggestion}
         isDesktopWeb={isDesktopWeb}
+        audience="personal"
+        noProgramTitle={noPlanCopy.title}
+        noProgramBody={noPlanCopy.subtitle}
+        noProgramCtaLabel="Create your plan"
       />
       {showWeeklyScore && data.weeklyScore && !data.weeklyScoreDismissed ? (
         <Card style={{ ...standardCard, padding: spacing[16] }}>
@@ -600,6 +630,7 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
 
 function PersonalCompToday({ data }) {
   const { navigate } = data;
+  const noPlanCopy = personalHomeTrainingCardCopy('no_plan', data.personalGoalBucket);
   return (
     <div style={{ display: 'grid', gap: spacing[12] }}>
       <Card style={baseCardStyle(colors.warning)}>
@@ -622,9 +653,13 @@ function PersonalCompToday({ data }) {
         hasWorkoutToday={data.hasWorkoutToday}
         hasProgramAssigned={data.hasProgramAssigned}
         onStartWorkout={data.onStartWorkout}
-        onMessageCoach={() => navigate('/comp-prep/pose-library')}
+        onNoProgramAction={() => navigate('/program-builder?personal=1')}
         startLabel={data.hasProgramAssigned ? 'Start workout →' : 'Explore exercise library →'}
         accent={colors.warning}
+        audience="personal"
+        noProgramTitle={noPlanCopy.title}
+        noProgramBody={noPlanCopy.subtitle}
+        noProgramCtaLabel="Create your plan"
       />
       <Card style={baseCardStyle()}>
         <SectionTitle>Self-assessment pose check</SectionTitle>
@@ -829,8 +864,25 @@ export default function TodayPage() {
   const habits = useMemo(() => habitNames.map((k) => ({ key: k, label: k.replaceAll('_', ' '), done: Boolean(habitState[k]) })), [habitNames, habitState]);
   const toggleHabit = useCallback((key) => setHabitState((p) => ({ ...p, [key]: !p[key] })), []);
 
-  const caloriesLogged = isPersonalRole ? 0 : Number(mealTotalsToday?.calories) || 0;
-  const proteinLogged = isPersonalRole ? 0 : Number(mealTotalsToday?.protein) || 0;
+  const personalMealTotalsToday = useMemo(() => {
+    if (!isPersonalRole || !userId) return { calories: 0, protein: 0 };
+    const today = new Date().toISOString().slice(0, 10);
+    const logs = listPersonalMealLogs(userId, today);
+    return logs.reduce(
+      (acc, meal) => ({
+        calories: acc.calories + (Number(meal?.calories) || 0),
+        protein: acc.protein + (Number(meal?.protein_g) || 0),
+      }),
+      { calories: 0, protein: 0 },
+    );
+  }, [isPersonalRole, userId, todayBundle]);
+
+  const caloriesLogged = isPersonalRole
+    ? personalMealTotalsToday.calories
+    : Number(mealTotalsToday?.calories) || 0;
+  const proteinLogged = isPersonalRole
+    ? personalMealTotalsToday.protein
+    : Number(mealTotalsToday?.protein) || 0;
   const calorieTarget = Number(nutritionPlan?.calories || nutritionPlan?.calorie_target || nutritionPlan?.target_calories || 0);
   const proteinTarget = Number(nutritionPlan?.protein || nutritionPlan?.protein_g || nutritionPlan?.target_protein_g || 0);
   const nutritionWeeklyDone = Number(retentionStreaks?.weeklyProgress?.nutrition?.done ?? 0);
@@ -954,6 +1006,8 @@ export default function TodayPage() {
     }
   }
 
+  const personalGoalBucket = getPersonalGoalBucketFromProfile({ profile: authProfile, user });
+
   const todayData = {
     navigate,
     exercises,
@@ -962,7 +1016,12 @@ export default function TodayPage() {
     onStartWorkout: () => navigate('/workout-player'),
     workoutName: assignedWorkout?.assignment?.client_display_name || assignedWorkout?.day?.title || assignedWorkout?.block?.title || "Today's session",
     heroAccent: colors.primary,
-    restLabel: !hasWorkoutToday ? (hasProgramAssigned ? 'Rest day · next session: tomorrow' : 'Ask your coach for a programme') : null,
+    restLabel: !hasWorkoutToday
+      ? (hasProgramAssigned
+        ? 'Rest day · next session: tomorrow'
+        : (isPersonalRole ? 'Build your programme in My plan or the builder' : 'Ask your coach for a programme'))
+      : null,
+    personalGoalBucket,
     progressText,
     hasNutritionTargets: calorieTarget > 0 || proteinTarget > 0,
     nutritionLine: `${Math.max(0, calorieTarget - caloriesLogged)}kcal remaining · ${Math.max(0, proteinTarget - proteinLogged)}g protein still needed`,

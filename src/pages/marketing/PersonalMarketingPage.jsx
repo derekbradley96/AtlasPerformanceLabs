@@ -1,5 +1,5 @@
 /**
- * Personal marketing: emotional clarity, optional Enhanced guidance.
+ * Personal marketing: emotional clarity for solo training.
  * (Standalone from coached athlete/client page at /for-clients.)
  */
 import React from 'react';
@@ -20,8 +20,8 @@ const FEELS_LIKE = [
     body: 'Logging, structure, and visible progress make it easier to keep showing up week after week.',
   },
   {
-    heading: 'Upgrade only when ready',
-    body: 'Start with Personal Basic free, then move to Enhanced when you want smarter guidance.',
+    heading: 'Train for free',
+    body: 'Programs, logging, nutrition, and progress — no subscription required.',
   },
 ];
 
@@ -32,14 +32,14 @@ const STALL_REASONS = [
   'Changing direction every week without data',
 ];
 
-const BASIC_ENHANCED = [
+const PERSONAL_INCLUDES = [
   {
-    heading: 'Personal Basic (Free)',
-    body: 'Logging, programs, and tracking for your training with full manual control.',
+    heading: 'Programs and logging',
+    body: 'Build your week, log sets and reps, and see what you actually did.',
   },
   {
-    heading: 'Personal Enhanced (£14.99)',
-    body: 'Auto builder, smart suggestions, and guidance that helps you move faster with less guesswork.',
+    heading: 'Nutrition and progress',
+    body: 'Set targets, log meals, and track trends without switching apps.',
   },
 ];
 
@@ -70,7 +70,7 @@ function WhyProgressStallsSection() {
             {[
               'Clear training structure you can follow',
               'A consistent logging rhythm that keeps momentum',
-              'Smarter guidance available when you want it',
+              'Progress you can see week to week',
             ].map((point) => (
               <p key={point} className="flex items-start gap-2.5 text-[0.95rem] sm:text-base leading-relaxed" style={{ color: colors.text }}>
                 <Check className="w-4 h-4 mt-1 flex-shrink-0" style={{ color: colors.primary }} strokeWidth={2.5} />
@@ -101,9 +101,9 @@ function ClickMomentSection() {
 
 export default function PersonalMarketingPage() {
   usePageMeta({
-    title: 'Personal training — Basic free, Enhanced when you are ready',
+    title: 'Personal training — free programs, logging, and progress',
     description:
-      'Train solo with Atlas: clear structure, logging, and progress. Personal Basic is free; Enhanced adds smarter guidance when you want it.',
+      'Train solo with Atlas: clear structure, logging, and progress. Free — no subscription required.',
     canonical: 'https://atlasperformancelabs.co.uk/personal',
   });
 
@@ -111,7 +111,7 @@ export default function PersonalMarketingPage() {
     <>
       <Hero
         title="Train properly, not randomly"
-        subtitle="Log your training, follow a clear plan, and actually stay consistent. Start free, upgrade only when you want smarter guidance."
+        subtitle="Log your training, follow a clear plan, and stay consistent — free."
         primaryCtaLabel="Start free"
         primaryCtaTo={SIGNUP_PUBLIC_PATH}
         secondaryCtaLabel="See pricing"
@@ -119,7 +119,7 @@ export default function PersonalMarketingPage() {
       />
       <Features title="What using Atlas actually feels like" items={FEELS_LIKE} />
       <WhyProgressStallsSection />
-      <Features title="Basic vs Enhanced" items={BASIC_ENHANCED} gridClassName="grid gap-4 sm:gap-5 md:grid-cols-2 max-w-5xl mx-auto" />
+      <Features title="What you get" items={PERSONAL_INCLUDES} gridClassName="grid gap-4 sm:gap-5 md:grid-cols-2 max-w-5xl mx-auto" />
       <ClickMomentSection />
       <Testimonials
         title="Why people stay with it"
@@ -127,7 +127,7 @@ export default function PersonalMarketingPage() {
       />
       <CTA
         title="Just start, you don&apos;t need to commit yet"
-        subtitle="Use Personal Basic free. Upgrade to Enhanced only when you want smarter help."
+        subtitle="Personal is free — programs, logging, nutrition, and progress in one place."
         primaryCtaLabel="Start free"
         primaryCtaTo={SIGNUP_PUBLIC_PATH}
         secondaryCtaLabel="See pricing"

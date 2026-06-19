@@ -19,13 +19,8 @@ import { track, ANALYTICS_EVENTS } from '@/services/analyticsService';
 const TIER_OPTIONS = [
   {
     id: 'basic',
-    title: 'Basic',
+    title: 'Personal',
     body: 'Structured solo tracking and straightforward coach matching.',
-  },
-  {
-    id: 'enhanced',
-    title: 'Enhanced',
-    body: 'Advanced solo context and tighter coach matching for high-friction goals.',
   },
 ];
 

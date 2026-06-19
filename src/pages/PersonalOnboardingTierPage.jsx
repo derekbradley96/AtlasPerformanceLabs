@@ -1,6 +1,5 @@
 /**
- * Personal: choose Basic (free) vs Enhanced (£14.99) before the onboarding question flow.
- * Persists `profiles.personal_plan_tier` then routes to `/personal-onboarding-flow`.
+ * @deprecated Personal tier picker removed — route redirects to onboarding flow.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -9,7 +8,7 @@ import { hasSupabase } from '@/lib/supabaseClient';
 import { isProfileOnboardingComplete, hasPersonalPlanTierSelected } from '@/lib/onboardingStatus';
 import { normalizeRole } from '@/lib/roles';
 import { getPostOnboardingPath, PERSONAL_ONBOARDING_TIER_SESSION_KEY } from '@/lib/postOnboardingRoutes';
-import { PERSONAL_ENHANCED_PRICE_DISPLAY } from '@/config/plans';
+import { PERSONAL_PLAN_LABEL } from '@/config/plans';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { impactLight } from '@/lib/haptics';
 import { colors, touchTargetMin } from '@/ui/tokens';
@@ -138,7 +137,7 @@ export default function PersonalOnboardingTierPage() {
           <div className={isWideWeb ? 'grid grid-cols-2 gap-6 mb-6' : 'flex flex-col gap-4 mb-6'}>
             {(isWideWeb ? ['basic', 'enhanced'] : ['enhanced', 'basic']).map((tier) => {
               const isEnhancedCard = tier === 'enhanced';
-              const title = isEnhancedCard ? `Enhanced (${PERSONAL_ENHANCED_PRICE_DISPLAY})` : 'Basic (Free)';
+              const title = isEnhancedCard ? `Enhanced (${PERSONAL_PLAN_LABEL})` : 'Basic (Free)';
               const tag = isEnhancedCard ? 'Guided setup' : 'Manual tracking';
               const description = isEnhancedCard
                 ? 'Structured training and nutrition with smarter insights.'

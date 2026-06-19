@@ -1,9 +1,22 @@
 import React, { Suspense } from 'react';
 import { Navigate, Route, useLocation, useParams } from 'react-router-dom';
 import RequireRole from '@/components/auth/RequireRole';
-import { Roles } from '@/lib/roles';
+import { Roles, isPersonal } from '@/lib/roles';
+import { useAuth } from '@/lib/AuthContext';
 import CommunityRoomPage from '@/pages/CommunityRoomPage';
 import { getMessagesThreadPath } from '@/lib/messagesPath';
+
+function ProgramsIndexEntry({ Programs }) {
+  const { effectiveRole } = useAuth();
+  if (isPersonal(effectiveRole)) {
+    return <Navigate to="/personal-my-program" replace />;
+  }
+  return (
+    <RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only.">
+      <Programs />
+    </RequireRole>
+  );
+}
 
 /** Legacy URLs only — coach messaging is canonical at `/messages`. */
 function RedirectTrainerMessagesListToCanonical() {
@@ -205,7 +218,7 @@ export default function CoachRoutes({
       <Route path="my-training" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="My Training is for coaches only."><MyTraining /></RequireRole>} />
       <Route path="clientdetail" element={<RequireAuth><ClientCoachOfferAppGate><RedirectClientDetail /></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="settings/branding" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Branding is for coaches only."><RequireCoachOwner accessDeniedMessage="Branding is only available to the account owner."><EliteBrandingPage /></RequireCoachOwner></RequireRole>} />
-      <Route path="programs" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only."><Programs /></RequireRole>} />
+      <Route path="programs" element={<ProgramsIndexEntry Programs={Programs} />} />
       <Route path="programbuilder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN, Roles.PERSONAL]} accessDeniedMessage="Program Builder is for coaches and personal accounts."><ProgramBuilderCanonicalEntry /></RequireRole>} />
       <Route path="program-builder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN, Roles.PERSONAL]} accessDeniedMessage="Program Builder is for coaches and personal accounts."><Suspense fallback={<LazyRouteFallback />}><ProgramBuilderPageLazy /></Suspense></RequireRole>} />
       <Route path="nutrition-builder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Nutrition builder is for coaches only."><Suspense fallback={<LazyRouteFallback />}><NutritionBuilderLazy /></Suspense></RequireRole>} />

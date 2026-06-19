@@ -73,7 +73,7 @@ const STEP_SEQUENCE = ['goal', 'about_you', 'training'];
 const TOTAL_STEPS = STEP_SEQUENCE.length + 1; // +1 for done screen
 
 /** Tier flag passed through to macro helper (no auto-programme). */
-const FINISH_TIER = 'enhanced';
+const FINISH_TIER = 'free';
 const PROFILE_PLAN_TIER = 'free';
 
 const EXPERIENCE_LABELS = {
@@ -1048,7 +1048,7 @@ export default function PersonalOnboardingFlow() {
                 type="button"
                 variant="secondary"
                 className="flex-1 min-w-[140px]"
-                onClick={() => navigate('/marketplace')}
+                onClick={() => navigate('/discover')}
               >
                 Browse coaches →
               </Button>

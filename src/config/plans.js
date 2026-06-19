@@ -184,7 +184,7 @@ export function getCommissionPercentForTier(planTier) {
 export const PERSONAL_PLAN_TIERS = ['free'];
 
 /** Shown on pricing / upgrade surfaces for Personal. */
-export const PERSONAL_ENHANCED_PRICE_DISPLAY = 'Free';
+export const PERSONAL_PLAN_LABEL = 'Free';
 
 /**
  * Resolve personal tier from auth profile/user.
@@ -203,25 +203,22 @@ export function resolvePersonalPlanTier(profile, user) {
     .toString()
     .toLowerCase()
     .trim();
-  if (personalTierRaw === 'enhanced' || personalTierRaw === 'personal_enhanced') return 'enhanced';
+  if (personalTierRaw === 'free') return 'free';
   if (personalTierRaw === 'basic' || personalTierRaw === 'personal_basic') return 'basic';
 
   const subscriptionActive =
     profile?.subscription_active === true
     || user?.subscription_active === true
     || String(profile?.subscription_status || user?.subscription_status || '').toLowerCase() === 'active';
-  if (subscriptionActive) return 'enhanced';
+  if (subscriptionActive) return 'free';
 
   const legacy = (profile?.plan_tier ?? user?.plan_tier ?? '').toString().toLowerCase().trim();
-  if (legacy === 'enhanced' || legacy === 'personal_enhanced' || legacy === 'pro' || legacy === 'elite') {
-    return 'enhanced';
-  }
   if (legacy === 'basic' || legacy === 'personal_basic') return 'basic';
   return 'basic';
 }
 
-/** True when stored personal_plan_tier grants full Personal product (includes legacy Enhanced). */
+/** @deprecated Personal tier gating retired — all personal users are `free`. */
 export function isPersonalEnhancedTier(planTier) {
   const t = String(planTier || '').toLowerCase().trim();
-  return t === 'enhanced' || t === 'free';
+  return t === 'free' || t === 'enhanced';
 }

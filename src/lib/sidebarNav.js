@@ -195,7 +195,7 @@ export function getSidebarSections(
       id: 'build',
       label: 'Build',
       items: [
-        { path: '/programs', label: 'My programme', icon: FileText },
+        { path: '/personal-my-program', label: 'My programme', icon: FileText },
         { path: '/comp-prep/pose-library', label: 'Exercise library', icon: Dumbbell },
       ],
     },
@@ -214,7 +214,7 @@ export function getSidebarSections(
       id: 'discover',
       label: 'Discover',
       items: [
-        { path: '/marketplace', label: 'Find a coach', icon: Store },
+        { path: '/discover', label: 'Find a coach', icon: Store },
       ],
     },
     {

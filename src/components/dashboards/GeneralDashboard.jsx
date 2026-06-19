@@ -441,10 +441,10 @@ export default function GeneralDashboard({ user }) {
             {personalPostOnboardingTier === 'enhanced' ? (
               <>
                 <h2 style={{ margin: 0, marginTop: welcomeEyebrowToTitle, fontSize: 20, fontWeight: 700, color: colors.text }}>
-                  Review your starter setup
+                  You&apos;re set — start training
                 </h2>
                 <p style={{ margin: 0, marginTop: welcomeTitleToBody, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
-                  Your draft plan and suggested targets are ready to refine.
+                  Build your plan, set targets, then log a check-in when you&apos;re ready.
                 </p>
                 <div
                   style={{

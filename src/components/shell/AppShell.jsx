@@ -9,8 +9,9 @@ import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { isBetaUser } from '@/lib/betaAccess';
 import BottomNavPremium, { BOTTOM_NAV_HEIGHT } from '@/components/ui/BottomNavPremium';
 import { getTabRoutesForRole } from '@/lib/routeMeta';
-import { DEFAULT_ROLE, normalizeRole, isCoach, isClient, getLandingPathForRole, Roles } from '@/lib/roles';
+import { DEFAULT_ROLE, normalizeRole, isCoach, isClient, isPersonal, getLandingPathForRole, Roles } from '@/lib/roles';
 import { isEliteTier, resolveCoachPlanTier, PLANS } from '@/config/plans';
+import { personalPlanBadgeLabel } from '@/lib/personalAccountUx';
 import { getSidebarSections } from '@/lib/sidebarNav';
 import { hapticNavigation } from '@/lib/haptics';
 import { isNative } from '@/lib/platform';
@@ -47,10 +48,12 @@ function initialsFromName(name) {
   return s.slice(0, 2).toUpperCase();
 }
 
-function DesktopShellUserFooter({ profile, user }) {
+function DesktopShellUserFooter({ profile, user, role }) {
   const displayName = String(profile?.full_name || user?.email || 'Account').trim() || 'Account';
-  const tier = resolveCoachPlanTier(profile, user);
-  const planLabel = coachPlanDisplayName(tier);
+  const normalizedRole = normalizeRole(role ?? profile?.role);
+  const planLabel = isPersonal(normalizedRole)
+    ? personalPlanBadgeLabel({ profile, user })
+    : coachPlanDisplayName(resolveCoachPlanTier(profile, user));
   return (
     <div
       style={{
@@ -247,7 +250,11 @@ function DesktopShell({
                 const Icon = item.icon;
                 const active = item.path === '/home'
                   ? pathname === '/home'
-                  : pathname === item.path || pathname.startsWith(`${item.path}/`);
+                  : item.path === '/discover'
+                    ? pathname === '/discover'
+                      || pathname.startsWith('/marketplace/coach/')
+                      || pathname === '/personal/coach-tier-selection'
+                    : pathname === item.path || pathname.startsWith(`${item.path}/`);
                 const badge = item.badgeKey === 'inbox'
                   ? (messagesThreadUnreadCount + inboxReviewsCount)
                   : item.badgeKey === 'messages'
@@ -323,7 +330,7 @@ function DesktopShell({
             flexShrink: 0,
           }}
         >
-          <DesktopShellUserFooter profile={profile} user={user} />
+          <DesktopShellUserFooter profile={profile} user={user} role={role} />
         </div>
       </aside>
 
@@ -748,7 +755,7 @@ export default function AppShell() {
             clientAccent={clientAccent}
             role={normalizeRole(effectiveRole ?? role ?? DEFAULT_ROLE)}
             coachFocus={coachFocus}
-            isElite={isEliteTier(resolveCoachPlanTier(profile, user))}
+            isElite={!isPersonalRole && isEliteTier(resolveCoachPlanTier(profile, user))}
             hasCompetitionPrep={
               resolvedAccess?.hasCompetitionPrep === true
               || (isPersonalRole && !!activeContestPrep?.id)

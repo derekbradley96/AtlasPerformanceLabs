@@ -32,7 +32,6 @@ const ROLE_REASON_OPTIONS = {
     { key: 'dont_use_enough', label: "I don't use it enough to keep the account" },
     { key: 'found_different_app', label: 'I found a different app' },
     { key: 'goal_achieved', label: "I achieved my goal and don't need this anymore" },
-    { key: 'too_expensive_enhanced', label: 'Too expensive (Enhanced plan)' },
     { key: 'features_not_fit', label: "The features don't match what I need" },
     { key: 'other', label: 'Other' },
   ],

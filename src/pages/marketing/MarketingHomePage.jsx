@@ -65,7 +65,7 @@ const ROLE_VALUE = [
   },
   {
     heading: 'Personal',
-    points: ['Free manual training tools', 'Tracking and logging', 'Enhanced upgrade for smart builder and guidance'],
+    points: ['Free training tools', 'Tracking and logging', 'Programs, nutrition, and progress'],
   },
 ];
 

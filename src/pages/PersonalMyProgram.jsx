@@ -23,7 +23,6 @@ import { resolvePersonalPlanTier } from '@/config/plans';
 import {
   personalHubEmptySubtitle,
   personalHubNoPlanBody,
-  personalHubNoPlanEnhancedHint,
   personalHubCloudSubtitle,
   personalHubLocalSubtitle,
   personalTrainingTipBasic,
@@ -241,10 +240,6 @@ export default function PersonalMyProgram() {
   const hasCloudProgram = !!supabasePlan?.block?.id;
 
   const runTemplateCreate = async (days) => {
-    if (!isEnhancedPersonal) {
-      toast.message('Templates are part of Enhanced.');
-      return;
-    }
     if (!supabase || !user?.id) {
       toast.error('Connect to the app to create a program.');
       return;
@@ -289,10 +284,6 @@ export default function PersonalMyProgram() {
 
   if (!program && !hasCloudProgram && supabaseReady) {
     const openQuickStartModal = () => {
-      if (!isEnhancedPersonal) {
-        toast.message('Templates are part of Enhanced.');
-        return;
-      }
       setCreateModalOpen(true);
     };
 
@@ -403,40 +394,21 @@ export default function PersonalMyProgram() {
                 Create your first plan
                 <ChevronRight className="w-4 h-4 ml-2 shrink-0" aria-hidden />
               </Button>
-              {isEnhancedPersonal ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={openQuickStartModal}
-                  disabled={!hasSupabase}
-                  className="w-full justify-center min-h-[48px]"
-                  style={{ borderColor: shell.cardBorder, color: colors.text, fontWeight: 600 }}
-                >
-                  <Sparkles className="w-4 h-4 mr-2 shrink-0" aria-hidden />
-                  Fast template (2–4 days)
-                </Button>
-              ) : (
-                <>
-                  <p style={{ margin: 0, fontSize: 12, color: colors.muted, lineHeight: 1.45, textAlign: 'center' }}>
-                    {personalHubNoPlanEnhancedHint()}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => navigate('/pricing')}
-                    className="w-full justify-center min-h-[48px]"
-                    style={{ borderColor: shell.cardBorder, color: colors.text, fontWeight: 600 }}
-                  >
-                    See Enhanced
-                  </Button>
-                </>
-              )}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={openQuickStartModal}
+                disabled={!hasSupabase}
+                className="w-full justify-center min-h-[48px]"
+                style={{ borderColor: shell.cardBorder, color: colors.text, fontWeight: 600 }}
+              >
+                <Sparkles className="w-4 h-4 mr-2 shrink-0" aria-hidden />
+                Fast template (2–4 days)
+              </Button>
             </div>
 
             <p style={{ margin: `${spacing[14]}px 0 0`, fontSize: 12, color: colors.muted, textAlign: 'center' }}>
-              {isEnhancedPersonal
-                ? 'Start with Create your first plan, or pick a template — both open the same editor.'
-                : 'Your plan stays empty until you name it and save in the planner — nothing is generated for you.'}
+              Start with Create your first plan, or pick a template — both open the same editor.
             </p>
           </Card>
           </div>

@@ -154,7 +154,7 @@ export function getPersonalMarketplaceHero(source) {
     [S.FROM_ADVANCED_REFINEMENT]: {
       eyebrow: 'Refinement',
       headline: 'You’ve outgrown guided solo mode',
-      body: 'You’re doing the work. A coach can now refine what Enhanced should only suggest.',
+      body: 'You’re doing the work. A coach can refine what solo tracking can only suggest.',
       primaryCta: 'Browse coaches',
       secondaryCta: 'Enter invite code',
     },

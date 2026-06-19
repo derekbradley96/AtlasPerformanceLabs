@@ -4,7 +4,7 @@ import { colors, shell } from '@/ui/tokens';
 import { space, cardRhythm, typeStack } from '@/ui/rhythm';
 
 /**
- * Marketplace comparison: Enhanced (solo) vs Coaching — ladder clarity for Personal → Coach conversion.
+ * Marketplace comparison: Personal (solo) vs Coaching — ladder clarity for Personal → Coach conversion.
  */
 export default function MarketplaceSoloVsCoachCompare({ isWideWeb = false }) {
   const gridCols = isWideWeb ? '1fr 1fr' : '1fr';
@@ -28,7 +28,7 @@ export default function MarketplaceSoloVsCoachCompare({ isWideWeb = false }) {
           textTransform: 'uppercase',
         }}
       >
-        Enhanced vs coaching
+        Personal vs coaching
       </p>
       <p
         style={{
@@ -38,7 +38,7 @@ export default function MarketplaceSoloVsCoachCompare({ isWideWeb = false }) {
           lineHeight: 1.5,
         }}
       >
-        Enhanced gives you structure inside Atlas. Coaching adds a human who steers decisions, accountability, and feedback on top of the same account.
+        Personal gives you structure inside Atlas for free. Coaching adds a human who steers decisions, accountability, and feedback on top of the same account.
       </p>
       <div
         style={{
@@ -66,7 +66,7 @@ export default function MarketplaceSoloVsCoachCompare({ isWideWeb = false }) {
               fontWeight: 700,
             }}
           >
-            Enhanced
+            Personal (free)
           </p>
           <ul
             style={{
@@ -77,10 +77,10 @@ export default function MarketplaceSoloVsCoachCompare({ isWideWeb = false }) {
               lineHeight: 1.5,
             }}
           >
-            <li>Starter structure</li>
-            <li>Solo prompts</li>
+            <li>Your own structure</li>
+            <li>Solo logging</li>
             <li>Trend awareness</li>
-            <li>Guided check-ins</li>
+            <li>Check-ins and habits</li>
           </ul>
         </div>
         <div

@@ -16,7 +16,7 @@ describe('resolvePersonalPlanTier', () => {
     ).toBe('free');
   });
 
-  it('non-personal legacy: subscription_active still maps to enhanced', () => {
-    expect(resolvePersonalPlanTier({ role: 'coach', subscription_active: true }, null)).toBe('enhanced');
+  it('non-personal legacy: subscription_active maps to free', () => {
+    expect(resolvePersonalPlanTier({ role: 'coach', subscription_active: true }, null)).toBe('free');
   });
 });
