@@ -26,7 +26,6 @@ export default function ProgramWeekView(props) {
     sourceBlocks,
     handleCopyFromSourceBlock,
     handleCopyPreviousWeek,
-    handleQuickStartGenerate,
     personalEnhancedExperience,
     days,
     handleAddDay,
@@ -48,7 +47,6 @@ export default function ProgramWeekView(props) {
     openExercisePicker,
     isCoachRole,
     clientId,
-    setGeneratedReveal,
   } = props;
 
   if (!block?.id) return null;
@@ -134,33 +132,6 @@ export default function ProgramWeekView(props) {
                 </button>
               </div>
             ) : null}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 md:col-span-2" style={{ gap: spacing[10] }}>
-              <p style={{ flex: 1, margin: 0, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>
-                Uses your <strong style={{ color: colors.text, fontWeight: 600 }}>Quick start</strong> choices above (goal, days, structure).
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setGeneratedReveal(null);
-                  handleQuickStartGenerate();
-                }}
-                disabled={saving || !selectedWeek}
-                style={{
-                  flexShrink: 0,
-                  minHeight: touchTargetMin,
-                  borderRadius: radii.button,
-                  border: `1px solid ${colors.primary}`,
-                  background: colors.primary,
-                  color: '#fff',
-                  fontWeight: 700,
-                  opacity: saving || !selectedWeek ? 0.6 : 1,
-                  padding: `0 ${spacing[16]}px`,
-                  cursor: saving || !selectedWeek ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {personalEnhancedExperience ? 'Generate smart draft' : 'Build my week'}
-              </button>
-            </div>
           </div>
         </Card>
       ) : null}

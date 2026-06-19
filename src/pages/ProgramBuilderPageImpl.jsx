@@ -25,12 +25,11 @@ import CoachFreeTextInput from '@/components/ui/CoachFreeTextInput';
 import { PageLoader } from '@/components/ui/LoadingState';
 import ProgramBuilderHeader from '@/components/program-builder/ProgramBuilderHeader';
 import ProgramWeekView from '@/components/program-builder/ProgramWeekView';
-import AutoBuildSheet from '@/components/program-builder/AutoBuildSheet';
 import DuplicateToClientSheet from '@/components/program-builder/DuplicateToClientSheet';
 import { PersonalCanvas, PersonalColumn } from '@/components/personal/PersonalSurface';
 import { personalColumnInnerBodyStyle } from '@/lib/personalShellLayout';
 import ExercisePickerModal from '@/components/programs/ExercisePickerModal';
-import { UserPlus, Save, Lightbulb } from 'lucide-react';
+import { UserPlus, Save } from 'lucide-react';
 import { duplicateBlockToClient } from '@/lib/supabaseRepo/phaseProgramRepo';
 import { activatePersonalProgramAssignment } from '@/lib/personalProgramSeed';
 import { ensureProgramWeekRowsForBlock } from '@/lib/programBlockWeeks';
@@ -219,7 +218,6 @@ export default function ProgramBuilderPage() {
   }, []);
   const [libraryFilterMuscle, setLibraryFilterMuscle] = useState('');
   const [libraryFilterEquipment, setLibraryFilterEquipment] = useState('');
-  const [autoBuildExplainability, setAutoBuildExplainability] = useState([]);
   const [showBuildSequence, setShowBuildSequence] = useState(false);
   const [buildStepIndex, setBuildStepIndex] = useState(0);
   const [generatedReveal, setGeneratedReveal] = useState(null);
@@ -1207,19 +1205,52 @@ export default function ProgramBuilderPage() {
     if (liveProgramContext?.clientId) {
       nextUpdates.coach_updated_at = new Date().toISOString();
     }
+    const currentExercise = exercises.find((e) => e.id === exerciseId);
     const { error } = await supabase.from('program_exercises').update(nextUpdates).eq('id', exerciseId);
     if (error) toast.error('Update failed');
     else {
       if (typeof updates.exercise_name === 'string') pushRecentExerciseName(updates.exercise_name);
       setExercises((ex) => ex.map((e) => (e.id === exerciseId ? { ...e, ...nextUpdates } : e)));
       if (liveProgramContext?.recipientProfileId) {
-        const currentExercise = exercises.find((e) => e.id === exerciseId);
-        const changedExerciseName = String(updates.exercise_name || currentExercise?.exercise_name || 'an exercise');
+        const exerciseName = String(nextUpdates.exercise_name || currentExercise?.exercise_name || 'an exercise');
+        const diffParts = [];
+        if (updates.exercise_name && currentExercise?.exercise_name && updates.exercise_name !== currentExercise.exercise_name) {
+          diffParts.push(`renamed to ${updates.exercise_name}`);
+        }
+        const numericFields = [
+          { key: 'sets', label: 'sets', fmt: (v) => String(v) },
+          { key: 'weight_kg', label: 'weight', fmt: (v) => `${v}kg` },
+          { key: 'rest_seconds', label: 'rest', fmt: (v) => `${v}s` },
+        ];
+        for (const { key, label, fmt } of numericFields) {
+          if (key in updates && currentExercise) {
+            const before = currentExercise[key];
+            const after = updates[key];
+            if (after != null && String(before) !== String(after)) {
+              diffParts.push(`${label}: ${before != null ? fmt(before) : '–'}→${fmt(after)}`);
+            }
+          }
+        }
+        if ('reps' in updates && currentExercise) {
+          const before = currentExercise.reps;
+          const after = updates.reps;
+          if (after != null && String(before) !== String(after)) {
+            diffParts.push(`reps: ${before ?? '–'}→${after}`);
+          }
+        }
+        if ('tempo' in updates && currentExercise) {
+          const before = currentExercise.tempo;
+          const after = updates.tempo;
+          if (after && String(before) !== String(after)) {
+            diffParts.push(`tempo: ${before ?? '–'}→${after}`);
+          }
+        }
+        const diffText = diffParts.length > 0 ? ` (${diffParts.join(', ')})` : '';
         await insertNotificationForRecipient(
           liveProgramContext.recipientProfileId,
           'program_update',
           'Your programme has been updated',
-          `${profile?.full_name || 'Your coach'} updated ${changedExerciseName} in your ${blockName || 'programme'}. Tap to see changes.`,
+          `${profile?.full_name || 'Your coach'} updated ${exerciseName}${diffText}`,
           { action_url: '/today', subtype: 'programme_updated', coach_update_note: nextUpdates.coach_update_note || null },
           block?.id || null,
           { dedupeKey: `programme_updated:${block?.id || 'block'}:${exerciseId}` },
@@ -2264,90 +2295,6 @@ export default function ProgramBuilderPage() {
         ? 'Select a client to create this block.'
         : '';
   const showCoachNoClientsGate = !isPersonalRole && !blockIdParam && clients.length === 0;
-  const shouldShowEntryAutoBuild =
-    !block?.id
-    && !blockIdParam
-    && !loading
-    && canUseBuilder
-    && !startFromScratchSelected
-    && !isPersonalRole;
-  const entryWeeksValue = resolveEntryTotalWeeks();
-  const entryGenerateDisabled =
-    saving
-    || (!isPersonalRole && !entryWhoFor)
-    || !entryWeeksValue;
-  const entryGenerateDisabledHint = !isPersonalRole && !entryWhoFor
-    ? 'Select a client to continue.'
-    : '';
-  const entryWhoForOptions = isPersonalRole
-    ? [{ value: 'myself', label: 'Myself' }]
-    : [
-        { value: ENTRY_TARGET_TEMPLATE, label: 'Template (unassigned)' },
-        ...clients.map((c) => ({ value: c.id, label: c.name || 'Client' })),
-      ];
-  const revealDays = Array.isArray(generatedReveal?.days) ? generatedReveal.days.slice(0, 4) : [];
-
-  if (shouldShowEntryAutoBuild) {
-    return (
-      <PersonalCanvas>
-        <div
-          className="min-h-screen pb-8"
-          style={{ background: isPersonalRole ? 'transparent' : colors.bg, color: colors.text }}
-          {...programBuilderMigrationAttrs}
-        >
-          <TopBar title={isPersonalRole ? 'My program' : 'Program Builder'} onBack={() => navigate(-1)} />
-          <PersonalColumn variant={isPersonalRole ? 'wide' : 'default'}>
-            <div
-              style={
-                isPersonalRole
-                  ? personalColumnInnerBodyStyle()
-                  : { ...pageContainer, maxWidth: isDesktopWeb ? 1240 : undefined, margin: '0 auto', paddingBottom: spacing[24] }
-              }
-            >
-              <AutoBuildSheet
-                mode="entry"
-                sectionGap={sectionGap}
-                saving={saving}
-                showBuildSequence={showBuildSequence}
-                BUILD_STEPS={BUILD_STEPS}
-                buildStepIndex={buildStepIndex}
-                entryConfig={{
-                  showWhoForStep: !isPersonalRole,
-                  whoForValue: entryWhoFor,
-                  whoForOptions: entryWhoForOptions,
-                  onWhoForChange: setEntryWhoFor,
-                  whoForLabel: isPersonalRole ? 'Who is this for?' : 'Which client is this for?',
-                  goalOptions: ENTRY_GOAL_OPTIONS,
-                  selectedGoal: entryGoal,
-                  onGoalSelect: setEntryGoal,
-                  daysPerWeek: entryDaysPerWeek,
-                  onDaysPerWeekSelect: setEntryDaysPerWeek,
-                  weeksPreset: entryWeeksPreset,
-                  onWeeksPresetChange: setEntryWeeksPreset,
-                  customWeeksValue: entryCustomWeeks,
-                  onCustomWeeksChange: setEntryCustomWeeks,
-                  onGenerate: () => {
-                    setShowEntryTemplates(false);
-                    handleEntryGenerateProgram();
-                  },
-                  onStartFromScratch: () => {
-                    setShowEntryTemplates(false);
-                    setStartFromScratchSelected(true);
-                  },
-                  onShowTemplates: () => setShowEntryTemplates((prev) => !prev),
-                  templatesOpen: showEntryTemplates,
-                  templateCards: PROGRAM_TEMPLATES,
-                  onTemplateSelect: handleEntryUseTemplate,
-                  generateDisabled: entryGenerateDisabled,
-                  generateDisabledHint: entryGenerateDisabledHint,
-                }}
-              />
-            </div>
-          </PersonalColumn>
-        </div>
-      </PersonalCanvas>
-    );
-  }
 
   return (
     <PersonalCanvas>
@@ -2599,58 +2546,7 @@ export default function ProgramBuilderPage() {
             ) : null}
           </Card>
         ) : null}
-        {!isPersonalRole ? (
-          <AutoBuildSheet
-            block={block}
-            personalBasicExperience={personalBasicExperience}
-            personalEnhancedExperience={personalEnhancedExperience}
-            sectionGap={sectionGap}
-            isPersonalRole={isPersonalRole}
-            canUsePersonalAutoBuilder={canUsePersonalAutoBuilder}
-            personalUpgradeCopy={personalUpgradeCopy}
-            autoBuildExplainability={autoBuildExplainability}
-            quickGoal={quickGoal}
-            setQuickGoal={setQuickGoal}
-            quickDaysPerWeek={quickDaysPerWeek}
-            setQuickDaysPerWeek={setQuickDaysPerWeek}
-            setQuickDaysPerWeekInput={setQuickDaysPerWeekInput}
-            weekStructureType={weekStructureType}
-            setWeekStructureType={setWeekStructureType}
-            quickStartPreviewTitles={quickStartPreviewTitles}
-            libraryFilterEquipment={libraryFilterEquipment}
-            setLibraryFilterEquipment={setLibraryFilterEquipment}
-            libraryFilterMuscle={libraryFilterMuscle}
-            setLibraryFilterMuscle={setLibraryFilterMuscle}
-            handleQuickStartGenerate={handleQuickStartGenerate}
-            saving={saving}
-            selectedWeek={selectedWeek}
-            generatedReveal={generatedReveal}
-            setGeneratedReveal={setGeneratedReveal}
-            revealDays={revealDays}
-            navigate={navigate}
-            handleAddExercise={handleAddExercise}
-            handleCopyPreviousWeek={handleCopyPreviousWeek}
-            showBuildSequence={showBuildSequence}
-            BUILD_STEPS={BUILD_STEPS}
-            buildStepIndex={buildStepIndex}
-          />
-        ) : null}
 
-        {block?.id && (clientId || block.client_id) && coachSuggestions.length > 0 && (!isPersonalRole || canUsePersonalAutoBuilder) && (
-          <Card style={{ ...standardCard, marginBottom: sectionGap, padding: spacing[16] }}>
-            <p style={{ ...sectionLabel, marginBottom: spacing[8], display: 'flex', alignItems: 'center', gap: spacing[6] }}>
-              <Lightbulb size={14} style={{ color: colors.primary }} />
-              Smart suggestions
-            </p>
-            <ul className="space-y-1" style={{ margin: 0, paddingLeft: spacing[18] }}>
-              {coachSuggestions.map((s, idx) => (
-                <li key={idx} className="text-sm" style={{ color: colors.text }}>
-                  {s}
-                </li>
-              ))}
-            </ul>
-          </Card>
-        )}
 
         {block?.id && !isPersonalRole && (clientId || block.client_id) && (
           <div className="flex flex-wrap gap-2" style={{ marginBottom: sectionGap }}>
@@ -2727,7 +2623,6 @@ export default function ProgramBuilderPage() {
           sourceBlocks={sourceBlocks}
           handleCopyFromSourceBlock={handleCopyFromSourceBlock}
           handleCopyPreviousWeek={handleCopyPreviousWeek}
-          handleQuickStartGenerate={handleQuickStartGenerate}
           personalEnhancedExperience={personalEnhancedExperience}
           days={days}
           handleAddDay={handleAddDay}
@@ -2779,7 +2674,6 @@ export default function ProgramBuilderPage() {
           isCoachRole={isCoachRole}
           clientId={clientId}
           standardCard={standardCard}
-          setGeneratedReveal={setGeneratedReveal}
         />
       </div>
       </PersonalColumn>
