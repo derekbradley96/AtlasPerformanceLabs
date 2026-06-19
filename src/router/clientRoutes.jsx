@@ -123,7 +123,7 @@ export default function ClientRoutes({
       <Route path="intakeforms" element={<RequireAuth><ClientCoachOfferAppGate><IntakeForms /></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="editintakeform" element={<RequireAuth><ClientCoachOfferAppGate><EditIntakeForm /></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="reviewcheckin" element={<RequireAuth><ClientCoachOfferAppGate><ReviewCheckIn /></ClientCoachOfferAppGate></RequireAuth>} />
-      <Route path="first-timer-guide" element={<RequireAuth><ClientCoachOfferAppGate><FirstTimerCompGuide /></ClientCoachOfferAppGate></RequireAuth>} />
+      <Route path="first-timer-guide" element={<RequireAuth><ClientCoachOfferAppGate><RequireClientPrepCapability capability="can_client_access_competition_prep" accessDeniedMessage="The competition first-timer guide is for competition-prep clients only."><FirstTimerCompGuide /></RequireClientPrepCapability></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="activeworkout" element={<RequireAuth><ClientCoachOfferAppGate><LegacyActiveWorkoutRedirect /></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="workoutsummary" element={<RequireAuth><ClientCoachOfferAppGate><LegacyWorkoutSummaryRedirect /></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="createworkout" element={<RequireAuth><ClientCoachOfferAppGate><LegacyCreateWorkoutRedirect /></ClientCoachOfferAppGate></RequireAuth>} />
@@ -133,7 +133,7 @@ export default function ClientRoutes({
       <Route path="call-requests" element={<RequireRole allow={[Roles.CLIENT]}><CallRequestsPage /></RequireRole>} />
       <Route path="progressphotos" element={<RequireAuth><ClientCoachOfferAppGate><ProgressPhotos /></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="nutrition" element={<RequireAuth><RequireClientCoachOfferSettled><Nutrition /></RequireClientCoachOfferSettled></RequireAuth>} />
-      <Route path="prep-precision" element={<RequireAuth><ClientCoachOfferAppGate><PrepPrecisionPage /></ClientCoachOfferAppGate></RequireAuth>} />
+      <Route path="prep-precision" element={<RequireAuth><ClientCoachOfferAppGate><RequireClientPrepCapability capability="can_client_access_competition_prep" accessDeniedMessage="Prep precision tracking is for competition-prep clients only."><PrepPrecisionPage /></RequireClientPrepCapability></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="achievements" element={<RequireAuth><ClientCoachOfferAppGate><Achievements /></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="milestones" element={<Navigate to="/achievements" replace />} />
       <Route path="settings/equipment" element={<RequireAuth><ClientCoachOfferAppGate><ClientEquipment /></ClientCoachOfferAppGate></RequireAuth>} />

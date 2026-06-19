@@ -93,6 +93,9 @@ export function resolveAtlasAccess({
   const isClientTransformationDelivery = client && clientDeliveryContext === 'transformation';
   const hasActiveContestPrepClient = Boolean(activeContestPrep && (activeContestPrep.id || activeContestPrep.show_date));
 
+  const personalGoal = personal ? String(profile?.goal ?? '').trim().toLowerCase() : null;
+  const personalHasCompGoal = personal && (personalGoal === 'competition' || Boolean(profile?.competition_date));
+
   return {
     role: resolvedRole,
     coachFocus,
@@ -108,6 +111,7 @@ export function resolveAtlasAccess({
     isCoachBasic,
     isCoachProOrElite,
     isPersonalEnhanced,
+    personalHasCompGoal,
     clientDeliveryContext,
     clientDeliveryReady,
     isClientTransformationDelivery,
@@ -118,7 +122,7 @@ export function resolveAtlasAccess({
     can_access_personal_enhanced_builder: isPersonalEnhanced,
     /** Client: competition prep surfaces (posing, peak week client flows). */
     can_client_access_competition_prep: isClientCompetitionDelivery || (client && hasActiveContestPrepClient),
-    /** Shared comp-prep area: coach with prep focus OR competition-delivery client. */
-    can_access_comp_prep_area: hasCompetitionPrep || isClientCompetitionDelivery,
+    /** Shared comp-prep area: coach with prep focus OR competition-delivery client OR personal comp goal user. */
+    can_access_comp_prep_area: hasCompetitionPrep || isClientCompetitionDelivery || personalHasCompGoal,
   };
 }

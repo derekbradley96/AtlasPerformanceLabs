@@ -482,7 +482,7 @@ function MoreContent() {
       return `Client · ${previewClientSubtype.charAt(0).toUpperCase() + previewClientSubtype.slice(1)}`;
     }
     if (previewRole === 'personal') {
-      return `Personal · ${previewPersonalTier === 'enhanced' ? 'Enhanced' : 'Basic'}`;
+      return `Personal`;
     }
     return 'Admin / Owner';
   }, [isPlatformAdmin, previewRole, previewCoachSubtype, previewCoachTier, previewClientSubtype, previewPersonalTier, roleLabel]);
@@ -494,8 +494,8 @@ function MoreContent() {
     isWideWeb && activePreviewRole === 'personal' && (isSolo || isPlatformAdmin);
   const personalTierEffective =
     isPlatformAdmin && activePreviewRole === 'personal' ? previewPersonalTier : personalTier;
-  const personalTierLabelDesktop = personalTierEffective === 'enhanced' ? 'Enhanced' : 'Basic';
-  const isBasicTierDesktop = personalTierEffective !== 'enhanced';
+  const personalTierLabelDesktop = personalPlanBadgeLabel({ profile, user: displayUser });
+  const isBasicTierDesktop = false;
 
   const renderRolePreviewMenus = () => {
     const menuRow = (icon, title, subtitle, to) => (
@@ -666,6 +666,7 @@ function MoreContent() {
       );
     }
     if (showPersonalMoreDesktop) return null;
+    const personalHasComp = resolvedAccess?.personalHasCompGoal === true;
     return (
       <>
         <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
@@ -674,10 +675,24 @@ function MoreContent() {
           </p>
         </Card>
         <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-          {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Today', 'Today’s session and plan', '/today')}
+          {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Today', "Today's session and plan", '/today')}
           {menuRow(<Dumbbell size={20} style={{ color: colors.muted }} />, 'My program', 'Blocks and training plan', '/myprogram')}
           {menuRow(<FileText size={20} style={{ color: colors.muted }} />, 'Program builder', 'Edit your personal program', '/program-builder?personal=1')}
         </div>
+        {personalHasComp ? (
+          <>
+            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
+                Competition Prep
+              </p>
+            </Card>
+            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+              {menuRow(<Award size={20} style={{ color: colors.muted }} />, 'Pose library', 'Posing references and stage cues', '/comp-prep/pose-library')}
+              {menuRow(<Crosshair size={20} style={{ color: colors.muted }} />, 'Prep protocols', 'Peak week and depletion protocols', '/prep-protocols')}
+              {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'Pose self-assessment', 'Review and self-score your poses', '/pose-self-assessment')}
+            </div>
+          </>
+        ) : null}
         <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
           <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>
             Nutrition
@@ -844,7 +859,7 @@ function MoreContent() {
             {activePreviewRole === 'personal' && (
               <p className="text-xs mt-1.5 font-semibold" style={{ color: colors.primary }}>
                 {isPlatformAdmin
-                  ? (previewPersonalTier === 'enhanced' ? 'Enhanced' : 'Basic')
+                  ? 'Personal (preview)'
                   : personalPlanBadgeLabel({ profile, user: displayUser })}
               </p>
             )}
@@ -969,32 +984,6 @@ function MoreContent() {
                     }}
                   >
                     {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {previewRole === 'personal' && (
-            <>
-              <p className="text-xs font-medium mt-4 mb-2" style={{ color: colors.muted }}>Personal tier</p>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { id: 'basic', label: 'Basic' },
-                  { id: 'enhanced', label: 'Enhanced' },
-                ].map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setPreviewPersonalTier(t.id)}
-                    className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
-                    style={{
-                      background: previewPersonalTier === t.id ? colors.primary : colors.surface1,
-                      color: previewPersonalTier === t.id ? '#fff' : colors.text,
-                      border: 'none',
-                    }}
-                  >
-                    {t.label}
                   </button>
                 ))}
               </div>
