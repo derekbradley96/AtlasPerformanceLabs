@@ -64,9 +64,25 @@ export default function FederationGuidePage() {
   if (!guide) {
     return (
       <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}>
-        <TopBar title="Federation guide" onBack={() => navigate(-1)} showBack />
-        <div style={{ padding: spacing[16] }}>
-          <p style={{ color: colors.muted }}>Unknown federation. Try {FEDERATION_KEYS.join(', ')}.</p>
+        <TopBar title="Federation guides" onBack={() => navigate(-1)} showBack />
+        <div style={{ padding: `${spacing[12]}px ${shell.pagePaddingH}px` }}>
+          <p style={{ margin: `0 0 ${spacing[14]}px`, fontSize: 13, color: colors.muted }}>
+            Select your federation to see show-day information, divisions, and what to bring.
+          </p>
+          {FEDERATION_KEYS.map((key) => (
+            <Card
+              key={key}
+              style={{ marginBottom: spacing[8], padding: spacing[14], cursor: 'pointer' }}
+              onClick={() => navigate(`/federation-guide/${key}`)}
+            >
+              <p style={{ margin: 0, fontWeight: 700, fontSize: 15, color: colors.text }}>
+                {FEDERATION_GUIDES[key].full_name}
+              </p>
+              <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                {FEDERATION_GUIDES[key].country} · {FEDERATION_GUIDES[key].drug_tested ? 'Drug-tested' : 'Non-tested'}
+              </p>
+            </Card>
+          ))}
         </div>
       </div>
     );

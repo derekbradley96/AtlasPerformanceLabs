@@ -101,6 +101,16 @@ export default function ClientRoutes({
         )}
       />
       <Route
+        path="federation-guide"
+        element={(
+          <RequireAuth>
+            <RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="Federation guides are for Personal accounts.">
+              <FederationGuidePage />
+            </RequireRole>
+          </RequireAuth>
+        )}
+      />
+      <Route
         path="federation-guide/:federationKey"
         element={(
           <RequireAuth>

@@ -626,7 +626,7 @@ function MoreContent() {
           </Card>
           <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
             {menuRow(<HelpCircle size={20} style={{ color: colors.muted }} />, 'Help', 'Get help and contact support', '/helpsupport')}
-            {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'My coach profile', 'View your coach information', '/my-trainer')}
+            {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'My coach profile', 'View your coach information', '/mytrainer')}
           </div>
           {!isPlatformAdmin ? (
             <>
@@ -676,7 +676,7 @@ function MoreContent() {
         </Card>
         <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
           {menuRow(<Calendar size={20} style={{ color: colors.muted }} />, 'Today', "Today's session and plan", '/today')}
-          {menuRow(<Dumbbell size={20} style={{ color: colors.muted }} />, 'My program', 'Blocks and training plan', '/myprogram')}
+          {menuRow(<Dumbbell size={20} style={{ color: colors.muted }} />, 'My program', 'Blocks and training plan', '/personal-my-program')}
           {menuRow(<FileText size={20} style={{ color: colors.muted }} />, 'Program builder', 'Edit your personal program', '/program-builder?personal=1')}
         </div>
         {personalHasComp ? (

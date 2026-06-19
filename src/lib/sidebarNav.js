@@ -147,7 +147,7 @@ export function getSidebarSections(
           { path: '/messages', label: 'Messages', icon: MessageSquare, badgeKey: 'messages' },
           { path: '/community', label: 'Community', icon: Users },
           { path: '/myprogram', label: 'My programme', icon: FileText },
-          { path: '/nutrition-plan', label: 'Nutrition plan', icon: UtensilsCrossed },
+          { path: '/nutrition', label: 'Nutrition plan', icon: UtensilsCrossed },
         ],
       },
       ...(isCompClient ? [{
