@@ -362,7 +362,7 @@ export default function PublicResultStoryPage() {
             <Button
               variant="secondary"
               className="w-full"
-              onClick={() => navigate('/marketplace')}
+              onClick={() => navigate('/discover')}
             >
               Explore coaches
             </Button>

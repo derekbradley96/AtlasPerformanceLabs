@@ -903,7 +903,7 @@ export default function CoachHomePage() {
     }
     if (coachFocus === 'integrated') {
       return [
-        { label: 'Prep lane', path: '/comp-prep', icon: Crosshair },
+        { label: 'Prep lane', path: '/prep-dashboard', icon: Crosshair },
         { label: 'Lifestyle lane', path: '/clients?type=lifestyle', icon: Users },
         { label: 'Review Center', path: '/review-center', icon: ListChecks },
         { label: 'Messages', path: '/messages', icon: MessageSquare },

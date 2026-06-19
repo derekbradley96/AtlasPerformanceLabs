@@ -84,7 +84,7 @@ export default function MarketingLayout() {
             <Link to="/for-clients" style={{ color: colors.muted }}>Clients</Link>
             <Link to="/personal" style={{ color: colors.muted }}>Personal</Link>
             <Link to="/pricing" style={{ color: colors.muted }}>Pricing</Link>
-            <Link to="/marketplace" style={{ color: colors.muted }}>Marketplace</Link>
+            <Link to="/discover" style={{ color: colors.muted }}>Find a coach</Link>
             <Link to="/affiliates" style={{ color: colors.muted }}>Partners</Link>
             <Link to="/why-switch" style={{ color: colors.muted }}>Why Switch</Link>
             <Link to="/blog" style={{ color: colors.muted }}>Blog</Link>

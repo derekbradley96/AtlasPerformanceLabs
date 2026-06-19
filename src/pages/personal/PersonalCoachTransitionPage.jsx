@@ -190,7 +190,7 @@ export default function PersonalCoachTransitionPage() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate('/enter-invite-code')}
+                onClick={() => navigate('/enterinvitecode')}
                 style={{
                   marginTop: spacing[8],
                   width: '100%',
