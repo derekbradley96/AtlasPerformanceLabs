@@ -176,10 +176,11 @@ enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
 # Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
-minimum_password_length = 6
+minimum_password_length = 8
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values
 # are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
-password_requirements = ""
+# Keep this in sync with src/lib/passwordPolicy.js (frontend enforces the same rule).
+password_requirements = "lower_upper_letters_digits"
 
 # Configure passkey sign-ins.
 # [auth.passkey]
@@ -231,26 +232,43 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
+# Production SMTP via Resend — sends auth emails from hello@atlasperformancelabs.co.uk.
+#
+# LOCAL DEV: leave this COMMENTED so local emails go to the Inbucket viewer
+# (http://127.0.0.1:54324) instead of being sent for real.
+#
+# PRODUCTION: set these in the Supabase Dashboard
+# (Authentication > Emails > SMTP Settings), OR uncomment below and run
+# `supabase config push` with RESEND_SMTP_PASSWORD set to your Resend API key.
+# Resend SMTP docs: https://resend.com/docs/send-with-smtp
 # [auth.email.smtp]
 # enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(RESEND_SMTP_PASSWORD)"
+# admin_email = "hello@atlasperformancelabs.co.uk"
+# sender_name = "Atlas Performance Labs"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+# Branded auth email templates (see supabase/templates/*.html).
+# Used by local `supabase start` and by `supabase config push`.
+# For production you can also paste the same HTML into
+# Supabase Dashboard > Authentication > Emails > Templates.
+[auth.email.template.confirmation]
+subject = "Confirm your email — Atlas Performance Labs"
+content_path = "./supabase/templates/confirm-signup.html"
 
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./templates/password_changed_notification.html"
+[auth.email.template.recovery]
+subject = "Reset your password — Atlas Performance Labs"
+content_path = "./supabase/templates/reset-password.html"
+
+[auth.email.template.magic_link]
+subject = "Your sign-in link — Atlas Performance Labs"
+content_path = "./supabase/templates/magic-link.html"
+
+[auth.email.template.email_change]
+subject = "Confirm your new email — Atlas Performance Labs"
+content_path = "./supabase/templates/email-change.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.

@@ -5,6 +5,13 @@ import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { getSupabase } from '@/lib/supabaseClient';
 import PageMeta from '@/components/seo/PageMeta';
+import {
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_REQUIREMENTS,
+  getPasswordChecks,
+  getPasswordError,
+} from '@/lib/passwordPolicy';
+import { Check } from 'lucide-react';
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -20,8 +27,9 @@ export default function ResetPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    const pwError = getPasswordError(password);
+    if (pwError) {
+      setError(pwError);
       return;
     }
     if (password !== confirm) {
@@ -93,7 +101,7 @@ export default function ResetPassword() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 8 characters"
+                placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`}
                 autoComplete="new-password"
                 className="w-full rounded-xl py-3 px-4 focus:outline-none focus:ring-2 mb-4"
                 style={{
@@ -102,6 +110,29 @@ export default function ResetPassword() {
                   color: colors.text,
                 }}
               />
+              {password.length > 0 && (
+                <ul style={{ listStyle: 'none', padding: 0, margin: '-8px 0 16px' }}>
+                  {PASSWORD_REQUIREMENTS.map((req) => {
+                    const met = getPasswordChecks(password)[req.key];
+                    return (
+                      <li
+                        key={req.key}
+                        className="text-xs"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          marginBottom: 4,
+                          color: met ? colors.success : colors.muted,
+                        }}
+                      >
+                        <Check size={13} style={{ opacity: met ? 1 : 0.3, flexShrink: 0 }} />
+                        {req.label}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
               <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>
                 Confirm password
               </label>

@@ -1,16 +1,28 @@
 /**
- * Brand mark — typography only (no raster logo asset).
- * Variants mirror the old layout so screens don’t need reflow.
- * - splash: large hero (splash / gates)
- * - auth: login / role pickers
- * - header: compact single-line (sidebars, legacy headers)
- * - inline: marketing nav / compact horizontal
+ * Brand logo component.
+ * - splash / auth: raster logo image (mix-blend-mode: screen removes the black background
+ *   on the dark navy surface, leaving only the glowing Atlas figure visible)
+ * - header / inline: clean text wordmark (no suitable compact icon asset available)
+ *
+ * Variants:
+ *   splash  — full logo, hero size (splash screen / loading gates)
+ *   auth    — full logo, medium (login, onboarding, role pickers)
+ *   header  — compact text (sidebars, desktop shell)
+ *   inline  — smallest text inline (marketing nav)
  */
 import React from 'react';
 import { colors } from '@/ui/tokens';
+import logoSrc from '@/assets/logo-image-1.png';
 
 const TEXT = colors.text;
 const MUTED = colors.muted;
+
+// Brightens the logo art and uses lighten blend so the dark background of the
+// PNG disappears on the app's dark navy surface while the glowing figure stays vivid.
+const LOGO_IMG_STYLE = {
+  mixBlendMode: 'screen',
+  filter: 'brightness(1.6) saturate(1.3) contrast(1.1)',
+};
 
 export default function AtlasLogo({
   variant = 'header',
@@ -18,48 +30,34 @@ export default function AtlasLogo({
   className = '',
   style = {},
   wrapperStyle = {},
-  alt: _alt = 'Atlas',
+  alt = 'Atlas Performance Labs',
 }) {
   if (variant === 'splash') {
     return (
       <div
         className={className}
         style={{
-          width: 320,
-          maxWidth: '85vw',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'flex-start',
+          alignItems: 'center',
           justifyContent: 'center',
           ...wrapperStyle,
         }}
       >
-        <span
+        <img
+          src={logoSrc}
+          alt={alt}
+          draggable={false}
           style={{
-            fontSize: 'clamp(1.75rem, 5vw, 2.25rem)',
-            fontWeight: 800,
-            letterSpacing: '-0.03em',
-            color: TEXT,
-            lineHeight: 1.1,
+            width: 280,
+            maxWidth: '80vw',
+            height: 'auto',
+            objectFit: 'contain',
+            display: 'block',
+            ...LOGO_IMG_STYLE,
             ...style,
           }}
-        >
-          Atlas Performance Labs
-        </span>
-        {showWordmark ? (
-          <span
-            style={{
-              marginTop: 10,
-              fontSize: '0.75rem',
-              fontWeight: 600,
-              letterSpacing: '0.2em',
-              textTransform: 'uppercase',
-              color: MUTED,
-            }}
-          >
-            Coaching platform
-          </span>
-        ) : null}
+        />
       </div>
     );
   }
@@ -69,40 +67,27 @@ export default function AtlasLogo({
       <div
         className={className}
         style={{
-          width: 260,
-          maxWidth: '72vw',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'flex-start',
+          alignItems: 'center',
+          justifyContent: 'center',
           ...wrapperStyle,
         }}
       >
-        <span
+        <img
+          src={logoSrc}
+          alt={alt}
+          draggable={false}
           style={{
-            fontSize: 'clamp(1.375rem, 4vw, 1.75rem)',
-            fontWeight: 700,
-            letterSpacing: '-0.02em',
-            color: TEXT,
-            lineHeight: 1.15,
+            width: 200,
+            maxWidth: '60vw',
+            height: 'auto',
+            objectFit: 'contain',
+            display: 'block',
+            ...LOGO_IMG_STYLE,
             ...style,
           }}
-        >
-          Atlas Performance Labs
-        </span>
-        {showWordmark ? (
-          <span
-            style={{
-              marginTop: 8,
-              fontSize: '0.65rem',
-              fontWeight: 600,
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              color: MUTED,
-            }}
-          >
-            Performance Labs
-          </span>
-        ) : null}
+        />
       </div>
     );
   }
@@ -141,7 +126,7 @@ export default function AtlasLogo({
     );
   }
 
-  // header — compact, no boxed tile (replaces 64×64 + image)
+  // header — compact sidebar / shell
   return (
     <div
       className={className}

@@ -12,6 +12,13 @@ import { User, ChevronLeft, Check } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
+import {
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_REQUIREMENTS,
+  getPasswordChecks,
+  getPasswordError,
+  isPasswordValid,
+} from '@/lib/passwordPolicy';
 import Card from '@/ui/Card';
 import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
 import { toast } from 'sonner';
@@ -345,13 +352,16 @@ export default function AuthScreen() {
   const pendingInvite = useMemo(() => getPendingInvite(), [signupStage, coachCode, mode]);
   const clientHasValidatedCode = signupRole !== 'client' || Boolean(pendingInvite?.code);
 
+  const passwordChecks = useMemo(() => getPasswordChecks(password), [password]);
+  const passwordMeetsPolicy = isPasswordValid(password);
+
   const loginValid = emailTrim.length > 0 && passwordLen >= 6;
   const accountStepValid =
-    isEmailValid(email) && passwordLen >= 8 && clientHasValidatedCode;
+    isEmailValid(email) && passwordMeetsPolicy && clientHasValidatedCode;
   const formValid = isLogin ? loginValid : signupStage === SIGNUP_STAGE.ACCOUNT ? accountStepValid : false;
   const isDisabled = !formValid || loading || isLoadingAuth;
 
-  const showPasswordHelper = !isLogin && signupStage === SIGNUP_STAGE.ACCOUNT && passwordLen > 0 && passwordLen < 8;
+  const showPasswordHelper = !isLogin && signupStage === SIGNUP_STAGE.ACCOUNT && passwordLen > 0 && !passwordMeetsPolicy;
 
   const handleTabLogin = async () => {
     setMode('login');
@@ -462,9 +472,12 @@ export default function AuthScreen() {
       setError('Password is required');
       return;
     }
-    if (!isLogin && pTrim.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
+    if (!isLogin) {
+      const pwError = getPasswordError(pTrim);
+      if (pwError) {
+        setError(pwError);
+        return;
+      }
     }
     if (!isLogin && signupRole === 'client') {
       const pend = getPendingInvite();
@@ -1136,7 +1149,7 @@ export default function AuthScreen() {
                 id="signup-password"
                 type="password"
                 autoComplete="new-password"
-                placeholder="At least 8 characters"
+                placeholder={`At least ${PASSWORD_MIN_LENGTH} characters`}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => {
@@ -1151,10 +1164,31 @@ export default function AuthScreen() {
                 }}
               />
 
-              {showPasswordHelper && (
-                <p className="text-xs mt-2 mb-0" style={{ color: colors.muted }}>
-                  Use at least 8 characters
-                </p>
+              {!isLogin && signupStage === SIGNUP_STAGE.ACCOUNT && passwordLen > 0 && (
+                <ul className="mt-2 mb-0" style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
+                  {PASSWORD_REQUIREMENTS.map((req) => {
+                    const met = passwordChecks[req.key];
+                    return (
+                      <li
+                        key={req.key}
+                        className="text-xs"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          marginBottom: 4,
+                          color: met ? colors.success : colors.muted,
+                        }}
+                      >
+                        <Check
+                          size={13}
+                          style={{ opacity: met ? 1 : 0.3, flexShrink: 0 }}
+                        />
+                        {req.label}
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
 
               {error && (
