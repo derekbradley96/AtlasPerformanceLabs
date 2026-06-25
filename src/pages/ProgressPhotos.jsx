@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
 import { useAuth } from '@/lib/AuthContext';
-import { isCoach } from '@/lib/roles';
+import { isCoach, isPersonal } from '@/lib/roles';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getMyClientProfile } from '@/lib/clientProfiles';
 import { listProgressPhotos, uploadProgressPhoto } from '@/lib/progressPhotosService';
@@ -164,6 +164,7 @@ export default function ProgressPhotos() {
   const { isDesktopWeb } = usePresentationMode();
 
   const coachRosterMode = isCoach(effectiveRole) && !!rosterClientId;
+  const isPersonalSelf = !coachRosterMode && isPersonal(effectiveRole);
 
   const [uploadForm, setUploadForm] = useState({
     date_taken: new Date().toISOString().split('T')[0],
@@ -178,7 +179,7 @@ export default function ProgressPhotos() {
   const { data: myClient = null, isLoading: loadingMyClient } = useQuery({
     queryKey: ['progress-photos-my-client', user?.id],
     queryFn: () => getMyClientProfile(user.id),
-    enabled: Boolean(user?.id && hasSupabase && !coachRosterMode),
+    enabled: Boolean(user?.id && hasSupabase && !coachRosterMode && !isPersonalSelf),
   });
 
   const { data: rosterClient = null, isLoading: loadingRosterClient } = useQuery({
@@ -198,6 +199,9 @@ export default function ProgressPhotos() {
   });
 
   const effectiveClientId = coachRosterMode ? rosterClientId : myClient?.id || '';
+  const personalProfileId = isPersonalSelf && !effectiveClientId ? user?.id || '' : '';
+  const photoScopeKey = effectiveClientId || personalProfileId || 'none';
+  const canUploadPhotos = Boolean(effectiveClientId || personalProfileId);
   const coachForTracking = rosterClient?.trainer_id ?? rosterClient?.coach_id ?? myClient?.trainer_id ?? myClient?.coach_id;
 
   const isCompetitionContext = Boolean(
@@ -205,13 +209,17 @@ export default function ProgressPhotos() {
   );
 
   const { data: photos = [], isLoading: loadingPhotos } = useQuery({
-    queryKey: ['progress-photos', effectiveClientId],
+    queryKey: ['progress-photos', photoScopeKey, personalProfileId ? 'personal' : 'client'],
     queryFn: async () => {
       const supabase = getSupabase();
-      if (!supabase || !effectiveClientId) return [];
-      return listProgressPhotos({ supabase, clientId: effectiveClientId });
+      if (!supabase || !canUploadPhotos) return [];
+      return listProgressPhotos({
+        supabase,
+        clientId: effectiveClientId || undefined,
+        profileId: personalProfileId || undefined,
+      });
     },
-    enabled: Boolean(hasSupabase && effectiveClientId),
+    enabled: Boolean(hasSupabase && canUploadPhotos),
   });
 
   const resolvedWeightTrend = useMemo(
@@ -233,14 +241,14 @@ export default function ProgressPhotos() {
   const uploadMutation = useMutation({
     mutationFn: async ({ file, tag, form }) => {
       const supabase = getSupabase();
-      if (!supabase || !effectiveClientId || !file) throw new Error('Missing upload context');
+      if (!supabase || !file || !canUploadPhotos) throw new Error('Missing upload context');
       const profileId = coachRosterMode ? rosterClient?.user_id : user?.id;
       if (!profileId) throw new Error('Missing profile for upload');
       const w = form.weight_kg.trim();
       const weightKg = w === '' ? null : Number(w);
       return uploadProgressPhoto({
         supabase,
-        clientId: effectiveClientId,
+        clientId: effectiveClientId || null,
         profileId,
         file,
         dateTaken: form.date_taken,
@@ -250,8 +258,8 @@ export default function ProgressPhotos() {
       });
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['progress-photos', effectiveClientId] });
-      queryClient.invalidateQueries({ queryKey: ['photo-comparison-photos', effectiveClientId] });
+      queryClient.invalidateQueries({ queryKey: ['progress-photos', photoScopeKey] });
+      queryClient.invalidateQueries({ queryKey: ['photo-comparison-photos', photoScopeKey] });
       toast.success('Photo uploaded');
       setMobileUploadOpen(false);
       setPendingFile(null);
@@ -284,7 +292,11 @@ export default function ProgressPhotos() {
   };
 
   const openComparison = () => {
-    if (!effectiveClientId || photos.length < 2) return;
+    if (!canUploadPhotos || photos.length < 2) return;
+    if (personalProfileId && !effectiveClientId) {
+      navigate('/prep-comparison?personal=1');
+      return;
+    }
     navigate(`/prep-comparison?clientId=${encodeURIComponent(effectiveClientId)}`);
   };
 
@@ -304,15 +316,15 @@ export default function ProgressPhotos() {
   }
 
   if (coachRosterMode && loadingRosterClient) return <PageLoader />;
-  if (!coachRosterMode && loadingMyClient) return <PageLoader />;
+  if (!coachRosterMode && !isPersonalSelf && loadingMyClient) return <PageLoader />;
 
-  if (!effectiveClientId) {
+  if (!canUploadPhotos) {
     return (
       <div className="min-h-screen p-4" style={{ background: colors.bg, color: colors.text }}>
         <EmptyState
           icon={Camera}
-          title="No client profile yet"
-          description="Link with a coach or finish onboarding to upload progress photos."
+          title="Sign in to upload progress photos"
+          description="Progress photos are saved to your Atlas account once you are signed in."
         />
       </div>
     );
@@ -331,7 +343,7 @@ export default function ProgressPhotos() {
   }
 
   const uploadDisabled =
-    !effectiveClientId || uploadMutation.isPending || (coachRosterMode && !rosterClient?.user_id);
+    !canUploadPhotos || uploadMutation.isPending || (coachRosterMode && !rosterClient?.user_id);
   const uploadPanel = (
     <Card style={{ padding: spacing[20], border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius }}>
       <h2 className="text-base font-semibold mb-1" style={{ color: colors.text }}>Upload</h2>

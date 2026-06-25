@@ -63,11 +63,18 @@ export async function uploadProgressPhoto({
   weightKg,
 }) {
   try {
-    if (!supabase || !clientId || !file) throw new Error('uploadProgressPhoto: supabase, clientId, and file are required');
+    if (!supabase || !file) throw new Error('uploadProgressPhoto: supabase and file are required');
+    const isPersonalUpload = !clientId && profileId;
+    if (!clientId && !profileId) {
+      throw new Error('uploadProgressPhoto: clientId or profileId is required');
+    }
     const safeTag = ALLOWED_TAGS.has(String(tag)) ? String(tag) : 'front';
     const blob = await compressProgressPhoto(file);
+    if (!blob) throw new Error('Could not process image');
     const photoId = crypto.randomUUID();
-    const path = `${clientId}/${photoId}.jpg`;
+    const path = isPersonalUpload
+      ? `personal/${profileId}/${photoId}.jpg`
+      : `${clientId}/${photoId}.jpg`;
 
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, blob, {
       contentType: 'image/jpeg',
@@ -76,15 +83,17 @@ export async function uploadProgressPhoto({
     if (upErr) throw upErr;
 
     let resolvedProfileId = profileId ?? null;
-    const linkedCoachId = coachId ?? (await getClientCoachId(clientId));
-    if (!resolvedProfileId) {
-      const { data: crow } = await supabase.from('clients').select('user_id').eq('id', clientId).maybeSingle();
-      if (crow?.user_id) resolvedProfileId = crow.user_id;
+    let resolvedCoachId = coachId ?? null;
+    if (!isPersonalUpload) {
+      resolvedCoachId = coachId ?? (await getClientCoachId(clientId));
+      if (!resolvedProfileId) {
+        const { data: crow } = await supabase.from('clients').select('user_id').eq('id', clientId).maybeSingle();
+        if (crow?.user_id) resolvedProfileId = crow.user_id;
+      }
     }
-    const resolvedCoachId = linkedCoachId ?? null;
 
     const row = {
-      client_id: clientId,
+      client_id: clientId || null,
       profile_id: resolvedProfileId,
       coach_id: resolvedCoachId,
       storage_path: path,
@@ -102,7 +111,7 @@ export async function uploadProgressPhoto({
     return { ...inserted, signed_url: signedUrl, photo_url: signedUrl };
   } catch (error) {
     console.error('[progressPhotosService] uploadProgressPhoto:', error);
-    return null;
+    throw error;
   }
 }
 

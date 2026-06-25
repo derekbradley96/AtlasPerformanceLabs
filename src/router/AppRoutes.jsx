@@ -393,7 +393,8 @@ function LegacyActiveWorkoutRedirect() {
 
 function LegacyWorkoutEntryRedirect() {
   const { effectiveRole } = useAuth();
-  if (isClient(effectiveRole) || isPersonal(effectiveRole)) return <Navigate to="/today" replace />;
+  if (isPersonal(effectiveRole)) return <WorkoutPlayerRedirect />;
+  if (isClient(effectiveRole)) return <Navigate to="/today-workout" replace />;
   return <Navigate to="/program-builder" replace />;
 }
 

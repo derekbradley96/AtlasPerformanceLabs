@@ -33,6 +33,7 @@ import {
   BookOpen,
   Activity,
 } from 'lucide-react';
+import { PERSONAL_PROGRAM_BUILDER } from '@/lib/personalBuilderNav';
 
 const COMP_ACCENT = '#9d6ef0'; // competition purple
 const PREP_ACCENT = '#ba7517'; // prep amber
@@ -195,8 +196,8 @@ export function getSidebarSections(
       id: 'build',
       label: 'Build',
       items: [
-        { path: '/personal-my-program', label: 'My programme', icon: FileText },
-        { path: '/comp-prep/pose-library', label: 'Exercise library', icon: Dumbbell },
+        { path: '/myprogram', label: 'My programme', icon: FileText },
+        { path: PERSONAL_PROGRAM_BUILDER, label: 'Exercise library', icon: Dumbbell },
       ],
     },
     ...(isCompPersonal ? [{

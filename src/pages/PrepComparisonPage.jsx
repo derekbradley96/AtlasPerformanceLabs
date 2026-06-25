@@ -6,7 +6,7 @@ import Card from '@/ui/Card';
 import EmptyState from '@/components/ui/EmptyState';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
-import { isCoach } from '@/lib/roles';
+import { isCoach, isPersonal } from '@/lib/roles';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getCoachClients } from '@/lib/checkins';
 import { getMyClientProfile } from '@/lib/clientProfiles';
@@ -19,7 +19,9 @@ export default function PrepComparisonPage() {
   const [searchParams] = useSearchParams();
   const { user, effectiveRole } = useAuth();
   const coachView = isCoach(effectiveRole);
+  const personalView = !coachView && isPersonal(effectiveRole);
   const presetClientId = searchParams.get('clientId') || '';
+  const personalMode = personalView && (searchParams.get('personal') === '1' || !presetClientId);
   const [selectedClientId, setSelectedClientId] = useState(presetClientId);
 
   const { data: clients = [], isLoading: loadingClients, isError: clientsError } = useQuery({
@@ -40,24 +42,30 @@ export default function PrepComparisonPage() {
   const { data: ownClientProfile = null, isLoading: loadingOwnClient, isError: ownClientError } = useQuery({
     queryKey: ['photo-comparison-own-client', user?.id],
     queryFn: () => getMyClientProfile(user.id),
-    enabled: !coachView && !!user?.id && hasSupabase,
+    enabled: !coachView && !personalView && !!user?.id && hasSupabase,
   });
 
   const effectiveClientId = coachView ? selectedClientId : ownClientProfile?.id || '';
+  const personalProfileId = personalMode && !effectiveClientId ? user?.id || '' : '';
+  const photoScopeKey = effectiveClientId || personalProfileId || '';
   const selectedClient = useMemo(
     () => (coachView ? clients.find((c) => c.id === effectiveClientId) || null : ownClientProfile),
     [coachView, clients, ownClientProfile, effectiveClientId]
   );
 
   const { data: photos = [], isLoading: loadingPhotos, isError: photosError } = useQuery({
-    queryKey: ['photo-comparison-photos', effectiveClientId],
+    queryKey: ['photo-comparison-photos', photoScopeKey, personalProfileId ? 'personal' : 'client'],
     queryFn: async () => {
-      if (!effectiveClientId || !hasSupabase) return [];
+      if (!photoScopeKey || !hasSupabase) return [];
       const supabase = getSupabase();
       if (!supabase) return [];
-      return listProgressPhotos({ supabase, clientId: effectiveClientId });
+      return listProgressPhotos({
+        supabase,
+        clientId: effectiveClientId || undefined,
+        profileId: personalProfileId || undefined,
+      });
     },
-    enabled: hasSupabase && !!effectiveClientId,
+    enabled: hasSupabase && !!photoScopeKey,
   });
 
   const isCompetitionContext = Boolean(
@@ -119,21 +127,25 @@ export default function PrepComparisonPage() {
           </Card>
         )}
 
-        {!isLoading && !effectiveClientId && (
+        {!isLoading && !photoScopeKey && (
           <EmptyState
-            title="Select a client"
-            description="Choose a client with at least two progress photos."
+            title={personalView ? 'Upload progress photos first' : 'Select a client'}
+            description={
+              personalView
+                ? 'Add at least two dated photos on Progress photos, then compare them here.'
+                : 'Choose a client with at least two progress photos.'
+            }
             icon={GitCompare}
           />
         )}
 
-        {!isLoading && effectiveClientId && photos.length < 2 && photos.length > 0 && (
+        {!isLoading && photoScopeKey && photos.length < 2 && photos.length > 0 && (
           <Card style={{ padding: spacing[24], border: `1px solid ${colors.border}`, borderRadius: shell.cardRadius ?? 8 }}>
             <p className="text-sm" style={{ color: colors.text }}>Upload one more progress photo to unlock side-by-side comparison.</p>
           </Card>
         )}
 
-        {!isLoading && effectiveClientId && photos.length === 0 && (
+        {!isLoading && photoScopeKey && photos.length === 0 && (
           <EmptyState
             title="No progress photos yet"
             description="Upload progress photos to compare your transformation visually."
@@ -141,7 +153,7 @@ export default function PrepComparisonPage() {
           />
         )}
 
-        {!isLoading && effectiveClientId && photos.length >= 2 && (
+        {!isLoading && photoScopeKey && photos.length >= 2 && (
           <>
             <h2 className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: colors.muted }}>
               {isCompetitionContext ? 'Weeks out comparison' : 'Date comparison'}

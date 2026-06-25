@@ -697,7 +697,7 @@ function PersonalCompToday({ data }) {
 export default function TodayPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { effectiveRole, isCompPrepClient, prepContext, activeContestPrep, profile: authProfile } = useAuth();
+  const { user, effectiveRole, isCompPrepClient, prepContext, activeContestPrep, profile: authProfile } = useAuth();
   const { isDesktopWeb } = usePresentationMode();
   const isPersonalRole = !isClient(effectiveRole);
   const hasCompetitionPrep = Boolean(activeContestPrep?.id) || Boolean(prepContext);

@@ -1,15 +1,20 @@
 import React, { Suspense } from 'react';
 import { Navigate, Route, useLocation, useParams } from 'react-router-dom';
 import RequireRole from '@/components/auth/RequireRole';
-import { Roles, isPersonal } from '@/lib/roles';
+import { Roles, isPersonal, normalizeRole } from '@/lib/roles';
 import { useAuth } from '@/lib/AuthContext';
 import CommunityRoomPage from '@/pages/CommunityRoomPage';
 import { getMessagesThreadPath } from '@/lib/messagesPath';
+import { PageLoader } from '@/components/ui/LoadingState';
 
 function ProgramsIndexEntry({ Programs }) {
-  const { effectiveRole } = useAuth();
-  if (isPersonal(effectiveRole)) {
-    return <Navigate to="/personal-my-program" replace />;
+  const { effectiveRole, profile, isHydratingAppState } = useAuth();
+  if (isHydratingAppState) {
+    return <PageLoader message="Loading…" />;
+  }
+  const role = effectiveRole ?? profile?.role;
+  if (isPersonal(role) || normalizeRole(role) === 'personal') {
+    return <Navigate to="/myprogram" replace />;
   }
   return (
     <RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only.">

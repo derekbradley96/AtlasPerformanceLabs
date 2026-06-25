@@ -79,6 +79,8 @@ import { getWeeksOutFromShow } from '@/lib/prepProtocols';
 import { getCoachClientJoinLinkPrimary } from '@/lib/referrals';
 import { sharePlainText } from '@/lib/nativeShare';
 import { inferWeightPhases, buildWeightInterpretation } from '@/lib/progressTrendEngine';
+import { shouldShowCoachUpsell } from '@/lib/coachUpsellTiming';
+import { fetchCoachUpsellPreviewRows } from '@/lib/coachUpsellPreview';
 
 const PAGE_PADDING = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
 
@@ -221,6 +223,7 @@ export default function ProgressPage() {
   const isCoachView = isCoach(effectiveRole) && clientIdParam != null;
   const isPersonalView = !isCoachView && isPersonal(effectiveRole);
   const showPrepSection = isCoachView && coachFocusAllowsPrepFeatures(coachFocus);
+  const supportCardShadow = '0 4px 24px rgba(0,0,0,0.22)';
 
   useEffect(() => {
     document.title = isCoachView && clientIdParam ? 'Client progress — Atlas' : 'Progress — Atlas';
@@ -307,6 +310,7 @@ export default function ProgressPage() {
     queryFn: () => fetchPersonalProgressDashboard(user.id),
     enabled: Boolean(supabase && user?.id && isPersonalView),
   });
+  const personalDashResolved = personalDash ?? EMPTY_PERSONAL_PROGRESS_DASHBOARD;
 
   const { data: activePersonalPrep } = useQuery({
     queryKey: ['personal-contest-prep-active', user?.id],
@@ -483,7 +487,7 @@ export default function ProgressPage() {
     if (personalDashLoading) {
       return derivePersonalProgressRouteState({ loading: true });
     }
-    const dash = personalDash ?? EMPTY_PERSONAL_PROGRESS_DASHBOARD;
+    const dash = personalDashResolved;
     const hasNt = hasPersonalNutritionTargets(personalNutritionMerged);
     const nut7Avg =
       dash.nutrition7d?.proteinAdherence7dAvg != null && dash.nutrition7d?.calorieAdherence7dAvg != null
@@ -684,50 +688,6 @@ export default function ProgressPage() {
         >
           <TopBar title={title} onBack={showBack ? () => navigate(-1) : undefined} showBack={showBack} />
           <PersonalColumn variant={isWideWeb ? 'home' : 'wide'}>
-          <section style={{ marginBottom: rhythm.section }}>
-            <p style={{ margin: `0 0 ${spacing[8]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
-              Strength bests
-            </p>
-            <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
-              <div style={{ display: 'grid', gap: spacing[8] }}>
-                {['Back squat', 'Deadlift', 'Barbell bench press', 'Overhead press', 'Barbell row'].map((lift) => (
-                  <div key={lift} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: `1px solid ${shell.cardBorder}`, borderRadius: 10, padding: spacing[10] }}>
-                    <div>
-                      <p style={{ margin: 0, fontSize: 14, color: colors.text, fontWeight: 700 }}>{lift}</p>
-                      <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>
-                        {dash.completedLast28d > 0 ? 'New PR momentum building - keep progressive overload.' : 'Log workouts to establish your PR baseline.'}
-                      </p>
-                    </div>
-                    <span style={{ fontSize: 11, color: colors.success, fontWeight: 700 }}>PR</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </section>
-
-          <section style={{ marginBottom: rhythm.section }}>
-            <p style={{ margin: `0 0 ${spacing[8]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
-              Workout consistency (12 weeks)
-            </p>
-            <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(14,minmax(0,1fr))', gap: 4 }}>
-                {Array.from({ length: 84 }).map((_, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      height: 12,
-                      borderRadius: 3,
-                      background: idx % Math.max(2, Math.round(84 / Math.max(1, dash.completedLast28d || 1))) === 0 ? colors.success : colors.surface2,
-                      opacity: idx % Math.max(2, Math.round(84 / Math.max(1, dash.completedLast28d || 1))) === 0 ? 1 : 0.35,
-                    }}
-                  />
-                ))}
-              </div>
-              <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 13, color: colors.muted }}>
-                {dash.completedLast28d >= 8 ? `${dash.completedLast28d} sessions in the last 4 weeks - consistent and compounding.` : `${dash.completedLast28d} sessions in the last 4 weeks - add 1-2 more weekly to lock consistency.`}
-              </p>
-            </Card>
-          </section>
             <section style={{ marginBottom: spacing[24] }}>
               <ProgressSummarySkeleton />
             </section>
@@ -817,7 +777,7 @@ export default function ProgressPage() {
   }
 
   if (isPersonalView) {
-    const dash = personalDash ?? EMPTY_PERSONAL_PROGRESS_DASHBOARD;
+    const dash = personalDashResolved;
     const isEnhancedTier = ['enhanced', 'free'].includes(resolvePersonalPlanTier(profile, user));
     const hasNt = hasPersonalNutritionTargets(personalNutritionMerged);
     const ntSummary = formatPersonalNutritionTargetsSummary(personalNutritionMerged);
@@ -841,7 +801,6 @@ export default function ProgressPage() {
     const noCheckins = Number(dash.personalCheckinsCount || 0) < 1;
     const noNutritionData = !hasNt && nut7Avg == null && !hasNutritionLine;
     const showEmptyProgressState = noWorkouts && noCheckins && noNutritionData;
-    const supportCardShadow = '0 4px 24px rgba(0,0,0,0.22)';
     const personalCoreInsights = buildPersonalCoreInsightLines(dash, weightChartPersonal);
 
     return (
