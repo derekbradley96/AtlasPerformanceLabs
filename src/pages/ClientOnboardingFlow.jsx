@@ -1021,32 +1021,6 @@ export default function ClientOnboardingFlow() {
             <p className="text-[12px] mb-2" style={{ color: colors.muted }}>
               ⚠️ You&apos;ll need to complete payment before your coach can see your full profile and send you a programme.
             </p>
-            {/* TESTING ONLY — remove this skip button before public launch. See docs/LAUNCH_CHECKLIST.md. */}
-            <button
-              type="button"
-              onClick={async function handleSkipForNow() {
-                const supabase = getSupabase();
-                if (supabase && supabaseUser?.id) {
-                  await supabase.from('profiles').update({ onboarding_complete: true }).eq('id', supabaseUser.id);
-                  await refreshProfile();
-                }
-                toast('You can complete payment from your account settings any time.', { duration: 4000 });
-                navigate(getPostOnboardingPath('client'));
-              }}
-              style={{
-                width: '100%',
-                marginTop: spacing[12],
-                padding: `${spacing[10]}px`,
-                borderRadius: radii.lg,
-                border: `1px dashed ${colors.border}`,
-                background: 'transparent',
-                color: colors.muted,
-                fontSize: 13,
-                cursor: 'pointer',
-              }}
-            >
-              Skip for now — I&apos;ll set up payment later
-            </button>
           </>
         ) : null}
 

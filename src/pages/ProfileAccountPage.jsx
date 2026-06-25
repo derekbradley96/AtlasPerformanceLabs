@@ -10,6 +10,7 @@ import { PageLoader } from '@/components/ui/LoadingState';
 import { useAuth } from '@/lib/AuthContext';
 import { isCoach, isClient, isPersonal } from '@/lib/roles';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { getPasswordError } from '@/lib/passwordPolicy';
 import { getNotificationPreferences, updateNotificationPreferences } from '@/lib/notificationPreferences';
 import { getCoachClientJoinLinkPrimary } from '@/lib/referrals';
 import { fetchMergedPersonalNutritionTargets, formatPersonalNutritionTargetsSummary, personalNutritionTargetsQueryKey } from '@/lib/personalNutritionProfile';
@@ -545,6 +546,8 @@ export default function ProfileAccountPage() {
         if (error) throw error;
       }
       if (supabase && password.trim()) {
+        const pwError = getPasswordError(password.trim());
+        if (pwError) throw new Error(pwError);
         const { error } = await supabase.auth.updateUser({ password: password.trim() });
         if (error) throw error;
         setPassword('');

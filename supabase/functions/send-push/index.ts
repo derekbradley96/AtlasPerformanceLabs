@@ -85,11 +85,29 @@ Deno.serve(async (req) => {
           { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
         );
       }
+    } else if (data?.type === "action_required" || data?.type === "insight") {
+      // Allow if caller has a coach–client relationship with the recipient, or is the recipient.
+      if (callerId !== profileId) {
+        // Check clients table: caller is coach of recipient, or recipient is coach of caller.
+        const { data: rel } = await supabase
+          .from("clients")
+          .select("id")
+          .or(
+            `and(coach_id.eq.${callerId},user_id.eq.${profileId}),and(user_id.eq.${callerId},coach_id.eq.${profileId})`
+          )
+          .limit(1)
+          .maybeSingle();
+        if (!rel) {
+          return new Response(
+            JSON.stringify({ ok: false, error: "Forbidden", sent: 0 }),
+            { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
+          );
+        }
+      }
     } else {
-      // Only message_received is allowed from the app; other types would require separate authorization.
       return new Response(
-        JSON.stringify({ ok: false, error: "Forbidden", sent: 0 }),
-        { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
+        JSON.stringify({ ok: false, error: "Unsupported push type", sent: 0 }),
+        { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 

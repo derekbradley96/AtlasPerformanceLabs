@@ -274,6 +274,15 @@ function NativePlatformInit() {
         await createAndroidChannels();
 
         const { App: CapApp } = await import('@capacitor/app');
+        // Android hardware back button: navigate back, or exit on root screens.
+        await CapApp.addListener('backButton', ({ canGoBack }) => {
+          if (canGoBack) {
+            window.history.back();
+          } else {
+            CapApp.exitApp();
+          }
+        });
+
         appStateHandle = await CapApp.addListener('appStateChange', async ({ isActive }) => {
           if (isActive) {
             await checkForUpdate();
