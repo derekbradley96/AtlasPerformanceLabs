@@ -79,11 +79,13 @@ export default function AtlasLogo({
           alt={alt}
           draggable={false}
           style={{
-            width: 200,
-            maxWidth: '60vw',
+            width: 340,
+            maxWidth: '85vw',
             height: 'auto',
             objectFit: 'contain',
             display: 'block',
+            marginTop: -40,
+            marginBottom: -40,
             ...LOGO_IMG_STYLE,
             ...style,
           }}

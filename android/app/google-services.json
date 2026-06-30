@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "539329854967",
+    "project_id": "atlas-performance-labs",
+    "storage_bucket": "atlas-performance-labs.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:539329854967:android:a113e56a069cf3af50c2f2",
+        "android_client_info": {
+          "package_name": "com.atlasperformancelabs.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD5oNMmXUEz_bj7l9dPuOSHg733BDHqEa4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -510,7 +510,15 @@ export default function AuthScreen() {
       if (isLogin) {
         toast.success('Signed in');
         if (isPublicAuthEntry) {
-          navigate('/auth?mode=login', { replace: true });
+          const dest = resolveContinueFromPublicAuth({
+            supabaseUser: data?.user ?? supabaseUser,
+            profile,
+            role,
+            profileLoadError,
+            getPendingInvite,
+            fallbackPath: '/home',
+          });
+          navigate(dest, { replace: true });
         }
         return;
       }
@@ -689,7 +697,7 @@ export default function AuthScreen() {
             transition: 'opacity 400ms ease-out, transform 400ms ease-out',
           }}
         >
-          <AtlasLogo variant="auth" />
+          <AtlasLogo variant="auth" wrapperStyle={{ marginTop: 40 }} />
           <p
             className="text-center"
             style={{
@@ -867,8 +875,8 @@ export default function AuthScreen() {
                       gap: spacing[10],
                     }}
                   >
-                    <svg width="16" height="18" viewBox="0 0 814 1000" aria-hidden>
-                      <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 405.4 10.4 300.5 10.4 219c0-232.3 149.5-355.3 296.6-355.3 79.8 0 146.3 52.6 196.3 52.6 48 0 123.3-55.4 213.8-55.4 34.2 0 142.5 3.2 214.8 138.9zm-175-133.2c-25.9 36.2-73.9 62.8-117.2 62.8-3.2 0-6.4-.3-9.6-.7 0-68.5 44.4-133.4 75.3-162.7 35.8-33.5 91.8-59.8 139.5-62.2.6 4.5.9 9 .9 12.8 0 64.2-41.6 132.1-88.9 150z" fill="currentColor" />
+                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+                      <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
                     </svg>
                     Continue with Apple
                   </button>
