@@ -28,7 +28,6 @@ import { getPendingInvite, clearPendingInvite, setPendingInvite } from '@/pages/
 import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { deriveAuthScreenSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { resolvePostSessionDestination } from '@/lib/auth/postAuthNavigation';
-import { resolveContinueFromPublicAuth } from '@/lib/auth/postAuthNavigation';
 import {
   authenticateWithBiometric,
   checkBiometricAvailability,
@@ -510,15 +509,9 @@ export default function AuthScreen() {
       if (isLogin) {
         toast.success('Signed in');
         if (isPublicAuthEntry) {
-          const dest = resolveContinueFromPublicAuth({
-            supabaseUser: data?.user ?? supabaseUser,
-            profile,
-            role,
-            profileLoadError,
-            getPendingInvite,
-            fallbackPath: '/home',
-          });
-          navigate(dest, { replace: true });
+          // Strip ?public=1 so the redirect useEffect (below) fires once auth
+          // state is committed to context — avoids racing navigate vs setState.
+          setSearchParams({}, { replace: true });
         }
         return;
       }
