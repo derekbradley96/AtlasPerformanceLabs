@@ -24,6 +24,7 @@ import { usePresentationMode } from '@/lib/presentationMode';
 import CoachFreeTextInput from '@/components/ui/CoachFreeTextInput';
 import { PageLoader } from '@/components/ui/LoadingState';
 import ProgramBuilderHeader from '@/components/program-builder/ProgramBuilderHeader';
+import ProgramEntryPanel from '@/components/program-builder/ProgramEntryPanel';
 import ProgramWeekView from '@/components/program-builder/ProgramWeekView';
 import DuplicateToClientSheet from '@/components/program-builder/DuplicateToClientSheet';
 import { PersonalCanvas, PersonalColumn } from '@/components/personal/PersonalSurface';
@@ -1866,6 +1867,13 @@ export default function ProgramBuilderPage() {
     return Math.max(1, Math.min(52, Math.round(preset)));
   }, [entryWeeksPreset, entryCustomWeeks]);
 
+  const handleStartBlank = () => {
+    const weeks = resolveEntryTotalWeeks();
+    setTotalWeeks(weeks);
+    headerEffectiveWeeksRef.current = weeks;
+    handleSaveBlock({ totalWeeks: weeks });
+  };
+
   const handleEntryGenerateProgram = useCallback(async () => {
     if (!supabase || !coachId) return;
     const isSelfTarget = isPersonalRole;
@@ -2312,130 +2320,70 @@ export default function ProgramBuilderPage() {
             : { ...pageContainer, maxWidth: isDesktopWeb ? 1240 : undefined, margin: '0 auto', paddingBottom: spacing[24] }
         }
       >
-        <ProgramBuilderHeader
-          showCoachNoClientsGate={showCoachNoClientsGate}
-          navigate={navigate}
-          clients={clients}
-          isPersonalRole={isPersonalRole}
-          personalBuilderIntro={personalBuilderIntro}
-          block={block}
-          personalBasicExperience={personalBasicExperience}
-          fromTodayContext={fromTodayContext}
-          dismissTodayFromBuilder={dismissTodayFromBuilder}
-          adjustmentMode={adjustmentMode}
-          contextBannerTitle={contextBannerTitle}
-          contextNote={contextNote}
-          handleSaveBlock={handleSaveBlock}
-          headerEffectiveWeeksRef={headerEffectiveWeeksRef}
-          saving={saving}
-          clientId={clientId}
-          contextReviewId={contextReviewId}
-          contextSource={contextSource}
-          setClientId={setClientId}
-          standardCard={standardCard}
-          sectionGap={sectionGap}
-          sectionLabel={sectionLabel}
-          blockName={blockName}
-          setBlockName={setBlockName}
-          totalWeeks={totalWeeks}
-          setTotalWeeks={setTotalWeeks}
-          reportHeaderEffectiveWeeks={reportHeaderEffectiveWeeks}
-          saveDisabled={saveDisabled}
-          saveHint={saveHint}
-          isPrepOriented={isPrepOriented}
-          personalSaveNameHint={personalSaveNameHint}
-          personalEnhancedExperience={personalEnhancedExperience}
-        />
-        {isPersonalRole && !block?.id && searchParams.get('templates') === '1' ? (
-          <Card style={{ ...standardCard, marginBottom: sectionGap, padding: spacing[16] }}>
-            <p style={{ ...sectionLabel, marginBottom: spacing[10] }}>Choose a template</p>
-            <p style={{ margin: `0 0 ${spacing[12]}px`, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
-              Structures are starting points — you edit every exercise and load after you pick one.
-            </p>
-            <div style={{ display: 'grid', gap: spacing[10] }}>
-              {PROGRAM_TEMPLATES.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  disabled={saving}
-                  onClick={() => handleEntryUseTemplate(t.id)}
-                  style={{
-                    textAlign: 'left',
-                    borderRadius: 12,
-                    border: `1px solid ${colors.border}`,
-                    background: colors.surface1,
-                    padding: spacing[12],
-                    cursor: saving ? 'wait' : 'pointer',
-                  }}
-                >
-                  <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>{t.name}</p>
-                  <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>{t.description}</p>
-                </button>
-              ))}
-            </div>
-          </Card>
-        ) : null}
-        {isPersonalRole ? (
-          <Card style={{ ...standardCard, marginBottom: sectionGap, padding: spacing[12] }}>
-            <div style={{ display: 'grid', gap: spacing[10] }}>
-              <div>
-                <p style={{ ...sectionLabel, marginBottom: 6 }}>Goal</p>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    ['muscle', 'Build muscle'],
-                    ['fat_loss', 'Lose fat'],
-                    ['competition', 'Competition prep'],
-                  ].map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setQuickGoal(value)}
-                      style={{
-                        minHeight: touchTargetMin - 8,
-                        padding: `0 ${spacing[12]}px`,
-                        borderRadius: 999,
-                        border: `1px solid ${quickGoal === value ? colors.primary : colors.border}`,
-                        background: quickGoal === value ? colors.primarySubtle : colors.surface1,
-                        color: quickGoal === value ? colors.primary : colors.text,
-                        fontSize: 12,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p style={{ ...sectionLabel, marginBottom: 6 }}>Days per week</p>
-                <div className="flex flex-wrap gap-2">
-                  {[2, 3, 4, 5, 6].map((n) => (
-                    <button
-                      key={`days-${n}`}
-                      type="button"
-                      onClick={() => {
-                        setQuickDaysPerWeek(n);
-                        setQuickDaysPerWeekInput(String(n));
-                      }}
-                      style={{
-                        minWidth: 44,
-                        minHeight: touchTargetMin - 8,
-                        borderRadius: 999,
-                        border: `1px solid ${quickDaysPerWeek === n ? colors.primary : colors.border}`,
-                        background: quickDaysPerWeek === n ? colors.primarySubtle : colors.surface1,
-                        color: quickDaysPerWeek === n ? colors.primary : colors.text,
-                        fontSize: 13,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </Card>
-        ) : null}
+        {/* Entry panel — when no block exists and client gate isn't blocking */}
+        {!block?.id && !showCoachNoClientsGate && (
+          <ProgramEntryPanel
+            isPersonalRole={isPersonalRole}
+            clients={clients}
+            saving={saving}
+            blockName={blockName}
+            setBlockName={setBlockName}
+            entryGoal={entryGoal}
+            setEntryGoal={setEntryGoal}
+            entryDaysPerWeek={entryDaysPerWeek}
+            setEntryDaysPerWeek={setEntryDaysPerWeek}
+            entryWeeksPreset={entryWeeksPreset}
+            setEntryWeeksPreset={setEntryWeeksPreset}
+            entryCustomWeeks={entryCustomWeeks}
+            setEntryCustomWeeks={setEntryCustomWeeks}
+            entryWhoFor={entryWhoFor}
+            onEntryWhoForChange={(val) => {
+              setEntryWhoFor(val);
+              if (val && val !== ENTRY_TARGET_TEMPLATE) setClientId(val);
+              else setClientId('');
+            }}
+            onGenerate={handleEntryGenerateProgram}
+            onStartBlank={handleStartBlank}
+          />
+        )}
+
+        {/* Editing header / no-clients gate — shown when block exists OR no clients yet */}
+        {(block?.id || showCoachNoClientsGate) && (
+          <ProgramBuilderHeader
+            showCoachNoClientsGate={showCoachNoClientsGate}
+            navigate={navigate}
+            clients={clients}
+            isPersonalRole={isPersonalRole}
+            personalBuilderIntro={personalBuilderIntro}
+            block={block}
+            personalBasicExperience={personalBasicExperience}
+            fromTodayContext={fromTodayContext}
+            dismissTodayFromBuilder={dismissTodayFromBuilder}
+            adjustmentMode={adjustmentMode}
+            contextBannerTitle={contextBannerTitle}
+            contextNote={contextNote}
+            handleSaveBlock={handleSaveBlock}
+            headerEffectiveWeeksRef={headerEffectiveWeeksRef}
+            saving={saving}
+            clientId={clientId}
+            contextReviewId={contextReviewId}
+            contextSource={contextSource}
+            setClientId={setClientId}
+            standardCard={standardCard}
+            sectionGap={sectionGap}
+            sectionLabel={sectionLabel}
+            blockName={blockName}
+            setBlockName={setBlockName}
+            totalWeeks={totalWeeks}
+            setTotalWeeks={setTotalWeeks}
+            reportHeaderEffectiveWeeks={reportHeaderEffectiveWeeks}
+            saveDisabled={saveDisabled}
+            saveHint={saveHint}
+            isPrepOriented={isPrepOriented}
+            personalSaveNameHint={personalSaveNameHint}
+            personalEnhancedExperience={personalEnhancedExperience}
+          />
+        )}
         {!isPersonalRole && block?.id ? (
           <Card style={{ ...standardCard, marginBottom: sectionGap, padding: spacing[12] }}>
             <div className="flex flex-wrap gap-2 items-center justify-between">
@@ -2595,14 +2543,6 @@ export default function ProgramBuilderPage() {
           onDuplicate={handleDuplicateBlockToClient}
           saving={saving}
         />
-
-        {!block?.id && (
-          <p className="text-[13px]" style={{ color: colors.muted, marginBottom: sectionGap }}>
-            {isPersonalRole
-              ? 'Name your plan above and tap Create — then add training days here.'
-              : 'Create the block to add weeks and days.'}
-          </p>
-        )}
 
         {block?.id ? <div ref={postBlockCreateRef} style={{ scrollMarginTop: 72, height: 0 }} aria-hidden /> : null}
         <ProgramWeekView

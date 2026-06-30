@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Plus, Search, Copy, Edit, Dumbbell, TrendingDown, Target, Users, Trash2 } from 'lucide-react';
+import { Plus, Search, Copy, Edit, Dumbbell, TrendingDown, Target, Users, Trash2, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   saveProgram,
@@ -23,7 +23,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { captureUiError } from '@/services/errorLogger';
 import { colors, spacing } from '@/ui/tokens';
 import { usePresentationMode } from '@/lib/presentationMode';
-import { desktopRhythm, chipPadding, cardContentRhythm } from '@/ui/pageLayout';
+import { desktopRhythm, cardContentRhythm } from '@/ui/pageLayout';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 
 async function lightHaptic() {
@@ -34,11 +34,11 @@ async function lightHaptic() {
 }
 
 const GOAL_OPTIONS = [
-  { key: 'all', label: 'All Goals' },
+  { key: 'all', label: 'All' },
   { key: 'strength', label: 'Strength' },
   { key: 'hypertrophy', label: 'Hypertrophy' },
   { key: 'fat_loss', label: 'Fat Loss' },
-  { key: 'general_fitness', label: 'General Fitness' },
+  { key: 'general_fitness', label: 'General' },
 ];
 const goalIcons = { strength: Dumbbell, hypertrophy: TrendingDown, fat_loss: Target, general_fitness: Users };
 const goalColors = {
@@ -55,7 +55,6 @@ export default function Programs() {
   const rhythm = desktopRhythm(isDesktopWeb);
   const cardRhythm = cardContentRhythm(isDesktopWeb);
   const cardPad = isDesktopWeb ? spacing[20] : spacing[16];
-  const goalChipPad = chipPadding({ desktop: isDesktopWeb, density: 'compact' });
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const data = useData();
@@ -90,11 +89,9 @@ export default function Programs() {
         const remote = Array.isArray(list) ? list : [];
         const supabaseBacked = hasSupabase && !!user?.id;
         if (supabaseBacked) {
-          // Source-of-truth when authenticated: DB-backed list only.
           setPrograms(remote);
           return;
         }
-        // Local-only mode: merge local seeded + runtime programs.
         const local = getLocalPrograms();
         const merged = [...remote];
         const seen = new Set(remote.map((p) => p?.id).filter(Boolean));
@@ -105,7 +102,6 @@ export default function Programs() {
       })
       .catch((err) => {
         if (!cancelled) {
-          // Fall back to local programs for continuity in coach flow.
           setPrograms(getLocalPrograms());
           setProgramsLoadError(false);
           captureUiError('Programs', err);
@@ -217,8 +213,35 @@ export default function Programs() {
         paddingTop: rhythm.top,
         paddingLeft: isDesktopWeb ? spacing[20] : 0,
         paddingRight: isDesktopWeb ? spacing[20] : 0,
+        paddingBottom: spacing[32],
       }}
     >
+      {/* Page header with Create button */}
+      <div
+        className="flex items-center justify-between"
+        style={{ marginBottom: spacing[16] }}
+      >
+        <h1 className="font-bold text-[20px]" style={{ color: colors.text, margin: 0 }}>
+          Programs
+        </h1>
+        <button
+          type="button"
+          onClick={handleCreate}
+          className="inline-flex items-center gap-2 font-semibold text-sm rounded-xl"
+          style={{
+            minHeight: 44,
+            padding: `0 ${spacing[16]}px`,
+            background: colors.primary,
+            color: '#fff',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          <Plus size={16} />
+          New Program
+        </button>
+      </div>
+
       {assignToClientId && clientForAssign && (
         <Card style={{ marginBottom: spacing[16], padding: isDesktopWeb ? spacing[16] : spacing[12] }}>
           <p className="text-[13px] font-medium" style={{ color: colors.muted, marginBottom: cardRhythm.titleBottom }}>Assigning to</p>
@@ -227,41 +250,53 @@ export default function Programs() {
         </Card>
       )}
 
-      <div style={{ marginBottom: rhythm.gutter }}>
+      {/* Search */}
+      <div style={{ marginBottom: spacing[12] }}>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none flex items-center">
-            <Search size={18} style={{ color: colors.muted }} />
+            <Search size={16} style={{ color: colors.muted }} />
           </span>
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search programs..."
-            className="w-full pl-9 pr-3 py-2.5 text-sm placeholder:opacity-70 focus:outline-none focus:ring-1 rounded-[20px]"
+            className="w-full pl-9 pr-3 py-2.5 text-sm placeholder:opacity-60 focus:outline-none focus:ring-1 rounded-xl"
             style={{
               color: colors.text,
-              background: colors.card,
+              background: colors.surface1,
               border: `1px solid ${colors.border}`,
             }}
           />
         </div>
       </div>
 
-      <div style={{ marginBottom: rhythm.section, minWidth: 0 }}>
-        <select
-          value={goalFilter}
-          onChange={(e) => setGoalFilter(e.target.value)}
-          className="w-full max-w-full rounded-[20px] text-sm py-2.5 px-3 focus:outline-none focus:ring-1 min-w-0"
-          style={{
-            color: colors.text,
-            background: colors.card,
-            border: `1px solid ${colors.border}`,
-          }}
-        >
-          {GOAL_OPTIONS.map((o) => (
-            <option key={o.key} value={o.key}>{o.label}</option>
-          ))}
-        </select>
+      {/* Goal filter chips */}
+      <div
+        className="flex gap-2 overflow-x-auto pb-1"
+        style={{ marginBottom: rhythm.section, scrollbarWidth: 'none' }}
+      >
+        {GOAL_OPTIONS.map((o) => {
+          const active = goalFilter === o.key;
+          return (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setGoalFilter(o.key)}
+              className="shrink-0 rounded-full text-xs font-semibold whitespace-nowrap"
+              style={{
+                minHeight: 34,
+                padding: `0 ${spacing[14]}px`,
+                background: active ? colors.primary : colors.surface1,
+                color: active ? '#fff' : colors.text,
+                border: `1px solid ${active ? colors.primary : colors.border}`,
+                cursor: 'pointer',
+              }}
+            >
+              {o.label}
+            </button>
+          );
+        })}
       </div>
 
       {(initialLoad || dataLoading) && <ProgramsListSkeleton count={4} />}
@@ -274,15 +309,13 @@ export default function Programs() {
         />
       ) : !initialLoad && !dataLoading && filteredPrograms.length === 0 ? (
         <EmptyState
-          icon={Dumbbell}
+          icon={ClipboardList}
           title={search || goalFilter !== 'all' ? 'No programs found' : 'No programs yet'}
           description={
             search || goalFilter !== 'all'
-              ? 'Try adjusting your filters to find a program.'
-              : 'Build your first program and assign it to a client.'
+              ? 'Try adjusting your search or filters.'
+              : 'Tap "New Program" above to build your first one.'
           }
-          actionLabel={!search && goalFilter === 'all' ? 'Create a program' : undefined}
-          onAction={!search && goalFilter === 'all' ? () => { void handleCreate(); } : undefined}
         />
       ) : !initialLoad && !dataLoading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: rhythm.gutter }}>
@@ -292,56 +325,83 @@ export default function Programs() {
             const assignedCount = getAssignmentCount(program.id);
             return (
               <Card key={program.id} style={{ padding: cardPad }}>
-                <div className="flex items-start justify-between gap-3" style={{ marginBottom: spacing[12] }}>
+                <div className="flex items-start gap-3">
+                  {/* Left: program info */}
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-[15px] truncate" style={{ color: colors.text, marginBottom: cardRhythm.titleBottom }}>{program.name}</h3>
-                    <div className="flex flex-wrap items-center gap-2" style={{ rowGap: isDesktopWeb ? spacing[8] : spacing[6] }}>
+                    <h3 className="font-semibold text-[15px] truncate" style={{ color: colors.text, margin: `0 0 ${spacing[6]}px` }}>
+                      {program.name}
+                    </h3>
+                    <div className="flex flex-wrap items-center gap-2">
                       {program.goal && (
                         <span
-                          className="rounded-full text-[10px] font-medium inline-flex items-center gap-1"
-                          style={{ background: `${goalColor}22`, color: goalColor, ...goalChipPad }}
+                          className="rounded-full text-[11px] font-semibold inline-flex items-center gap-1"
+                          style={{ background: `${goalColor}20`, color: goalColor, padding: '2px 8px' }}
                         >
-                          <GoalIcon size={12} />
+                          <GoalIcon size={11} />
                           {(program.goal || '').replace('_', ' ')}
                         </span>
                       )}
                       {program.duration_weeks && (
-                        <span className="text-xs" style={{ color: colors.muted }}>{program.duration_weeks} weeks</span>
+                        <span className="text-[11px]" style={{ color: colors.muted }}>{program.duration_weeks}w</span>
                       )}
-                      <span className="text-xs" style={{ color: colors.muted }}>v{program.version ?? 1}</span>
-                      <span className="text-xs" style={{ color: colors.muted }}>{program.updated_date ? new Date(program.updated_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</span>
-                      <span className="text-xs" style={{ color: colors.muted }}>{assignedCount} assigned</span>
+                      <span className="text-[11px]" style={{ color: colors.muted }}>{assignedCount} assigned</span>
+                      {program.updated_date && (
+                        <span className="text-[11px]" style={{ color: colors.muted }}>
+                          {new Date(program.updated_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </span>
+                      )}
                     </div>
-                    {program.description && <p className="text-sm line-clamp-2" style={{ color: colors.muted, marginTop: cardRhythm.titleBottom }}>{program.description}</p>}
+                    {program.description && (
+                      <p className="text-[12px] line-clamp-2 mt-1.5" style={{ color: colors.muted, margin: `${spacing[8]}px 0 0` }}>
+                        {program.description}
+                      </p>
+                    )}
                   </div>
-                </div>
-                <div className="flex gap-2 flex-wrap" style={{ marginTop: cardRhythm.actionsTop }}>
-                  <Button variant="secondary" onClick={() => handleEdit(program.id, program)} style={{ flex: 1, minWidth: 0 }}>
-                    <Edit size={14} style={{ marginRight: 4 }} /> Edit
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => handleDuplicate(program)}
-                    className="rounded-xl flex items-center justify-center"
-                    style={{ minHeight: 44, minWidth: 44, background: 'rgba(255,255,255,0.08)', border: `1px solid ${colors.border}` }}
-                    aria-label="Duplicate"
-                  >
-                    <Copy size={18} style={{ color: colors.muted }} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setProgramToDelete(program)}
-                    className="rounded-xl flex items-center justify-center"
-                    style={{ minHeight: 44, minWidth: 44, background: colors.surface1, border: `1px solid ${colors.border}` }}
-                    aria-label="Delete program"
-                  >
-                    <Trash2 size={18} style={{ color: colors.danger }} />
-                  </button>
-                  {assignToClientId && (
-                    <Button variant="primary" onClick={() => handleAssignToClient(program.id)}>
-                      Assign to Client
-                    </Button>
-                  )}
+
+                  {/* Right: action buttons */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {assignToClientId ? (
+                      <Button variant="primary" onClick={() => handleAssignToClient(program.id)} style={{ fontSize: 13 }}>
+                        Assign
+                      </Button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(program.id, program)}
+                          className="inline-flex items-center gap-1.5 rounded-lg font-semibold text-[13px]"
+                          style={{
+                            minHeight: 36,
+                            padding: `0 ${spacing[12]}px`,
+                            background: colors.primarySubtle,
+                            color: colors.primary,
+                            border: `1px solid ${colors.primary}`,
+                          }}
+                        >
+                          <Edit size={13} />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicate(program)}
+                          className="rounded-lg inline-flex items-center justify-center"
+                          style={{ minHeight: 36, minWidth: 36, background: colors.surface1, border: `1px solid ${colors.border}` }}
+                          aria-label="Duplicate"
+                        >
+                          <Copy size={15} style={{ color: colors.muted }} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProgramToDelete(program)}
+                          className="rounded-lg inline-flex items-center justify-center"
+                          style={{ minHeight: 36, minWidth: 36, background: colors.surface1, border: `1px solid ${colors.border}` }}
+                          aria-label="Delete"
+                        >
+                          <Trash2 size={15} style={{ color: colors.danger }} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </Card>
             );
@@ -349,15 +409,6 @@ export default function Programs() {
         </div>
       ) : null}
 
-      {!initialLoad && !dataLoading && filteredPrograms.length > 0 && (
-        <div style={{ marginTop: spacing[16] }}>
-          <Button variant="primary" onClick={handleCreate} style={{ width: '100%' }}>
-            <Plus size={18} style={{ marginRight: 8 }} /> Create Program
-          </Button>
-        </div>
-      )}
-
-      <div style={{ height: spacing[16] }} />
       <ConfirmDialog
         open={programToDelete !== null}
         title={`Delete "${programToDelete?.name || 'this program'}"?`}
