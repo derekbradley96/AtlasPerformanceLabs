@@ -160,7 +160,7 @@ export default function CoachRoutes({
       <Route path="results-stories" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Result stories are for coaches only."><ResultsStoriesPage /></RequireRole>} />
       <Route path="results-gallery" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Result stories are for coaches only."><ResultsGalleryPage /></RequireRole>} />
       <Route path="results-stories/:id" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Result stories are for coaches only."><CoachResultsStoryBuilderPage /></RequireRole>} />
-      <Route path="methodology-packages" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Methodology packages are for coaches only."><MethodologyPackagePage /></RequireRole>} />
+      <Route path="methodology-packages" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Coaching packs are for coaches only."><MethodologyPackagePage /></RequireRole>} />
       <Route path="calendar" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Session calendar is for coaches only."><CoachCalendarPage /></RequireRole>} />
       <Route path="gym" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Gym overview is for coaches only."><GymDashboard /></RequireRole>} />
       <Route path="organisation" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Organisation dashboard is for coaches only."><OrganisationDashboardPage /></RequireRole>} />

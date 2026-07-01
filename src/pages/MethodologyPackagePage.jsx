@@ -91,7 +91,7 @@ export default function MethodologyPackagePage() {
       toast.error(error.message || 'Could not save package');
       return;
     }
-    toast.success('Methodology package saved');
+    toast.success('Coaching pack saved');
     setForm({ name: '', description: '', onboarding_message: '', nutrition_formula: 'bw*28', checkin_template_id: '', program_ids: [] });
     load();
   };
@@ -122,7 +122,7 @@ export default function MethodologyPackagePage() {
         notes: `Auto-generated from methodology package ${pkg.name}`,
       }, { onConflict: 'client_id' });
     }
-    toast.success('Methodology deployed to client');
+    toast.success('Pack deployed to client');
     navigate(`/clients/${clientId}?tab=program`);
   };
 
@@ -138,19 +138,19 @@ export default function MethodologyPackagePage() {
 
   return (
     <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}>
-      <TopBar title="Methodology Package" onBack={() => navigate(-1)} />
+      <TopBar title="Coaching Pack" onBack={() => navigate(-1)} />
       <div style={{ ...PAGE_PADDING, paddingTop: spacing[16], paddingBottom: spacing[24], display: 'grid', gap: spacing[12] }}>
         <Card style={{ padding: spacing[14] }}>
-          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Build package</p>
-          <input style={{ ...inputStyle, marginTop: spacing[8] }} placeholder="Sarah's Transformation System" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Build pack</p>
+          <input style={{ ...inputStyle, marginTop: spacing[8] }} placeholder="e.g. Sarah's 12-Week Transformation" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
           <textarea style={{ ...inputStyle, marginTop: spacing[8] }} rows={2} placeholder="Description" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-          <textarea style={{ ...inputStyle, marginTop: spacing[8] }} rows={2} placeholder="Onboarding message for new client" value={form.onboarding_message} onChange={(e) => setForm((f) => ({ ...f, onboarding_message: e.target.value }))} />
-          <input style={{ ...inputStyle, marginTop: spacing[8] }} placeholder="Nutrition formula e.g. bw*28" value={form.nutrition_formula} onChange={(e) => setForm((f) => ({ ...f, nutrition_formula: e.target.value }))} />
+          <textarea style={{ ...inputStyle, marginTop: spacing[8] }} rows={2} placeholder="Onboarding message sent to new client" value={form.onboarding_message} onChange={(e) => setForm((f) => ({ ...f, onboarding_message: e.target.value }))} />
+          <input style={{ ...inputStyle, marginTop: spacing[8] }} placeholder="Calorie formula e.g. bw*28 (bodyweight × 28)" value={form.nutrition_formula} onChange={(e) => setForm((f) => ({ ...f, nutrition_formula: e.target.value }))} />
           <select style={{ ...inputStyle, marginTop: spacing[8] }} value={form.checkin_template_id} onChange={(e) => setForm((f) => ({ ...f, checkin_template_id: e.target.value }))}>
             <option value="">Select default check-in template</option>
             {templates.map((t) => <option key={t.id} value={t.id}>{t.name || 'Template'}</option>)}
           </select>
-          <p style={{ margin: `${spacing[10]}px 0 ${spacing[6]}px`, fontSize: 12, color: colors.muted }}>Programs to include (in order)</p>
+          <p style={{ margin: `${spacing[10]}px 0 ${spacing[6]}px`, fontSize: 12, color: colors.muted }}>Training programs (in order, each runs 28 days)</p>
           <div style={{ display: 'grid', gap: 6 }}>
             {programs.map((p) => (
               <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
@@ -170,7 +170,7 @@ export default function MethodologyPackagePage() {
           </div>
           {selectedProgramTitle ? <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted }}>Selected: {selectedProgramTitle}</p> : null}
           <button type="button" onClick={savePackage} disabled={saving} style={{ marginTop: spacing[12], width: '100%', minHeight: 42, borderRadius: 10, border: 'none', background: colors.primary, color: '#fff', fontWeight: 700 }}>
-            {saving ? 'Saving...' : 'Save methodology package'}
+            {saving ? 'Saving...' : 'Save coaching pack'}
           </button>
         </Card>
 
@@ -179,7 +179,7 @@ export default function MethodologyPackagePage() {
             Deploy to client
           </p>
           {loading ? <p style={{ fontSize: 13, color: colors.muted }}>Loading...</p> : null}
-          {!loading && packages.length === 0 ? <p style={{ fontSize: 13, color: colors.muted }}>No saved packages yet.</p> : null}
+          {!loading && packages.length === 0 ? <p style={{ fontSize: 13, color: colors.muted }}>No saved packs yet.</p> : null}
           <div style={{ display: 'grid', gap: spacing[8], marginTop: spacing[8] }}>
             {packages.map((pkg) => (
               <button

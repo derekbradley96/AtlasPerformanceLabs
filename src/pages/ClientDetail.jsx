@@ -1174,7 +1174,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
       });
     }
     setMethodologySheetOpen(false);
-    toast.success('Methodology deployed');
+    toast.success('Pack deployed to client');
     navigate(`/clients/${clientId}?tab=program`);
   }, [clientId, navigate]);
 

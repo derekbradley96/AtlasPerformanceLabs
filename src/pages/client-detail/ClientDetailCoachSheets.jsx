@@ -91,7 +91,7 @@ export function ClientDetailMethodologySheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="rounded-t-2xl" style={{ background: colors.card, borderColor: colors.border }}>
         <SheetHeader>
-          <SheetTitle style={{ color: colors.text }}>Deploy methodology</SheetTitle>
+          <SheetTitle style={{ color: colors.text }}>Deploy coaching pack</SheetTitle>
         </SheetHeader>
         <div className="flex flex-col gap-2 pt-4 pb-6">
           {coachMethodologyPackages.length === 0 ? (
@@ -101,7 +101,7 @@ export function ClientDetailMethodologySheet({
               className="w-full rounded-xl py-3 px-4 text-left"
               style={{ border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text }}
             >
-              No saved packages yet. Create your first package →
+              No saved packs yet. Create your first pack →
             </button>
           ) : null}
           {coachMethodologyPackages.map((pkg) => (
@@ -124,7 +124,7 @@ export function ClientDetailMethodologySheet({
             className="w-full rounded-xl py-3 px-4 text-left"
             style={{ border: `1px solid ${colors.border}`, background: colors.bg, color: colors.primary }}
           >
-            Manage methodology packages →
+            Manage coaching packs →
           </button>
         </div>
       </SheetContent>

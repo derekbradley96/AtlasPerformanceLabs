@@ -77,7 +77,7 @@ export function getSidebarSections(
         label: 'Build',
         items: [
           { path: '/programs', label: 'Programmes', icon: FileText },
-          { path: '/methodology-packages', label: 'Methodology packs', icon: Package },
+          { path: '/methodology-packages', label: 'Coaching packs', icon: Package },
           { path: '/coach/nutrition', label: 'Nutrition plans', icon: UtensilsCrossed },
           { path: '/checkins', label: 'Check-ins', icon: ClipboardList },
           { path: '/checkintemplates', label: 'Check-in templates', icon: ClipboardList },
