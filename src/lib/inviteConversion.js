@@ -163,10 +163,29 @@ export async function applyInviteCodeForUser({ supabase, user, inviteCode }) {
     if (error) throw humanizeInviteJoinError(error);
   }
 
+  const wasPersonal = isPersonal(user?.user_type ?? user?.role);
+
+  // Transfer personal program blocks to the new coach so they can see the client's
+  // full workout history. Personal blocks have owner_profile_id = userId and
+  // coach_id = userId; updating coach_id = coachId lets the coach's RLS policy
+  // (coach_id = auth.uid()) include these blocks without copying any data.
+  if (wasPersonal && coachId && userId) {
+    try {
+      await supabase
+        .from('program_blocks')
+        .update({ coach_id: coachId })
+        .eq('owner_profile_id', userId)
+        .eq('coach_id', userId);
+    } catch (e) {
+      // Non-fatal: coach can still coach this client, just won't see historical blocks
+      if (import.meta.env.DEV) console.warn('[inviteConversion] personal blocks handoff failed', e);
+    }
+  }
+
   return {
     clientProfile,
     coach_id: resolveCoachLinkId(clientProfile) ?? coachId,
-    was_personal: isPersonal(user?.user_type ?? user?.role),
+    was_personal: wasPersonal,
   };
 }
 
