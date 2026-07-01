@@ -218,6 +218,7 @@ function ClientMyProgram() {
   const scheduleDays = assignmentRow.weekly_schedule || [1, 3, 5]; // Mon, Wed, Fri default
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+  const todayExercises = assignment?.exercises ?? [];
   const mpActive = deriveMyProgramRouteState({ roleView: 'client', surface: 'active' });
 
   return (
@@ -259,21 +260,20 @@ function ClientMyProgram() {
             <p className="text-sm text-slate-300 mb-4">{assignment.day.notes}</p>
           )}
 
-          {assignmentRow.notes && (
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
+          {(blockView?.coach_notes || assignmentRow.notes) && (
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 mb-3">
               <p className="text-xs text-blue-300 font-medium mb-1">Coach Notes:</p>
-              <p className="text-sm text-slate-200">{assignmentRow.notes}</p>
+              <p className="text-sm text-slate-200">{blockView?.coach_notes || assignmentRow.notes}</p>
             </div>
           )}
-          {activeAssignment?.block?.id && clientProfile?.id ? (
+          {(activeAssignment?.block?.id || blockView?.id) && clientProfile?.id ? (
             <Button
-              variant="ghost"
-              className="w-full mt-3 text-blue-300 hover:text-blue-200"
+              className="w-full mt-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40"
               onClick={() =>
-                navigate(`/program-viewer?clientId=${clientProfile.id}&blockId=${activeAssignment.block.id}`)
+                navigate(`/program-viewer?clientId=${clientProfile.id}&blockId=${activeAssignment?.block?.id ?? blockView?.id}`)
               }
             >
-              View full program
+              View Full Program <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
           ) : null}
         </motion.div>
@@ -323,11 +323,26 @@ function ClientMyProgram() {
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-lg font-bold text-white mb-1">{blockView?.title || "Today's Workout"}</h3>
+                <h3 className="text-lg font-bold text-white mb-1">{assignment?.day?.day_name || blockView?.title || "Today's Workout"}</h3>
                 <p className="text-sm text-slate-300">You're scheduled to train today!</p>
               </div>
               <Dumbbell className="w-8 h-8 text-green-400" />
             </div>
+
+            {todayExercises.length > 0 && (
+              <div className="mb-4 space-y-2">
+                {todayExercises.map((ex, i) => (
+                  <div key={ex.id ?? i} className="flex items-center gap-3 bg-black/20 rounded-xl px-3 py-2.5">
+                    <span className="text-xs text-green-400 font-bold w-5 shrink-0">{i + 1}</span>
+                    <span className="text-sm text-white font-medium flex-1 truncate">{ex.exercise_name}</span>
+                    <span className="text-xs text-slate-400 shrink-0">
+                      {ex.sets && ex.reps ? `${ex.sets}×${ex.reps}` : ex.sets ? `${ex.sets} sets` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <Link to="/today">
               <Button className="w-full bg-green-500 hover:bg-green-600">
                 Start Workout <ChevronRight className="w-4 h-4 ml-2" />

@@ -69,6 +69,7 @@ export default function Programs() {
   const [programsLoadError, setProgramsLoadError] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [programToDelete, setProgramToDelete] = useState(null);
+  const [assignmentCounts, setAssignmentCounts] = useState({});
 
   useEffect(() => {
     document.title = 'Programs — Atlas';
@@ -84,12 +85,31 @@ export default function Programs() {
     setDataLoading(true);
     setProgramsLoadError(false);
     data.listPrograms()
-      .then((list) => {
+      .then(async (list) => {
         if (cancelled) return;
         const remote = Array.isArray(list) ? list : [];
         const supabaseBacked = hasSupabase && !!user?.id;
         if (supabaseBacked) {
           setPrograms(remote);
+          // Fetch assignment counts from Supabase
+          if (remote.length > 0) {
+            const supabase = getSupabase();
+            if (supabase) {
+              const ids = remote.map((p) => p.id).filter(Boolean);
+              const { data: countRows } = await supabase
+                .from('program_block_assignments')
+                .select('program_block_id')
+                .in('program_block_id', ids)
+                .eq('is_active', true);
+              if (!cancelled && Array.isArray(countRows)) {
+                const counts = {};
+                for (const row of countRows) {
+                  counts[row.program_block_id] = (counts[row.program_block_id] || 0) + 1;
+                }
+                setAssignmentCounts(counts);
+              }
+            }
+          }
           return;
         }
         const local = getLocalPrograms();
@@ -322,7 +342,7 @@ export default function Programs() {
           {(filteredPrograms || []).map((program) => {
             const GoalIcon = goalIcons[program.goal] || Dumbbell;
             const goalColor = goalColors[program.goal] || colors.muted;
-            const assignedCount = getAssignmentCount(program.id);
+            const assignedCount = (hasSupabase && user?.id) ? (assignmentCounts[program.id] ?? 0) : getAssignmentCount(program.id);
             return (
               <Card key={program.id} style={{ padding: cardPad }}>
                 <div className="flex items-start gap-3">
@@ -332,6 +352,14 @@ export default function Programs() {
                       {program.name}
                     </h3>
                     <div className="flex flex-wrap items-center gap-2">
+                      {!program.client_id && (
+                        <span
+                          className="rounded-full text-[11px] font-semibold"
+                          style={{ background: colors.surface2, color: colors.muted, padding: '2px 8px', border: `1px solid ${colors.border}` }}
+                        >
+                          Template
+                        </span>
+                      )}
                       {program.goal && (
                         <span
                           className="rounded-full text-[11px] font-semibold inline-flex items-center gap-1"
@@ -344,7 +372,9 @@ export default function Programs() {
                       {program.duration_weeks && (
                         <span className="text-[11px]" style={{ color: colors.muted }}>{program.duration_weeks}w</span>
                       )}
-                      <span className="text-[11px]" style={{ color: colors.muted }}>{assignedCount} assigned</span>
+                      {assignedCount > 0 && (
+                        <span className="text-[11px]" style={{ color: colors.muted }}>{assignedCount} assigned</span>
+                      )}
                       {program.updated_date && (
                         <span className="text-[11px]" style={{ color: colors.muted }}>
                           {new Date(program.updated_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}

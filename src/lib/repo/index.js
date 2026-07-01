@@ -123,19 +123,19 @@ export const repo = {
         const coachId = trainerIdOrClientId;
         const { data, error } = await supabase
           .from('program_blocks')
-          .select('id, title, total_weeks, updated_at, created_at, client_id, goal, notes')
+          .select('id, title, total_weeks, created_at, client_id, coach_notes')
           .or(`coach_id.eq.${coachId},owner_profile_id.eq.${coachId}`)
-          .order('updated_at', { ascending: false });
+          .order('created_at', { ascending: false });
         if (!error && Array.isArray(data)) {
           return data.map((row) => ({
             id: row.id,
             name: row.title || 'Untitled program',
-            goal: row.goal || null,
+            goal: null,
             duration_weeks: row.total_weeks || null,
             version: 1,
-            updated_date: row.updated_at || row.created_at || null,
+            updated_date: row.created_at || null,
             created_date: row.created_at || null,
-            description: row.notes || '',
+            description: row.coach_notes || '',
             client_id: row.client_id || null,
           }));
         }

@@ -18,7 +18,7 @@ export default function DuplicateToClientSheet({
 
   return (
     <Card style={{ ...standardCard, marginBottom: sectionGap, padding: spacing[16] }}>
-      <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Duplicate full block to another client</p>
+      <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Assign program to another client</p>
       <div className="flex flex-wrap gap-2 items-center">
         <select
           value={duplicateTargetClientId}
@@ -58,7 +58,7 @@ export default function DuplicateToClientSheet({
             opacity: saving || !duplicateTargetClientId ? 0.6 : 1,
           }}
         >
-          <UserPlus size={16} /> Duplicate block
+          <UserPlus size={16} /> Assign to client
         </button>
       </div>
     </Card>
