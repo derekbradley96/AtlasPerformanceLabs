@@ -1676,6 +1676,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
             clientPlanForDetail={clientPlanForDetail}
             dashboardData={dashboardData}
             clientId={clientId}
+            clientUserId={client?.user_id ?? null}
             navigate={navigate}
             lightHaptic={lightHaptic}
             programsList={programsList}
@@ -1712,6 +1713,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
             clientDailySnapshotLoading={clientDailySnapshotLoading}
             clientTodayLines={clientTodayLines}
             clientId={clientId}
+            clientUserId={client?.user_id ?? null}
             navigate={navigate}
           />
         )}

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
@@ -6,6 +6,7 @@ import SkeletonCard from '@/components/ui/SkeletonCard';
 import { standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
 import { spacing, colors, radii } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { ChevronDown, ChevronUp, History } from 'lucide-react';
 
 export default function ClientNutritionTab({
   nutritionLatestWeek,
@@ -17,6 +18,7 @@ export default function ClientNutritionTab({
   clientDailySnapshotLoading,
   clientTodayLines,
   clientId,
+  clientUserId,
   navigate,
 }) {
   const { data: clientMealsToday = [], isLoading: clientMealsTodayLoading } = useQuery({
@@ -48,6 +50,25 @@ export default function ClientNutritionTab({
   );
   const caloriesTarget = nutritionLatestWeek?.calories ?? null;
   const proteinTarget = nutritionLatestWeek?.protein ?? null;
+
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+
+  const { data: personalHistory = [], isLoading: personalHistoryLoading } = useQuery({
+    queryKey: ['client-personal-nutrition-history', clientUserId],
+    queryFn: async () => {
+      const supabase = getSupabase();
+      if (!supabase || !clientUserId) return [];
+      const { data } = await supabase
+        .from('personal_nutrition_adherence')
+        .select('day_date, target_calories, target_protein_g, logged_calories, logged_protein_g, macros_hit_percent')
+        .eq('profile_id', clientUserId)
+        .order('day_date', { ascending: false })
+        .limit(30);
+      return Array.isArray(data) ? data : [];
+    },
+    enabled: Boolean(clientUserId && hasSupabase),
+    staleTime: 300000,
+  });
 
   return (
     <>
@@ -208,6 +229,96 @@ export default function ClientNutritionTab({
           ) : null}
         </div>
       </Card>
+
+      {(personalHistoryLoading || personalHistory.length > 0) && (
+        <>
+          <button
+            type="button"
+            onClick={() => setHistoryExpanded((v) => !v)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: spacing[6],
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+              marginBottom: sectionGap,
+              width: '100%',
+            }}
+          >
+            <History size={14} color={colors.primary} />
+            <span style={{ ...sectionLabel, margin: 0, flex: 1, textAlign: 'left' }}>Pre-coaching nutrition history</span>
+            {historyExpanded ? <ChevronUp size={14} color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
+          </button>
+          {historyExpanded && (
+            <Card style={{ ...standardCard, padding: spacing[16], marginBottom: sectionGap }}>
+              <p style={{ fontSize: 11, color: colors.muted, marginBottom: spacing[12], marginTop: 0 }}>
+                This client self-tracked before joining your roster. Last 30 days shown.
+              </p>
+              {personalHistoryLoading ? (
+                <SkeletonCard lines={4} />
+              ) : personalHistory.length === 0 ? (
+                <p style={{ fontSize: 13, color: colors.muted, margin: 0 }}>No self-tracked nutrition data found.</p>
+              ) : (
+                <div>
+                  {personalHistory.map((row) => {
+                    const hitPct = row.macros_hit_percent != null
+                      ? Math.round(Number(row.macros_hit_percent))
+                      : row.target_calories
+                        ? Math.round((Number(row.logged_calories) / Number(row.target_calories)) * 100)
+                        : null;
+                    const color = hitPct == null ? colors.muted : hitPct >= 90 ? colors.success : hitPct >= 70 ? colors.primary : colors.warning;
+                    return (
+                      <div
+                        key={row.day_date}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: `${spacing[6]}px 0`,
+                          borderBottom: `0.5px solid ${colors.border}`,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, color: colors.muted }}>
+                          {new Date(row.day_date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </span>
+                        <span style={{ fontSize: 12, color: colors.text }}>
+                          {Math.round(Number(row.logged_calories) || 0)} kcal
+                          {row.logged_protein_g != null ? ` · P ${Math.round(Number(row.logged_protein_g))}g` : ''}
+                        </span>
+                        {hitPct != null && (
+                          <span style={{ fontSize: 11, color, fontWeight: 600, minWidth: 36, textAlign: 'right' }}>
+                            {hitPct}%
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {personalHistory.length > 0 && (() => {
+                    const avg = Math.round(
+                      personalHistory.reduce((s, r) => s + (Number(r.logged_calories) || 0), 0) / personalHistory.length
+                    );
+                    const avgP = Math.round(
+                      personalHistory.reduce((s, r) => s + (Number(r.logged_protein_g) || 0), 0) / personalHistory.length
+                    );
+                    return (
+                      <div style={{ marginTop: spacing[12], padding: spacing[10], background: colors.surface1, borderRadius: radii.md }}>
+                        <p style={{ fontSize: 11, fontWeight: 600, color: colors.muted, margin: 0, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: spacing[4] }}>
+                          30-day average
+                        </p>
+                        <p style={{ fontSize: 13, color: colors.text, margin: 0 }}>
+                          {avg} kcal · P {avgP}g
+                        </p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </Card>
+          )}
+        </>
+      )}
     </>
   );
 }
