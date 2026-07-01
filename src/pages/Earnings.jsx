@@ -323,66 +323,6 @@ export default function Earnings() {
     }
   }, [userId]);
 
-  if (!hasPaymentHistory && !summaryLoading) {
-    return (
-      <div style={pageContainer}>
-        <TopBar title="Earnings" />
-        {!isStripeConnectedNow ? (
-          <section style={{ marginBottom: spacing[12], ...sectionStyle(0) }}>
-            <Card style={{ padding: spacing[14] }}>
-              <p className="text-[15px] font-semibold" style={{ color: colors.text }}>
-                Connect Stripe to start receiving payments from clients through Atlas.
-              </p>
-              <Button
-                variant="primary"
-                disabled={stripeLoading}
-                onClick={handleSetupPayouts}
-                style={{ marginTop: spacing[12] }}
-              >
-                Set up payouts
-              </Button>
-            </Card>
-          </section>
-        ) : null}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: 320,
-            textAlign: 'center',
-            padding: spacing[32],
-          }}
-        >
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: '50%',
-              background: colors.surface2,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: spacing[16],
-            }}
-          >
-            <CreditCard size={24} style={{ color: colors.muted }} />
-          </div>
-          <p style={{ fontSize: 18, fontWeight: 600, color: colors.text, margin: 0 }}>
-            No earnings yet
-          </p>
-          <p style={{ fontSize: 14, color: colors.muted, marginTop: spacing[8], maxWidth: 280 }}>
-            Once clients start paying through Atlas, your transactions appear here.
-          </p>
-          <Button onClick={() => navigate('/get-clients')} style={{ marginTop: spacing[20] }}>
-            Get your first client →
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
       className="app-screen min-w-0 max-w-full overflow-x-hidden"
@@ -399,6 +339,26 @@ export default function Earnings() {
           <p className="text-[13px] font-medium" style={{ color: colors.destructive }}>Showing overdue payments</p>
           <p className="text-[12px] mt-0.5" style={{ color: colors.muted }}>From your command center</p>
         </Card>
+      )}
+
+      {/* No-earnings prompt — shown until first payment comes in */}
+      {!summaryLoading && !hasPaymentHistory && (
+        <section style={{ marginBottom: spacing[12], ...sectionStyle(0) }}>
+          <Card style={{ padding: spacing[16], display: 'flex', alignItems: 'center', gap: spacing[14], background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.25)' }}>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(99,102,241,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <CreditCard size={20} style={{ color: colors.accent }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 15, fontWeight: 600, color: colors.text, margin: 0 }}>No earnings yet</p>
+              <p style={{ fontSize: 13, color: colors.muted, marginTop: 4, marginBottom: 0 }}>
+                Once clients start paying through Atlas, everything below fills in automatically.
+              </p>
+            </div>
+            <Button onClick={() => navigate('/get-clients')} style={{ flexShrink: 0 }}>
+              Get clients →
+            </Button>
+          </Card>
+        </section>
       )}
 
       {/* Stripe banner – compact */}
@@ -453,19 +413,7 @@ export default function Earnings() {
         </div>
       </section>
 
-      {!summaryLoading && !hasPaymentHistory ? (
-        <section style={{ marginBottom: spacing[16], ...sectionStyle(60) }}>
-          <Card style={{ padding: spacing[16] }}>
-            <p className="text-[15px] font-semibold" style={{ color: colors.text }}>No payments recorded yet.</p>
-            <p className="text-[13px] mt-1" style={{ color: colors.muted }}>
-              Once clients pay through Atlas, transactions appear here.
-            </p>
-          </Card>
-        </section>
-      ) : null}
-
       {/* Revenue forecast: expected next 30d, overdue, pending, at-risk */}
-      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(60) }}>
         <p className="text-[13px] font-medium mb-2" style={{ color: colors.muted }}>Revenue forecast</p>
         <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: spacing[10] }}>
@@ -487,7 +435,6 @@ export default function Earnings() {
           </Card>
         </div>
       </section>
-      ) : null}
 
       {summaryLoading ? (
         <section style={{ marginBottom: spacing[16], ...sectionStyle(70) }}>
@@ -518,40 +465,23 @@ export default function Earnings() {
       )}
 
       {/* Summary cards */}
-      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(80) }}>
         <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: spacing[12] }}>
           <Card>
             <p className="text-[12px]" style={{ color: colors.muted }}>{timeLabel}</p>
-            <p className="text-[22px] font-bold mt-0.5" style={{ color: colors.text }}>{formatCurrency(totals.grossRevenue)}</p>
+            <p className="text-[22px] font-bold mt-0.5" style={{ color: colors.text }}>{formatCurrency(totals.grossRevenue ?? 0)}</p>
             <p className="text-[11px]" style={{ color: colors.muted }}>Gross</p>
-            <p className="text-[18px] font-semibold mt-2" style={{ color: colors.accent }}>{formatCurrency(totals.netRevenue)}</p>
+            <p className="text-[18px] font-semibold mt-2" style={{ color: colors.accent }}>{formatCurrency(totals.netRevenue ?? 0)}</p>
             <p className="text-[11px]" style={{ color: colors.muted }}>Net</p>
           </Card>
           <Card>
             <p className="text-[12px]" style={{ color: colors.muted }}>Pending / Overdue</p>
-            <p className="text-[20px] font-bold mt-0.5" style={{ color: colors.text }}>{formatCurrency(totals.pending)}</p>
+            <p className="text-[20px] font-bold mt-0.5" style={{ color: colors.text }}>{formatCurrency(totals.pending ?? 0)}</p>
             <p className="text-[11px]" style={{ color: colors.muted }}>Pending</p>
-            <p className="text-[18px] font-semibold mt-2" style={{ color: colors.attention }}>{formatCurrency(totals.overdue)}</p>
+            <p className="text-[18px] font-semibold mt-2" style={{ color: colors.attention }}>{formatCurrency(totals.overdue ?? 0)}</p>
             <p className="text-[11px]" style={{ color: colors.muted }}>Overdue</p>
           </Card>
         </div>
-        {(summary.projected30DayRevenue != null || summary.atRiskRevenue > 0) && (
-          <div className="grid grid-cols-2" style={{ gap: spacing[12], marginTop: spacing[12] }}>
-            {summary.projected30DayRevenue != null && (
-              <Card>
-                <p className="text-[12px]" style={{ color: colors.muted }}>Projected 30 days</p>
-                <p className="text-[18px] font-semibold mt-0.5" style={{ color: colors.text }}>{formatCurrency(summary.projected30DayRevenue)}</p>
-              </Card>
-            )}
-            {summary.atRiskRevenue >= 0 && (
-              <Card>
-                <p className="text-[12px]" style={{ color: colors.muted }}>At-risk revenue</p>
-                <p className="text-[18px] font-semibold mt-0.5" style={{ color: summary.atRiskRevenue > 0 ? colors.attention : colors.text }}>{formatCurrency(summary.atRiskRevenue)}</p>
-              </Card>
-            )}
-          </div>
-        )}
         {coachData?.billing_state?.recommended_plan && coachData?.billing_state?.recommended_plan !== currentPlan && (
           <Card style={{ marginTop: spacing[12], padding: spacing[12] }}>
             <p className="text-[12px] font-semibold" style={{ color: colors.text }}>
@@ -575,10 +505,8 @@ export default function Earnings() {
           </Card>
         )}
       </section>
-      ) : null}
 
       {/* Overdue list – scroll target for Home "Payments overdue" */}
-      {hasPaymentHistory ? (
       <section ref={overdueSectionRef} id="overdue" style={{ marginBottom: spacing[16], ...sectionStyle(90) }}>
         <p className="text-[13px] font-semibold" style={{ color: colors.muted, marginBottom: spacing[8] }}>Overdue</p>
         {overdueTransactions.length === 0 ? (
@@ -636,19 +564,15 @@ export default function Earnings() {
           </Card>
         )}
       </section>
-      ) : null}
 
       {/* Revenue trend */}
-      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(120) }}>
         <div key={period} style={{ animation: 'earnings-fade-in 240ms ease-out' }}>
           <RevenueTrend series={series} period={period} />
         </div>
       </section>
-      ) : null}
 
       {/* Recent transactions */}
-      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(160) }}>
         <p className="text-[13px] font-semibold" style={{ color: colors.muted, marginBottom: spacing[8] }}>Recent transactions</p>
         <Card style={{ padding: 0 }}>
@@ -686,10 +610,8 @@ export default function Earnings() {
           ))}
         </Card>
       </section>
-      ) : null}
 
       {/* Recent payouts */}
-      {hasPaymentHistory ? (
       <section style={{ marginBottom: spacing[16], ...sectionStyle(200) }}>
         <p className="text-[13px] font-semibold" style={{ color: colors.muted, marginBottom: spacing[8] }}>Recent payouts</p>
         <Card style={{ padding: 0 }}>
@@ -710,9 +632,13 @@ export default function Earnings() {
               <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: p.status === 'paid' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(234, 179, 8, 0.2)', color: p.status === 'paid' ? colors.success : colors.warning }}>{p.status}</span>
             </div>
           ))}
+          {payouts.length === 0 && (
+            <div style={{ padding: spacing[16], textAlign: 'center' }}>
+              <p className="text-[13px]" style={{ color: colors.muted }}>No payouts yet</p>
+            </div>
+          )}
         </Card>
       </section>
-      ) : null}
 
       {/* Tax set-aside */}
       <section style={{ marginBottom: spacing[16], ...sectionStyle(240) }}>
