@@ -2320,8 +2320,8 @@ export default function ProgramBuilderPage() {
             : { ...pageContainer, maxWidth: isDesktopWeb ? 1240 : undefined, margin: '0 auto', paddingBottom: spacing[24] }
         }
       >
-        {/* Entry panel — when no block exists and client gate isn't blocking */}
-        {!block?.id && !showCoachNoClientsGate && (
+        {/* Entry panel — shown whenever no block is open yet */}
+        {!block?.id && (
           <ProgramEntryPanel
             isPersonalRole={isPersonalRole}
             clients={clients}
@@ -2347,8 +2347,8 @@ export default function ProgramBuilderPage() {
           />
         )}
 
-        {/* Editing header / no-clients gate — shown when block exists OR no clients yet */}
-        {(block?.id || showCoachNoClientsGate) && (
+        {/* Editing header — shown when a block is open */}
+        {block?.id && (
           <ProgramBuilderHeader
             showCoachNoClientsGate={showCoachNoClientsGate}
             navigate={navigate}
