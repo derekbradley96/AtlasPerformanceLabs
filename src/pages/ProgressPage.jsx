@@ -1546,7 +1546,7 @@ export default function ProgressPage() {
         {(weightChart365Data.length >= 1 || weightChartData.length >= 1) ? (
           <section style={{ marginBottom: spacing[24] }}>
             <Card style={{ padding: spacing[16] }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: colors.text, margin: 0, marginBottom: spacing[12], textTransform: 'uppercase', letterSpacing: '0.04em', color: colors.muted }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0, marginBottom: spacing[12], textTransform: 'uppercase', letterSpacing: '0.04em', color: colors.muted }}>
                 Weight trend
               </h3>
               <div style={{ height: 220 }}>

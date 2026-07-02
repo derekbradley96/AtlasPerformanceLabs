@@ -95,7 +95,6 @@ class RootErrorBoundary extends React.Component {
       return (
         <div
           style={{
-            minHeight: '100vh',
             minHeight: '100dvh',
             background: '#0B1220',
             color: '#E5E7EB',
@@ -138,7 +137,6 @@ function BootContent() {
     return (
       <div
         style={{
-          minHeight: '100vh',
           minHeight: '100dvh',
           background: '#0B1220',
           color: '#E5E7EB',
