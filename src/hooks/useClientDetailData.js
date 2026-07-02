@@ -207,6 +207,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       return data;
     },
     enabled: Boolean(hasSupabase && clientId),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: retentionRiskRow, isLoading: retentionRiskLoading } = useQuery({
@@ -222,6 +223,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       return data;
     },
     enabled: Boolean(hasSupabase && clientId),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: lifecycleRow, isLoading: lifecycleLoading } = useQuery({
@@ -237,6 +239,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       return data;
     },
     enabled: Boolean(hasSupabase && clientId),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: coachingInsights = [] } = useQuery({
@@ -255,6 +258,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       return Array.isArray(data) ? data : [];
     },
     enabled: Boolean(hasSupabase && clientId),
+    staleTime: 2 * 60 * 1000,
   });
 
   const canReviewAdaptiveRecommendations = isCoach(role) || isAdmin(role);
@@ -275,6 +279,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       return Array.isArray(data) ? data : [];
     },
     enabled: Boolean(hasSupabase && clientId && canReviewAdaptiveRecommendations),
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: momentumRows = [], isLoading: momentumLoading } = useQuery({
@@ -291,6 +296,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       return Array.isArray(data) ? data : [];
     },
     enabled: Boolean(hasSupabase && clientId),
+    staleTime: 5 * 60 * 1000,
   });
 
   const prepOsFrom = daysAgoDateString(13);
@@ -305,6 +311,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       }
     },
     enabled: Boolean(hasSupabase && clientId),
+    staleTime: 2 * 60 * 1000,
   });
   const { data: osPrepDailies = [] } = useQuery({
     queryKey: ['client-os-prep-dailies', clientId, prepOsFrom, prepOsTo],
@@ -316,6 +323,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       }
     },
     enabled: Boolean(hasSupabase && clientId),
+    staleTime: 2 * 60 * 1000,
   });
 
   const { data: clientDailySnapshot, isLoading: clientDailySnapshotLoading } = useQuery({
@@ -345,6 +353,7 @@ export function useClientDetailData({ clientId, authUserId, role }) {
       return Array.isArray(data) ? data : [];
     },
     enabled: !!authUserId && !!hasSupabase,
+    staleTime: 10 * 60 * 1000,
   });
 
   return {

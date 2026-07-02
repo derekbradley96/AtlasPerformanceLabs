@@ -58,6 +58,7 @@ export default function RevenueAnalyticsPage() {
       return data;
     },
     enabled: !!supabase && !!coachId,
+    staleTime: 60 * 1000,
   });
 
   const { data: recentPayments = [] } = useQuery({
@@ -73,6 +74,7 @@ export default function RevenueAnalyticsPage() {
       return error ? [] : (data ?? []);
     },
     enabled: !!supabase && !!coachId,
+    staleTime: 60 * 1000,
   });
 
   const { data: commissionsRows = [] } = useQuery({
@@ -83,6 +85,7 @@ export default function RevenueAnalyticsPage() {
       return error ? [] : (data ?? []);
     },
     enabled: !!supabase && !!coachId,
+    staleTime: 60 * 1000,
   });
 
   const { data: paidPayments = [] } = useQuery({
@@ -93,6 +96,7 @@ export default function RevenueAnalyticsPage() {
       return error ? [] : (data ?? []);
     },
     enabled: !!supabase && !!coachId,
+    staleTime: 60 * 1000,
   });
 
   const { data: failedPayments = [] } = useQuery({
@@ -103,6 +107,7 @@ export default function RevenueAnalyticsPage() {
       return error ? [] : (data ?? []);
     },
     enabled: !!supabase && !!coachId,
+    staleTime: 60 * 1000,
   });
 
   const { data: activeSubscriptions = [] } = useQuery({
@@ -113,6 +118,7 @@ export default function RevenueAnalyticsPage() {
       return error ? [] : (data ?? []);
     },
     enabled: !!supabase && !!coachId,
+    staleTime: 60 * 1000,
   });
 
   const topClientIds = useMemo(() => {
@@ -147,6 +153,7 @@ export default function RevenueAnalyticsPage() {
       return map;
     },
     enabled: !!supabase && clientIdsForNames.length > 0,
+    staleTime: 60 * 1000,
   });
 
   const commissionSummary = useMemo(() => {

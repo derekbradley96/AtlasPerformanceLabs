@@ -107,6 +107,7 @@ async function fetchAnalyticsData(coachFilter, showPrep) {
     supabase
       .from('checkins')
       .select('client_id, week_start')
+      .in('trainer_id', coachIds)
       .gte('submitted_at', since),
     supabase.from('clients').select('id').in('assigned_coach_id', coachIds),
     supabase

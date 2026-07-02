@@ -120,18 +120,21 @@ export default function Earnings() {
       return res.coach ? { ...res.coach, connected: res.connected } : null;
     },
     enabled: !!userId,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: summaryData, isLoading: summaryLoading } = useQuery({
     queryKey: ['earnings-summary', userId, period],
     queryFn: async () => getEarningsSummary(supabase, userId, period),
     enabled: !!supabase && !!userId && !isDemoMode,
+    staleTime: 60 * 1000,
   });
 
   const { data: paymentRows = [] } = useQuery({
     queryKey: ['earnings-payments-list', userId],
     queryFn: async () => getClientPaymentsList(supabase, userId),
     enabled: !!supabase && !!userId && !isDemoMode,
+    staleTime: 2 * 60 * 1000,
   });
 
   const totals = summaryData?.totals ?? {};
@@ -188,17 +191,13 @@ export default function Earnings() {
     return () => cancelAnimationFrame(t);
   }, []);
 
-  // On mount: sync Connect status from backend so we only show "Connect Stripe" when no connect account
+  // Sync Connect status from the get-coach query (avoids a duplicate edge-function call on mount)
   useEffect(() => {
-    if (!userId) return;
-    (async () => {
-      const res = await getCoach(userId);
-      if (res.coach?.stripe_account_id) {
-        setStripeConnected(true, res.coach.stripe_account_id);
-        setStripeConnectedState(true);
-      }
-    })();
-  }, [userId]);
+    if (coachData?.stripe_account_id) {
+      setStripeConnected(true, coachData.stripe_account_id);
+      setStripeConnectedState(true);
+    }
+  }, [coachData]);
 
   // After Stripe Connect return/refresh: refetch coach status and sync local state
   useEffect(() => {
