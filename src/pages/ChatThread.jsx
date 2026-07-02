@@ -67,7 +67,6 @@ const AUTO_SCROLL_THRESHOLD = 200;
 const COMPOSER_HEIGHT = 72;
 const PAYMENT_REMINDER_MSG = 'Hi! This is a friendly reminder that your payment is overdue. Please settle at your earliest convenience. Thanks!';
 const QUICK_REPLIES = ['Got it!', 'On it', 'Send when you can', 'Sounds good'];
-const GIPHY_KEY = import.meta.env.VITE_GIPHY_API_KEY || 'dc6zaTOxFJmzC';
 const DEBUG_MESSAGING = import.meta.env.DEV && import.meta.env.VITE_DEBUG_MESSAGING === 'true';
 const DESKTOP_SIDEBAR_WIDTH = 232;
 
@@ -334,8 +333,6 @@ export default function ChatThread() {
   const [newMessageIds, setNewMessageIds] = useState(() => new Set());
   const [showAttachmentSheet, setShowAttachmentSheet] = useState(false);
   const [showGifPicker, setShowGifPicker] = useState(false);
-  const [gifSearch, setGifSearch] = useState('');
-  const [gifResults, setGifResults] = useState([]);
   const [mediaPreview, setMediaPreview] = useState(null);
   const fileInputRef = useRef(null);
   const videoFileInputRef = useRef(null);
@@ -934,25 +931,6 @@ export default function ChatThread() {
     [clientId, sendChatMedia],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      const query = gifSearch.trim();
-      const endpoint = query
-        ? `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(GIPHY_KEY)}&q=${encodeURIComponent(query)}&limit=16&rating=pg`
-        : `https://api.giphy.com/v1/gifs/trending?api_key=${encodeURIComponent(GIPHY_KEY)}&limit=16&rating=pg`;
-      try {
-        const res = await fetch(endpoint);
-        const json = await res.json();
-        if (!cancelled) setGifResults(Array.isArray(json?.data) ? json.data : []);
-      } catch {
-        if (!cancelled) setGifResults([]);
-      }
-    };
-    if (showGifPicker) run();
-    return () => { cancelled = true; };
-  }, [showGifPicker, gifSearch]);
-
   const { isReconnecting, pulseRemoteTypingIndicator } = useChatThreadRealtimeWiring({
     currentThreadId: currentThread?.id,
     dataRef,
@@ -1515,10 +1493,7 @@ export default function ChatThread() {
 
       <ChatThreadOverlays
         showGifPicker={showGifPicker}
-        gifSearch={gifSearch}
-        setGifSearch={setGifSearch}
         setShowGifPicker={setShowGifPicker}
-        gifResults={gifResults}
         handleSendGif={handleSendGif}
         mediaPreview={mediaPreview}
         setMediaPreview={setMediaPreview}

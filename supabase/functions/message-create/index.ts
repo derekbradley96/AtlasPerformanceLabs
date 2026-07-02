@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "https://esm.sh/zod@3.23.8";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
+import { sendPushToProfile } from "../_shared/fcm.ts";
 
 const payloadSchema = z.object({
   conversation_id: z.string().uuid().optional(),
@@ -72,6 +73,35 @@ Deno.serve(async (req) => {
     if (error) {
       return jsonError("Request failed", 500);
     }
+
+    // Push the recipient so coach feedback / client replies land on the lock screen.
+    // Failures never block the send.
+    try {
+      const recipientId = isCoach ? clientUserId : coachId;
+      if (recipientId) {
+        const { data: senderProfile } = await supabase
+          .from("profiles")
+          .select("display_name")
+          .eq("id", callerId)
+          .maybeSingle();
+        const senderName = String((senderProfile as { display_name?: string } | null)?.display_name || "").trim()
+          || (isCoach ? "Your coach" : "Your client");
+        const preview = String(text || "").slice(0, 120) || "New message";
+        await sendPushToProfile(supabase, {
+          profileId: recipientId,
+          title: senderName,
+          body: preview,
+          data: {
+            type: "message_received",
+            thread_id: threadId,
+            deep_link: clientId ? `/messages/${clientId}` : "/messages",
+          },
+        });
+      }
+    } catch (pushErr) {
+      console.error("message-create push", pushErr);
+    }
+
     const out = {
       ...inserted,
       conversation_id: (inserted as Record<string, unknown>).thread_id,
