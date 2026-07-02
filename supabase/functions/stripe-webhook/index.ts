@@ -27,8 +27,9 @@ function calculatePlatformFee(amountPaidCents: number, commissionRate: number): 
   return { platformFeeCents, coachAmountCents };
 }
 
+// Server-to-server (Stripe) — no CORS needed; referencing request-scoped CORS here crashed every response path.
 function jsonResp(body: unknown, status: number) {
-  return new Response(JSON.stringify(body), { status, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 async function resolveCoachProfileId(

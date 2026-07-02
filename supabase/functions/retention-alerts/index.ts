@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
 
     const { data: highRisk, error: fetchError } = await supabase
       .from(RETENTION_VIEW)
-      .select("coach_id, client_id, client_name, risk_score, risk_band, reasons, last_checkin_at, checkins_last_4w, messages_last_7d, compliance_trend")
+      .select("coach_id, client_id, client_name, risk_score, risk_band, reasons")
       .eq("risk_band", "high");
 
     if (fetchError) {
@@ -69,10 +69,6 @@ Deno.serve(async (req) => {
         risk_score: row.risk_score,
         risk_band: row.risk_band,
         reasons: row.reasons ?? [],
-        last_checkin_at: row.last_checkin_at,
-        checkins_last_4w: row.checkins_last_4w,
-        messages_last_7d: row.messages_last_7d,
-        compliance_trend: row.compliance_trend,
         client_name: row.client_name,
       };
 
