@@ -131,6 +131,7 @@ function DesktopShell({
   role,
   coachFocus,
   isElite,
+  isProOrElite,
   hasCompetitionPrep,
   clientDeliveryContext,
   linkedCoachFocus,
@@ -142,11 +143,12 @@ function DesktopShell({
       getSidebarSections(role ?? 'personal', {
         coachFocus,
         isElite,
+        isProOrElite,
         hasCompetitionPrep,
         clientDeliveryContext,
         linkedCoachFocus,
       }),
-    [role, coachFocus, isElite, hasCompetitionPrep, clientDeliveryContext, linkedCoachFocus],
+    [role, coachFocus, isElite, isProOrElite, hasCompetitionPrep, clientDeliveryContext, linkedCoachFocus],
   );
 
   return (
@@ -756,6 +758,7 @@ export default function AppShell() {
             role={normalizeRole(effectiveRole ?? role ?? DEFAULT_ROLE)}
             coachFocus={coachFocus}
             isElite={!isPersonalRole && isEliteTier(resolveCoachPlanTier(profile, user))}
+            isProOrElite={resolvedAccess?.isCoachProOrElite === true}
             hasCompetitionPrep={
               resolvedAccess?.hasCompetitionPrep === true
               || (isPersonalRole && !!activeContestPrep?.id)

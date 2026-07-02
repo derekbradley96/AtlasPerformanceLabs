@@ -2,7 +2,6 @@ import React from 'react';
 import { Navigate, Route, useParams } from 'react-router-dom';
 import RequireRole from '@/components/auth/RequireRole';
 import { Roles } from '@/lib/roles';
-import PrepComparisonPage from '@/pages/PrepComparisonPage';
 
 function PersonalCoachSlugRedirect() {
   const { slug } = useParams();
@@ -50,7 +49,7 @@ export default function PersonalRoutes({
         element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]}><Navigate to="/program-builder?personal=1&templates=1" replace /></RequireRole>}
       />
       <Route path="import/mfp" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="MFP import is for Personal accounts."><ImportMFPPage /></RequireRole>} />
-      <Route path="prep-comparison" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="Photo comparison is for Personal accounts."><PrepComparisonPage /></RequireRole>} />
+      {/* /prep-comparison lives in coachRoutes.jsx (first registration wins) and allows PERSONAL there. */}
     </>
   );
 }

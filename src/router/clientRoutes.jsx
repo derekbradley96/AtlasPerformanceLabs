@@ -3,7 +3,17 @@ import { Navigate, Route } from 'react-router-dom';
 import { RequireAuth } from '@/components/auth/routeGuards';
 import RequireRole from '@/components/auth/RequireRole';
 import { Roles } from '@/lib/roles';
+import { useAuth } from '@/lib/AuthContext';
 import CommunityRoomPage from '@/pages/CommunityRoomPage';
+import { PageLoader } from '@/components/ui/LoadingState';
+
+/** Bare /show-checklist (sidebar link) — resolve the signed-in client's active prep, then deep-link. */
+function ShowChecklistEntry() {
+  const { activeContestPrep, clientLinkedResolved } = useAuth();
+  if (!clientLinkedResolved) return <PageLoader message="Loading…" />;
+  if (activeContestPrep?.id) return <Navigate to={`/prep/${activeContestPrep.id}/show-checklist`} replace />;
+  return <Navigate to="/today" replace />;
+}
 
 export default function ClientRoutes({
   ClientCoachOfferAppGate,
@@ -75,6 +85,7 @@ export default function ClientRoutes({
       <Route path="community" element={<RequireAuth><RequireClientCoachOfferSettled><ErrorBoundary><CommunityRoomPage /></ErrorBoundary></RequireClientCoachOfferSettled></RequireAuth>} />
       <Route path="workout-player" element={<RequireRole allow={[Roles.CLIENT, Roles.PERSONAL]} accessDeniedMessage="The workout player is for clients and personal accounts."><ClientCoachOfferAppGate><WorkoutPlayerPage /></ClientCoachOfferAppGate></RequireRole>} />
       <Route path="readiness-checkin" element={<RequireRole allow={[Roles.CLIENT, Roles.PERSONAL]} accessDeniedMessage="Daily check-in is for clients and personal accounts."><ClientCoachOfferAppGate><ReadinessCheckinPage /></ClientCoachOfferAppGate></RequireRole>} />
+      <Route path="show-checklist" element={<RequireAuth><ClientCoachOfferAppGate><RequireClientPrepCapability capability="can_client_access_competition_prep"><ShowChecklistEntry /></RequireClientPrepCapability></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="peak-week" element={<RequireAuth><ClientCoachOfferAppGate><RequireClientPrepCapability capability="can_client_access_competition_prep"><ErrorBoundary><ClientPeakWeekPage /></ErrorBoundary></RequireClientPrepCapability></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="peak-week-checkin" element={<RequireAuth><ClientCoachOfferAppGate><RequireClientPrepCapability capability="can_client_access_competition_prep"><PeakWeekCheckinSubmitPage /></RequireClientPrepCapability></ClientCoachOfferAppGate></RequireAuth>} />
       <Route path="habits-daily" element={<RequireAuth><ClientCoachOfferAppGate><ClientHabitsDailyPage /></ClientCoachOfferAppGate></RequireAuth>} />
@@ -94,7 +105,7 @@ export default function ClientRoutes({
         path="pose-self-assessment"
         element={(
           <RequireAuth>
-            <RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="Pose self-assessment is for Personal accounts.">
+            <RequireRole allow={[Roles.PERSONAL, Roles.CLIENT, Roles.ADMIN]} accessDeniedMessage="Pose self-assessment is for Personal accounts and clients.">
               <SelfPoseAssessmentPage />
             </RequireRole>
           </RequireAuth>

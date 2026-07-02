@@ -712,7 +712,6 @@ function MoreContent() {
           {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Daily check-in', 'Readiness and recovery', '/readiness-checkin')}
           {menuRow(<TrendingUp size={20} style={{ color: colors.muted }} />, 'Progress', 'Trends and consistency', '/progress')}
           {menuRow(<Image size={20} style={{ color: colors.muted }} />, 'Progress photos', 'Photo check-ins', '/progressphotos')}
-          {menuRow(<CheckSquare size={20} style={{ color: colors.muted }} />, 'Check-ins', 'History and templates', '/checkins')}
         </div>
         <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
           <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>

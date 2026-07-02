@@ -40,7 +40,7 @@ const PREP_ACCENT = '#ba7517'; // prep amber
 
 export function getSidebarSections(
   role,
-  { coachFocus, isElite, hasCompetitionPrep, clientDeliveryContext, linkedCoachFocus } = {},
+  { coachFocus, isElite, isProOrElite, hasCompetitionPrep, clientDeliveryContext, linkedCoachFocus } = {},
 ) {
   const isCompCoach = coachFocus === 'competition';
   const isIntegrated = coachFocus === 'integrated';
@@ -100,7 +100,8 @@ export function getSidebarSections(
         items: [
           { path: '/earnings', label: 'Earnings', icon: CreditCard },
           { path: '/time-report', label: 'Time report', icon: Clock },
-          { path: '/revenue-analytics', label: 'Revenue analytics', icon: LineChart },
+          // Pro/Elite capability (can_access_advanced_coach_automation) — hidden for Basic so the link never dead-ends in "Access limited"
+          ...(isProOrElite ? [{ path: '/revenue-analytics', label: 'Revenue analytics', icon: LineChart }] : []),
           { path: '/plan', label: 'Plan & billing', icon: Gift },
           ...(isElite ? [{ path: '/settings/branding', label: 'Client branding', icon: Zap }] : []),
           { path: '/team', label: 'Team', icon: UsersRound },
