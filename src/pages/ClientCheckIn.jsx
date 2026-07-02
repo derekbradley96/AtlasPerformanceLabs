@@ -396,7 +396,19 @@ export default function ClientCheckIn() {
       releaseAllPreviewUrls();
       setPendingPhotos([]);
       setPhotoPreviewUrls([]);
-      toast.success('Check-in submitted!');
+      void import('@/lib/haptics').then((m) => m.notificationSuccess?.()).catch(() => {});
+      void import('@/lib/appReview')
+        .then((m) => m.maybeRequestReview(m.incrementReviewActionCount()))
+        .catch(() => {});
+      void import('canvas-confetti')
+        .then((mod) => {
+          const confetti = mod?.default || mod;
+          if (typeof confetti === 'function') {
+            confetti({ particleCount: 70, spread: 65, origin: { y: 0.7 }, disableForReducedMotion: true });
+          }
+        })
+        .catch(() => {});
+      toast.success('Check-in submitted — nice work this week!');
       if (draftKey) {
         try {
           localStorage.removeItem(draftKey);

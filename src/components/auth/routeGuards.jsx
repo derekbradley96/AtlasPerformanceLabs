@@ -115,10 +115,13 @@ export const RequireCoachCapability = ({ capability, children, accessDeniedMessa
   const { resolvedAccess } = useAuth();
   const allowed = Boolean(resolvedAccess?.[capability]);
   if (!allowed) {
+    // Tier-gated (not focus-gated) capability: give coaches a direct path to upgrade.
+    const isTierGated = capability === 'can_access_advanced_coach_automation';
     return (
       <AccessDenied
         title="Access limited"
         message={accessDeniedMessage ?? 'Not available for your current coaching focus.'}
+        secondaryAction={isTierGated && resolvedAccess?.isCoach ? { label: 'View plans & upgrade', path: '/plan' } : undefined}
       />
     );
   }

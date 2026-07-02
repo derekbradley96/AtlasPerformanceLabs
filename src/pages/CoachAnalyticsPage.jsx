@@ -11,7 +11,6 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import CountPill from '@/components/CountPill';
-import EmptyState from '@/components/ui/EmptyState';
 import { ProgressSummarySkeleton, TrendSectionSkeleton } from '@/components/ui/LoadingState';
 import { hapticLight } from '@/lib/haptics';
 import { colors, spacing, radii, shadows } from '@/ui/tokens';
@@ -513,24 +512,9 @@ export default function CoachAnalyticsPage() {
     }
   };
 
+  // Full dashboard always renders (zero values) so new coaches see what the page offers —
+  // same pattern as Earnings. Compact invite banner replaces the old blocking empty state.
   const hasRoster = data.metrics.length > 0 || (roster.activeClients ?? 0) > 0;
-  if (!hasRoster) {
-    return (
-      <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
-        <div className={`p-4 ${isDesktopWeb ? 'max-w-6xl' : 'max-w-lg'} mx-auto`}>
-          <h1 className="atlas-page-title">Analytics</h1>
-          <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>Roster health and trends at a glance.</p>
-          <EmptyState
-            title="No analytics yet"
-            description="Your roster is empty. Invite athletes with your link or coach code; after they complete onboarding, analytics appear here."
-            icon={BarChart3}
-            actionLabel="Invite clients"
-            onAction={() => navigate('/get-clients')}
-          />
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen pb-8" style={{ background: colors.bg, color: colors.text }}>
@@ -539,6 +523,25 @@ export default function CoachAnalyticsPage() {
         <p className="text-sm mt-1 mb-4" style={{ color: colors.muted }}>
           Roster health and trends at a glance.
         </p>
+
+        {!loading && !hasRoster ? (
+          <div
+            className="flex items-center gap-3 rounded-xl"
+            style={{
+              padding: spacing[16],
+              marginBottom: spacing[16],
+              background: 'rgba(99,102,241,0.08)',
+              border: '1px solid rgba(99,102,241,0.25)',
+            }}
+          >
+            <BarChart3 size={20} style={{ color: colors.primary, flexShrink: 0 }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold m-0" style={{ color: colors.text }}>No analytics yet</p>
+              <p className="text-xs m-0" style={{ color: colors.muted }}>Invite clients — once they onboard, this page fills in.</p>
+            </div>
+            <Button size="sm" onClick={() => navigate('/get-clients')}>Get clients →</Button>
+          </div>
+        ) : null}
 
         {/* Export */}
         <div className="flex flex-wrap gap-2" style={{ marginBottom: spacing[16] }}>

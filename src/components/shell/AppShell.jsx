@@ -270,7 +270,9 @@ function DesktopShell({
                   <button
                     key={item.path}
                     type="button"
-                    onClick={() => onNavigate({ key: item.path, to: item.path })}
+                    onClick={() => onNavigate(item.locked
+                      ? { key: '/plan', to: '/plan' }
+                      : { key: item.path, to: item.path })}
                     style={{
                       width: '100%',
                       display: 'flex',
@@ -281,6 +283,7 @@ function DesktopShell({
                       border: 'none',
                       background: active ? activeBg : 'transparent',
                       color: active ? activeColor : inactiveColor,
+                      opacity: item.locked ? 0.65 : 1,
                       fontSize: 13,
                       fontWeight: active ? 600 : 400,
                       cursor: 'pointer',
@@ -300,6 +303,23 @@ function DesktopShell({
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.label}
                     </span>
+                    {item.locked ? (
+                      <span
+                        style={{
+                          background: 'rgba(139,92,246,0.18)',
+                          color: 'rgb(167,139,250)',
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: '0.05em',
+                          padding: '1px 6px',
+                          borderRadius: 8,
+                          flexShrink: 0,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        Pro
+                      </span>
+                    ) : null}
                     {badge > 0 ? (
                       <span
                         style={{

@@ -18,7 +18,6 @@ import AppRoutes from '@/router/AppRoutes';
 import { isCoach, isClient, isPersonal } from '@/lib/roles';
 import { resolveCoachPlanTier, isEliteTier } from '@/config/plans';
 import { clearBadge, createAndroidChannels } from '@/services/pushNotifications';
-import { incrementReviewActionCount, maybeRequestReview } from '@/lib/appReview';
 import { initNetworkMonitoring } from '@/lib/networkStatus';
 import ScreenshotCaption from '@/tools/ScreenshotCaption';
 import IncomingCallBanner from '@/components/video/IncomingCallBanner';
@@ -288,8 +287,7 @@ function NativePlatformInit() {
             await checkForUpdate();
             clearBadge();
             queryClientInstance.invalidateQueries();
-            const count = incrementReviewActionCount();
-            await maybeRequestReview(count);
+            // Review prompt counts happy moments (workout done, check-in submitted), not app opens.
           }
         });
 

@@ -81,7 +81,30 @@ export default function PostWorkoutCompletion({
 
   useEffect(() => {
     impactLight();
+    // Completed workout = qualifying happy moment for the app review prompt.
+    void import('@/lib/appReview')
+      .then((m) => m.maybeRequestReview(m.incrementReviewActionCount()))
+      .catch(() => {});
   }, []);
+
+  // Celebrate beating last session — skip for recovery sessions and the calmer personal-basic chrome.
+  const shouldCelebrate = (sessionImprovement?.beatSets ?? 0) >= 1 && !isRecoverySession && !personalMinimalCompletion;
+  useEffect(() => {
+    if (!shouldCelebrate) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const mod = await import('canvas-confetti');
+        const confetti = mod?.default || mod;
+        if (!cancelled && typeof confetti === 'function') {
+          confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 }, disableForReducedMotion: true });
+        }
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldCelebrate]);
 
   const beatSets = sessionImprovement?.beatSets ?? 0;
   const matchedSets = sessionImprovement?.matchedSets ?? 0;

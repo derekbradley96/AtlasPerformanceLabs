@@ -100,8 +100,8 @@ export function getSidebarSections(
         items: [
           { path: '/earnings', label: 'Earnings', icon: CreditCard },
           { path: '/time-report', label: 'Time report', icon: Clock },
-          // Pro/Elite capability (can_access_advanced_coach_automation) — hidden for Basic so the link never dead-ends in "Access limited"
-          ...(isProOrElite ? [{ path: '/revenue-analytics', label: 'Revenue analytics', icon: LineChart }] : []),
+          // Pro/Elite capability (can_access_advanced_coach_automation) — Basic sees a locked row that routes to /plan
+          { path: '/revenue-analytics', label: 'Revenue analytics', icon: LineChart, ...(isProOrElite ? {} : { locked: true }) },
           { path: '/plan', label: 'Plan & billing', icon: Gift },
           ...(isElite ? [{ path: '/settings/branding', label: 'Client branding', icon: Zap }] : []),
           { path: '/team', label: 'Team', icon: UsersRound },
