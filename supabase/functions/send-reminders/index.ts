@@ -6,6 +6,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { sendPushToProfile } from "../_shared/fcm.ts";
 
 const TRIGGER_COPY: Record<string, { title: string; message: string }> = {
   workout_due: {
@@ -143,6 +144,12 @@ async function handleScheduledCheckinReminders(
           template_id: (template as { id?: string }).id ?? null,
         },
       });
+      await sendPushToProfile(supabase, {
+        profileId: client.user_id,
+        title: 'Check-in reminder',
+        body: `Your check-in opens in ${reminderAdvanceMinutes} minutes.`,
+        data: { type: 'checkin_due', deep_link: '/submit-checkin' },
+      });
       sent++;
     }
   }
@@ -229,7 +236,7 @@ Deno.serve(async (req) => {
         client_id: c.id,
         trigger_type: "checkin_due",
         message: customMessage,
-        data: { type: "checkin_due", client_id: c.id, deep_link: "/checkins" },
+        data: { type: "checkin_due", client_id: c.id, deep_link: "/submit-checkin" },
       });
     }
 
@@ -372,7 +379,7 @@ Deno.serve(async (req) => {
         client_id: c.id,
         trigger_type: "billing_due",
         message: `Payment of ${amountText} is overdue. Tap to update your payment method.`,
-        data: { type: "billing_due", client_id: c.id, amount_due: overdueAmount || 0, deep_link: "/billing" },
+        data: { type: "billing_due", client_id: c.id, amount_due: overdueAmount || 0, deep_link: "/profile-account" },
       });
     }
 
@@ -490,6 +497,14 @@ Deno.serve(async (req) => {
         entity_id: clientId,
       });
       if (nErr) console.error("coach pending notification", nErr);
+      else {
+        await sendPushToProfile(supabase, {
+          profileId: coachId,
+          title,
+          body: message,
+          data: { type: notifType, deep_link: `/messages/${clientId}` },
+        });
+      }
     }
 
     const overduePaymentCutoff = addDays(today, -3);
@@ -870,6 +885,15 @@ Deno.serve(async (req) => {
         inserted += 1;
         sentToday.add(key);
         byTrigger[trigger_type] = (byTrigger[trigger_type] ?? 0) + 1;
+        await sendPushToProfile(supabase, {
+          profileId,
+          title,
+          body: message,
+          data: {
+            type: trigger_type,
+            deep_link: typeof (data as Record<string, unknown>).deep_link === "string" ? (data as Record<string, unknown>).deep_link : "",
+          },
+        });
       }
     }
 

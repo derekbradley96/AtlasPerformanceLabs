@@ -3,6 +3,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { sendPushToProfile } from "../_shared/fcm.ts";
 
 const RETENTION_REVIEW_TABLE = "atlas_retention_review_items";
 const RETENTION_VIEW = "v_client_retention_risk";
@@ -91,6 +92,12 @@ Deno.serve(async (req) => {
         );
       }
       inserted += 1;
+      await sendPushToProfile(supabase, {
+        profileId: coachId,
+        title: "Client at risk",
+        body: `${row.client_name || "A client"} is showing high churn risk — worth a check-in.`,
+        data: { type: "retention_risk", deep_link: `/clients/${clientId}` },
+      });
     }
 
     return new Response(
