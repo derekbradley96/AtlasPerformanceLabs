@@ -360,7 +360,10 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
             carbs: mealData?.carbs_g,
             fats: mealData?.fats_g,
             portionGrams: mealData?.portion_grams,
+            portionMl: mealData?.portion_ml,
             portionUnit: mealData?.household_unit || (mealData?.portion_ml != null ? 'ml' : null),
+            householdUnit: mealData?.household_unit,
+            householdAmount: mealData?.household_amount,
             barcode: mealData?.barcode,
             notes: mealData?.notes,
             source: mealData?.source || 'manual',
@@ -379,7 +382,10 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
             carbs: mealData?.carbs_g,
             fats: mealData?.fats_g,
             portionGrams: mealData?.portion_grams,
+            portionMl: mealData?.portion_ml,
             portionUnit: mealData?.household_unit || (mealData?.portion_ml != null ? 'ml' : null),
+            householdUnit: mealData?.household_unit,
+            householdAmount: mealData?.household_amount,
             barcode: mealData?.barcode,
             notes: mealData?.notes,
             source: mealData?.source || 'manual',
@@ -509,7 +515,11 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
       queryClient.invalidateQueries({ queryKey: nutritionRecentFoodsQueryKey(user?.id) });
       queryClient.invalidateQueries({ queryKey: ['nutrition-weekly-trend', user?.id] });
       setDeleting(null);
-    }
+    },
+    onError: (err) => {
+      setDeleting(null);
+      toast.error(err?.message || 'Could not delete meal — try again');
+    },
   });
 
   const editMealMutation = useMutation({
@@ -531,6 +541,9 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
       queryClient.invalidateQueries({ queryKey: ['nutrition-weekly-trend', user?.id] });
       setEditingMeal(null);
       toast.success('Meal updated');
+    },
+    onError: (err) => {
+      toast.error(err?.message || 'Could not update meal — try again');
     },
   });
 

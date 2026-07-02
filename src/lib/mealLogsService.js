@@ -44,91 +44,97 @@ export async function addMealLog({
   carbs,
   fats,
   portionGrams,
+  portionMl,
   portionUnit,
+  householdUnit,
+  householdAmount,
   barcode,
   notes,
   source,
 }) {
-  try {
-    if (!supabase) throw new Error('Supabase unavailable');
-    if (!profileId && !clientId) throw new Error('addMealLog requires profileId or clientId');
-    const payload = {
-      profile_id: profileId ?? null,
-      client_id: clientId ?? null,
-      log_date: logDate,
-      meal_type: normalizeMealType(mealType),
-      logged_at: new Date().toISOString(),
-      food_name: String(foodName || '').trim(),
-      calories: coerceNum(calories),
-      protein_g: coerceNum(protein),
-      carbs_g: coerceNum(carbs),
-      fats_g: coerceNum(fats),
-      portion_grams: coerceNum(portionGrams),
-      portion_unit: portionUnit || null,
-      barcode: barcode || null,
-      notes: notes || null,
-      source: source || 'manual',
-    };
-    const { data, error } = await supabase.from('meal_logs').insert(payload).select('*').single();
-    if (error) throw new Error(error.message || 'Failed to add meal');
-    return data;
-  } catch (error) {
+  // Throws on failure so callers' mutations roll back — returning null here made
+  // a failed save look like success (toast + optimistic row that vanished on refetch).
+  if (!supabase) throw new Error('Supabase unavailable');
+  if (!profileId && !clientId) throw new Error('addMealLog requires profileId or clientId');
+  const payload = {
+    profile_id: profileId ?? null,
+    client_id: clientId ?? null,
+    log_date: logDate,
+    meal_type: normalizeMealType(mealType),
+    logged_at: new Date().toISOString(),
+    food_name: String(foodName || '').trim(),
+    calories: coerceNum(calories),
+    protein_g: coerceNum(protein),
+    carbs_g: coerceNum(carbs),
+    fats_g: coerceNum(fats),
+    portion_grams: coerceNum(portionGrams),
+    portion_ml: coerceNum(portionMl),
+    portion_unit: portionUnit || null,
+    household_unit: householdUnit || null,
+    household_amount: coerceNum(householdAmount),
+    barcode: barcode || null,
+    notes: notes || null,
+    source: source || 'manual',
+  };
+  const { data, error } = await supabase.from('meal_logs').insert(payload).select('*').single();
+  if (error) {
     console.error('[mealLogsService] addMealLog:', error);
-    return null;
+    throw new Error(error.message || 'Failed to add meal');
   }
+  return data;
 }
 
 export async function updateMealLog({ supabase, id, updates }) {
-  try {
-    if (!supabase) throw new Error('Supabase unavailable');
-    const patch = {};
-    const keys = [
-      'meal_type',
-      'food_name',
-      'calories',
-      'protein_g',
-      'carbs_g',
-      'fats_g',
-      'notes',
-      'portion_grams',
-      'portion_unit',
-      'barcode',
-      'source',
-      'logged_at',
-      'log_date',
-    ];
-    for (const k of keys) {
-      if (!Object.prototype.hasOwnProperty.call(updates, k)) continue;
-      if (k === 'meal_type') {
-        patch[k] = normalizeMealType(updates[k]);
-        continue;
-      }
-      if (k === 'calories' || k === 'protein_g' || k === 'carbs_g' || k === 'fats_g' || k === 'portion_grams') {
-        patch[k] = coerceNum(updates[k]);
-      } else {
-        patch[k] = updates[k];
-      }
+  if (!supabase) throw new Error('Supabase unavailable');
+  const patch = {};
+  const keys = [
+    'meal_type',
+    'food_name',
+    'calories',
+    'protein_g',
+    'carbs_g',
+    'fats_g',
+    'notes',
+    'portion_grams',
+    'portion_ml',
+    'portion_unit',
+    'household_unit',
+    'household_amount',
+    'barcode',
+    'source',
+    'logged_at',
+    'log_date',
+  ];
+  const numericKeys = new Set(['calories', 'protein_g', 'carbs_g', 'fats_g', 'portion_grams', 'portion_ml', 'household_amount']);
+  for (const k of keys) {
+    if (!Object.prototype.hasOwnProperty.call(updates, k)) continue;
+    if (k === 'meal_type') {
+      patch[k] = normalizeMealType(updates[k]);
+      continue;
     }
-
-    const { data, error } = await supabase.from('meal_logs').update(patch).eq('id', id).select('*').single();
-    if (error) throw new Error(error.message || 'Failed to update meal');
-    return data;
-  } catch (error) {
-    console.error('[mealLogsService] updateMealLog:', error);
-    return null;
+    if (numericKeys.has(k)) {
+      patch[k] = coerceNum(updates[k]);
+    } else {
+      patch[k] = updates[k];
+    }
   }
+
+  const { data, error } = await supabase.from('meal_logs').update(patch).eq('id', id).select('*').single();
+  if (error) {
+    console.error('[mealLogsService] updateMealLog:', error);
+    throw new Error(error.message || 'Failed to update meal');
+  }
+  return data;
 }
 
 export async function deleteMealLog({ supabase, id }) {
-  try {
-    if (!supabase) throw new Error('Supabase unavailable');
-    const { error } = await supabase.from('meal_logs').delete().eq('id', id);
-    if (error) throw new Error(error.message || 'Failed to delete meal');
-    return true;
-  } catch (error) {
+  if (!supabase) throw new Error('Supabase unavailable');
+  const { error } = await supabase.from('meal_logs').delete().eq('id', id);
+  if (error) {
     console.error('[mealLogsService] deleteMealLog:', error);
-    return false;
+    throw new Error(error.message || 'Failed to delete meal');
   }
+  return true;
 }
 
 export async function getMealLogTotals({ supabase, profileId, clientId, logDate }) {
