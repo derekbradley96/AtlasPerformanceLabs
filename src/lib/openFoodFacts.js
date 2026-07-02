@@ -204,6 +204,54 @@ async function fetchOpenGroceryProduct(code) {
   return { ok: true, product };
 }
 
+const OFF_SEARCH_URL = 'https://search.openfoodfacts.org/search';
+const OFF_SEARCH_FIELDS = ['product_name', 'nutriments', 'serving_size', 'product_quantity', 'brands', 'image_front_url', 'code'].join(',');
+const searchCache = new Map();
+const pendingSearches = new Map();
+const SEARCH_CACHE_TTL_MS = 1000 * 60 * 30;
+
+/**
+ * Free-text food search (Open Food Facts search-a-licious API).
+ * Returns products normalized to the same shape as barcode lookups; results
+ * without calorie data are dropped (they can't be logged).
+ */
+export async function searchFoodProducts(query, { pageSize = 12 } = {}) {
+  const q = String(query || '').trim();
+  if (q.length < 2) return { ok: false, reason: 'query_too_short', products: [] };
+
+  const cacheKey = `${q.toLowerCase()}|${pageSize}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < SEARCH_CACHE_TTL_MS) {
+    return { ok: true, source: 'cache', products: cached.products };
+  }
+  if (pendingSearches.has(cacheKey)) return pendingSearches.get(cacheKey);
+
+  const request = (async () => {
+    try {
+      const url = `${OFF_SEARCH_URL}?q=${encodeURIComponent(q)}&page_size=${pageSize}&fields=${encodeURIComponent(OFF_SEARCH_FIELDS)}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json', 'User-Agent': OFF_USER_AGENT },
+      });
+      if (!response.ok) return { ok: false, reason: 'http_error', products: [] };
+      const payload = await response.json();
+      const hits = Array.isArray(payload?.hits) ? payload.hits : [];
+      const products = hits
+        .map((hit) => parseProductFromResponse(hit?.code || '', { product: hit }))
+        .filter((p) => p && Number.isFinite(Number(p.calories_per_100g)));
+      searchCache.set(cacheKey, { products, at: Date.now() });
+      return { ok: true, source: 'off_search', products };
+    } catch {
+      return { ok: false, reason: 'network_error', products: [] };
+    } finally {
+      pendingSearches.delete(cacheKey);
+    }
+  })();
+
+  pendingSearches.set(cacheKey, request);
+  return request;
+}
+
 export async function fetchOpenFoodFactsProduct(barcode) {
   const code = String(barcode || '').trim();
   if (!code) {

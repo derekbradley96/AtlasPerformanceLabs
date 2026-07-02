@@ -23,7 +23,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer';
 import { scanBarcodeValue } from '@/lib/barcodeScanner';
-import { fetchOpenFoodFactsProduct } from '@/lib/openFoodFacts';
+import { fetchOpenFoodFactsProduct, searchFoodProducts } from '@/lib/openFoodFacts';
 import { formatNumber } from '@/lib/format';
 import { useAuth } from '@/lib/AuthContext';
 import {
@@ -178,6 +178,8 @@ export default function MealLogForm({
   const [webBarcodeInput, setWebBarcodeInput] = useState('');
   const [commonFoodTab, setCommonFoodTab] = useState('protein');
   const [foodSearchQuery, setFoodSearchQuery] = useState('');
+  const [dbSearchResults, setDbSearchResults] = useState([]);
+  const [dbSearching, setDbSearching] = useState(false);
   const isNativeApp = Capacitor.isNativePlatform();
   const recentScans = useMemo(() => listUserBarcodeCacheEntries(10), [lookupOpen, showForm]);
 
@@ -630,6 +632,49 @@ export default function MealLogForm({
     toast.success(`\u2713 ${scannedFood?.name || 'Food'} logged`);
   };
 
+  // Debounced Open Food Facts text search — fills the "Food database" section under recents.
+  useEffect(() => {
+    const q = foodSearchQuery.trim();
+    if (!showForm || q.length < 3) {
+      setDbSearchResults([]);
+      setDbSearching(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setDbSearching(true);
+    const t = setTimeout(async () => {
+      const result = await searchFoodProducts(q, { pageSize: 12 });
+      if (cancelled) return;
+      setDbSearchResults(result.ok ? result.products : []);
+      setDbSearching(false);
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [foodSearchQuery, showForm]);
+
+  /** Open the same confirm sheet used for barcode scans with a text-search result. */
+  const openConfirmFromSearchResult = useCallback((product) => {
+    if (!product) return;
+    hapticSelection();
+    setLookupOpen(true);
+    setLookupBarcode(String(product.barcode || '').trim());
+    setScannedFood(product);
+    setLookupError('');
+    const servingG = Number(product?.serving_size_grams);
+    const liquid = isLikelyLiquid(product?.serving_size);
+    if (Number.isFinite(servingG) && servingG > 0) {
+      setConsumedServings('1');
+      setConsumedGrams(String(Math.round(servingG)));
+      setBarcodeServingMode('serving');
+    } else {
+      setConsumedGrams(String(liquid ? 250 : 100));
+      setBarcodeServingMode('100g');
+    }
+    setManualFromScanned(product);
+  }, []);
+
   const openQuickConfirmFromCache = useCallback((entry) => {
     const code = String(entry?.barcode || '').trim();
     const product = entry?.product;
@@ -662,112 +707,8 @@ export default function MealLogForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openScannerSignal]);
 
-  if (!showForm) {
-    if (hideCollapsedActions) return null;
-    return (
-      <>
-        {recentScans.length > 0 ? (
-          <div className="mb-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Recent scans</p>
-            <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] md:grid md:grid-cols-2 [&::-webkit-scrollbar]:hidden">
-              {recentScans.map((entry) => {
-                const p = entry.product || {};
-                return (
-                  <div key={`${entry.barcode}-${entry.cachedAt}`} className="min-w-[220px] rounded-lg border border-slate-700 bg-slate-900/40 p-2">
-                    <p className="text-xs font-semibold text-slate-100 truncate">{p.name || 'Scanned food'}</p>
-                    <p className="text-[11px] text-slate-400">
-                      Cal {Math.round(Number(p.calories_per_100g) || 0)} · P {formatNumber(Number(p.protein_per_100g) || 0)} · C {formatNumber(Number(p.carbs_per_100g) || 0)} · F {formatNumber(Number(p.fats_per_100g) || 0)}
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-1 text-xs font-semibold text-blue-300"
-                      onClick={() => openQuickConfirmFromCache(entry)}
-                    >
-                      + Log again
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
-        <div className="flex flex-col gap-2">
-          {isNativeApp ? (
-            <div>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full h-11 border-slate-600 bg-slate-800/40 text-slate-200 hover:bg-slate-800 hover:text-white"
-                onClick={startScan}
-                disabled={lookupLoading}
-              >
-                <ScanBarcode className="w-4 h-4 mr-2 shrink-0" aria-hidden />
-                {lookupLoading ? 'Scanning...' : 'Scan barcode'}
-              </Button>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 500,
-                  color: colors.success,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                  display: 'block',
-                  textAlign: 'center',
-                  marginTop: 2,
-                }}
-              >
-                Always free
-              </span>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2">
-              <p className="text-xs text-slate-400 mb-2">Enter barcode</p>
-              <div className="flex gap-2">
-                <Input
-                  value={webBarcodeInput}
-                  onChange={(e) => setWebBarcodeInput(e.target.value)}
-                  placeholder="e.g. 5000169105718"
-                  className="bg-slate-800 border-slate-700"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setLookupOpen(true);
-                    void lookupByBarcode(webBarcodeInput);
-                  }}
-                >
-                  Search
-                </Button>
-              </div>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 500,
-                  color: colors.success,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                  display: 'block',
-                  textAlign: 'center',
-                  marginTop: 6,
-                }}
-              >
-                Always free
-              </span>
-            </div>
-          )}
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.98 }}
-            onClick={() => setShowForm(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-slate-600 rounded-xl text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            Log Meal
-          </motion.button>
-        </div>
-
-        {isNativeApp ? (
+  // Confirm sheet is shared by the collapsed actions AND the open form (text search opens it too).
+  const lookupSheet = isNativeApp ? (
           <Drawer open={lookupOpen} onOpenChange={(open) => { setLookupOpen(open); if (!open) resetLookupState(); }}>
             <DrawerContent className="border-slate-700 bg-slate-900 text-slate-100">
               <DrawerHeader>
@@ -900,7 +841,114 @@ export default function MealLogForm({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        )}
+        );
+
+  if (!showForm) {
+    if (hideCollapsedActions) return null;
+    return (
+      <>
+        {recentScans.length > 0 ? (
+          <div className="mb-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">Recent scans</p>
+            <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] md:grid md:grid-cols-2 [&::-webkit-scrollbar]:hidden">
+              {recentScans.map((entry) => {
+                const p = entry.product || {};
+                return (
+                  <div key={`${entry.barcode}-${entry.cachedAt}`} className="min-w-[220px] rounded-lg border border-slate-700 bg-slate-900/40 p-2">
+                    <p className="text-xs font-semibold text-slate-100 truncate">{p.name || 'Scanned food'}</p>
+                    <p className="text-[11px] text-slate-400">
+                      Cal {Math.round(Number(p.calories_per_100g) || 0)} · P {formatNumber(Number(p.protein_per_100g) || 0)} · C {formatNumber(Number(p.carbs_per_100g) || 0)} · F {formatNumber(Number(p.fats_per_100g) || 0)}
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-1 text-xs font-semibold text-blue-300"
+                      onClick={() => openQuickConfirmFromCache(entry)}
+                    >
+                      + Log again
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-2">
+          {isNativeApp ? (
+            <div>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full h-11 border-slate-600 bg-slate-800/40 text-slate-200 hover:bg-slate-800 hover:text-white"
+                onClick={startScan}
+                disabled={lookupLoading}
+              >
+                <ScanBarcode className="w-4 h-4 mr-2 shrink-0" aria-hidden />
+                {lookupLoading ? 'Scanning...' : 'Scan barcode'}
+              </Button>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: colors.success,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  display: 'block',
+                  textAlign: 'center',
+                  marginTop: 2,
+                }}
+              >
+                Always free
+              </span>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-slate-700 bg-slate-900/40 p-2">
+              <p className="text-xs text-slate-400 mb-2">Enter barcode</p>
+              <div className="flex gap-2">
+                <Input
+                  value={webBarcodeInput}
+                  onChange={(e) => setWebBarcodeInput(e.target.value)}
+                  placeholder="e.g. 5000169105718"
+                  className="bg-slate-800 border-slate-700"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setLookupOpen(true);
+                    void lookupByBarcode(webBarcodeInput);
+                  }}
+                >
+                  Search
+                </Button>
+              </div>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: colors.success,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  display: 'block',
+                  textAlign: 'center',
+                  marginTop: 6,
+                }}
+              >
+                Always free
+              </span>
+            </div>
+          )}
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setShowForm(true)}
+            className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-slate-600 rounded-xl text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            Log Meal
+          </motion.button>
+        </div>
+
+        {lookupSheet}
       </>
     );
   }
@@ -959,10 +1007,43 @@ export default function MealLogForm({
           type="search"
           value={foodSearchQuery}
           onChange={(e) => setFoodSearchQuery(e.target.value)}
-          placeholder="Filter recent & common foods"
+          placeholder="Search foods — e.g. chicken breast"
           className="bg-slate-700 border-slate-600"
         />
       </div>
+
+      {foodSearchQuery.trim().length >= 3 ? (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">
+            Food database{dbSearching ? ' — searching…' : ''}
+          </p>
+          {dbSearchResults.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[min(36vh,280px)] overflow-y-auto pr-1">
+              {dbSearchResults.map((product, idx) => (
+                <button
+                  key={product.barcode || `${product.name}-${idx}`}
+                  type="button"
+                  onClick={() => openConfirmFromSearchResult(product)}
+                  className="rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-2 text-left hover:border-slate-500 hover:bg-slate-800"
+                >
+                  <p className="text-xs font-medium text-slate-100 truncate">
+                    {pickFoodEmoji(product.name)} {product.name}
+                    {product.brands ? <span className="text-slate-400"> — {product.brands}</span> : null}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    Per 100g: {Math.round(Number(product.calories_per_100g) || 0)} kcal
+                    {Number.isFinite(Number(product.protein_per_100g)) ? ` · P ${formatNumber(Number(product.protein_per_100g))}g` : ''}
+                    {Number.isFinite(Number(product.carbs_per_100g)) ? ` · C ${formatNumber(Number(product.carbs_per_100g))}g` : ''}
+                    {Number.isFinite(Number(product.fats_per_100g)) ? ` · F ${formatNumber(Number(product.fats_per_100g))}g` : ''}
+                  </p>
+                </button>
+              ))}
+            </div>
+          ) : !dbSearching ? (
+            <p className="text-xs text-slate-500">No database matches — check recents below or enter macros manually.</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {recentFiltered.length > 0 ? (
         <div>
@@ -1224,6 +1305,7 @@ export default function MealLogForm({
           <X className="w-4 h-4 text-slate-300" />
         </button>
       </div>
+      {lookupSheet}
     </motion.form>
   );
 }
