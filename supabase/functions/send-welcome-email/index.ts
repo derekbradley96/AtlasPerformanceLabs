@@ -97,7 +97,7 @@ serve(async (req) => {
         Authorization: `Bearer ${RESEND_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from: FROM, to, subject, html }),
+      body: JSON.stringify({ from: FROM, to, reply_to: 'customerservice@atlasperformancelabs.co.uk', subject, html }),
     })
     const body = await r.text()
     return new Response(body, {

@@ -7,6 +7,8 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 
 const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const FROM = "Atlas <hello@atlasperformancelabs.co.uk>";
+// hello@ is a send-only label; replies go to the monitored Workspace inbox.
+const REPLY_TO = "customerservice@atlasperformancelabs.co.uk";
 const APP_URL = "https://atlasperformancelabs.co.uk";
 
 type DigestRow = {
@@ -165,6 +167,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           from: FROM,
           to: email,
+          reply_to: REPLY_TO,
           subject,
           html: digestHtml((row.display_name || "Coach").split(" ")[0], d),
         }),
