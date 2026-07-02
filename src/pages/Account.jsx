@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut } from 'lucide-react';
+import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield } from 'lucide-react';
 import { getRouteTitle } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { createPageUrl } from '@/utils';
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { COACH_FOCUS_OPTIONS, coachFocusLabel } from '@/lib/data/coachTypeHelpers';
 import { normalizeRole, isCoach } from '@/lib/roles';
 import { atlasMigrationDataAttributes, deriveAccountHubRouteState } from '@/lib/atlasMigrationPhases';
+import { getSupabase } from '@/lib/supabaseClient';
 
 /**
  * Account hub: iOS list style. No in-page header (AppShell provides back + title).
@@ -24,14 +25,17 @@ export default function Account() {
   const navigate = useNavigate();
   const location = useLocation();
   const { openFeedback, openSupport } = useFeedbackModal();
-  const { user: authUser, role, effectiveRole, profile, coachFocus, updateProfile, isDemoMode, isLoadingAuth, supabaseUser, signOut } = useAuth();
+  const { user: authUser, role, effectiveRole, profile, coachFocus, updateProfile, isDemoMode, isLoadingAuth, supabaseUser, signOut, isAdmin } = useAuth();
   const displayUser = authUser;
   const [updatingFocus, setUpdatingFocus] = useState(false);
+  const [updatingTier, setUpdatingTier] = useState(false);
+  const [updatingRole, setUpdatingRole] = useState(false);
   const canonicalRole = normalizeRole(effectiveRole ?? role ?? null);
 
   const displayFocus = (profile?.coach_focus ?? coachFocus ?? 'transformation').toLowerCase();
   const effectiveFocus = ['transformation', 'competition', 'integrated'].includes(displayFocus) ? displayFocus : 'transformation';
   const canUpdateProfile = !!supabaseUser?.id && typeof updateProfile === 'function';
+  const planTier = profile?.plan_tier ?? 'basic';
 
   const handleCoachFocusChange = async (focus) => {
     if (!canUpdateProfile || focus === effectiveFocus) return;
@@ -46,6 +50,42 @@ export default function Account() {
       toast.success('Coaching focus updated');
     } finally {
       setUpdatingFocus(false);
+    }
+  };
+
+  const handlePlanTierChange = async (tier) => {
+    if (!canUpdateProfile || tier === planTier || updatingTier) return;
+    impactLight();
+    setUpdatingTier(true);
+    try {
+      const result = await updateProfile({ plan_tier: tier });
+      if (result?.error) {
+        toast.error(result.error.message || 'Could not update plan tier');
+        return;
+      }
+      toast.success(`Switched to ${tier.charAt(0).toUpperCase() + tier.slice(1)} — reloading…`);
+      setTimeout(() => window.location.reload(), 800);
+    } finally {
+      setUpdatingTier(false);
+    }
+  };
+
+  const handleRoleChange = async (newRole) => {
+    if (!canUpdateProfile || newRole === canonicalRole || updatingRole) return;
+    impactLight();
+    setUpdatingRole(true);
+    try {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', supabaseUser.id);
+      if (error) {
+        toast.error(error.message || 'Could not switch role');
+        return;
+      }
+      toast.success(`Switched to ${newRole} — reloading…`);
+      setTimeout(() => window.location.reload(), 800);
+    } finally {
+      setUpdatingRole(false);
     }
   };
 
@@ -65,6 +105,7 @@ export default function Account() {
 
   return (
     <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={pageContainer} {...accountHubMigrationAttrs}>
+      <div style={{ maxWidth: 480, margin: '0 auto', width: '100%' }}>
       <div className="overflow-hidden" style={standardCard}>
         <Row
           left={<UserCircle size={20} style={{ color: colors.muted }} />}
@@ -182,6 +223,131 @@ export default function Account() {
           onPress={() => { impactLight(); navigate('/settings/delete-account'); }}
         />
       </div>
+
+      {isAdmin && (
+        <div className="overflow-hidden" style={{ ...standardCard, marginTop: spacing[16], border: '1px solid rgba(99,102,241,0.35)' }}>
+          <div
+            style={{
+              minHeight: 34,
+              display: 'flex',
+              alignItems: 'center',
+              gap: spacing[8],
+              paddingLeft: spacing[16],
+              paddingRight: spacing[16],
+              borderBottom: `1px solid ${colors.border}`,
+              color: 'rgba(139,92,246,0.9)',
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+            }}
+          >
+            <Shield size={13} />
+            Admin controls
+          </div>
+
+          {/* Plan tier */}
+          <div style={{ padding: spacing[16], borderBottom: `1px solid ${colors.border}` }}>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>Plan tier</p>
+              <p className="text-sm font-semibold" style={{ color: 'rgba(139,92,246,0.9)' }}>
+                {planTier.charAt(0).toUpperCase() + planTier.slice(1)}
+              </p>
+            </div>
+            <div
+              className="flex rounded-xl overflow-hidden"
+              style={{ background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.border}` }}
+            >
+              {['basic', 'pro', 'elite'].map((tier) => (
+                <button
+                  key={tier}
+                  type="button"
+                  disabled={updatingTier || !canUpdateProfile}
+                  onClick={() => handlePlanTierChange(tier)}
+                  className="flex-1 py-3 text-sm font-medium transition-colors duration-200 disabled:opacity-60"
+                  style={{
+                    minHeight: touchTargetMin,
+                    background: planTier === tier ? 'rgba(99,102,241,0.25)' : 'transparent',
+                    color: planTier === tier ? 'rgba(139,92,246,1)' : colors.muted,
+                  }}
+                >
+                  {tier.charAt(0).toUpperCase() + tier.slice(1)}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs mt-2" style={{ color: colors.muted }}>
+              Pro/Elite unlocks Revenue Analytics, Command Center &amp; Training Intelligence
+            </p>
+          </div>
+
+          {/* Role switcher */}
+          <div style={{ padding: spacing[16], borderBottom: `1px solid ${colors.border}` }}>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-xs font-medium" style={{ color: colors.muted }}>View as role</p>
+              <p className="text-sm font-semibold" style={{ color: 'rgba(139,92,246,0.9)' }}>
+                {canonicalRole ? canonicalRole.charAt(0).toUpperCase() + canonicalRole.slice(1) : '—'}
+              </p>
+            </div>
+            <div
+              className="flex rounded-xl overflow-hidden"
+              style={{ background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.border}` }}
+            >
+              {['coach', 'client', 'personal'].map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  disabled={updatingRole || !canUpdateProfile}
+                  onClick={() => handleRoleChange(r)}
+                  className="flex-1 py-3 text-sm font-medium transition-colors duration-200 disabled:opacity-60"
+                  style={{
+                    minHeight: touchTargetMin,
+                    background: canonicalRole === r ? 'rgba(99,102,241,0.25)' : 'transparent',
+                    color: canonicalRole === r ? 'rgba(139,92,246,1)' : colors.muted,
+                  }}
+                >
+                  {r.charAt(0).toUpperCase() + r.slice(1)}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs mt-2" style={{ color: colors.muted }}>
+              Switches your DB role — reload to see sidebar &amp; routes for that role
+            </p>
+          </div>
+
+          {/* Admin panel links */}
+          <button
+            type="button"
+            className="flex items-center justify-between w-full"
+            style={{ padding: spacing[16], borderBottom: `1px solid ${colors.border}` }}
+            onClick={() => { impactLight(); navigate('/admin'); }}
+          >
+            <div className="flex items-center gap-3">
+              <Shield size={20} style={{ color: 'rgba(139,92,246,0.8)' }} />
+              <div className="text-left">
+                <p className="text-[15px] font-medium" style={{ color: colors.text }}>Admin panel</p>
+                <p className="text-xs" style={{ color: colors.muted }}>Users, billing, analytics, feature flags</p>
+              </div>
+            </div>
+            <span style={{ color: colors.muted, fontSize: 18 }}>›</span>
+          </button>
+          <button
+            type="button"
+            className="flex items-center justify-between w-full"
+            style={{ padding: spacing[16] }}
+            onClick={() => { impactLight(); navigate('/admin-dev-panel'); }}
+          >
+            <div className="flex items-center gap-3">
+              <Shield size={20} style={{ color: 'rgba(139,92,246,0.8)' }} />
+              <div className="text-left">
+                <p className="text-[15px] font-medium" style={{ color: colors.text }}>Dev panel</p>
+                <p className="text-xs" style={{ color: colors.muted }}>Role switcher, debug tools, seed data</p>
+              </div>
+            </div>
+            <span style={{ color: colors.muted, fontSize: 18 }}>›</span>
+          </button>
+        </div>
+      )}
+
       <div
         className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2"
         style={{ paddingTop: spacing[20], paddingBottom: spacing[16] }}
@@ -192,6 +358,7 @@ export default function Account() {
         <Link to="/terms" className="text-sm font-medium" style={{ color: colors.primary }}>
           Terms of Service
         </Link>
+      </div>
       </div>
     </div>
   );
