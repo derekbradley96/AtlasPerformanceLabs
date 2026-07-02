@@ -70,8 +70,25 @@ export async function syncOfflineQueue(supabase) {
   for (const op of queue) {
     try {
       if (op.type === 'upsert_set') {
-        const { error } = await supabase.from('workout_session_sets').upsert(op.payload);
-        if (error) throw error;
+        // Strip queue/synthetic fields; resolve the real row by (session, exercise, set) —
+        // there is no DB unique constraint to upsert against, and legacy payloads carry a fake id.
+        const { id: _id, ts: _ts, loadSuggestion: _ls, queued: _q, ...row } = op.payload ?? {};
+        if (!row.session_id || !row.exercise_id || !row.set_number) throw new Error('invalid_offline_set');
+        const { data: existing, error: selErr } = await supabase
+          .from('workout_session_sets')
+          .select('id')
+          .eq('session_id', row.session_id)
+          .eq('exercise_id', row.exercise_id)
+          .eq('set_number', row.set_number)
+          .maybeSingle();
+        if (selErr) throw selErr;
+        if (existing?.id) {
+          const { error } = await supabase.from('workout_session_sets').update(row).eq('id', existing.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('workout_session_sets').insert(row);
+          if (error) throw error;
+        }
       } else if (op.type === 'complete_session') {
         const { error } = await supabase
           .from('workout_sessions')

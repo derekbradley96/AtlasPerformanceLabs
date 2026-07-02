@@ -852,6 +852,10 @@ export default function WorkoutPlayerPage() {
         prescribed_rest_seconds: prescribedRest,
       });
 
+      if (saved?.queued) {
+        toast.message('No signal — set saved on this device, will sync automatically.');
+      }
+
       const nextSetN = currentSetNumber + 1;
       const maxSetsHere = Math.max(1, Number(currentExercise.sets) || 1);
       if (saved?.loadSuggestion && nextSetN <= maxSetsHere) {

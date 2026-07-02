@@ -167,6 +167,41 @@ export async function getSetsForSession(sessionId) {
  * @param {string} sessionId
  * @param {{ exercise_id: string, set_number: number, completed?: boolean, reps_done?: number | null, weight_done?: number | null, rir_done?: number | null, notes?: string | null, prescribed_reps?: number | null, prescribed_reps_raw?: string | null, prescribed_weight?: number | null, prescribed_rir?: number | null, prescribed_rest_seconds?: number | null, client_notes?: string | null }} payload
  */
+/** Network-level failure (offline, DNS, timeout) — retryable, unlike RLS/validation errors. */
+function isNetworkError(e) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  if (e && typeof e === 'object' && e.code) return false; // PostgrestError — server reached
+  const msg = String(e?.message || e || '').toLowerCase();
+  return msg.includes('failed to fetch') || msg.includes('network') || msg.includes('load failed') || msg.includes('timed out') || msg.includes('timeout');
+}
+
+/** sessionStorage copy (so the player sees the set) + durable offline queue (so it syncs later). */
+function persistSetLocally(sessionId, row) {
+  const key = getStorageSetsKey(sessionId);
+  let sets = [];
+  try {
+    const raw = sessionStorage.getItem(key);
+    sets = raw ? JSON.parse(raw) : [];
+  } catch {}
+  const id = row.exercise_id + '-' + row.set_number;
+  const idx = sets.findIndex((s) => s.exercise_id === row.exercise_id && s.set_number === row.set_number);
+  const newSet = {
+    ...row,
+    id,
+    prescribed_reps: row.prescribed_reps,
+    prescribed_rest_seconds: row.prescribed_rest_seconds,
+  };
+  if (idx >= 0) sets[idx] = newSet;
+  else sets.push(newSet);
+  sets.sort((a, b) => (a.exercise_id || '').localeCompare(b.exercise_id || '') || a.set_number - b.set_number);
+  try {
+    sessionStorage.setItem(key, JSON.stringify(sets));
+  } catch {}
+  // Queue the DB row only — no synthetic id (sync resolves the real row by session/exercise/set).
+  queueOfflineOperation({ type: 'upsert_set', payload: { ...row }, ts: Date.now() });
+  return newSet;
+}
+
 export async function upsertSet(sessionId, payload) {
   const supabase = getSupabase();
   const setNum = Math.max(1, Math.round(Number(payload.set_number) || 1));
@@ -193,6 +228,7 @@ export async function upsertSet(sessionId, payload) {
     console.info('[workoutSessionApi] upsertSet payload', { sessionId, exercise_id: row.exercise_id, set_number: setNum, completed: row.completed });
   }
   if (supabase) {
+    try {
     const { data: existing } = await supabase
       .from('workout_session_sets')
       .select('id')
@@ -260,31 +296,17 @@ export async function upsertSet(sessionId, payload) {
     if (error) throw error;
     const loadSuggestion = await loadSuggestionAfterCompletedSet(sessionId, row, payload);
     return { ...data, loadSuggestion };
+    } catch (e) {
+      // Gym connectivity drop: keep the workout moving — persist locally, sync when back online.
+      if (!isNetworkError(e)) throw e;
+      if (import.meta.env.DEV) {
+        console.info('[workoutSessionApi] upsertSet offline fallback', { sessionId, exercise_id: row.exercise_id, set_number: setNum });
+      }
+      const newSet = persistSetLocally(sessionId, row);
+      return { ...newSet, loadSuggestion: null, queued: true };
+    }
   }
-  const key = getStorageSetsKey(sessionId);
-  let sets = [];
-  try {
-    const raw = sessionStorage.getItem(key);
-    sets = raw ? JSON.parse(raw) : [];
-  } catch {}
-  const id = row.exercise_id + '-' + row.set_number;
-  const idx = sets.findIndex((s) => s.exercise_id === row.exercise_id && s.set_number === row.set_number);
-  const newSet = {
-    ...row,
-    id,
-    prescribed_reps: row.prescribed_reps,
-    prescribed_rest_seconds: row.prescribed_rest_seconds,
-  };
-  if (idx >= 0) sets[idx] = newSet;
-  else sets.push(newSet);
-  sets.sort((a, b) => (a.exercise_id || '').localeCompare(b.exercise_id || '') || a.set_number - b.set_number);
-  sessionStorage.setItem(key, JSON.stringify(sets));
-  const setPayload = newSet;
-  queueOfflineOperation({
-    type: 'upsert_set',
-    payload: setPayload,
-    ts: Date.now(),
-  });
+  const newSet = persistSetLocally(sessionId, row);
   return { ...newSet, loadSuggestion: null };
 }
 
