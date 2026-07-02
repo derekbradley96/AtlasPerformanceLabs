@@ -56,6 +56,8 @@ Deno.serve(async (req) => {
       payment_method_types: ["card"],
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
+      // Lets testers/partners apply Stripe promotion codes (e.g. 100%-off beta codes) at checkout.
+      allow_promotion_codes: true,
       subscription_data: {
         metadata: { coach_id: coach.id, user_id: userId, plan_tier: rawTier },
       },
