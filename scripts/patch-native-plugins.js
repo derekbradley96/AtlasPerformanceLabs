@@ -20,6 +20,7 @@ const PATCHES = [
   { pkg: 'capacitor-native-biometric', template: 'capacitor-native-biometric.Package.swift' },
   { pkg: '@capacitor/live-updates', template: 'live-updates.Package.swift' },
   { pkg: '@capacitor-mlkit/barcode-scanning', template: 'mlkit-barcode-scanning.Package.swift' },
+  { pkg: '@capacitor-community/in-app-review', template: 'in-app-review.Package.swift' },
 ];
 
 for (const { pkg, template } of PATCHES) {
