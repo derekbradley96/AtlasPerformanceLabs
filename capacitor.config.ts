@@ -22,7 +22,8 @@ const config: CapacitorConfig = {
     SplashScreen: {
       launchShowDuration: 0,
       launchAutoHide: true,
-      backgroundColor: '#0F172A',
+      // Must match the splash image canvas and colors.bgPrimary so launch → app is one seamless colour.
+      backgroundColor: '#0B1220',
       androidScaleType: 'CENTER_CROP',
       showSpinner: false,
     },

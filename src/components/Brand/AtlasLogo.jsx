@@ -1,7 +1,6 @@
 /**
  * Brand logo component.
- * - splash / auth: raster logo image (mix-blend-mode: screen removes the black background
- *   on the dark navy surface, leaving only the glowing Atlas figure visible)
+ * - splash / auth: raster logo image (transparent background, sits directly on dark surfaces)
  * - header / inline: clean text wordmark (no suitable compact icon asset available)
  *
  * Variants:
@@ -17,11 +16,10 @@ import logoSrc from '@/assets/logo-image-1.png';
 const TEXT = colors.text;
 const MUTED = colors.muted;
 
-// Brightens the logo art and uses lighten blend so the dark background of the
-// PNG disappears on the app's dark navy surface while the glowing figure stays vivid.
+// The logo PNG has a transparent background — brightness lift only, no mix-blend-mode
+// (the blend broke on some WebViews (iPad) and rendered a visible box).
 const LOGO_IMG_STYLE = {
-  mixBlendMode: 'screen',
-  filter: 'brightness(1.6) saturate(1.3) contrast(1.1)',
+  filter: 'brightness(1.45) saturate(1.2)',
 };
 
 export default function AtlasLogo({
