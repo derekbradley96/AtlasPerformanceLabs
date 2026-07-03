@@ -11,13 +11,24 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 
+const APP_SCHEME_PROTOCOL = 'com.atlasperformancelabs.app:';
+
 function applyUrlToRouter(url, navigate) {
   if (!url || typeof url !== 'string') return;
   try {
     const u = new URL(url);
-    const pathname = u.pathname || '/';
+    let pathname = u.pathname || '/';
+    // Custom scheme URLs (com.atlasperformancelabs.app://auth/callback) parse the first
+    // segment as host — fold it back into the path so /auth/callback routes correctly.
+    if (u.protocol === APP_SCHEME_PROTOCOL && u.host) {
+      pathname = `/${u.host}${u.pathname || ''}`;
+    }
     const search = u.search || '';
     const hash = u.hash || '';
+    if (u.protocol === APP_SCHEME_PROTOCOL) {
+      // Returning from external-browser OAuth — dismiss the SFSafariViewController sheet.
+      import('@capacitor/browser').then(({ Browser }) => Browser.close()).catch(() => {});
+    }
     if (pathname !== window.location.pathname || search !== window.location.search || hash !== window.location.hash) {
       if (hash) window.location.hash = hash;
       navigate(pathname + search, { replace: true });

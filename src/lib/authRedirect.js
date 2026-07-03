@@ -6,11 +6,13 @@
 import { Capacitor } from '@capacitor/core';
 import { getAppOrigin } from '@/lib/appOrigin';
 
-const CAPACITOR_AUTH_CALLBACK = 'capacitor://localhost/auth/callback';
+// Custom app scheme (registered in Info.plist CFBundleURLTypes) — Safari CAN redirect to this
+// after external-browser OAuth; it cannot redirect to capacitor://localhost from an https page.
+const CAPACITOR_AUTH_CALLBACK = 'com.atlasperformancelabs.app://auth/callback';
 
 /**
- * Returns the URL Supabase should redirect to after email confirm / password reset / magic link.
- * - Capacitor native: capacitor://localhost/auth/callback (opens the app on device)
+ * Returns the URL Supabase should redirect to after email confirm / password reset / magic link / OAuth.
+ * - Capacitor native: com.atlasperformancelabs.app://auth/callback (opens the app on device)
  * - Web: current origin + /auth/callback
  */
 export function getAuthCallbackUrl() {

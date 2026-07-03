@@ -66,5 +66,16 @@
 	<string>Atlas saves your workout data and body weight to Apple Health to keep your health records complete.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.atlasperformancelabs.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.atlasperformancelabs.app</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

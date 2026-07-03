@@ -232,6 +232,7 @@ import BlogIndexPage from '@/pages/marketing/BlogIndexPage';
 import BlogPostPage from '@/pages/marketing/BlogPostPage';
 import PrivacyPolicyPage from '@/pages/marketing/PrivacyPolicyPage';
 import TermsOfServicePage from '@/pages/marketing/TermsOfServicePage';
+import SupportPage from '@/pages/marketing/SupportPage';
 import AuthScreen from '@/screens/AuthScreen';
 import AuthCallback from '@/screens/AuthCallback';
 
@@ -497,6 +498,7 @@ export default function AppRoutes({ isNative }) {
             <Route path="blog/:slug" element={<BlogPostPage />} />
             <Route path="privacy" element={<PrivacyPolicyPage />} />
             <Route path="terms" element={<TermsOfServicePage />} />
+            <Route path="support" element={<SupportPage />} />
           </Route>
         ) : null}
       </Route>

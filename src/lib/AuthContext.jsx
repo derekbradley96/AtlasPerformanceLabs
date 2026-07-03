@@ -1,5 +1,6 @@
 /** Production auth flow is unified through /login. Legacy role-select pages are DEV/demo only. setFakeSession is a DEV-only fallback. */
 import React, { createContext, useState, useContext, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { getCoachType, normalizeCoachType } from '@/lib/data/coachProfileRepo';
 import { coachTypeToCoachFocus, coachFocusToCoachType } from '@/lib/data/coachTypeHelpers';
 import { safeGetJson } from '@/lib/storageSafe';
@@ -616,21 +617,30 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * OAuth (Google / Apple). Uses same redirect URL as email magic links so web + Capacitor deep link work.
+   * Native: must open in the system browser (SFSafariViewController) — Google blocks OAuth inside
+   * embedded WebViews (disallowed_useragent), which is why in-WebView sign-in dead-ends. The
+   * provider then redirects to com.atlasperformancelabs.app://auth/callback, which reopens the app.
    * @param {'google' | 'apple'} provider
    */
   const signInWithProvider = async (provider) => {
     if (!hasSupabase || !supabase) throw new Error('Supabase not configured');
     const redirectTo = getAuthCallbackUrl();
+    const isNative = typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform?.();
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo,
+        skipBrowserRedirect: Boolean(isNative),
         queryParams: provider === 'google'
           ? { access_type: 'offline', prompt: 'consent' }
           : {},
       },
     });
     if (error) throw error;
+    if (isNative && data?.url) {
+      const { Browser } = await import('@capacitor/browser');
+      await Browser.open({ url: data.url });
+    }
     return data;
   };
 
