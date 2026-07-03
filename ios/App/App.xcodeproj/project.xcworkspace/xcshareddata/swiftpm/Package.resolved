@@ -11,12 +11,66 @@
       }
     },
     {
+      "identity" : "google-mlkit-swiftpm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/d-date/google-mlkit-swiftpm.git",
+      "state" : {
+        "revision" : "39257f6c2486677301c4cd413a0a1f1503b1cf31",
+        "version" : "5.0.1"
+      }
+    },
+    {
+      "identity" : "googledatatransport",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/google/GoogleDataTransport.git",
+      "state" : {
+        "revision" : "a637d318ae7ae246b02d7305121275bc75ed5565",
+        "version" : "9.4.0"
+      }
+    },
+    {
+      "identity" : "googleutilities",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/google/GoogleUtilities.git",
+      "state" : {
+        "revision" : "26c898aed8bed13b8a63057ee26500abbbcb8d55",
+        "version" : "7.13.1"
+      }
+    },
+    {
+      "identity" : "gtm-session-fetcher",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/google/gtm-session-fetcher.git",
+      "state" : {
+        "revision" : "9534039303015a84837090d20fa21cae6e5eadb6",
+        "version" : "3.3.2"
+      }
+    },
+    {
       "identity" : "ionic-live-updates-releases",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ionic-team/ionic-live-updates-releases.git",
       "state" : {
         "revision" : "e577a3735249a62f5dedd79d21c06d71e28f6855",
         "version" : "0.5.8"
+      }
+    },
+    {
+      "identity" : "nanopb",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/firebase/nanopb.git",
+      "state" : {
+        "revision" : "b7e1104502eca3a213b46303391ca4d3bc8ddec1",
+        "version" : "2.30910.0"
+      }
+    },
+    {
+      "identity" : "promises",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/google/promises.git",
+      "state" : {
+        "revision" : "540318ecedd63d883069ae7f1ed811a2df00b6ac",
+        "version" : "2.4.0"
       }
     }
   ],
