@@ -18,6 +18,7 @@ const PATCHES = [
   { pkg: '@capacitor-community/apple-sign-in', template: 'apple-sign-in.Package.swift' },
   { pkg: 'capacitor-healthkit', template: 'capacitor-healthkit.Package.swift' },
   { pkg: 'capacitor-native-biometric', template: 'capacitor-native-biometric.Package.swift' },
+  { pkg: '@capacitor/live-updates', template: 'live-updates.Package.swift' },
 ];
 
 for (const { pkg, template } of PATCHES) {
