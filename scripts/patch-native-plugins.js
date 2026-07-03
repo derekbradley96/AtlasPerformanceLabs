@@ -16,6 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const PATCHES = [
   { pkg: '@capacitor-community/apple-sign-in', template: 'apple-sign-in.Package.swift' },
+  { pkg: 'capacitor-healthkit', template: 'capacitor-healthkit.Package.swift' },
 ];
 
 for (const { pkg, template } of PATCHES) {
