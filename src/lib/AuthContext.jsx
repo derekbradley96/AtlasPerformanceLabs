@@ -617,15 +617,31 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * OAuth (Google / Apple). Uses same redirect URL as email magic links so web + Capacitor deep link work.
-   * Native: must open in the system browser (SFSafariViewController) — Google blocks OAuth inside
-   * embedded WebViews (disallowed_useragent), which is why in-WebView sign-in dead-ends. The
-   * provider then redirects to com.atlasperformancelabs.app://auth/callback, which reopens the app.
+   * Native iOS + Apple: fully native (AuthenticationServices Face ID sheet only, no browser at all) —
+   * see nativeAppleSignIn.js. Everything else (Google on any platform, Apple on web/Android) opens the
+   * system browser (SFSafariViewController) — Google blocks OAuth inside embedded WebViews
+   * (disallowed_useragent), which is why in-WebView sign-in dead-ends. The provider then redirects to
+   * com.atlasperformancelabs.app://auth/callback, which reopens the app.
    * @param {'google' | 'apple'} provider
    */
   const signInWithProvider = async (provider) => {
     if (!hasSupabase || !supabase) throw new Error('Supabase not configured');
-    const redirectTo = getAuthCallbackUrl();
     const isNative = typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform?.();
+
+    if (provider === 'apple' && isNative && Capacitor.getPlatform?.() === 'ios') {
+      const { nativeAppleAuthorize } = await import('@/lib/nativeAppleSignIn');
+      const result = await nativeAppleAuthorize();
+      if (!result) throw new Error('Apple sign-in was cancelled');
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: result.identityToken,
+        nonce: result.nonce,
+      });
+      if (error) throw error;
+      return data;
+    }
+
+    const redirectTo = getAuthCallbackUrl();
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {

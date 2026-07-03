@@ -8,6 +8,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-native-plugins.js",
     "start": "vite",
     "test": "vitest run",
     "test:unit": "vitest run",
@@ -63,6 +64,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@capacitor-community/apple-sign-in": "^6.0.0",
     "@capacitor-community/in-app-review": "^6.0.0",
     "@capacitor-mlkit/barcode-scanning": "^6.2.0",
     "@capacitor/app": "^6.0.3",
