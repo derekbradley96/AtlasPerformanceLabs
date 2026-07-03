@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield } from 'lucide-react';
+import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield, FlaskConical } from 'lucide-react';
 import { getRouteTitle } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { createPageUrl } from '@/utils';
@@ -36,6 +36,50 @@ export default function Account() {
   const effectiveFocus = ['transformation', 'competition', 'integrated'].includes(displayFocus) ? displayFocus : 'transformation';
   const canUpdateProfile = !!supabaseUser?.id && typeof updateProfile === 'function';
   const planTier = profile?.plan_tier ?? 'basic';
+  /** Scoped QA capability: same role/tier/focus switching as admin, without platform-admin (Users/Billing/Audit) access. */
+  const isQaTester = profile?.beta_group === 'qa_tester';
+  const showTesterControls = isAdmin || isQaTester;
+
+  const [clientRow, setClientRow] = useState(null);
+  const [updatingDelivery, setUpdatingDelivery] = useState(false);
+  useEffect(() => {
+    if (!showTesterControls || canonicalRole !== 'client' || !supabaseUser?.id) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const { data } = await supabase
+        .from('clients')
+        .select('id, delivery_context')
+        .eq('user_id', supabaseUser.id)
+        .maybeSingle();
+      if (!cancelled) setClientRow(data ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [showTesterControls, canonicalRole, supabaseUser?.id]);
+
+  const handleDeliveryContextChange = useCallback(async (context) => {
+    if (!clientRow?.id || updatingDelivery || context === clientRow?.delivery_context) return;
+    impactLight();
+    setUpdatingDelivery(true);
+    try {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('clients')
+        .update({ delivery_context: context, client_type: context })
+        .eq('id', clientRow.id);
+      if (error) {
+        toast.error(error.message || 'Could not update delivery context');
+        return;
+      }
+      setClientRow((r) => ({ ...r, delivery_context: context }));
+      toast.success(`Client delivery set to ${context} — reloading…`);
+      setTimeout(() => window.location.reload(), 800);
+    } finally {
+      setUpdatingDelivery(false);
+    }
+  }, [clientRow, updatingDelivery]);
 
   const handleCoachFocusChange = async (focus) => {
     if (!canUpdateProfile || focus === effectiveFocus) return;
@@ -224,7 +268,7 @@ export default function Account() {
         />
       </div>
 
-      {isAdmin && (
+      {showTesterControls && (
         <div className="overflow-hidden" style={{ ...standardCard, marginTop: spacing[16], border: '1px solid rgba(99,102,241,0.35)' }}>
           <div
             style={{
@@ -242,8 +286,8 @@ export default function Account() {
               textTransform: 'uppercase',
             }}
           >
-            <Shield size={13} />
-            Admin controls
+            {isAdmin ? <Shield size={13} /> : <FlaskConical size={13} />}
+            {isAdmin ? 'Admin controls' : 'Tester controls'}
           </div>
 
           {/* Plan tier */}
@@ -314,37 +358,77 @@ export default function Account() {
             </p>
           </div>
 
-          {/* Admin panel links */}
-          <button
-            type="button"
-            className="flex items-center justify-between w-full"
-            style={{ padding: spacing[16], borderBottom: `1px solid ${colors.border}` }}
-            onClick={() => { impactLight(); navigate('/admin'); }}
-          >
-            <div className="flex items-center gap-3">
-              <Shield size={20} style={{ color: 'rgba(139,92,246,0.8)' }} />
-              <div className="text-left">
-                <p className="text-[15px] font-medium" style={{ color: colors.text }}>Admin panel</p>
-                <p className="text-xs" style={{ color: colors.muted }}>Users, billing, analytics, feature flags</p>
+          {/* Client delivery context — only meaningful once viewing as a client */}
+          {canonicalRole === 'client' && clientRow ? (
+            <div style={{ padding: spacing[16], borderBottom: `1px solid ${colors.border}` }}>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-xs font-medium" style={{ color: colors.muted }}>Client delivery</p>
+                <p className="text-sm font-semibold" style={{ color: 'rgba(139,92,246,0.9)' }}>
+                  {clientRow.delivery_context === 'competition' ? 'Competition' : 'Transformation'}
+                </p>
               </div>
-            </div>
-            <span style={{ color: colors.muted, fontSize: 18 }}>›</span>
-          </button>
-          <button
-            type="button"
-            className="flex items-center justify-between w-full"
-            style={{ padding: spacing[16] }}
-            onClick={() => { impactLight(); navigate('/admin-dev-panel'); }}
-          >
-            <div className="flex items-center gap-3">
-              <Shield size={20} style={{ color: 'rgba(139,92,246,0.8)' }} />
-              <div className="text-left">
-                <p className="text-[15px] font-medium" style={{ color: colors.text }}>Dev panel</p>
-                <p className="text-xs" style={{ color: colors.muted }}>Role switcher, debug tools, seed data</p>
+              <div
+                className="flex rounded-xl overflow-hidden"
+                style={{ background: 'rgba(255,255,255,0.06)', border: `1px solid ${colors.border}` }}
+              >
+                {['transformation', 'competition'].map((ctx) => (
+                  <button
+                    key={ctx}
+                    type="button"
+                    disabled={updatingDelivery}
+                    onClick={() => handleDeliveryContextChange(ctx)}
+                    className="flex-1 py-3 text-sm font-medium transition-colors duration-200 disabled:opacity-60"
+                    style={{
+                      minHeight: touchTargetMin,
+                      background: clientRow.delivery_context === ctx ? 'rgba(99,102,241,0.25)' : 'transparent',
+                      color: clientRow.delivery_context === ctx ? 'rgba(139,92,246,1)' : colors.muted,
+                    }}
+                  >
+                    {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
+                  </button>
+                ))}
               </div>
+              <p className="text-xs mt-2" style={{ color: colors.muted }}>
+                Competition unlocks posing, peak week &amp; prep tools on the client side
+              </p>
             </div>
-            <span style={{ color: colors.muted, fontSize: 18 }}>›</span>
-          </button>
+          ) : null}
+
+          {/* Admin panel links — platform admin only, not shown to scoped testers */}
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                className="flex items-center justify-between w-full"
+                style={{ padding: spacing[16], borderBottom: `1px solid ${colors.border}` }}
+                onClick={() => { impactLight(); navigate('/admin'); }}
+              >
+                <div className="flex items-center gap-3">
+                  <Shield size={20} style={{ color: 'rgba(139,92,246,0.8)' }} />
+                  <div className="text-left">
+                    <p className="text-[15px] font-medium" style={{ color: colors.text }}>Admin panel</p>
+                    <p className="text-xs" style={{ color: colors.muted }}>Users, billing, analytics, feature flags</p>
+                  </div>
+                </div>
+                <span style={{ color: colors.muted, fontSize: 18 }}>›</span>
+              </button>
+              <button
+                type="button"
+                className="flex items-center justify-between w-full"
+                style={{ padding: spacing[16] }}
+                onClick={() => { impactLight(); navigate('/admin-dev-panel'); }}
+              >
+                <div className="flex items-center gap-3">
+                  <Shield size={20} style={{ color: 'rgba(139,92,246,0.8)' }} />
+                  <div className="text-left">
+                    <p className="text-[15px] font-medium" style={{ color: colors.text }}>Dev panel</p>
+                    <p className="text-xs" style={{ color: colors.muted }}>Role switcher, debug tools, seed data</p>
+                  </div>
+                </div>
+                <span style={{ color: colors.muted, fontSize: 18 }}>›</span>
+              </button>
+            </>
+          )}
         </div>
       )}
 
