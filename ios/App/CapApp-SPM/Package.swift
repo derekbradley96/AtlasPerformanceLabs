@@ -24,7 +24,8 @@ let package = Package(
         .package(name: "CapacitorPushNotifications", path: "../../../node_modules/@capacitor/push-notifications"),
         .package(name: "CapacitorShare", path: "../../../node_modules/@capacitor/share"),
         .package(name: "CapacitorSplashScreen", path: "../../../node_modules/@capacitor/splash-screen"),
-        .package(name: "CapacitorHealthkit", path: "../../../node_modules/capacitor-healthkit")
+        .package(name: "CapacitorHealthkit", path: "../../../node_modules/capacitor-healthkit"),
+        .package(name: "CapacitorNativeBiometric", path: "../../../node_modules/capacitor-native-biometric")
     ],
     targets: [
         .target(
@@ -44,7 +45,8 @@ let package = Package(
                 .product(name: "CapacitorPushNotifications", package: "CapacitorPushNotifications"),
                 .product(name: "CapacitorShare", package: "CapacitorShare"),
                 .product(name: "CapacitorSplashScreen", package: "CapacitorSplashScreen"),
-                .product(name: "CapacitorHealthkit", package: "CapacitorHealthkit")
+                .product(name: "CapacitorHealthkit", package: "CapacitorHealthkit"),
+                .product(name: "CapacitorNativeBiometric", package: "CapacitorNativeBiometric")
             ]
         )
     ]
