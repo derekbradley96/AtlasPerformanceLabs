@@ -1910,15 +1910,23 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
                 }
 
                 if (clientUserId) {
-                  const { error: notificationError } = await supabase.from('notifications').insert({
-                    profile_id: clientUserId,
-                    type: 'programme_assigned',
-                    title: 'Your coach assigned a programme',
-                    message: 'A new training programme is ready for you.',
-                    is_read: false,
-                    category: 'coaching',
-                  });
-                  if (notificationError) throw notificationError;
+                  // RLS only allows inserting your OWN notifications rows — the
+                  // previous direct insert for the client always failed, which
+                  // threw AFTER the assignment succeeded and showed "Could not
+                  // assign programme". RPC path is RLS-safe and non-fatal.
+                  try {
+                    const { insertNotificationForRecipient } = await import('@/lib/notifications');
+                    await insertNotificationForRecipient(
+                      clientUserId,
+                      'programme_assigned',
+                      'Your coach assigned a programme',
+                      'A new training programme is ready for you.',
+                      { client_id: clientId, deep_link: '/myprogram' },
+                      programId
+                    );
+                  } catch (_) {
+                    /* notification is best-effort; the assignment already saved */
+                  }
                 }
               }
 

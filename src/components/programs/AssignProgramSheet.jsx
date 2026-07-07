@@ -1,8 +1,12 @@
 import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Search } from 'lucide-react';
+import repo from '@/lib/repo';
+import { useAuth } from '@/lib/AuthContext';
 import { getPrograms } from '@/lib/programsStore';
+import { getLocalDateKey } from '@/lib/localDate';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
@@ -20,10 +24,27 @@ function formatDate(iso) {
 }
 
 export default function AssignProgramSheet({ clientId, clientName, onAssign, onClose }) {
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [selectedProgram, setSelectedProgram] = useState(null);
 
-  const programs = useMemo(() => getPrograms(), []);
+  // Real coach programs live in Supabase program_blocks (repo.programs.list);
+  // the old localStorage getPrograms() showed "No programs found" for coaches
+  // whose programs were built in the Program Builder. Local store remains the
+  // sandbox/offline fallback.
+  const { data: programs = [], isLoading: programsLoading } = useQuery({
+    queryKey: ['assignable-programs', user?.id],
+    queryFn: async () => {
+      try {
+        const remote = await repo.programs.list(user?.id);
+        if (Array.isArray(remote) && remote.length > 0) return remote;
+      } catch (_) {
+        /* fall through to local */
+      }
+      return getPrograms();
+    },
+    enabled: !!user?.id,
+  });
   const filtered = useMemo(() => {
     if (!search.trim()) return programs;
     const q = search.trim().toLowerCase();
@@ -33,18 +54,16 @@ export default function AssignProgramSheet({ clientId, clientName, onAssign, onC
   const getNextMonday = () => {
     const d = new Date();
     d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7));
-    return d.toISOString().slice(0, 10);
+    return getLocalDateKey(d);
   };
 
   const handleSelectProgram = (prog) => {
     setSelectedProgram(prog);
-    setEffectiveChoice(null);
   };
 
   const handleStartToday = async () => {
     await mediumHaptic();
-    const today = new Date().toISOString().slice(0, 10);
-    onAssign(selectedProgram.id, today);
+    onAssign(selectedProgram.id, getLocalDateKey());
     onClose();
   };
 
@@ -88,7 +107,9 @@ export default function AssignProgramSheet({ clientId, clientName, onAssign, onC
             </div>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto" style={{ padding: spacing[16], paddingTop: spacing[8] }}>
-            {filtered.length === 0 ? (
+            {programsLoading ? (
+              <p className="text-sm" style={{ color: colors.muted }}>Loading programs…</p>
+            ) : filtered.length === 0 ? (
               <p className="text-sm" style={{ color: colors.muted }}>No programs found. Create one first.</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[8] }}>
