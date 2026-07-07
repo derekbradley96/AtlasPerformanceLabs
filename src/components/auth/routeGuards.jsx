@@ -5,6 +5,7 @@ import { isProfileOnboardingComplete, isCoachMainAppUnblocked, getPersonalOnboar
 import { normalizeRole } from '@/lib/roles';
 import { getPendingInvite } from '@/pages/ClientCode';
 import { CANONICAL_COACH_ONBOARDING_PATH, isCoachOnboardingSurfacePath } from '@/lib/coachOnboardingRoutes';
+import { hasExplicitRoleChoice } from '@/lib/auth/oauthSignupIntent';
 import { useTrainerPermissions } from '@/components/hooks/useTrainerPermissions';
 import AccessDenied from '@/components/AccessDenied';
 
@@ -15,6 +16,7 @@ const ONBOARDING_PATHS = [
   '/clientonboarding',
   '/onboarding/personal',
   '/onboarding',
+  '/onboardingrole',
 ];
 
 export function RequireAuthLayout({ BootLoadingWithTimeout }) {
@@ -61,6 +63,10 @@ export function RequireAuthLayout({ BootLoadingWithTimeout }) {
 
     if (pendingInv?.code && norm !== 'coach') {
       return <Navigate to="/client-onboarding-flow" replace />;
+    }
+    // OAuth user who never chose a role (DB trigger defaulted them) — ask, don't assume personal.
+    if (supabaseUser?.id && !hasExplicitRoleChoice(supabaseUser)) {
+      return <Navigate to="/onboardingrole" replace />;
     }
     if (norm === 'client') {
       return <Navigate to="/client-onboarding-flow" replace />;

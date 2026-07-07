@@ -20,6 +20,9 @@ import { resolveIncompleteOnboardingDestination } from '@/lib/auth/postAuthNavig
 import { resolveAuthCallbackPendingState } from '@/lib/auth/authCallbackState';
 import { getPendingInvite } from '@/pages/ClientCode';
 import { normalizeRole } from '@/lib/roles';
+import { consumeOAuthSignupIntent, hasExplicitRoleChoice } from '@/lib/auth/oauthSignupIntent';
+import { getPersonalOnboardingEntryPath } from '@/lib/onboardingStatus';
+import { CANONICAL_COACH_ONBOARDING_PATH } from '@/lib/coachOnboardingRoutes';
 
 function parseHashParams(hash) {
   if (!hash || !hash.startsWith('#')) return {};
@@ -136,9 +139,41 @@ export default function AuthCallback() {
     return () => { cancelled = true; };
   }, [searchParams, typeQuery]);
 
+  // 1b) OAuth signup: apply the role the user picked on the signup tab before the redirect.
+  //     Without this, Google/Apple signups have no role metadata and the DB trigger
+  //     defaults them to 'personal' — coaches and clients would lose their chosen path.
+  const intentAppliedRef = useRef(false);
+  const [applyingIntent, setApplyingIntent] = useState(false);
+  useEffect(() => {
+    if (!callbackHandled || status === 'error' || !supabaseUser?.id || intentAppliedRef.current) return;
+    intentAppliedRef.current = true;
+    const intent = consumeOAuthSignupIntent();
+    if (!intent || hasExplicitRoleChoice(supabaseUser)) return;
+    let cancelled = false;
+    setApplyingIntent(true);
+    (async () => {
+      try {
+        await supabase.auth.updateUser({ data: { role: intent.role } });
+        await supabase.from('profiles').update({ role: intent.role }).eq('id', supabaseUser.id);
+        if (cancelled) return;
+        const destination = intent.role === 'coach'
+          ? CANONICAL_COACH_ONBOARDING_PATH
+          : intent.role === 'client'
+            ? '/client-onboarding-flow'
+            : getPersonalOnboardingEntryPath(null);
+        // Full navigation so AuthContext re-derives role from the fresh profile.
+        window.location.assign(destination);
+      } catch {
+        // Fall through to normal routing — the role picker will catch them.
+        if (!cancelled) setApplyingIntent(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [callbackHandled, status, supabaseUser]);
+
   // 2) Route by auth state: no session -> /login, session+no profile -> /onboarding, complete profile -> /home.
   useEffect(() => {
-    if (!callbackHandled || status === 'error') return;
+    if (!callbackHandled || status === 'error' || applyingIntent) return;
     if (!supabaseUser) {
       if (!authUserWaitTimedOut) return;
       navigate(LOGIN_PUBLIC_PATH, { replace: true });
@@ -170,7 +205,7 @@ export default function AuthCallback() {
       return;
     }
     navigate(getDashboardPath(profile.role), { replace: true });
-  }, [callbackHandled, supabaseUser, profile, role, profileLoadError, isRecovery, status, authUserWaitTimedOut, navigate]);
+  }, [callbackHandled, supabaseUser, profile, role, profileLoadError, isRecovery, status, authUserWaitTimedOut, applyingIntent, navigate]);
 
   useEffect(() => {
     setAuthUserWaitTimedOut(false);

@@ -36,6 +36,7 @@ import {
   isBiometricEnabled,
 } from '@/lib/biometricAuth';
 import { AFFILIATE_REF_SESSION_KEY } from '@/lib/affiliateProgramme';
+import { setOAuthSignupIntent, clearOAuthSignupIntent } from '@/lib/auth/oauthSignupIntent';
 
 const ATLAS_BLUE = colors.brand;
 
@@ -96,6 +97,47 @@ const SIGNUP_STAGE = /** @type {const} */ ({
   CLIENT_CODE: 'client_code',
   ACCOUNT: 'account',
 });
+
+const oauthButtonStyle = {
+  width: '100%',
+  height: 48,
+  borderRadius: radii.lg,
+  border: `1px solid ${colors.border}`,
+  background: colors.surface1,
+  color: colors.text,
+  fontSize: 15,
+  fontWeight: 500,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: spacing[10],
+};
+
+/** Google + Apple buttons, shared by the login card and the signup account step. */
+function OAuthProviderButtons({ onProvider, showApple }) {
+  return (
+    <>
+      <button type="button" onClick={() => onProvider('google')} style={oauthButtonStyle}>
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+          <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
+          <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853" />
+          <path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05" />
+          <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335" />
+        </svg>
+        Continue with Google
+      </button>
+      {showApple ? (
+        <button type="button" onClick={() => onProvider('apple')} style={oauthButtonStyle}>
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+            <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
+          </svg>
+          Continue with Apple
+        </button>
+      ) : null}
+    </>
+  );
+}
 
 export default function AuthScreen() {
   const navigate = useNavigate();
@@ -818,74 +860,17 @@ export default function AuthScreen() {
                   marginBottom: spacing[16],
                 }}
               >
-                <button
-                  type="button"
-                  onClick={async () => {
+                <OAuthProviderButtons
+                  showApple={isNativePlatform || /iPhone|iPad|iPod|Mac/.test(navigator.userAgent || '')}
+                  onProvider={async (provider) => {
                     try {
-                      await signInWithProvider('google');
+                      await signInWithProvider(provider);
                     } catch (e) {
-                      if (import.meta.env.DEV) console.warn('[Auth] Google OAuth', e);
-                      toast.error('Could not sign in with Google — try email instead');
+                      if (import.meta.env.DEV) console.warn('[Auth] OAuth', provider, e);
+                      toast.error(`Could not sign in with ${provider === 'google' ? 'Google' : 'Apple'} — try email instead`);
                     }
                   }}
-                  style={{
-                    width: '100%',
-                    height: 48,
-                    borderRadius: radii.lg,
-                    border: `1px solid ${colors.border}`,
-                    background: colors.surface1,
-                    color: colors.text,
-                    fontSize: 15,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: spacing[10],
-                  }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
-                    <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4" />
-                    <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853" />
-                    <path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05" />
-                    <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335" />
-                  </svg>
-                  Continue with Google
-                </button>
-
-                {(isNativePlatform || /iPhone|iPad|iPod|Mac/.test(navigator.userAgent || '')) ? (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await signInWithProvider('apple');
-                      } catch (e) {
-                        if (import.meta.env.DEV) console.warn('[Auth] Apple OAuth', e);
-                        toast.error('Could not sign in with Apple — try email instead');
-                      }
-                    }}
-                    style={{
-                      width: '100%',
-                      height: 48,
-                      borderRadius: radii.lg,
-                      border: `1px solid ${colors.border}`,
-                      background: colors.surface1,
-                      color: colors.text,
-                      fontSize: 15,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: spacing[10],
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
-                      <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
-                    </svg>
-                    Continue with Apple
-                  </button>
-                ) : null}
+                />
 
                 <div
                   style={{
@@ -1126,6 +1111,28 @@ export default function AuthScreen() {
                   Coach code verified
                 </div>
               )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[8], marginBottom: spacing[16] }}>
+                <OAuthProviderButtons
+                  showApple={isNativePlatform || /iPhone|iPad|iPod|Mac/.test(navigator.userAgent || '')}
+                  onProvider={async (provider) => {
+                    try {
+                      // Carry the chosen role through the OAuth redirect — applied in AuthCallback.
+                      setOAuthSignupIntent(signupRole);
+                      await signInWithProvider(provider);
+                    } catch (e) {
+                      clearOAuthSignupIntent();
+                      if (import.meta.env.DEV) console.warn('[Auth] OAuth signup', provider, e);
+                      toast.error(`Could not sign up with ${provider === 'google' ? 'Google' : 'Apple'} — try email instead`);
+                    }
+                  }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: spacing[10], margin: `${spacing[4]}px 0` }}>
+                  <div style={{ flex: 1, height: 1, background: colors.border }} />
+                  <span style={{ fontSize: 12, color: colors.muted }}>or</span>
+                  <div style={{ flex: 1, height: 1, background: colors.border }} />
+                </div>
+              </div>
 
               <label htmlFor="signup-email" className="block text-xs font-medium mb-2" style={{ color: colors.muted }}>
                 Email

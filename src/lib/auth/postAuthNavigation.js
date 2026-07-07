@@ -10,6 +10,7 @@ import {
 } from '@/lib/onboardingStatus';
 import { normalizeRole } from '@/lib/roles';
 import { CANONICAL_COACH_ONBOARDING_PATH } from '@/lib/coachOnboardingRoutes';
+import { hasExplicitRoleChoice } from '@/lib/auth/oauthSignupIntent';
 
 /** @param {{ role: string, profile: object, supabaseUser: object }} input */
 export function resolveAuthRole({ role, profile, supabaseUser }) {
@@ -42,6 +43,11 @@ export function resolveIncompleteOnboardingDestination({
 
   if (pending?.code && r !== 'coach') {
     return '/client-onboarding-flow';
+  }
+  // OAuth users who skipped the signup form get 'personal' from the DB trigger default —
+  // never assume it. No explicit role choice ever → ask, don't guess.
+  if (supabaseUser?.id && !hasExplicitRoleChoice(supabaseUser)) {
+    return '/onboardingrole';
   }
   if (r === 'client') {
     return '/client-onboarding-flow';
