@@ -7,6 +7,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { sendPushToProfile } from "../_shared/fcm.ts";
+import { TRIGGER_PREF_KEY, loadNotificationPrefs, isNotificationAllowed } from "../_shared/notificationPrefs.ts";
 
 const TRIGGER_COPY: Record<string, { title: string; message: string }> = {
   workout_due: {
@@ -98,6 +99,13 @@ async function handleScheduledCheckinReminders(
 
   if (!templates?.length) return 0;
 
+  const allUserIds = templates.flatMap((t) =>
+    (((t as { clients?: Array<{ user_id?: string | null }> }).clients) ?? [])
+      .map((c) => c?.user_id)
+      .filter(Boolean) as string[]
+  );
+  const prefs = await loadNotificationPrefs(supabase, allUserIds);
+
   let sent = 0;
   for (const template of templates) {
     const scheduleTime = String((template as { schedule_time?: string | null })?.schedule_time || '');
@@ -120,6 +128,7 @@ async function handleScheduledCheckinReminders(
     const assignedClients = ((template as { clients?: Array<{ id?: string; user_id?: string | null }> }).clients ?? []);
     for (const client of assignedClients) {
       if (!client?.user_id || !client?.id) continue;
+      if (!isNotificationAllowed(prefs, client.user_id, "checkins")) continue;
       const weekStart = getWeekStartUTC(now);
       const { data: existing } = await supabase
         .from('checkins')
@@ -855,11 +864,19 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Respect per-user notification preferences: an explicit false for the
+    // trigger's category skips both the in-app notification and the push.
+    const dispatchPrefs = await loadNotificationPrefs(
+      supabase,
+      toSend.map((t) => String(t.user_id)),
+    );
+
     let inserted = 0;
     const byTrigger: Record<string, number> = {};
     for (const item of toSend) {
       const { user_id, trigger_type, title: customTitle, message: customMessage, data: customData, dedupe_key } = item;
       const profileId = user_id;
+      if (!isNotificationAllowed(dispatchPrefs, String(profileId), TRIGGER_PREF_KEY[trigger_type])) continue;
       const key = dedupe_key ? `${profileId}:${dedupe_key}` : `${profileId}:${trigger_type}`;
       if (sentToday.has(key)) continue;
       const copy = TRIGGER_COPY[trigger_type] ?? { title: "Reminder", message: "You have an action due." };

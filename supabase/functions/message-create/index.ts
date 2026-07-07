@@ -7,6 +7,7 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
 import { sendPushToProfile } from "../_shared/fcm.ts";
+import { loadNotificationPrefs, isNotificationAllowed } from "../_shared/notificationPrefs.ts";
 
 const payloadSchema = z.object({
   conversation_id: z.string().uuid().optional(),
@@ -78,7 +79,10 @@ Deno.serve(async (req) => {
     // Failures never block the send.
     try {
       const recipientId = isCoach ? clientUserId : coachId;
-      if (recipientId) {
+      // Message-notification preference suppresses the push only — the message
+      // itself always lands in the thread.
+      const prefs = recipientId ? await loadNotificationPrefs(supabase, [recipientId]) : new Map();
+      if (recipientId && isNotificationAllowed(prefs, recipientId, "messages")) {
         const { data: senderProfile } = await supabase
           .from("profiles")
           .select("display_name")

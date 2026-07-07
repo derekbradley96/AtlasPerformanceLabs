@@ -9,11 +9,14 @@ import { impactLight } from '@/lib/haptics';
 import { atlasMigrationDataAttributes, deriveNotificationPrefsPageRouteState } from '@/lib/atlasMigrationPhases';
 
 const TOGGLES = [
-  { key: 'checkins', label: 'Check-ins', description: 'Check-in due and review notifications' },
+  { key: 'checkins', label: 'Check-ins', description: 'Check-in due, pose check, and review notifications' },
   { key: 'messages', label: 'Messages', description: 'New message alerts' },
+  { key: 'workouts', label: 'Workouts', description: 'Workout due and missed-session reminders' },
   { key: 'habits', label: 'Habits', description: 'Daily habit reminders' },
+  { key: 'nutrition', label: 'Nutrition & supplements', description: 'Supplement and nutrition reminders' },
   { key: 'peak_week', label: 'Peak week', description: 'Peak week updates and day instructions' },
   { key: 'payments', label: 'Payments', description: 'Payment due and overdue alerts' },
+  { key: 'progress_reminders', label: 'Progress prompts', description: 'Occasional prompts to share progress and feedback' },
 ];
 
 export default function NotificationSettingsPage() {
@@ -25,6 +28,9 @@ export default function NotificationSettingsPage() {
     habits: true,
     peak_week: true,
     payments: true,
+    workouts: true,
+    nutrition: true,
+    progress_reminders: true,
   });
   const [loading, setLoading] = useState(!!profileId && hasSupabase);
   const [saving, setSaving] = useState(null);
