@@ -704,7 +704,7 @@ export default function MealLogForm({
   React.useEffect(() => {
     if (!openScannerSignal) return;
     startScan();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [openScannerSignal]);
 
   // Confirm sheet is shared by the collapsed actions AND the open form (text search opens it too).

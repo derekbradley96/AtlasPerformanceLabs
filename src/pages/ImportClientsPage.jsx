@@ -80,7 +80,7 @@ export default function ImportClientsPage() {
       }
       if (errors.length) {
         toast.error(`Some rows failed: ${errors.length} error(s). See console for details.`);
-        // eslint-disable-next-line no-console
+         
         console.error('Client import errors', errors);
       }
       const prog = mapPrograms({ rows: parsed.rows, createdClients: created });

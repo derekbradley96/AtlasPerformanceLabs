@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { useAlertStatus } from '@/components/hooks/useAlertStatus';
-import { UserCircle, Palette, HelpCircle, Trophy, Phone, Users, CheckSquare, Award, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Store, Bell, Gift, Calendar, Building2, LayoutDashboard, ChevronRight, UtensilsCrossed, Crosshair, UserPlus, ClipboardList, Dumbbell, LineChart, Target, Share2, UserMinus, Clock } from 'lucide-react';
+import { UserCircle, Palette, HelpCircle, Trophy, Phone, Users, Award, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Store, Bell, Gift, Calendar, Building2, LayoutDashboard, ChevronRight, UtensilsCrossed, Crosshair, UserPlus, ClipboardList, Dumbbell, LineChart, Target, Share2, UserMinus, Clock } from 'lucide-react';
 import { seedIfEmpty, resetSandbox, addClient } from '@/lib/sandboxStore';
 import { getTrainerId } from '@/lib/getTrainerId';
 import { getTrainerProfile } from '@/lib/trainerFoundation/trainerProfileRepo';

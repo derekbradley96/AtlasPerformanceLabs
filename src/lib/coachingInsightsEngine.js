@@ -41,13 +41,13 @@ export async function generateClientInsights(clientId) {
 
   for (const fn of detectors) {
     try {
-      // eslint-disable-next-line no-await-in-loop
+       
       const insight = await fn(clientId, { supabase, graph: graphContext });
       if (insight) results.push(insight);
     } catch (e) {
       if (import.meta.env.DEV) {
         // Do not throw; a single detector should not break the whole pipeline.
-        // eslint-disable-next-line no-console
+         
         console.error('[coachingInsightsEngine] detector failed', fn.name, e?.message);
       }
     }

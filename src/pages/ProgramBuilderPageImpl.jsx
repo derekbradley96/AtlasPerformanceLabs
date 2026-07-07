@@ -72,7 +72,7 @@ import {
 import { EXERCISES as PICKER_EXERCISES, getExerciseById } from '@/data/exercises/exerciseLibrary';
 import { atlasMigrationDataAttributes, deriveProgramBuilderRouteState } from '@/lib/atlasMigrationPhases';
 import { rememberProgramBuilderExerciseDefaults } from '@/lib/programBuilderDefaults';
-import { PROGRAM_TEMPLATES, getProgramTemplateById } from '@/lib/programTemplates';
+import { getProgramTemplateById } from '@/lib/programTemplates';
 import {
   fetchWeeks,
   fetchDays,

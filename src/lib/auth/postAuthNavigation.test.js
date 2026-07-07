@@ -93,12 +93,25 @@ describe('postAuthNavigation', () => {
     ).toBe('/coach-onboarding-flow');
   });
 
-  it('resolveIncompleteOnboardingDestination: missing role defaults to personal onboarding (never coach)', () => {
+  it('resolveIncompleteOnboardingDestination: no explicitly-chosen role → role picker (never assume personal)', () => {
+    // OAuth users skip the signup form; the DB trigger defaults them to 'personal'.
+    // A user whose metadata has no role choice must be asked, not assumed.
     expect(
       resolveIncompleteOnboardingDestination({
         profile: { id: 'p1', onboarding_complete: false },
         role: null,
         supabaseUser: user({}),
+        getPendingInvite: () => null,
+      })
+    ).toBe('/onboardingrole');
+  });
+
+  it('resolveIncompleteOnboardingDestination: explicit personal choice → personal onboarding', () => {
+    expect(
+      resolveIncompleteOnboardingDestination({
+        profile: { id: 'p1', role: 'personal', onboarding_complete: false },
+        role: 'personal',
+        supabaseUser: user({ role: 'personal' }),
         getPendingInvite: () => null,
       })
     ).toBe('/personal-onboarding-flow');

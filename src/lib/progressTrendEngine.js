@@ -41,7 +41,7 @@ async function upsertTrend({ supabase, clientId, trendType, trendStatus, trendVa
     .single();
   if (error) {
     if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
+       
       console.error('[progressTrendEngine] upsertTrend failed', trendType, error.message);
     }
     return null;

@@ -124,7 +124,7 @@ const PoseAnnotationCanvas = forwardRef(function PoseAnnotationCanvas({
     const ny = clamp01(draft.cy / c.height);
     const nr = clamp01(draft.r / Math.min(c.width, c.height));
     const col = COLOR_OPTIONS.find((x) => x.id === colorId)?.hex || '#ef4444';
-    // eslint-disable-next-line no-alert
+     
     const label = window.prompt('Label this marker', '') ?? '';
     const next = [...annotations, { x: nx, y: ny, radius: nr, label: label.trim(), color: col }];
     setAnnotations(next);

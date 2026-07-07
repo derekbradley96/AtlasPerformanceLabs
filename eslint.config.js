@@ -5,6 +5,11 @@ import pluginReactHooks from "eslint-plugin-react-hooks";
 import pluginUnusedImports from "eslint-plugin-unused-imports";
 
 export default [
+  // Generated output — never lint (android/ios build intermediates carry inline
+  // eslint directives referencing plugins this config doesn't load).
+  {
+    ignores: ["dist/**", "android/**", "ios/**", "node_modules/**"],
+  },
   {
     files: [
       "src/components/**/*.{js,mjs,cjs,jsx}",

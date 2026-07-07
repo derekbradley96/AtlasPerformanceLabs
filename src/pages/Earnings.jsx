@@ -9,7 +9,6 @@ import { DollarSign, Check, MessageSquare, CreditCard } from 'lucide-react';
 import { toast } from 'sonner';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
-import TopBar from '@/components/ui/TopBar';
 import { colors, spacing } from '@/ui/tokens';
 import {
   getStoredPeriod,

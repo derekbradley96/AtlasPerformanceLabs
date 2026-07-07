@@ -6,7 +6,7 @@ import SkeletonCard from '@/components/ui/SkeletonCard';
 import ClientProgramPanel from '@/components/clients/ClientProgramPanel';
 import { ClipboardList, History, ChevronDown, ChevronUp } from 'lucide-react';
 import { standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
-import { spacing, colors, radii } from '@/ui/tokens';
+import { spacing, colors } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 export default function ClientProgramTab(props) {

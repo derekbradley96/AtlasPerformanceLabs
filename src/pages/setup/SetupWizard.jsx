@@ -25,7 +25,9 @@ async function lightHaptic() {
   try {
     if (Capacitor.isNativePlatform()) await Haptics.impact({ style: ImpactStyle.Light });
     else if (navigator.vibrate) navigator.vibrate(10);
-  } catch (_) {}
+  } catch {
+    /* haptics unavailable */
+  }
 }
 
 export default function SetupWizard() {

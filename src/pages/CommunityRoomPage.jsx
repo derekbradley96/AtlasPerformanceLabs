@@ -615,7 +615,7 @@ export default function CommunityRoomPage() {
       return;
     }
     for (let attempts = 0; attempts < 8 && !messageNodeRefs.current.get(pinnedId); attempts += 1) {
-      // eslint-disable-next-line no-await-in-loop
+       
       const loaded = await loadOlderMessages();
       if (!loaded) break;
     }

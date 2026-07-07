@@ -15,7 +15,7 @@ import { isProfileOnboardingComplete } from '@/lib/onboardingStatus';
 import { getPostOnboardingPath } from '@/lib/postOnboardingRoutes';
 import Button from '@/ui/Button';
 import Card from '@/ui/Card';
-import { colors, radii, spacing, touchTargetMin } from '@/ui/tokens';
+import { colors, spacing, touchTargetMin } from '@/ui/tokens';
 import { impactLight } from '@/lib/haptics';
 import { deriveClientOnboardingSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { coachOfferServiceRequiresStripeCheckout } from '@/lib/clientPendingPaymentAccess';
