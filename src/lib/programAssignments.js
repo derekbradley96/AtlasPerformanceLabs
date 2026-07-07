@@ -16,6 +16,20 @@ function getISOWeekday(date) {
 }
 
 /**
+ * Parse a date-only string ("YYYY-MM-DD") as LOCAL midnight. new Date("YYYY-MM-DD")
+ * parses as UTC midnight, which lands on the previous local day for anyone west of
+ * UTC — shifting week numbers and rotation-day indexes by one. Other formats and
+ * Date instances pass through unchanged.
+ */
+function parseAssignmentDate(value) {
+  if (value instanceof Date) return new Date(value);
+  const s = String(value ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return new Date(value);
+}
+
+/**
  * Fetch active program block assignment for a client.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} clientId - clients.id
@@ -152,7 +166,7 @@ async function resolveWorkoutFromAssignment(supabase, assignment, block, asOf) {
  */
 export async function getCurrentProgramWeek(supabase, assignment, block, asOf = new Date()) {
   if (!supabase || !assignment?.start_date || !block?.id) return null;
-  const start = new Date(assignment.start_date);
+  const start = parseAssignmentDate(assignment.start_date);
   start.setHours(0, 0, 0, 0);
   const today = asOf instanceof Date ? asOf : new Date(asOf);
   today.setHours(0, 0, 0, 0);
@@ -189,7 +203,7 @@ export async function getTodaysProgramDay(supabase, week, date = new Date(), ass
   const match = days.find((d) => Number(d.day_number) === isoWeekday);
   if (match) return match;
   if (assignment?.start_date) {
-    const start = new Date(assignment.start_date);
+    const start = parseAssignmentDate(assignment.start_date);
     start.setHours(0, 0, 0, 0);
     const today = date instanceof Date ? new Date(date) : new Date(date);
     today.setHours(0, 0, 0, 0);
@@ -253,7 +267,7 @@ export async function getAssignedWorkoutForToday(opts, asOf = new Date()) {
     if (!days.length) return null;
 
     const meta = getAssignmentMeta(profileId);
-    const start = new Date(meta?.effectiveDate || program.created_date || asOf);
+    const start = parseAssignmentDate(meta?.effectiveDate || program.created_date || asOf);
     start.setHours(0, 0, 0, 0);
     const today = asOf instanceof Date ? new Date(asOf) : new Date(asOf);
     today.setHours(0, 0, 0, 0);

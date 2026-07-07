@@ -560,26 +560,39 @@ export async function completeSession(sessionId) {
   const supabase = getSupabase();
   const completed_at = new Date().toISOString();
   if (supabase) {
-    const { data: session } = await supabase.from('workout_sessions').select('client_id, profile_id, program_day_id').eq('id', sessionId).single();
-    if (import.meta.env.DEV) {
-      console.info('[workoutSessionApi] completeSession', { sessionId, completed_at });
-    }
-    const { data: updated, error } = await supabase
-      .from('workout_sessions')
-      .update({ status: 'completed', completed_at })
-      .eq('id', sessionId)
-      .select('id, status, completed_at')
-      .single();
-    if (import.meta.env.DEV) {
-      console.info('[workoutSessionApi] completeSession response', { data: updated ?? null, error: error ?? null });
-    }
-    if (error) throw error;
     try {
-      const profileId = session?.profile_id || null;
-      if (profileId) await markWorkoutCompletedToday({ profileId, clientId: session?.client_id || null });
-    } catch (_) {}
-    trackWorkoutLogged(sessionId, session ?? null);
-    return updated;
+      const { data: session } = await supabase.from('workout_sessions').select('client_id, profile_id, program_day_id').eq('id', sessionId).single();
+      if (import.meta.env.DEV) {
+        console.info('[workoutSessionApi] completeSession', { sessionId, completed_at });
+      }
+      const { data: updated, error } = await supabase
+        .from('workout_sessions')
+        .update({ status: 'completed', completed_at })
+        .eq('id', sessionId)
+        .select('id, status, completed_at')
+        .single();
+      if (import.meta.env.DEV) {
+        console.info('[workoutSessionApi] completeSession response', { data: updated ?? null, error: error ?? null });
+      }
+      if (error) throw error;
+      try {
+        const profileId = session?.profile_id || null;
+        if (profileId) await markWorkoutCompletedToday({ profileId, clientId: session?.client_id || null });
+      } catch (_) {}
+      trackWorkoutLogged(sessionId, session ?? null);
+      return updated;
+    } catch (e) {
+      // Same gym-connectivity story as upsertSet: the sets are already queued,
+      // so finishing must not dead-end — queue the completion and let the
+      // player show its complete state. Queue is FIFO, so sets sync first.
+      if (!isNetworkError(e)) throw e;
+      queueOfflineOperation({
+        type: 'complete_session',
+        payload: { id: sessionId, completed_at },
+        userId: getAuthUserIdForOfflineQueue(),
+      });
+      return { id: sessionId, status: 'completed', completed_at, queued: true };
+    }
   }
   const keys = Object.keys(sessionStorage);
   const sessionKey = keys.find((k) => k.startsWith(STORAGE_KEY_SESSION) && sessionStorage.getItem(k)?.includes(sessionId));

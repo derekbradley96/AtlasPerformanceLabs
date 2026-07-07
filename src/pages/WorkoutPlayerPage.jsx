@@ -714,6 +714,13 @@ export default function WorkoutPlayerPage() {
       void maybeRequestReview(count);
       const unlocked = evaluateUserMilestones(user?.id, [], { workoutCount: 1 });
       if (unlocked) setAchievementRecord(unlocked);
+      if (data?.queued) {
+        // Finished offline: completion is queued and will sync — the summary
+        // page can't load its data yet, so stay on the in-player complete state.
+        toast.success('Workout saved — will sync when you’re back online');
+        void maybeTrackFirstSession();
+        return;
+      }
       toast.success('Saved successfully');
       if (data?.id) {
         void maybeTrackFirstSession();
