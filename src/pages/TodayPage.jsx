@@ -866,7 +866,7 @@ export default function TodayPage() {
 
   const personalMealTotalsToday = useMemo(() => {
     if (!isPersonalRole || !userId) return { calories: 0, protein: 0 };
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateKey();
     const logs = listPersonalMealLogs(userId, today);
     return logs.reduce(
       (acc, meal) => ({
@@ -992,11 +992,22 @@ export default function TodayPage() {
     try {
       const supabase = getSupabase();
       if (!supabase || !userId) return;
-      await supabase.from('client_weight_logs').insert({
-        profile_id: userId,
-        weight: valueKg,
-        log_date: new Date().toISOString().split('T')[0],
-      });
+      // client_weight_logs is keyed by the clients-row id; the old insert used
+      // a nonexistent profile_id column and never checked the error, so this
+      // showed "Weight logged" while saving nothing.
+      let error = null;
+      if (isPersonalRole) {
+        ({ error } = await supabase.from('personal_checkins').insert({ user_id: userId, weight: valueKg }));
+      } else {
+        const clientRowId = todayDataHook.profile?.id ?? null;
+        if (!clientRowId) throw new Error('No client record');
+        ({ error } = await supabase.from('client_weight_logs').insert({
+          client_id: clientRowId,
+          weight: valueKg,
+          log_date: getLocalDateKey(),
+        }));
+      }
+      if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['today-page-v2-bundle'] });
       setWeightSheetOpen(false);
       setWeightInput('');

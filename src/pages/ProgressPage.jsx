@@ -411,16 +411,42 @@ export default function ProgressPage() {
       if (!supabase) return [];
       const start = new Date();
       start.setDate(start.getDate() - 365);
-      let q = supabase
+      // client_weight_logs columns are weight/log_date (no user_id/weight_kg/
+      // logged_at — the old select errored and this chart was always empty).
+      // Personal users' weights live in personal_checkins. Rows are normalized
+      // to the legacy shape the chart/phase code below expects.
+      if (isPersonalView) {
+        const { data } = await supabase
+          .from('personal_checkins')
+          .select('id, weight, created_at')
+          .eq('user_id', user?.id)
+          .not('weight', 'is', null)
+          .gte('created_at', start.toISOString())
+          .order('created_at', { ascending: true })
+          .limit(500);
+        return (data || []).map((r) => ({
+          id: r.id,
+          weight_kg: Number(r.weight),
+          logged_at: r.created_at,
+          created_at: r.created_at,
+          target_weight_kg: null,
+        }));
+      }
+      const { data } = await supabase
         .from('client_weight_logs')
-        .select('id, client_id, user_id, weight_kg, logged_at, created_at, target_weight_kg')
-        .gte('logged_at', start.toISOString())
-        .order('logged_at', { ascending: true })
+        .select('id, client_id, weight, log_date, created_at')
+        .eq('client_id', clientId)
+        .gte('log_date', start.toISOString().slice(0, 10))
+        .order('log_date', { ascending: true })
         .limit(500);
-      if (isPersonalView) q = q.eq('user_id', user?.id);
-      else q = q.eq('client_id', clientId);
-      const { data } = await q;
-      return Array.isArray(data) ? data : [];
+      return (data || []).map((r) => ({
+        id: r.id,
+        client_id: r.client_id,
+        weight_kg: Number(r.weight),
+        logged_at: r.log_date || r.created_at,
+        created_at: r.created_at,
+        target_weight_kg: null,
+      }));
     },
     enabled: !!supabase && !!(isPersonalView ? user?.id : clientId),
   });

@@ -281,12 +281,14 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
       if (!supabase || !profile?.id) return [];
       const since = new Date();
       since.setDate(since.getDate() - 35);
+      // Actual columns: weight/log_date (weight_kg/logged_at never existed —
+      // this query errored and the weight card was permanently empty).
       const { data, error } = await supabase
         .from('client_weight_logs')
-        .select('weight_kg, logged_at, target_weight_kg')
+        .select('weight, log_date, created_at')
         .eq('client_id', profile.id)
-        .gte('logged_at', since.toISOString())
-        .order('logged_at', { ascending: false })
+        .gte('log_date', since.toISOString().slice(0, 10))
+        .order('log_date', { ascending: false })
         .limit(24);
       if (error) return [];
       return Array.isArray(data) ? data : [];
@@ -297,7 +299,7 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
   const dashboardWeightCardModel = React.useMemo(() => {
     if (!dashTransformationWeightSurface || !profile?.id) return null;
     const series = weightLogsRecentDash
-      .map((r) => ({ weight: Number(r.weight_kg), date: r.logged_at }))
+      .map((r) => ({ weight: Number(r.weight), date: r.log_date || r.created_at }))
       .filter((r) => Number.isFinite(r.weight));
     const currentWeight =
       series[0]?.weight ??

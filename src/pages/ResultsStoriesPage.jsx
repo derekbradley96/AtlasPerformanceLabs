@@ -30,22 +30,22 @@ export default function ResultsStoriesPage() {
       const rows = [];
       for (const c of clients || []) {
         const [weightsRes, workoutRes, programRes] = await Promise.all([
-          sb.from('client_weight_logs').select('weight_kg, logged_at').eq('client_id', c.id).order('logged_at', { ascending: true }),
+          sb.from('client_weight_logs').select('weight, log_date').eq('client_id', c.id).order('log_date', { ascending: true }),
           sb.from('workout_sessions').select('id', { head: true, count: 'exact' }).eq('client_id', c.id).eq('status', 'completed'),
           sb.from('program_block_assignments').select('program_block_id, program_blocks(title)').eq('client_id', c.id).eq('is_active', true).maybeSingle(),
         ]);
-        const weights = Array.isArray(weightsRes.data) ? weightsRes.data.filter((x) => Number.isFinite(Number(x.weight_kg))) : [];
+        const weights = Array.isArray(weightsRes.data) ? weightsRes.data.filter((x) => Number.isFinite(Number(x.weight))) : [];
         if (weights.length < 2) continue;
         const first = weights[0];
         const last = weights[weights.length - 1];
-        const weeks = toWeeks(first.logged_at, last.logged_at);
-        const delta = Number(last.weight_kg) - Number(first.weight_kg);
+        const weeks = toWeeks(first.log_date, last.log_date);
+        const delta = Number(last.weight) - Number(first.weight);
         if (weeks < 8 || Math.abs(delta) < 3 || Number(workoutRes.count || 0) < 10) continue;
         rows.push({
           clientId: c.id,
           clientName: String(c.name || 'Client').split(' ')[0],
-          startDate: first.logged_at,
-          endDate: last.logged_at,
+          startDate: first.log_date,
+          endDate: last.log_date,
           changeKg: delta,
           weeks,
           workoutsCompleted: Number(workoutRes.count || 0),

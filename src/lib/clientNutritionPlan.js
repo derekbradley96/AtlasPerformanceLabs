@@ -1,4 +1,5 @@
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { getLocalDateKey } from '@/lib/localDate';
 
 /**
  * Reads the active nutrition snapshot for a client directly from Supabase tables.
@@ -21,10 +22,14 @@ export async function getClientNutritionSnapshot(clientId) {
   const plan = plans.find((p) => p?.is_active === true) ?? plans[0];
   if (!plan?.id) return null;
 
+  const todayIso = getLocalDateKey();
+  // Latest week that has STARTED — a coach pre-programming next week's
+  // targets must not flip the client's numbers early.
   const { data: weeks } = await supabase
     .from('nutrition_plan_weeks')
     .select('week_start, calories, protein, carbs, fats, phase, notes')
     .eq('plan_id', plan.id)
+    .lte('week_start', todayIso)
     .order('week_start', { ascending: false })
     .limit(1);
 
@@ -33,7 +38,6 @@ export async function getClientNutritionSnapshot(clientId) {
   const protein = latestWeek?.protein ?? plan.protein ?? null;
   const carbs = latestWeek?.carbs ?? plan.carbs ?? null;
   const fats = latestWeek?.fats ?? plan.fats ?? null;
-  const todayIso = new Date().toISOString().slice(0, 10);
   let peakWeekOverride = null;
   const { data: activePeakWeek } = await supabase
     .from('peak_weeks')

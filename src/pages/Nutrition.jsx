@@ -76,6 +76,7 @@ import {
 import { PrepHierarchyLevel } from '@/lib/prepHierarchy';
 import { listUserBarcodeCacheEntries } from '@/lib/mealBarcodeUserCache';
 import { getPrepEducationEntry } from '@/lib/prepEducationContent';
+import { getLocalDateKey } from '@/lib/localDate';
 
 function mapMealLogDbRowToUi(row) {
   if (!row) return row;
@@ -236,11 +237,12 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
     document.title = 'Nutrition — Atlas';
   }, []);
 
-  const todayDateKey = useMemo(() => new Date().toISOString().split('T')[0], []);
+  // Local wall-clock day, not UTC — a 00:30 BST log must count toward today.
+  const todayDateKey = useMemo(() => getLocalDateKey(), []);
   const yesterdayDateKey = useMemo(() => {
     const d = new Date();
     d.setDate(d.getDate() - 1);
-    return d.toISOString().split('T')[0];
+    return getLocalDateKey(d);
   }, []);
   const weekStartIso = useMemo(() => nutritionWeekStartIso(todayDateKey), [todayDateKey]);
 
@@ -343,7 +345,7 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
 
   const logMealMutation = useMutation({
     mutationFn: async (mealData) => {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateKey();
       const loggedAt = new Date().toISOString();
       if (hasSupabase) {
         const sb = getSupabase();
@@ -768,7 +770,7 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
     for (let i = 6; i >= 0; i -= 1) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
+      const key = getLocalDateKey(d);
       const pct = byDate.has(key) ? byDate.get(key) : null;
       let tone = 'empty';
       if (pct != null && Number.isFinite(pct)) {

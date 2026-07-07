@@ -8,6 +8,7 @@ import { fetchMergedPersonalNutritionTargets } from '@/lib/personalNutritionProf
 import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
 import { getRetentionStreaks } from '@/lib/retentionHabitService';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { getLocalDateKey } from '@/lib/localDate';
 
 async function fetchWeightRowsV2({ supabase, profileId, isPersonalRole }) {
   if (!supabase || !profileId) return [];
@@ -21,22 +22,25 @@ async function fetchWeightRowsV2({ supabase, profileId, isPersonalRole }) {
       .limit(30);
     return (data || []).map((r) => ({ weight: Number(r.weight), date: r.created_at }));
   }
+  // Actual columns are client_id/weight/log_date — the previous select used
+  // weight_kg/logged_at/target_weight_kg, which don't exist, so this errored
+  // and the weight chart was permanently empty for clients.
   const { data } = await supabase
     .from('client_weight_logs')
-    .select('weight_kg, logged_at, target_weight_kg')
+    .select('weight, log_date, created_at')
     .eq('client_id', profileId)
-    .order('logged_at', { ascending: false })
+    .order('log_date', { ascending: false })
     .limit(30);
   return (data || []).map((r) => ({
-    weight: Number(r.weight_kg),
-    date: r.logged_at,
-    targetWeight: Number(r.target_weight_kg) || null,
+    weight: Number(r.weight),
+    date: r.log_date || r.created_at,
+    targetWeight: null,
   }));
 }
 
 async function fetchClientMealTotalsToday(supabase, clientId) {
   if (!supabase || !clientId) return { calories: 0, protein: 0 };
-  const logDate = new Date().toISOString().slice(0, 10);
+  const logDate = getLocalDateKey();
   const { data, error } = await supabase
     .from('meal_logs')
     .select('calories, protein_g')

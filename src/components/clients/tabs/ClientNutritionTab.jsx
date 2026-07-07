@@ -6,6 +6,7 @@ import SkeletonCard from '@/components/ui/SkeletonCard';
 import { standardCard, sectionLabel, sectionGap } from '@/ui/pageLayout';
 import { spacing, colors, radii } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { getLocalDateKey } from '@/lib/localDate';
 import { ChevronDown, ChevronUp, History } from 'lucide-react';
 
 export default function ClientNutritionTab({
@@ -26,7 +27,7 @@ export default function ClientNutritionTab({
     queryFn: async () => {
       const supabase = getSupabase();
       if (!supabase || !clientId) return [];
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateKey();
       const { data } = await supabase
         .from('meal_logs')
         .select('id, food_name, calories, protein_g, carbs_g, fats_g, meal_type, logged_at')
