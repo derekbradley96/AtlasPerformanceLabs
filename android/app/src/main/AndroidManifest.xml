@@ -33,6 +33,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- OAuth / magic-link return trip: Supabase redirects the external browser to
+                 com.atlasperformancelabs.app://auth/callback — this claims that scheme so the
+                 app reopens with the session tokens (Capacitor appUrlOpen → DeepLinkHandler). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.atlasperformancelabs.app" />
+            </intent-filter>
+
         </activity>
 
         <provider

@@ -160,6 +160,30 @@ Deno.serve(async (req) => {
           if (clientUserId && typeof clientUserId === "string") {
             await supabase.from("profiles").update({ onboarding_complete: true }).eq("id", clientUserId);
           }
+          // Record the subscription link — without this row, invoice.paid can never resolve
+          // which coach/client an invoice belongs to, so commission records and the coach's
+          // Earnings numbers silently stay empty for the primary client-pays-coach flow.
+          const offerCoachId = session.metadata?.coach_id ?? null;
+          const offerSubId = (session.subscription as string) ?? null;
+          if (offerCoachId && offerSubId) {
+            const { data: existingPay } = await supabase
+              .from(TABLE.payments)
+              .select("id")
+              .eq("stripe_subscription_id", offerSubId)
+              .maybeSingle();
+            if (!existingPay?.id) {
+              await supabase.from(TABLE.payments).insert({
+                coach_id: offerCoachId,
+                client_id: publicClientsRowId,
+                stripe_customer_id: (session.customer as string) ?? null,
+                stripe_subscription_id: offerSubId,
+                status: "active",
+                last_invoice_status: "paid",
+                created_at: now,
+                updated_at: now,
+              });
+            }
+          }
           safeLogWebhook("checkout.session.completed", { objectId: session.id });
           break;
         }
@@ -258,7 +282,31 @@ Deno.serve(async (req) => {
         const subId = invoice.subscription as string;
         if (!subId) break;
         const amountPaidCents = invoice.amount_paid ?? 0;
-        const { data: pay } = await supabase.from(TABLE.payments).select("coach_id, client_id").eq("stripe_subscription_id", subId).single();
+        let { data: pay } = await supabase.from(TABLE.payments).select("coach_id, client_id").eq("stripe_subscription_id", subId).single();
+        if (!pay) {
+          // Self-heal: client-offer subscriptions created before checkout wrote an
+          // atlas_payments row can't be resolved from the DB — recover the coach/client
+          // link from the subscription's Stripe metadata and backfill the row.
+          try {
+            const sub = await stripe.subscriptions.retrieve(subId);
+            const md = sub?.metadata ?? {};
+            if (md.client_offer === "1" && md.coach_id && md.clients_row_id) {
+              await supabase.from(TABLE.payments).insert({
+                coach_id: md.coach_id,
+                client_id: md.clients_row_id,
+                stripe_customer_id: (sub.customer as string) ?? null,
+                stripe_subscription_id: subId,
+                status: "active",
+                last_invoice_status: "paid",
+                created_at: now,
+                updated_at: now,
+              });
+              pay = { coach_id: md.coach_id, client_id: md.clients_row_id };
+            }
+          } catch (_) {
+            // Stripe lookup failed — continue without the bridge rather than failing the event.
+          }
+        }
         let commissionRate = TIER_COMMISSION.basic;
         if (pay?.coach_id) {
           const { data: coach } = await supabase.from(TABLE.coaches).select("user_id").eq("id", pay.coach_id).single();
@@ -309,6 +357,39 @@ Deno.serve(async (req) => {
         if (pay?.client_id) {
           await supabase.from(TABLE.review_items).update({ status: "done", updated_at: now }).eq("coach_id", pay.coach_id).eq("client_id", pay.client_id).eq("type", "payment_overdue");
         }
+        // Bridge into client_payments — Earnings/RevenueAnalytics read this table
+        // (coach_id = profile id, amount in major units), not atlas_payments, so
+        // Stripe-collected client payments are invisible to coaches without it.
+        if (pay?.client_id && profileId && amountPaidCents > 0) {
+          const paidAtSecs = invoice.status_transitions?.paid_at ?? null;
+          const paidAtIso = paidAtSecs ? new Date(paidAtSecs * 1000).toISOString() : now;
+          const { data: existingClientPayment } = await supabase
+            .from("client_payments")
+            .select("id, status")
+            .eq("provider_payment_id", invoice.id)
+            .maybeSingle();
+          if (existingClientPayment?.id) {
+            // A retry after invoice.payment_failed — promote the failed row to paid.
+            if (existingClientPayment.status !== "paid") {
+              await supabase.from("client_payments").update({
+                status: "paid",
+                amount: amountPaidCents / 100,
+                paid_at: paidAtIso,
+              }).eq("id", existingClientPayment.id);
+            }
+          } else {
+            await supabase.from("client_payments").insert({
+              client_id: pay.client_id,
+              coach_id: profileId,
+              amount: amountPaidCents / 100,
+              currency: (invoice.currency ?? "gbp").toUpperCase(),
+              status: "paid",
+              payment_provider: "stripe",
+              provider_payment_id: invoice.id,
+              paid_at: paidAtIso,
+            });
+          }
+        }
         safeLogWebhook(event.type, { objectId: invoice.id });
         break;
       }
@@ -352,6 +433,26 @@ Deno.serve(async (req) => {
             created_at: now,
             updated_at: now,
           }, { onConflict: "coach_id,dedupe_key" });
+        }
+        // Mirror the failure into client_payments so the coach's failed-payments
+        // panel (RevenueAnalytics) reflects Stripe declines, not just manual entries.
+        if (pay?.client_id && profileId) {
+          const { data: existingClientPayment } = await supabase
+            .from("client_payments")
+            .select("id, status")
+            .eq("provider_payment_id", invoice.id)
+            .maybeSingle();
+          if (!existingClientPayment?.id) {
+            await supabase.from("client_payments").insert({
+              client_id: pay.client_id,
+              coach_id: profileId,
+              amount: (invoice.amount_due ?? 0) / 100,
+              currency: (invoice.currency ?? "gbp").toUpperCase(),
+              status: "failed",
+              payment_provider: "stripe",
+              provider_payment_id: invoice.id,
+            });
+          }
         }
         safeLogWebhook("invoice.payment_failed", { objectId: invoice.id });
         break;
