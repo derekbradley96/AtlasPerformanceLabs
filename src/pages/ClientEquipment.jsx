@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase } from '@/lib/supabaseClient';
 import { getSandboxClientByUserId } from '@/lib/linkedClientFromUserId';
-import { getClientGym, setClientGym, EQUIPMENT_LABELS } from '@/lib/gymEquipmentStore';
+import { setClientGym, fetchClientGym, EQUIPMENT_LABELS } from '@/lib/gymEquipmentStore';
 import Card from '@/ui/Card';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
@@ -48,15 +48,24 @@ export default function ClientEquipment() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!clientId) return;
-    const existing = getClientGym(clientId) || {};
-    setGymName(existing.gymName ?? '');
-    setRack(!!existing.rack);
-    setSmith(!!existing.smith);
-    setCables(!!existing.cables);
-    setHackSquat(!!existing.hackSquat);
-    setDbMax(existing.dbMax != null ? String(existing.dbMax) : '');
-    setMachinesNotes(existing.machinesNotes ?? '');
+    if (!clientId) return undefined;
+    let cancelled = false;
+    // Server copy first — this is what the coach sees; the local cache alone
+    // never leaves this device.
+    fetchClientGym(clientId).then((existing) => {
+      if (cancelled) return;
+      const gym = existing || {};
+      setGymName(gym.gymName ?? '');
+      setRack(!!gym.rack);
+      setSmith(!!gym.smith);
+      setCables(!!gym.cables);
+      setHackSquat(!!gym.hackSquat);
+      setDbMax(gym.dbMax != null ? String(gym.dbMax) : '');
+      setMachinesNotes(gym.machinesNotes ?? '');
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [clientId]);
 
   const handleSave = () => {

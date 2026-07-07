@@ -1,6 +1,6 @@
 /**
  * Habit progress card: Steps, Sleep, Water, Nutrition adherence.
- * Uses client_habits + habit_logs. Shown on Client Home and Coach Client Detail.
+ * Uses client_habits + client_habit_logs. Shown on Client Home and Coach Client Detail.
  */
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -69,8 +69,10 @@ export default function HabitProgressCard({ clientId }) {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       const from = sevenDaysAgo.toISOString().slice(0, 10);
+      // client_habit_logs is where the daily habit pages write; the legacy
+      // habit_logs table has no writer, so reading it showed nothing forever.
       const { data, error } = await supabase
-        .from('habit_logs')
+        .from('client_habit_logs')
         .select('*')
         .in('habit_id', habitIds)
         .gte('log_date', from)

@@ -10,9 +10,9 @@ import { logAuditEvent } from '@/lib/auditLogStore';
 import AssignProgramSheet from '@/components/programs/AssignProgramSheet';
 import { formatRelativeDate, safeDate, safeFormatDate } from '@/lib/format';
 import { timeAgo } from '@/lib/timeAgo';
-import { getClientNotes, setClientNotes, getCoachNotes, setCoachNotes, getClientMarkedPaid, setClientMarkedPaid } from '@/lib/clientDetailStorage';
+import { getClientNotes, setClientNotes, getCoachNotes, setCoachNotes, getClientMarkedPaid, setClientMarkedPaid, fetchClientDetailNotes } from '@/lib/clientDetailStorage';
 import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
-import { getClientGym, setClientGym } from '@/lib/gymEquipmentStore';
+import { getClientGym, setClientGym, fetchClientGym } from '@/lib/gymEquipmentStore';
 import { getAchievementsList, getShownAchievementIds, markAchievementShown } from '@/lib/milestonesStore';
 import { unlockMilestone } from '@/lib/milestonesStore';
 import { evaluateClientMilestones } from '@/lib/milestoneEngine';
@@ -188,6 +188,25 @@ export default function ClientDetail() {
       setMarkedPaid(safe(() => getClientMarkedPaid(clientId), false));
     }
   }, [clientId]);
+  // Hydrate server-backed notes + gym equipment into the device cache. The
+  // client edits equipment on their own device, so without this pull the coach
+  // never sees it; notes sync across the coach's devices the same way.
+  useEffect(() => {
+    if (!clientId) return undefined;
+    let cancelled = false;
+    fetchClientDetailNotes(clientId, authUser?.id ?? null).then((notes) => {
+      if (cancelled || !notes) return;
+      setQuickNotes(notes.quickNotes ?? '');
+      setCoachNotesState(notes.coachNotes ?? '');
+    });
+    fetchClientGym(clientId).then((gym) => {
+      if (cancelled || !gym) return;
+      setGymForm(gym);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, authUser?.id]);
   useEffect(() => {
     if (!clientId) return;
     try {
@@ -1016,17 +1035,17 @@ export default function ClientDetail() {
 
   const handleSaveNotes = useCallback(() => {
     if (!clientId) return;
-    setClientNotes(clientId, quickNotes);
+    setClientNotes(clientId, quickNotes, authUser?.id ?? null);
     lightHaptic();
     toast.success('Notes saved');
-  }, [clientId, quickNotes]);
+  }, [clientId, quickNotes, authUser?.id]);
 
   const handleSaveCoachNotes = useCallback(() => {
     if (!clientId) return;
-    setCoachNotes(clientId, coachNotesState);
+    setCoachNotes(clientId, coachNotesState, authUser?.id ?? null);
     lightHaptic();
     toast.success('Coach notes saved');
-  }, [clientId, coachNotesState]);
+  }, [clientId, coachNotesState, authUser?.id]);
 
   const savePinnedNote = useCallback(() => {
     if (!clientId) return;

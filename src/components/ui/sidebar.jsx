@@ -9,9 +9,11 @@ import { createPageUrl } from '@/utils';
 import { useAuth } from '@/lib/AuthContext';
 import { isPersonal, isCoach, normalizeRole } from '@/lib/roles';
 import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
+import { useInboxBadgeCount } from '@/hooks/useInboxBadgeCount';
 export default function Sidebar({ userRole }) {
   const location = useLocation();
   const { signOut } = useAuth();
+  const inboxBadgeCount = useInboxBadgeCount();
   
   // Trainer navigation
   const trainerNavItems = [
@@ -79,6 +81,14 @@ export default function Sidebar({ userRole }) {
             >
               <Icon className="w-5 h-5" />
               <span>{item.label}</span>
+              {item.page === 'Messages' && inboxBadgeCount > 0 ? (
+                <span
+                  className="ml-auto inline-flex items-center justify-center rounded-full text-[11px] font-bold text-white"
+                  style={{ minWidth: 18, height: 18, padding: '0 5px', background: '#EF4444' }}
+                >
+                  {inboxBadgeCount > 99 ? '99+' : inboxBadgeCount}
+                </span>
+              ) : null}
             </Link>
           );
         })}

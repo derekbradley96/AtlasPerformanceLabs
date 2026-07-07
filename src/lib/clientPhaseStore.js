@@ -1,8 +1,11 @@
 /**
  * Client phase (Cut, Maintenance, Lean Bulk, Bulk, Recomp) with history.
- * Effective date + optional note. localStorage-backed; structure maps to Supabase later.
+ * Effective date + optional note. Current phase syncs to clients.phase so
+ * every device and surface (roster, ReviewCenter, other coach devices) sees
+ * the same value; localStorage keeps the per-device history and cache.
  */
 import { PHASES } from '@/lib/intelligence/config.js';
+import { getSupabase } from '@/lib/supabaseClient';
 
 const KEY = 'atlas_client_phase';
 const HISTORY_KEY = 'atlas_client_phase_history';
@@ -57,6 +60,19 @@ export function setClientPhase(clientId, phase, effectiveDate = new Date().toISO
     createdAt: new Date().toISOString(),
   });
   safeSet(HISTORY_KEY, history);
+
+  // Best-effort server sync — clients.phase is what other devices and the
+  // roster read; a local-only write would diverge per device.
+  const supabase = getSupabase();
+  if (supabase && clientId) {
+    supabase
+      .from('clients')
+      .update({ phase })
+      .eq('id', clientId)
+      .then(({ error }) => {
+        if (error && import.meta.env?.DEV) console.warn('[clientPhaseStore] server sync failed', error.message);
+      });
+  }
   return map[clientId];
 }
 
