@@ -6,6 +6,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId } from "../_shared/auth.ts";
 import { sendPushToProfile } from "../_shared/fcm.ts";
+import { loadNotificationPrefs, isNotificationAllowed, type NotificationPrefKey } from "../_shared/notificationPrefs.ts";
+
+/** Push type → notification_preferences column. Unmapped types are allowed. */
+const PUSH_TYPE_PREF: Record<string, NotificationPrefKey> = {
+  message_received: "messages",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
@@ -98,6 +104,18 @@ Deno.serve(async (req) => {
         JSON.stringify({ ok: false, error: "Unsupported push type", sent: 0 }),
         { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
       );
+    }
+
+    // Recipient's notification preferences: an explicit false suppresses the push.
+    const prefKey = PUSH_TYPE_PREF[String(data?.type ?? "")] ?? null;
+    if (prefKey) {
+      const prefs = await loadNotificationPrefs(supabase, [profileId]);
+      if (!isNotificationAllowed(prefs, profileId, prefKey)) {
+        return new Response(
+          JSON.stringify({ ok: true, sent: 0, skipped: "preference" }),
+          { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
+        );
+      }
     }
 
     const sent = await sendPushToProfile(supabase, {

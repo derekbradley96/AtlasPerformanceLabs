@@ -6,7 +6,136 @@ import AudioMessage from '@/components/chat/AudioMessage';
 import AudioBubble from '@/components/messages/AudioBubble';
 import SummaryCardBubble from '@/components/chat/SummaryCardBubble';
 import { DateSeparator, dateGroupLabel, getDaySeparatorLabel } from '@/pages/chat-thread/chatThreadUiPrimitives';
+import { getDisplayableMediaUrl, resolveMessageMediaUrl } from '@/lib/messaging/resolveMessageMediaUrl';
 import { colors, spacing } from '@/ui/tokens';
+
+/**
+ * Stored media_url values are 7-day signed URLs (or 'path:...' when signing
+ * failed at send time) — used raw, chat photos/GIFs/videos break after a week.
+ * Resolve to a fresh signed URL when needed; onError forces one re-sign for
+ * URLs revoked or expired mid-session.
+ */
+function useResolvedMediaUrl(mediaUrl) {
+  const [url, setUrl] = React.useState(() => getDisplayableMediaUrl(mediaUrl));
+  const retriedRef = React.useRef(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    retriedRef.current = false;
+    setUrl(getDisplayableMediaUrl(mediaUrl));
+    resolveMessageMediaUrl(mediaUrl).then((fresh) => {
+      if (!cancelled && fresh) setUrl(fresh);
+    });
+    return () => { cancelled = true; };
+  }, [mediaUrl]);
+  const handleLoadError = React.useCallback(() => {
+    if (retriedRef.current) return;
+    retriedRef.current = true;
+    resolveMessageMediaUrl(mediaUrl, { force: true }).then((fresh) => {
+      if (fresh) setUrl(fresh);
+    });
+  }, [mediaUrl]);
+  return [url, handleLoadError];
+}
+
+function MediaMessageBubble({
+  m,
+  isOutgoing,
+  openMessageMenu,
+  startMediaLongPress,
+  cancelMediaLongPress,
+  setMediaPreview,
+  retryFailedMessage,
+}) {
+  const [mediaUrl, handleLoadError] = useResolvedMediaUrl(m?.media_url);
+  return (
+    <div className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`} style={{ marginBottom: 10 }}>
+      <div style={{ maxWidth: '72%', position: 'relative' }}>
+        {m?.status === 'sending' ? (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center rounded-[14px]"
+            style={{ background: 'rgba(0,0,0,0.45)' }}
+            aria-hidden
+          >
+            <span className="text-[12px] font-medium text-white">Sending…</span>
+          </div>
+        ) : null}
+        {m?.type === 'video' ? (
+          <video
+            src={mediaUrl || undefined}
+            controls
+            playsInline
+            onError={handleLoadError}
+            onContextMenu={(e) => { e.preventDefault(); openMessageMenu(m, e); }}
+            onPointerDown={() => startMediaLongPress(m)}
+            onPointerUp={cancelMediaLongPress}
+            onPointerCancel={cancelMediaLongPress}
+            onPointerLeave={cancelMediaLongPress}
+            style={{
+              width: '100%',
+              maxWidth: 280,
+              maxHeight: 200,
+              borderRadius: 12,
+              display: 'block',
+              background: '#000',
+              border: `1px solid ${colors.border}`,
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => mediaUrl && setMediaPreview(mediaUrl)}
+            onContextMenu={(e) => { e.preventDefault(); openMessageMenu(m, e); }}
+            onPointerDown={() => startMediaLongPress(m)}
+            onPointerUp={cancelMediaLongPress}
+            onPointerCancel={cancelMediaLongPress}
+            onPointerLeave={cancelMediaLongPress}
+            style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }}
+          >
+            {mediaUrl ? (
+              <img
+                src={mediaUrl}
+                alt=""
+                onError={handleLoadError}
+                style={{
+                  width: '100%',
+                  maxHeight: 280,
+                  objectFit: 'cover',
+                  borderRadius: 14,
+                  border: `1px solid ${colors.border}`,
+                }}
+              />
+            ) : (
+              <div
+                aria-hidden
+                style={{
+                  width: 220,
+                  height: 160,
+                  borderRadius: 14,
+                  border: `1px solid ${colors.border}`,
+                  background: colors.surface2,
+                }}
+              />
+            )}
+          </button>
+        )}
+        {isOutgoing && m?.status === 'failed' ? (
+          <button
+            type="button"
+            onClick={() => retryFailedMessage(m)}
+            className="mt-2 text-[11px] font-semibold px-2 py-1 rounded-md"
+            style={{
+              border: `1px solid ${colors.border}`,
+              background: colors.surface1,
+              color: colors.text,
+            }}
+          >
+            Retry
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 function messageRequestsCheckin(message) {
   const body = String(message?.body || '').trim().toLowerCase();
@@ -159,77 +288,15 @@ export default function ChatThreadMessageList({
                   <AudioMessage message={m} isOutgoing={isOutgoing} />
                 </div>
               ) : (m?.type === 'image' || m?.type === 'gif' || m?.type === 'video') ? (
-                <div className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`} style={{ marginBottom: 10 }}>
-                  <div style={{ maxWidth: '72%', position: 'relative' }}>
-                    {m?.status === 'sending' ? (
-                      <div
-                        className="absolute inset-0 z-10 flex items-center justify-center rounded-[14px]"
-                        style={{ background: 'rgba(0,0,0,0.45)' }}
-                        aria-hidden
-                      >
-                        <span className="text-[12px] font-medium text-white">Sending…</span>
-                      </div>
-                    ) : null}
-                    {m?.type === 'video' ? (
-                      <video
-                        src={m.media_url}
-                        controls
-                        playsInline
-                        onContextMenu={(e) => { e.preventDefault(); openMessageMenu(m, e); }}
-                        onPointerDown={() => startMediaLongPress(m)}
-                        onPointerUp={cancelMediaLongPress}
-                        onPointerCancel={cancelMediaLongPress}
-                        onPointerLeave={cancelMediaLongPress}
-                        style={{
-                          width: '100%',
-                          maxWidth: 280,
-                          maxHeight: 200,
-                          borderRadius: 12,
-                          display: 'block',
-                          background: '#000',
-                          border: `1px solid ${colors.border}`,
-                        }}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setMediaPreview(m.media_url)}
-                        onContextMenu={(e) => { e.preventDefault(); openMessageMenu(m, e); }}
-                        onPointerDown={() => startMediaLongPress(m)}
-                        onPointerUp={cancelMediaLongPress}
-                        onPointerCancel={cancelMediaLongPress}
-                        onPointerLeave={cancelMediaLongPress}
-                        style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }}
-                      >
-                        <img
-                          src={m.media_url}
-                          alt=""
-                          style={{
-                            width: '100%',
-                            maxHeight: 280,
-                            objectFit: 'cover',
-                            borderRadius: 14,
-                            border: `1px solid ${colors.border}`,
-                          }}
-                        />
-                      </button>
-                    )}
-                    {isOutgoing && m?.status === 'failed' ? (
-                      <button
-                        type="button"
-                        onClick={() => retryFailedMessage(m)}
-                        className="mt-2 text-[11px] font-semibold px-2 py-1 rounded-md"
-                        style={{
-                          border: `1px solid ${colors.border}`,
-                          background: colors.surface1,
-                          color: colors.text,
-                        }}
-                      >
-                        Retry
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
+                <MediaMessageBubble
+                  m={m}
+                  isOutgoing={isOutgoing}
+                  openMessageMenu={openMessageMenu}
+                  startMediaLongPress={startMediaLongPress}
+                  cancelMediaLongPress={cancelMediaLongPress}
+                  setMediaPreview={setMediaPreview}
+                  retryFailedMessage={retryFailedMessage}
+                />
               ) : (
                 <>
                   <ChatBubble

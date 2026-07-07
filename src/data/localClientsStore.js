@@ -158,3 +158,18 @@ export async function getClientById(id) {
   const found = list.find((c) => c && c.id === id);
   return found ? normalize(found) : null;
 }
+
+/**
+ * Wipe locally stored demo clients (called once after login so Supabase is the
+ * only source). The parallel .ts store exports this; clientsService resolves
+ * THIS file, and the missing export made the first authed listClients throw.
+ */
+export async function clearLocalDemoClients() {
+  try {
+    await storage.setJSON(KEY, []);
+    setSyncCache([]);
+    if (DEV) console.log('[ATLAS] clearLocalDemoClients: wiped', KEY);
+  } catch (e) {
+    if (DEV) console.warn('[localClientsStore] clearLocalDemoClients failed', e?.message);
+  }
+}

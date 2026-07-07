@@ -30,6 +30,10 @@ import { getMessagesListPath, navigateToThread } from '@/lib/messagesPath';
 const PIN_BG = colors.primary;
 const UNPIN_BG = colors.surface2;
 const DELETE_BG = colors.danger;
+// Stable default for the threads query: an inline `= []` makes a new array
+// identity every render while data is undefined (loading/error), and the
+// state-mirroring effect below then loops setState → "Maximum update depth".
+const EMPTY_THREADS = [];
 
 async function lightHaptic() {
   try {
@@ -136,7 +140,7 @@ export default function Messages() {
   }, []);
 
   const {
-    data: supabaseThreads = [],
+    data: supabaseThreads = EMPTY_THREADS,
     isLoading: threadsLoading,
     refetch: refetchThreads,
     isError: threadsError,

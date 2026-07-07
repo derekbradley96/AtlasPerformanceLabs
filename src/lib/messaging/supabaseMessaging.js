@@ -277,6 +277,20 @@ async function countUnreadForViewer({ supabase, threadId, viewerRole, afterIso }
   return Number(count) || 0;
 }
 
+/** Inbox preview text from a last-message row ({ message_type, message_text, duration_ms }). */
+function buildLastMessagePreview(last) {
+  if (!last) return '';
+  if (last.message_type === 'voice') {
+    const sec = Math.floor((last.duration_ms || 0) / 1000);
+    return sec ? `Voice note · ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : 'Voice note';
+  }
+  if (last.message_type === 'video') return '📹 Video';
+  if (last.message_type === 'gif') return 'GIF';
+  if (last.message_type === 'image') return 'Photo';
+  if (last.message_text != null && String(last.message_text).trim()) return String(last.message_text).slice(0, 80);
+  return '';
+}
+
 /**
  * List threads for coach OR for a signed-in client (by roster clients.id).
  * Enriched with last_message_preview, last_message_at, unread_count.
@@ -309,48 +323,61 @@ export async function listThreads({ supabase, coachId, clientRosterId, preferred
     : dedupeThreadsByClientId(threads, { preferredCoachId });
   if (visibleThreads.length === 0) return [];
 
-  const enriched = await Promise.all(
-    visibleThreads.map(async (t) => {
-      const { data: msgs } = await supabase
-        .from('message_messages')
-        .select('message_text, created_at, message_type, duration_ms')
-        .eq('thread_id', t.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      const last = Array.isArray(msgs) && msgs[0] ? msgs[0] : null;
-      let last_message_preview = '';
-      if (last?.message_type === 'voice') {
-        const sec = Math.floor((last.duration_ms || 0) / 1000);
-        last_message_preview = sec ? `Voice note · ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : 'Voice note';
-      } else if (last?.message_type === 'image' || last?.message_type === 'gif' || last?.message_type === 'video') {
-        if (last.message_type === 'video') {
-          last_message_preview = '📹 Video';
-        } else {
-        last_message_preview = last.message_type === 'gif' ? 'GIF' : 'Photo';
-        }
-      } else if (last?.message_text != null && String(last.message_text).trim()) {
-        last_message_preview = String(last.message_text).slice(0, 80);
-      }
-      const last_message_at = last?.created_at ?? null;
-      const afterIso = viewerRole === 'coach' ? t.coach_last_read_at ?? null : t.client_last_read_at ?? null;
-      let unread_count = 0;
-      try {
-        unread_count = await countUnreadForViewer({
-          supabase,
-          threadId: t.id,
-          viewerRole,
-          afterIso,
+  // One round trip for last message + unread across all threads (the previous
+  // per-thread path was 2 queries per thread and this list is badge-polled).
+  let enrichmentById = null;
+  try {
+    const { data: rpcRows, error: rpcErr } = await supabase.rpc('message_threads_enriched', {
+      p_thread_ids: visibleThreads.map((t) => t.id),
+    });
+    if (!rpcErr && Array.isArray(rpcRows)) {
+      enrichmentById = new Map(rpcRows.map((r) => [String(r.thread_id), r]));
+    }
+  } catch (_) {
+    enrichmentById = null;
+  }
+
+  const enriched = enrichmentById
+    ? visibleThreads.map((t) => {
+        const r = enrichmentById.get(String(t.id));
+        return normalizeThread(t, {
+          last_message_preview: buildLastMessagePreview(
+            r ? { message_type: r.last_message_type, message_text: r.last_message_text, duration_ms: r.last_duration_ms } : null
+          ),
+          last_message_at: r?.last_message_at ?? null,
+          unread_count: Number(viewerRole === 'coach' ? r?.unread_for_coach : r?.unread_for_client) || 0,
         });
-      } catch (_) {
-        unread_count = 0;
-      }
-      return normalizeThread(t, {
-        last_message_preview,
-        last_message_at,
-        unread_count,
-      });
-    })
-  );
+      })
+    : await Promise.all(
+      visibleThreads.map(async (t) => {
+        const { data: msgs } = await supabase
+          .from('message_messages')
+          .select('message_text, created_at, message_type, duration_ms')
+          .eq('thread_id', t.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const last = Array.isArray(msgs) && msgs[0] ? msgs[0] : null;
+        const last_message_preview = buildLastMessagePreview(last);
+        const last_message_at = last?.created_at ?? null;
+        const afterIso = viewerRole === 'coach' ? t.coach_last_read_at ?? null : t.client_last_read_at ?? null;
+        let unread_count = 0;
+        try {
+          unread_count = await countUnreadForViewer({
+            supabase,
+            threadId: t.id,
+            viewerRole,
+            afterIso,
+          });
+        } catch (_) {
+          unread_count = 0;
+        }
+        return normalizeThread(t, {
+          last_message_preview,
+          last_message_at,
+          unread_count,
+        });
+      })
+    );
   debugMessaging('listThreads', {
     viewerRole,
     coachId: coachId ?? null,

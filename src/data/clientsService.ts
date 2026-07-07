@@ -13,7 +13,16 @@ let localClearedForSession = false;
 function clearLocalDemoClientsOnLoginOnce(): void {
   if (localClearedForSession) return;
   localClearedForSession = true;
-  localStore.clearLocalDemoClients();
+  // Both localClientsStore.js and .ts exist; the resolved module may not carry
+  // this export — never let the wipe take listClients down with it.
+  const clear = (localStore as { clearLocalDemoClients?: () => unknown }).clearLocalDemoClients;
+  if (typeof clear === 'function') {
+    try {
+      void clear();
+    } catch (_) {
+      /* best-effort cleanup only */
+    }
+  }
 }
 
 /** Get local clients synchronously. Handles both .ts store (sync loadClients) and .js store (getSyncCache). */

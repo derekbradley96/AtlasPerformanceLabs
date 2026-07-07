@@ -202,8 +202,12 @@ function NativeKeyboardConfig() {
   return null;
 }
 
-/** On iOS (native or Safari): suppress long-press context menu (Copy/Look Up/Translate). */
-function iOSContextMenuSuppress() {
+/**
+ * On iOS (native or Safari): suppress long-press context menu (Copy/Look Up/Translate).
+ * Name must start uppercase — lowercase JSX renders as an unknown DOM tag and
+ * the component never mounts (this suppression was silently dead).
+ */
+function IOSContextMenuSuppress() {
   useEffect(() => {
     const isIOS =
       (typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform?.() && Capacitor.getPlatform?.() === 'ios') ||
@@ -389,7 +393,7 @@ function App() {
         <QueryClientProvider client={queryClientInstance}>
           <Router>
             <NativeKeyboardConfig />
-            <iOSContextMenuSuppress />
+            <IOSContextMenuSuppress />
             <ErrorBoundaryWithRouter>
               <ProfileLoadErrorBanner />
               <LocalClientsInit />
