@@ -77,12 +77,33 @@ function normalizeCurrencyAmount(value: unknown): string {
   return `£${Math.round(amount)}`;
 }
 
+/**
+ * Coaches enter schedule_time in a plain time picker (their local wall clock).
+ * Evaluate schedules in Europe/London so BST doesn't shift every reminder by
+ * an hour; per-coach timezones would need a column on checkin_templates.
+ */
+function getLondonClock(now: Date): { dayOfWeek: number; currentTime: string } {
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = fmt.formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    dayOfWeek: dayMap[get("weekday")] ?? now.getUTCDay(),
+    currentTime: `${get("hour") || "00"}:${get("minute") || "00"}`,
+  };
+}
+
 async function handleScheduledCheckinReminders(
   supabase: SupabaseClient,
   now: Date
 ): Promise<number> {
-  const dayOfWeek = now.getUTCDay(); // 0=Sun 6=Sat
-  const currentTime = now.toISOString().slice(11, 16); // "HH:MM"
+  const { dayOfWeek, currentTime } = getLondonClock(now); // 0=Sun 6=Sat, "HH:MM"
 
   const { data: templates } = await supabase
     .from('checkin_templates')
@@ -190,7 +211,7 @@ Deno.serve(async (req) => {
     const today = getTodayISO();
     const weekStart = getWeekStartUTC(now);
     const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); // 1 Mon .. 7 Sun (ISODOW)
-    const isEvening = now.getUTCHours() >= 18; // 6pm UTC: send "still waiting" reminder
+    const isEvening = Number(getLondonClock(now).currentTime.slice(0, 2)) >= 18; // 6pm London: send "still waiting" reminder
     const nextDay = new Date(now);
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     const nextDayISO = nextDay.toISOString().slice(0, 10);
@@ -716,8 +737,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 6) Supplement reminders: morning / evening / missed (by UTC hour)
-    const hour = now.getUTCHours();
+    // 6) Supplement reminders: morning / evening / missed (Europe/London wall clock — see getLondonClock)
+    const hour = Number(getLondonClock(now).currentTime.slice(0, 2));
     const isMorningWindow = hour >= 6 && hour < 12;
     const isEveningWindow = hour >= 17 && hour < 21;
     const isMissedWindow = hour >= 21 || hour < 6;

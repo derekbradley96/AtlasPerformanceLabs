@@ -56,6 +56,9 @@ export function getRouteForNotification(notification, viewerRole = null) {
       if (isCoach && clientId) return `/clients/${clientId}/review-center`;
       if (isCoach) return '/review-center/checkins';
       return '/check-in';
+    case 'checkin_reviewed':
+      // Client-bound: open their reviewed check-in with the coach's feedback.
+      return checkinId ? `/reviewcheckin?id=${encodeURIComponent(checkinId)}` : '/check-in';
     case 'checkin_due':
       return isClient || !isCoach ? '/check-in' : '/review-center/checkins';
     case 'message_received':

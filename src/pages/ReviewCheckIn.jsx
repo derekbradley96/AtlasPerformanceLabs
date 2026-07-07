@@ -179,6 +179,14 @@ export default function ReviewCheckIn() {
       toast.success('Feedback sent');
       queryClient.invalidateQueries(['checkin-detail']);
       setFeedback('');
+      // Tell the client their feedback exists — the written response lives on
+      // the checkins row and is otherwise invisible until they happen to look.
+      const recipientUserId = client?.user_id ?? clientUserLink?.user_id ?? null;
+      if (recipientUserId) {
+        import('@/services/notificationTriggers')
+          .then((m) => m.notifyClientCheckinReviewed(recipientUserId, checkin?.id ?? null, checkin?.client_id ?? null))
+          .catch(() => {});
+      }
       navigate(createPageUrl('CheckIns'));
     }
   });

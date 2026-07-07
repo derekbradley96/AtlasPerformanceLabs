@@ -42,7 +42,13 @@ export async function sendPushToProfile(profileId, title, body, data = {}) {
  */
 export async function triggerActionRequiredPush(profileId, title, body, data = {}) {
   if (!profileId) return;
-  const payload = { type: 'action_required', ...normalizePushData(data) };
+  // Transport type LAST: send-push only accepts action_required / insight /
+  // message_received. Callers pass semantic types (checkin_review, habit_due…)
+  // in data — spreading data after type let those override the transport type,
+  // so every one of these pushes was rejected as "Unsupported push type".
+  // The semantic type is preserved as `kind`; tap routing uses data.deep_link.
+  const normalized = normalizePushData(data);
+  const payload = { ...normalized, kind: normalized.type ?? '', type: 'action_required' };
   await sendPushToProfile(profileId, title, body || String(title), payload).catch(() => {});
 }
 
@@ -69,7 +75,7 @@ function flushMessageBucket(recipientProfileId) {
       : b.lastPreview && String(b.lastPreview).trim()
         ? String(b.lastPreview).slice(0, 120)
         : 'You have a new message.';
-  const data = { type: 'message_received', ...normalizePushData(b.extra) };
+  const data = { ...normalizePushData(b.extra), type: 'message_received' };
   sendPushToProfile(recipientProfileId, title, body, data).catch(() => {});
 }
 
@@ -101,6 +107,8 @@ export async function triggerInsightPush(profileId, title, body, data = {}) {
   const last = lastInsightPushByProfile.get(profileId) || 0;
   if (now - last < INSIGHT_MIN_INTERVAL_MS) return;
   lastInsightPushByProfile.set(profileId, now);
-  const payload = { type: 'insight', ...normalizePushData(data) };
+  // Same transport-type rule as triggerActionRequiredPush.
+  const normalized = normalizePushData(data);
+  const payload = { ...normalized, kind: normalized.type ?? '', type: 'insight' };
   await sendPushToProfile(profileId, title, body || '', payload).catch(() => {});
 }

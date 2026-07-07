@@ -145,51 +145,9 @@ export async function getCheckinForWeek(clientId, weekStart) {
   }
 }
 
-/**
- * Inserts a checkin row. RLS allows insert when client owns the row or coach owns the client.
- * Payload must include client_id, week_start, focus_type; other fields optional.
- * @param {Record<string, unknown>} payload - At least client_id, week_start, focus_type; plus any metric/reflection/photo fields.
- * @returns {Promise<Record<string, unknown> | null>} Inserted row or null on failure.
- */
-export async function submitCheckin(payload) {
-  if (!hasSupabase || !payload || typeof payload !== 'object') return null;
-  const supabase = getSupabase();
-  if (!supabase) return null;
-  const { client_id, week_start, focus_type } = payload;
-  if (!client_id || !week_start || !focus_type) return null;
-  try {
-    const row = {
-      client_id,
-      week_start,
-      focus_type: ['transformation', 'competition', 'integrated'].includes(String(focus_type)) ? focus_type : 'transformation',
-      weight: payload.weight ?? null,
-      steps_avg: payload.steps_avg ?? null,
-      sleep_score: payload.sleep_score ?? null,
-      energy_level: payload.energy_level ?? null,
-      training_completion: payload.training_completion ?? null,
-      nutrition_adherence: payload.nutrition_adherence ?? null,
-      cardio_completion: payload.cardio_completion ?? null,
-      posing_minutes: payload.posing_minutes ?? null,
-      pump_quality: payload.pump_quality ?? null,
-      digestion_score: payload.digestion_score ?? null,
-      condition_notes: payload.condition_notes ?? null,
-      wins: payload.wins ?? null,
-      struggles: payload.struggles ?? null,
-      questions: payload.questions ?? null,
-      photos: Array.isArray(payload.photos) ? payload.photos : [],
-    };
-    const { data, error } = await supabase.from('checkins').insert(row).select().single();
-    if (error) return null;
-    try {
-      await supabase.rpc('evaluate_client_state', { p_client_id: client_id });
-    } catch {
-      // non-blocking: check-in should still succeed if intelligence rpc fails
-    }
-    return data;
-  } catch {
-    return null;
-  }
-}
+// NOTE: a legacy submitCheckin() helper was removed here — it omitted the
+// NOT NULL trainer_id column so its insert always failed (and it swallowed
+// the error). The live submit path is ClientCheckIn.jsx's mutation.
 
 const FOCUS_VALUES = ['transformation', 'competition', 'integrated'];
 

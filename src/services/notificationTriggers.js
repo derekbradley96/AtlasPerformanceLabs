@@ -33,6 +33,37 @@ export async function notifyCoachCheckinSubmitted(coachProfileId, clientId, chec
         type: 'checkin_review',
         client_id: clientId,
         checkin_id: checkinId,
+        deep_link: checkinId ? `/review-center/checkins/${encodeURIComponent(checkinId)}` : '/review-center',
+      });
+    } catch (_) {}
+  }
+}
+
+/**
+ * Coach reviewed a check-in and left written feedback → notify the client.
+ * Without this, feedback saved via the check-in review form landed in
+ * checkins.coach_response with no signal to the client that it exists.
+ */
+export async function notifyClientCheckinReviewed(clientUserId, checkinId, clientId = null) {
+  if (!clientUserId) return;
+  const deepLink = checkinId ? `/reviewcheckin?id=${encodeURIComponent(checkinId)}` : '/check-in';
+  const rowId = await insertNotificationForRecipient(
+    clientUserId,
+    'checkin_reviewed',
+    'Check-in reviewed',
+    'Your coach reviewed your check-in and left feedback.',
+    { client_id: clientId ?? null, checkin_id: checkinId ?? null, deep_link: deepLink },
+    checkinId || null,
+    { cooldownMinutes: 30, maxPerDay: 20, dedupeKey: `checkin_reviewed_${checkinId || clientUserId}`, timingTag: 'immediate' }
+  );
+  if (rowId) {
+    try {
+      const { triggerActionRequiredPush } = await import('@/services/pushAlertService');
+      await triggerActionRequiredPush(clientUserId, 'Check-in reviewed', 'Your coach reviewed your check-in and left feedback.', {
+        type: 'checkin_reviewed',
+        client_id: clientId,
+        checkin_id: checkinId,
+        deep_link: deepLink,
       });
     } catch (_) {}
   }
