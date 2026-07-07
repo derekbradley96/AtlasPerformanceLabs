@@ -39,6 +39,18 @@ import { AFFILIATE_REF_SESSION_KEY } from '@/lib/affiliateProgramme';
 
 const ATLAS_BLUE = colors.brand;
 
+/**
+ * iOS portrait: this screen's fields sit in a vertically-centred flex column, so when the
+ * keyboard opens the browser's native "scroll focused input into view" often leaves the
+ * field under the keyboard (worked in landscape only because the keyboard is short enough
+ * there to not cover it). Nudge it into view ourselves once the keyboard animation settles.
+ */
+function scrollFieldIntoView(target) {
+  setTimeout(() => {
+    target?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, 300);
+}
+
 function getAuthErrorMessage(authError) {
   if (!authError) return 'Invalid email or password';
   if (import.meta.env.DEV) {
@@ -909,7 +921,7 @@ export default function AuthScreen() {
                 }}
                 className="w-full mb-4 focus:outline-none"
                 style={inputBaseStyle}
-                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onFocus={(e) => { Object.assign(e.target.style, inputFocusStyle); scrollFieldIntoView(e.target); }}
                 onBlur={(e) => {
                   e.target.style.borderColor = colors.border;
                   e.target.style.boxShadow = 'none';
@@ -931,7 +943,7 @@ export default function AuthScreen() {
                 }}
                 className="w-full focus:outline-none"
                 style={inputBaseStyle}
-                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onFocus={(e) => { Object.assign(e.target.style, inputFocusStyle); scrollFieldIntoView(e.target); }}
                 onBlur={(e) => {
                   e.target.style.borderColor = colors.border;
                   e.target.style.boxShadow = 'none';
@@ -1048,7 +1060,7 @@ export default function AuthScreen() {
                   ...inputBaseStyle,
                   minHeight: touchTargetMin,
                 }}
-                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onFocus={(e) => { Object.assign(e.target.style, inputFocusStyle); scrollFieldIntoView(e.target); }}
                 onBlur={(e) => {
                   e.target.style.borderColor = colors.border;
                   e.target.style.boxShadow = 'none';
@@ -1135,7 +1147,7 @@ export default function AuthScreen() {
                 }}
                 className="w-full mb-3 focus:outline-none"
                 style={inputBaseStyle}
-                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onFocus={(e) => { Object.assign(e.target.style, inputFocusStyle); scrollFieldIntoView(e.target); }}
                 onBlur={(e) => {
                   e.target.style.borderColor = colors.border;
                   e.target.style.boxShadow = 'none';
@@ -1158,7 +1170,7 @@ export default function AuthScreen() {
                 }}
                 className="w-full focus:outline-none"
                 style={inputBaseStyle}
-                onFocus={(e) => Object.assign(e.target.style, inputFocusStyle)}
+                onFocus={(e) => { Object.assign(e.target.style, inputFocusStyle); scrollFieldIntoView(e.target); }}
                 onBlur={(e) => {
                   e.target.style.borderColor = colors.border;
                   e.target.style.boxShadow = 'none';

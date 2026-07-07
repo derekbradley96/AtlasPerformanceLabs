@@ -7,7 +7,6 @@ import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Search, MessageSquare as MessageIcon, ChevronRight, UserPlus } from 'lucide-react';
 import { getClientHealth } from '@/lib/health/healthEngineBridge';
-import HealthBreakdownSheet from '@/components/health/HealthBreakdownSheet';
 import { getMonthsWithTrainer } from '@/lib/loyaltyAwardsStore';
 import { getRetentionItem } from '@/lib/retention/retentionRepo';
 import { getCheckinReviewed } from '@/lib/checkinReviewStorage';
@@ -506,8 +505,6 @@ export default function Clients() {
     () => filteredClients.slice(0, visibleCount),
     [filteredClients, visibleCount]
   );
-
-  const [healthSheetClientId, setHealthSheetClientId] = useState(null);
 
   const handleSegmentChange = async (key) => {
     await lightHaptic();
@@ -1019,28 +1016,22 @@ export default function Clients() {
                             {journeyRosterBadgeLabel(client)}
                           </span>
                         )}
-                        <button
-                          type="button"
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            await lightHaptic();
-                            setHealthSheetClientId(client.id);
-                          }}
-                          className="rounded-full px-2 py-0.5 text-[10px] font-medium active:opacity-80 inline-flex items-center gap-1"
-                          style={{ background: healthBg, color: healthResult ? healthRiskColor : colors.muted, border: 'none' }}
-                          aria-label={
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[10px] font-medium inline-flex items-center gap-1"
+                          style={{ background: healthBg, color: healthResult ? healthRiskColor : colors.muted }}
+                          title={
                             healthResult?.riskLevel === 'red'
-                              ? 'High risk — open health details'
+                              ? 'High risk'
                               : healthResult?.riskLevel === 'amber'
-                                ? 'Medium risk — open health details'
+                                ? 'Medium risk'
                                 : healthResult
-                                  ? 'On track — open health details'
-                                  : 'Health score — open details'
+                                  ? 'On track'
+                                  : 'Health score'
                           }
                         >
                           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: healthResult ? healthRiskColor : colors.muted }} aria-hidden />
                           {healthResult?.score ?? '—'}
-                        </button>
+                        </span>
                         {hasRetentionRisk && (
                           <span
                             className="rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -1086,11 +1077,6 @@ export default function Clients() {
           </Button>
         </div>
       )}
-      <HealthBreakdownSheet
-        open={!!healthSheetClientId}
-        onOpenChange={(open) => { if (!open) setHealthSheetClientId(null); }}
-        result={healthSheetClientId ? healthByClientId[healthSheetClientId] ?? null : null}
-      />
       {isCoachView && (
         <BroadcastMessageSheet
           open={broadcastOpen}
