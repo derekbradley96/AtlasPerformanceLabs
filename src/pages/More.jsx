@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { useAlertStatus } from '@/components/hooks/useAlertStatus';
-import { UserCircle, Palette, HelpCircle, Trophy, Phone, Users, Award, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Store, Bell, Gift, Calendar, Building2, LayoutDashboard, ChevronRight, UtensilsCrossed, Crosshair, UserPlus, ClipboardList, Dumbbell, LineChart, Target, Share2, UserMinus, Clock, Inbox } from 'lucide-react';
+import { UserCircle, Palette, HelpCircle, Trophy, Phone, Users, Award, TrendingUp, FileText, Image, CreditCard, UsersRound, Package, RefreshCw, Zap, Store, Bell, Gift, Calendar, Building2, LayoutDashboard, ChevronRight, UtensilsCrossed, Crosshair, UserPlus, ClipboardList, Dumbbell, LineChart, Target, Share2, UserMinus, Clock, Inbox, Pill } from 'lucide-react';
 import { seedIfEmpty, resetSandbox, addClient } from '@/lib/sandboxStore';
 import { getTrainerId } from '@/lib/getTrainerId';
 import { getTrainerProfile } from '@/lib/trainerFoundation/trainerProfileRepo';
@@ -535,6 +535,7 @@ function MoreContent() {
               {menuRow(<Package size={20} style={{ color: colors.muted }} />, 'Methodology packages', 'Save and deploy your coaching system', '/methodology-packages')}
               {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition plans', 'Create per-client nutrition plans', '/coach/nutrition')}
               {menuRow(<ClipboardList size={20} style={{ color: colors.muted }} />, 'Check-in templates', 'Design reusable client check-ins', '/checkintemplates')}
+              {menuRow(<Pill size={20} style={{ color: colors.muted }} />, 'Supplement stacks', 'Assign supplement protocols to clients', '/supplement-stacks')}
               {menuRow(<Phone size={20} style={{ color: colors.muted }} />, 'Services', 'Define your offers and pricing', '/services')}
               {includePrepTools ? menuRow(<Award size={20} style={{ color: colors.muted }} />, 'Pose library', 'Competition posing references', '/comp-prep/pose-library') : null}
               {includePrepTools ? menuRow(<Crosshair size={20} style={{ color: colors.muted }} />, 'Prep tools', 'Peak week and prep command tools', '/prep-dashboard') : null}
@@ -702,6 +703,7 @@ function MoreContent() {
         <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
           {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition', 'Logging and daily fuel', '/nutrition')}
           {menuRow(<Target size={20} style={{ color: colors.muted }} />, 'Nutrition targets', 'Calories and macros', '/nutrition-targets')}
+          {menuRow(<Pill size={20} style={{ color: colors.muted }} />, 'Supplements', 'Your protocol and daily logging', '/client/supplements')}
           {menuRow(<RefreshCw size={20} style={{ color: colors.muted }} />, 'Import from MyFitnessPal', 'Bring your diary history into Atlas', '/import/mfp')}
         </div>
         <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>

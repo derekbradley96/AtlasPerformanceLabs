@@ -70,6 +70,8 @@ export default function SupplementStackBuilder() {
   const [timing, setTiming] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedSupplementId, setSelectedSupplementId] = useState('');
+  const [customName, setCustomName] = useState('');
+  const [customCategory, setCustomCategory] = useState('');
 
   const isCoachRole = isCoach(effectiveRole);
 
@@ -117,6 +119,46 @@ export default function SupplementStackBuilder() {
     onError: (e) => {
       toast.error(e?.message || 'Could not assign supplement');
     },
+  });
+
+  // Coaches add their own entries to the shared library — free-text, whatever
+  // they prescribe. The catalog is just names/categories; content isn't policed.
+  const addCustomMutation = useMutation({
+    mutationFn: async () => {
+      const name = customName.trim();
+      if (!name) throw new Error('Enter a supplement name');
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('No supabase client');
+      const { data, error } = await supabase
+        .from('supplements')
+        .insert({ name, category: customCategory.trim() || null })
+        .select('id, name, description, category')
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (row) => {
+      toast.success(`Added "${row.name}" to the library`);
+      queryClient.invalidateQueries({ queryKey: ['supplements_all'] });
+      setSelectedSupplementId(row.id);
+      setCustomName('');
+      setCustomCategory('');
+    },
+    onError: (e) => toast.error(e?.message || 'Could not add supplement'),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async (rowId) => {
+      const supabase = getSupabase();
+      if (!supabase) throw new Error('No supabase client');
+      const { error } = await supabase.from('client_supplements').delete().eq('id', rowId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Removed from stack');
+      queryClient.invalidateQueries({ queryKey: ['client_supplements_stack', clientId] });
+    },
+    onError: (e) => toast.error(e?.message || 'Could not remove'),
   });
 
   if (!isCoachRole) {
@@ -251,6 +293,37 @@ export default function SupplementStackBuilder() {
               </div>
             )}
 
+            <div className="mt-3 pt-3 border-t" style={{ borderColor: colors.border }}>
+              <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
+                Add your own
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Supplement name"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  className="flex-1 text-sm"
+                  style={{ padding: spacing[10], borderRadius: radii.button, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text }}
+                />
+                <input
+                  type="text"
+                  placeholder="Category"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  className="text-sm"
+                  style={{ width: 110, padding: spacing[10], borderRadius: radii.button, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text }}
+                />
+                <Button
+                  variant="secondary"
+                  disabled={!customName.trim() || addCustomMutation.isPending}
+                  onClick={() => addCustomMutation.mutate()}
+                >
+                  {addCustomMutation.isPending ? 'Adding…' : 'Add'}
+                </Button>
+              </div>
+            </div>
+
             <div
               className="mt-4 pt-3 border-t"
               style={{ borderColor: colors.border }}
@@ -338,20 +411,32 @@ export default function SupplementStackBuilder() {
                 {clientStack.map((row) => (
                   <li
                     key={row.id}
-                    className="rounded-lg px-3 py-2 border"
+                    className="rounded-lg px-3 py-2 border flex items-start justify-between gap-2"
                     style={{ borderColor: colors.border, background: colors.surface1 }}
                   >
-                    <p className="text-sm font-medium" style={{ color: colors.text }}>
-                      {row.supplements?.name || 'Supplement'}
-                    </p>
-                    <p className="text-xs mt-1" style={{ color: colors.muted }}>
-                      {row.dosage || '—'} {row.timing ? `• ${row.timing}` : ''}
-                    </p>
-                    {row.notes && (
-                      <p className="text-xs mt-1" style={{ color: colors.muted }}>
-                        {row.notes}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium" style={{ color: colors.text }}>
+                        {row.supplements?.name || 'Supplement'}
                       </p>
-                    )}
+                      <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                        {row.dosage || '—'} {row.timing ? `• ${row.timing}` : ''}
+                      </p>
+                      {row.notes && (
+                        <p className="text-xs mt-1" style={{ color: colors.muted }}>
+                          {row.notes}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeMutation.mutate(row.id)}
+                      disabled={removeMutation.isPending}
+                      aria-label="Remove supplement"
+                      className="flex-shrink-0 rounded-md px-2 py-1 text-xs"
+                      style={{ color: colors.danger, background: 'transparent', border: `1px solid ${colors.border}`, minHeight: 32 }}
+                    >
+                      Remove
+                    </button>
                   </li>
                 ))}
               </ul>

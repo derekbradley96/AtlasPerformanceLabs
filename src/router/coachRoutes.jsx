@@ -7,6 +7,8 @@ import CommunityRoomPage from '@/pages/CommunityRoomPage';
 import { getMessagesThreadPath } from '@/lib/messagesPath';
 import { PageLoader } from '@/components/ui/LoadingState';
 
+const SupplementStackBuilder = React.lazy(() => import('@/pages/SupplementStackBuilder'));
+
 function ProgramsIndexEntry({ Programs }) {
   const { effectiveRole, profile, isHydratingAppState } = useAuth();
   if (isHydratingAppState) {
@@ -226,6 +228,7 @@ export default function CoachRoutes({
       <Route path="settings/branding" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Branding is for coaches only."><RequireCoachOwner accessDeniedMessage="Branding is only available to the account owner."><EliteBrandingPage /></RequireCoachOwner></RequireRole>} />
       <Route path="programs" element={<ProgramsIndexEntry Programs={Programs} />} />
       <Route path="programbuilder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN, Roles.PERSONAL]} accessDeniedMessage="Program Builder is for coaches and personal accounts."><ProgramBuilderCanonicalEntry /></RequireRole>} />
+      <Route path="supplement-stacks" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Supplement stacks are for coaches only."><Suspense fallback={<LazyRouteFallback />}><SupplementStackBuilder /></Suspense></RequireRole>} />
       <Route path="program-builder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN, Roles.PERSONAL]} accessDeniedMessage="Program Builder is for coaches and personal accounts."><Suspense fallback={<LazyRouteFallback />}><ProgramBuilderPageLazy /></Suspense></RequireRole>} />
       <Route path="nutrition-builder" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Nutrition builder is for coaches only."><Suspense fallback={<LazyRouteFallback />}><NutritionBuilderLazy /></Suspense></RequireRole>} />
       {/* LEGACY route — prefer /program-assignments (legacy AssignProgram page is intentionally not routed). */}
