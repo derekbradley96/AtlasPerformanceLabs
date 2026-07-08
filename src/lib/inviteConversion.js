@@ -2,8 +2,8 @@ import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 import { isPersonal, normalizeRole } from '@/lib/roles';
 import { resolveCoachLinkId } from '@/lib/coachLink';
 
-const CLIENT_SELECT_FULL = 'id, user_id, coach_id, trainer_id, billing_status, client_type';
-const CLIENT_SELECT_LEGACY = 'id, user_id, coach_id, trainer_id, client_type';
+const CLIENT_SELECT_FULL = 'id, user_id, coach_id, trainer_id, billing_status, client_type, name';
+const CLIENT_SELECT_LEGACY = 'id, user_id, coach_id, trainer_id, client_type, name';
 
 function isMissingColumnError(error) {
   const msg = String(error?.message || '');
@@ -161,6 +161,27 @@ export async function applyInviteCodeForUser({ supabase, user, inviteCode }) {
       .update({ role: 'client' })
       .eq('id', userId);
     if (error) throw humanizeInviteJoinError(error);
+  }
+
+  // Roster rows created here have no name — without this the coach's client
+  // list shows a permanent 'Client' for everyone who joined by invite code.
+  const existingName = String(clientProfile?.name ?? '').trim();
+  if (clientProfile?.id && !existingName) {
+    const displayName = String(
+      user?.full_name ?? user?.user_metadata?.full_name ?? user?.display_name ?? ''
+    ).trim();
+    const email = String(user?.email ?? user?.user_metadata?.email ?? '').trim();
+    const fallbackName = displayName || email;
+    if (fallbackName) {
+      try {
+        await supabase
+          .from('clients')
+          .update({ name: fallbackName, full_name: displayName || null, email: email || null })
+          .eq('id', clientProfile.id);
+      } catch (e) {
+        if (import.meta.env.DEV) console.warn('[inviteConversion] roster name sync failed', e);
+      }
+    }
   }
 
   const wasPersonal = isPersonal(user?.user_type ?? user?.role);

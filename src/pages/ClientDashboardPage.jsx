@@ -45,6 +45,21 @@ export default function ClientDashboardPage() {
     (async () => {
       try {
         const supabase = getSupabase();
+        // Never silently re-link an already-coached client: a stale join link
+        // for a different coach must not hijack the relationship. Switching
+        // stays possible via the explicit Enter Code page.
+        if (supabase) {
+          const { data: existingLink } = await supabase
+            .from('clients')
+            .select('coach_id, trainer_id')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          const currentCoachId = existingLink?.trainer_id ?? existingLink?.coach_id ?? null;
+          if (currentCoachId && pending.trainerId && String(currentCoachId) !== String(pending.trainerId)) {
+            toast.info('You already have a coach. To switch, use Enter Code in settings.');
+            return;
+          }
+        }
         await applyInviteCodeForUser({ supabase, user, inviteCode: pending.code });
         await queryClient.invalidateQueries({ queryKey: ['client-profile'] });
         await refreshProfile?.();

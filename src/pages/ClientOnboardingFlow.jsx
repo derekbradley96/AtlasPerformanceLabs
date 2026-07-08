@@ -518,6 +518,19 @@ export default function ClientOnboardingFlow() {
           await supabase.from('profiles').upsert({ id: supabaseUser.id, ...patch });
         }
       }
+      // Keep the coach's roster row in sync — it has its own name columns, and
+      // rows created by invite/offer flows start nameless ("Client" everywhere).
+      try {
+        const supabase = getSupabase();
+        if (supabase && supabaseUser?.id && patch.full_name) {
+          await supabase
+            .from('clients')
+            .update({ name: patch.full_name, full_name: patch.full_name })
+            .eq('user_id', supabaseUser.id);
+        }
+      } catch (_) {
+        /* roster name sync is best-effort */
+      }
       await refreshProfile();
       setStep(STEP.PLAN);
     } catch (e) {
