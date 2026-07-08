@@ -59,7 +59,6 @@ import ClientSupplementStack from '@/pages/ClientSupplementStack';
 import CallRequestsPage from '@/pages/CallRequestsPage';
 import SoloDashboardPage from '@/pages/SoloDashboardPage';
 import PersonalInsightsPage from '@/pages/PersonalInsightsPage';
-import ClientDetail from '@/pages/ClientDetail';
 import CheckinReview from '@/pages/CheckinReview';
 import Intervention from '@/pages/Intervention';
 import ChatThread from '@/pages/ChatThread';
@@ -97,7 +96,6 @@ import PosingReview from '@/pages/compPrep/PosingReview';
 import ReviewCenter from '@/pages/ReviewCenter';
 import ReviewCenterPage from '@/pages/ReviewCenterPage';
 import ReviewCenterQueuePage from '@/pages/ReviewCenterQueuePage';
-import CheckInReviewPage from '@/pages/CheckInReviewPage';
 import PoseCheckSubmitPage from '@/pages/PoseCheckSubmitPage';
 import PoseCheckReviewPage from '@/pages/PoseCheckReviewPage';
 import PoseCheckReviewDetailPage from '@/pages/PoseCheckReviewDetailPage';
@@ -165,14 +163,12 @@ import LeadCheckout from '@/pages/LeadCheckout';
 import LeadCheckoutSuccess from '@/pages/LeadCheckoutSuccess';
 import LeadCheckoutCancel from '@/pages/LeadCheckoutCancel';
 import ClientEquipment from '@/pages/ClientEquipment';
-import CoachOnboardingFlow from '@/pages/CoachOnboardingFlow';
 import Appearance from '@/pages/Appearance';
 import HelpSupport from '@/pages/HelpSupport';
 import ReportBugPage from '@/pages/ReportBugPage';
 import FeedbackPage from '@/pages/FeedbackPage';
 import NavigationAudit from '@/pages/NavigationAudit';
 import Profile from '@/pages/Profile';
-import ProfileAccountPage from '@/pages/ProfileAccountPage';
 import DeleteAccountPage from '@/pages/DeleteAccountPage';
 import GoodbyePage from '@/pages/GoodbyePage';
 import ProgressPage from '@/pages/ProgressPage';
@@ -248,6 +244,13 @@ const NutritionBuilderLazy = React.lazy(() => import('@/pages/NutritionBuilder')
 const ProgramAssignmentsPageLazy = React.lazy(() => import('@/pages/ProgramAssignmentsPage'));
 const ProgramViewerPageLazy = React.lazy(() => import('@/pages/ProgramViewerPage'));
 const EarningsLazy = React.lazy(() => import('@/pages/Earnings'));
+// Heavy, non-first-paint pages: split out of the entry chunk. Names preserved
+// (incl. registry pass-down to coach/client routers); each route site is
+// wrapped in <Suspense fallback={<LazyRouteFallback/>}>.
+const ClientDetail = React.lazy(() => import('@/pages/ClientDetail'));
+const CheckInReviewPage = React.lazy(() => import('@/pages/CheckInReviewPage'));
+const CoachOnboardingFlow = React.lazy(() => import('@/pages/CoachOnboardingFlow'));
+const ProfileAccountPage = React.lazy(() => import('@/pages/ProfileAccountPage'));
 
 const LazyRouteFallback = () => (
   <div className="flex items-center justify-center min-h-[200px]">
@@ -560,7 +563,7 @@ export default function AppRoutes({ isNative }) {
 
         <Route element={<FeedbackProvider><AppShell /></FeedbackProvider>}>
           <Route path="coach-onboarding" element={<CoachAtlasSubscriptionGate><RequireRole allow={[Roles.COACH, Roles.ADMIN]}><RedirectToCoachOnboardingFlow /></RequireRole></CoachAtlasSubscriptionGate>} />
-          <Route path="coach-onboarding-flow" element={<CoachAtlasSubscriptionGate><RequireRole allow={[Roles.COACH, Roles.ADMIN]}><CoachOnboardingFlow /></RequireRole></CoachAtlasSubscriptionGate>} />
+          <Route path="coach-onboarding-flow" element={<CoachAtlasSubscriptionGate><RequireRole allow={[Roles.COACH, Roles.ADMIN]}><Suspense fallback={<LazyRouteFallback />}><CoachOnboardingFlow /></Suspense></RequireRole></CoachAtlasSubscriptionGate>} />
           <Route path="setup" element={<CoachAtlasSubscriptionGate><RequireRole allow={[Roles.COACH, Roles.ADMIN]}><RedirectToCoachOnboardingFlow /></RequireRole></CoachAtlasSubscriptionGate>} />
           <Route path="trainer-setup" element={<CoachAtlasSubscriptionGate><RequireRole allow={[Roles.COACH, Roles.ADMIN]}><RedirectToCoachOnboardingFlow /></RequireRole></CoachAtlasSubscriptionGate>} />
           {/* Renders src/pages/CoachHomePage.jsx for coaches via HomePageByRole (canonical coach home) */}
@@ -683,7 +686,7 @@ export default function AppRoutes({ isNative }) {
           <Route path="notificationsettings" element={<Navigate to="/settings/notifications" replace />} />
           <Route path="notifications" element={<RequireAuth><NotificationsPage /></RequireAuth>} />
           <Route path="profile" element={<RequireAuth><Profile /></RequireAuth>} />
-          <Route path="profile-account" element={<RequireAuth><ProfileAccountPage /></RequireAuth>} />
+          <Route path="profile-account" element={<RequireAuth><Suspense fallback={<LazyRouteFallback />}><ProfileAccountPage /></Suspense></RequireAuth>} />
 
           {ClientRoutes({
             ClientCoachOfferAppGate,
