@@ -384,7 +384,19 @@ const AuthenticatedApp = () => {
       } catch (_) {}
     };
     window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
+    // Killed while offline → reopened online: the 'online' event never fires
+    // in that lifecycle, so queued workout sets sat until the NEXT
+    // connectivity flap. Flush once at startup too (after boot settles).
+    let startupFlushId = null;
+    if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+      startupFlushId = setTimeout(() => {
+        void handleOnline();
+      }, 4000);
+    }
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      if (startupFlushId) clearTimeout(startupFlushId);
+    };
   }, []);
 
   if (isDev && authError?.type === 'auth_required') {
