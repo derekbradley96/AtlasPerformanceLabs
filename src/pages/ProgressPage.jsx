@@ -455,12 +455,19 @@ export default function ProgressPage() {
     queryKey: ['progress-prep-phases', clientId],
     queryFn: async () => {
       if (!supabase || !clientId) return [];
+      // Table is contest_preps (plural) and the start column is prep_start_date —
+      // the old query hit a nonexistent table, so prep phases never overlaid the chart.
       const { data } = await supabase
-        .from('contest_prep')
-        .select('id, start_date, end_date, show_date, created_at, updated_at')
+        .from('contest_preps')
+        .select('id, prep_start_date, show_date, created_at')
         .eq('client_id', clientId)
-        .order('start_date', { ascending: true });
-      return Array.isArray(data) ? data : [];
+        .order('created_at', { ascending: true });
+      return (Array.isArray(data) ? data : []).map((r) => ({
+        id: r.id,
+        start_date: r.prep_start_date ?? null,
+        show_date: r.show_date ?? null,
+        created_at: r.created_at ?? null,
+      }));
     },
     enabled: !!supabase && !!clientId && !isPersonalView,
   });

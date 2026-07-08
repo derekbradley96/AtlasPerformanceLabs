@@ -23,20 +23,21 @@ export default function Achievements() {
   const userId = authUser?.id;
   const rosterClientId = clientLinkedRow?.id ?? null;
 
-  const { data: clientCheckins = [] } = useQuery({
-    queryKey: ['achievements-my-checkins', rosterClientId],
+  // Milestone progress needs the TOTAL submitted count — the old list query was
+  // limited to 10 rows, so every check-in milestone above 10 froze at 10/N.
+  const { data: checkinCount = 0 } = useQuery({
+    queryKey: ['achievements-my-checkin-count', rosterClientId],
     queryFn: async () => {
-      if (!hasSupabase || !rosterClientId) return [];
+      if (!hasSupabase || !rosterClientId) return 0;
       const supabase = getSupabase();
-      if (!supabase) return [];
-      const { data, error } = await supabase
+      if (!supabase) return 0;
+      const { count, error } = await supabase
         .from('checkins')
-        .select('id, submitted_at, status, coach_reviewed_at')
+        .select('id', { count: 'exact', head: true })
         .eq('client_id', rosterClientId)
-        .order('submitted_at', { ascending: false })
-        .limit(10);
-      if (error) return [];
-      return Array.isArray(data) ? data : [];
+        .eq('status', 'submitted');
+      if (error) return 0;
+      return Number(count) || 0;
     },
     enabled: Boolean(hasSupabase && rosterClientId),
     staleTime: 5 * 60 * 1000,
@@ -45,8 +46,6 @@ export default function Achievements() {
   const byUser = true;
   const achievements = userId ? getAchievementsList(userId, { byUser }) : [];
   const showFindCoach = isPersonal(effectiveRole ?? role);
-  const checkIns = clientCheckins;
-  const checkinCount = checkIns.filter((c) => c.status === 'submitted').length;
   const streakDays = checkinCount;
 
   const createdSource = clientLinkedRow?.created_at ?? clientLinkedRow?.created_date ?? profile?.created_at;
