@@ -892,12 +892,31 @@ Deno.serve(async (req) => {
       toSend.map((t) => String(t.user_id)),
     );
 
+    // London-hour send windows [start, endExclusive). The per-day dedupe resets
+    // at UTC midnight, so without these the first */30 cron run of the day
+    // pushed "habit reminder" / "workout due" at ~1am. Types not listed are
+    // already window-gated where they're created (supplements, evening workout).
+    const SEND_WINDOWS: Record<string, [number, number]> = {
+      workout_due: [7, 12],
+      habit_due: [8, 21],
+      checkin_due: [8, 20],
+      prep_pose_check_due: [9, 20],
+      billing_due: [9, 18],
+      coach_review_prompt: [10, 20],
+      review_prompt_4_weeks: [10, 20],
+      peak_week_update: [6, 22],
+    };
+    const londonHour = Number(getLondonClock(new Date()).currentTime.slice(0, 2));
+
     let inserted = 0;
     const byTrigger: Record<string, number> = {};
     for (const item of toSend) {
       const { user_id, trigger_type, title: customTitle, message: customMessage, data: customData, dedupe_key } = item;
       const profileId = user_id;
       if (!isNotificationAllowed(dispatchPrefs, String(profileId), TRIGGER_PREF_KEY[trigger_type])) continue;
+      const win = SEND_WINDOWS[trigger_type];
+      // Outside the window: skip WITHOUT marking sent — it fires when the window opens.
+      if (win && (londonHour < win[0] || londonHour >= win[1])) continue;
       const key = dedupe_key ? `${profileId}:${dedupe_key}` : `${profileId}:${trigger_type}`;
       if (sentToday.has(key)) continue;
       const copy = TRIGGER_COPY[trigger_type] ?? { title: "Reminder", message: "You have an action due." };

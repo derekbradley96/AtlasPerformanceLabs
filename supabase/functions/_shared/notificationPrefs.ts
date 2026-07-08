@@ -18,12 +18,11 @@ export type NotificationPrefKey =
 
 /** send-reminders trigger_type → preference column. Unmapped triggers are always allowed. */
 export const TRIGGER_PREF_KEY: Record<string, NotificationPrefKey> = {
-  workout_due_today: "workouts",
-  workout_still_waiting: "workouts",
+  workout_due: "workouts",
+  workout_evening_reminder: "workouts",
   checkin_due: "checkins",
   prep_pose_check_due: "checkins",
   habit_due: "habits",
-  habit_checkin: "habits",
   billing_due: "payments",
   supplement_morning_reminder: "nutrition",
   supplement_evening_reminder: "nutrition",
