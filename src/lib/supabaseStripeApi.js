@@ -112,11 +112,16 @@ export async function stripeConnectLink(userId) {
 /**
  * Get coach record (Stripe status, etc.).
  * @param {string} userId
+ * @param {{ sync?: boolean }} [options] - sync: refresh charges/payouts flags live from Stripe
+ *   (use right after Connect onboarding returns, before the webhook lands).
  * @returns {Promise<{ coach?: { id: string; stripe_account_id?: string; charges_enabled?: boolean; payouts_enabled?: boolean }; connected?: boolean; error?: string }>}
  */
-export async function getCoach(userId) {
+export async function getCoach(userId, options = {}) {
   if (!userId) return { error: 'user_id required' };
-  const { data, error } = await invokeSupabaseFunction('get-coach', { user_id: userId });
+  const { data, error } = await invokeSupabaseFunction('get-coach', {
+    user_id: userId,
+    ...(options.sync ? { sync: true } : {}),
+  });
   if (error) return { error };
   return {
     coach: data?.coach ?? null,
@@ -125,6 +130,16 @@ export async function getCoach(userId) {
     charges_enabled: !!data?.charges_enabled,
     payouts_enabled: !!data?.payouts_enabled,
   };
+}
+
+/**
+ * Stripe Express dashboard login link for the signed-in coach (payouts, bank details).
+ * @returns {Promise<{ url?: string|null, error?: string }>}
+ */
+export async function stripeExpressLogin() {
+  const { data, error } = await invokeSupabaseFunction('stripe-express-login', {});
+  if (error) return { error };
+  return { url: data?.url ?? null };
 }
 
 /**

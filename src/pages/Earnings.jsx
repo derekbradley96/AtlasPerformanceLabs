@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { navigateToThread } from '@/lib/messagesPath';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -23,7 +23,7 @@ import {
 } from '@/lib/earningsService';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { isStripeConnected, setStripeConnected, getConnectAccountLinkUrl } from '@/lib/stripeConnectStore';
-import { stripeConnectLink, getCoach } from '@/lib/supabaseStripeApi';
+import { stripeConnectLink, getCoach, stripeExpressLogin } from '@/lib/supabaseStripeApi';
 import { safeDate } from '@/lib/format';
 import RevenueTrend from '@/components/earnings/RevenueTrend';
 import TaxSetAsideCard from '@/components/earnings/TaxSetAsideCard';
@@ -108,6 +108,7 @@ export default function Earnings() {
   const [addReceiptOpen, setAddReceiptOpen] = useState(false);
   const [stripeConnectedState, setStripeConnectedState] = useState(() => isStripeConnected());
   const [stripeLoading, setStripeLoading] = useState(false);
+  const queryClient = useQueryClient();
   const overdueSectionRef = useRef(null);
   const isStripeConnectedNow = stripeConnectedState || isStripeConnected();
   const [dismissedUpgradePromptId, setDismissedUpgradePromptId] = useState(null);
@@ -198,19 +199,36 @@ export default function Earnings() {
     }
   }, [coachData]);
 
-  // After Stripe Connect return/refresh: refetch coach status and sync local state
+  // After Stripe Connect return/refresh: sync status live from Stripe — the
+  // account.updated webhook may not have landed yet, and the DB flags alone
+  // would tell a coach who just finished onboarding that they haven't.
   useEffect(() => {
     const stripeParam = searchParams.get('stripe');
     if ((stripeParam !== 'return' && stripeParam !== 'refresh') || !userId) return;
     (async () => {
-      const { connected, charges_enabled } = await getCoach(userId);
+      const { connected, charges_enabled } = await getCoach(userId, { sync: true });
       if (connected) {
         setStripeConnected(true, 'connected');
         setStripeConnectedState(true);
         toast.success(charges_enabled ? 'Stripe connected' : 'Stripe: complete onboarding to accept payments');
+        queryClient.invalidateQueries({ queryKey: ['get-coach', userId] });
       }
     })();
-  }, [searchParams, userId]);
+  }, [searchParams, userId, queryClient]);
+
+  const openStripeDashboard = useCallback(async () => {
+    await lightHaptic();
+    try {
+      const { url, error } = await stripeExpressLogin();
+      if (url) {
+        window.open(url, '_blank', 'noopener');
+        return;
+      }
+      toast.error(error || 'Could not open the Stripe dashboard');
+    } catch (e) {
+      toast.error(e?.message ?? 'Could not open the Stripe dashboard');
+    }
+  }, []);
 
   const setPeriodAndPersist = useCallback((p) => {
     lightHaptic();
@@ -380,13 +398,26 @@ export default function Earnings() {
               </Button>
             </div>
           </Card>
+        ) : coachData?.stripe_account_id && coachData?.charges_enabled === false ? (
+          <Card style={{ padding: spacing[12], border: `1px solid ${colors.warning}` }}>
+            <div className="flex items-center gap-3">
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colors.warning }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-[14px] font-semibold" style={{ color: colors.warning }}>Payments paused — action needed</p>
+                <p className="text-[12px] mt-0.5" style={{ color: colors.muted }}>Stripe needs more details before you can take payments.</p>
+              </div>
+              <Button variant="primary" disabled={stripeLoading} onClick={handleSetupPayouts}>
+                Finish setup
+              </Button>
+            </div>
+          </Card>
         ) : (
           <div className="flex items-center justify-between" style={{ padding: spacing[10], background: CARD_BG, border: `1px solid ${BORDER}`, borderRadius: 20 }}>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full" style={{ background: colors.success }} />
               <span className="text-[13px] font-medium" style={{ color: colors.success }}>Stripe connected</span>
             </div>
-            <button type="button" onClick={() => toast.info('Manage – coming soon')} className="text-[13px] font-medium" style={{ color: colors.accent, background: 'none', border: 'none' }}>Manage</button>
+            <button type="button" onClick={openStripeDashboard} className="text-[13px] font-medium" style={{ color: colors.accent, background: 'none', border: 'none' }}>Payouts & bank</button>
           </div>
         )}
       </section>
@@ -632,7 +663,19 @@ export default function Earnings() {
           ))}
           {payouts.length === 0 && (
             <div style={{ padding: spacing[16], textAlign: 'center' }}>
-              <p className="text-[13px]" style={{ color: colors.muted }}>No payouts yet</p>
+              <p className="text-[13px]" style={{ color: colors.muted }}>
+                {isStripeConnectedNow ? 'Payout history lives in your Stripe dashboard' : 'No payouts yet'}
+              </p>
+              {isStripeConnectedNow && (
+                <button
+                  type="button"
+                  onClick={openStripeDashboard}
+                  className="mt-2 text-[13px] font-medium"
+                  style={{ color: colors.accent, background: 'none', border: 'none' }}
+                >
+                  View payouts in Stripe →
+                </button>
+              )}
             </div>
           )}
         </Card>
