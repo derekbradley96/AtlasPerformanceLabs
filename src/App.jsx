@@ -140,63 +140,59 @@ const LoadingOverlay = () => {
 function NativeKeyboardConfig() {
   useEffect(() => {
     if (typeof Capacitor === 'undefined'
-      || !Capacitor.isNativePlatform?.()) return;
+      || !Capacitor.isNativePlatform?.()) return undefined;
     let cancelled = false;
     let showHandle = null;
     let hideHandle = null;
+    // Remembered so focusin (field→field, keyboard already up) can reuse it.
+    let lastKeyboardHeight = 0;
+
+    const scrollActiveIntoView = () => {
+      requestAnimationFrame(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body || active.tagName === 'BODY') return;
+        const rect = active.getBoundingClientRect();
+        const keyboardHeight = lastKeyboardHeight || 300;
+        const visibleHeight = window.innerHeight - keyboardHeight;
+        // block:'center' keeps the field clear of the keyboard and comfortably
+        // above it, whichever scroll container it lives in.
+        if (rect.bottom > visibleHeight - 20 || rect.top < 0) {
+          active.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+      });
+    };
+
+    // Field→field while the keyboard stays up: keyboardWillShow doesn't fire
+    // again, so re-scroll on focus of any text control when the keyboard is open.
+    const onFocusIn = (e) => {
+      if (lastKeyboardHeight <= 0) return;
+      const t = e.target;
+      if (!t || !/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || '') && !t.isContentEditable) return;
+      scrollActiveIntoView();
+    };
 
     (async () => {
       try {
         const { Keyboard } = await import('@capacitor/keyboard');
         if (cancelled) return;
-
-        // Hide accessory bar (arrows/check) — existing behaviour
         await Keyboard.setAccessoryBarVisible({ isVisible: false });
-
-        // Scroll active input into view when keyboard shows
-        showHandle = await Keyboard.addListener(
-          'keyboardWillShow',
-          (info) => {
-            // Give the browser a frame to register the element
-            requestAnimationFrame(() => {
-              const active = document.activeElement;
-              if (!active
-                || active === document.body
-                || active.tagName === 'BODY') return;
-
-              // Calculate if the input is hidden behind keyboard
-              const rect = active.getBoundingClientRect();
-              const viewportHeight = window.innerHeight;
-              const keyboardHeight = info.keyboardHeight || 300;
-              const inputBottom = rect.bottom;
-              const visibleHeight = viewportHeight - keyboardHeight;
-
-              if (inputBottom > visibleHeight - 20) {
-                active.scrollIntoView({
-                  behavior: 'smooth',
-                  block: 'center',
-                  inline: 'nearest',
-                });
-              }
-            });
-          }
-        );
-
-        // Clear any scroll offset when keyboard hides
-        hideHandle = await Keyboard.addListener(
-          'keyboardWillHide',
-          () => {
-            // Restore scroll to natural position
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }
-        );
+        showHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
+          lastKeyboardHeight = info?.keyboardHeight || 300;
+          scrollActiveIntoView();
+        });
+        hideHandle = await Keyboard.addListener('keyboardWillHide', () => {
+          lastKeyboardHeight = 0;
+        });
+        document.addEventListener('focusin', onFocusIn);
       } catch (_) {}
     })();
 
     return () => {
       cancelled = true;
-      showHandle?.then?.(h => h?.remove?.());
-      hideHandle?.then?.(h => h?.remove?.());
+      document.removeEventListener('focusin', onFocusIn);
+      // addListener resolves to a handle synchronously stored here — remove directly.
+      showHandle?.remove?.();
+      hideHandle?.remove?.();
     };
   }, []);
   return null;
