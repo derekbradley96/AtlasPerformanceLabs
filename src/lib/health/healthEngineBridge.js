@@ -8,6 +8,44 @@ function safeArray(x) {
   return Array.isArray(x) ? x : [];
 }
 
+function toFiniteNumber(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The live check-in form writes nutrition_adherence / training_completion
+ * (0-100), mood_level / energy_level / stress_level (1-10), and
+ * digestion_score (1-10) — but the engine reads adherence_pct, mood and
+ * stress (~1-5 thresholds) and digestion_flags. Without this mapping those
+ * inputs silently fell back to healthy defaults and never moved the score.
+ */
+function normalizeCheckInForEngine(checkin) {
+  if (!checkin || typeof checkin !== 'object') return checkin ?? null;
+  const adherence =
+    toFiniteNumber(checkin.adherence_pct)
+    ?? toFiniteNumber(checkin.nutrition_adherence)
+    ?? toFiniteNumber(checkin.adherence)
+    ?? toFiniteNumber(checkin.training_completion);
+  const mood10 = toFiniteNumber(checkin.mood_level) ?? toFiniteNumber(checkin.energy_level);
+  const stress10 = toFiniteNumber(checkin.stress_level);
+  const digestion10 = toFiniteNumber(checkin.digestion_score);
+  const existingDigestionFlags = Array.isArray(checkin.digestion_flags) ? checkin.digestion_flags : [];
+  return {
+    ...checkin,
+    adherence_pct: adherence,
+    mood: toFiniteNumber(checkin.mood) ?? (mood10 != null ? mood10 / 2 : null),
+    stress: toFiniteNumber(checkin.stress) ?? (stress10 != null ? stress10 / 2 : null),
+    digestion_flags:
+      existingDigestionFlags.length > 0
+        ? existingDigestionFlags
+        : digestion10 != null && digestion10 <= 3
+          ? ['digestion_low']
+          : [],
+  };
+}
+
 /**
  * Get most recent submitted check-in for "latest" metrics.
  */
@@ -20,7 +58,7 @@ function getLatestCheckIn(checkIns) {
       const tb = safeDate(b?.submitted_at ?? b?.created_date ?? b?.created_at)?.getTime() ?? 0;
       return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
     });
-  return submitted[0] ?? null;
+  return submitted[0] ? normalizeCheckInForEngine(submitted[0]) : null;
 }
 
 /**

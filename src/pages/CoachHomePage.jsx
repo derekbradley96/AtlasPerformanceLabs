@@ -100,7 +100,10 @@ function waitingLabel(iso) {
 }
 
 function getWeekDatesFromMonday(weekStartIso) {
-  const start = new Date(weekStartIso);
+  // Parse the YYYY-MM-DD week start as LOCAL midnight — new Date('YYYY-MM-DD')
+  // is UTC midnight, which shifts the whole week window by an hour under BST.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(weekStartIso ?? ''));
+  const start = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(weekStartIso);
   start.setHours(0, 0, 0, 0);
   return Array.from({ length: 7 }, (_, idx) => {
     const d = new Date(start);

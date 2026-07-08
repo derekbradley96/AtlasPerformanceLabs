@@ -248,11 +248,12 @@ export function evaluateClientHealth(
     safeClient.steps_target ?? safeClient.stepsTarget,
     10000
   );
-  const stepsActual = safeNumber(
-    latestCheckIn?.steps ?? latestCheckIn?.steps_avg ?? latestCheckIn?.metrics?.steps,
-    0
-  );
-  if (stepsTarget > 0 && stepsActual < stepsTarget * 0.7) {
+  const stepsReported =
+    latestCheckIn?.steps ?? latestCheckIn?.steps_avg ?? latestCheckIn?.metrics?.steps ?? null;
+  const stepsActual = safeNumber(stepsReported, 0);
+  // Only judge steps that were actually reported — with the default 10k target,
+  // a check-in template without a steps question penalised every client.
+  if (stepsTarget > 0 && stepsReported != null && stepsActual < stepsTarget * 0.7) {
     penaltyCompliance += Math.min(8 * sensitivity, BUCKET_COMPLIANCE - penaltyCompliance);
     flags.push(FLAGS.LOW_STEPS);
     reasonCandidates.push({ text: 'Steps below target', severity: 5 });

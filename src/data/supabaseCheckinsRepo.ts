@@ -20,7 +20,15 @@ const CHECKIN_SELECT_COLUMNS = [
   'weight_kg',
   'notes',
   'steps',
+  // Health engine inputs — the live check-in form writes these columns; when
+  // they weren't selected, the engine scored everyone on healthy defaults.
+  'steps_avg',
   'nutrition_adherence',
+  'training_completion',
+  'mood_level',
+  'energy_level',
+  'stress_level',
+  'digestion_score',
   'sleep_hours',
   'reviewed_at',
   'reviewed_by',
