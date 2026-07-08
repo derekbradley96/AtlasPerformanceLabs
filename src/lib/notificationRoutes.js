@@ -61,6 +61,8 @@ export function getRouteForNotification(notification, viewerRole = null) {
       return checkinId ? `/reviewcheckin?id=${encodeURIComponent(checkinId)}` : '/check-in';
     case 'programme_assigned':
       return isClient || !isCoach ? '/myprogram' : '/programs';
+    case 'coach_inquiry':
+      return isCoach ? '/inquiry-inbox' : '/discover';
     case 'checkin_due':
       return isClient || !isCoach ? '/check-in' : '/review-center/checkins';
     case 'message_received':

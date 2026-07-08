@@ -245,6 +245,31 @@ export default function CoachMarketplacePage() {
         message: inquiryMessage.trim() || null,
       });
       if (error) throw error;
+      // Applications previously landed in coach_inquiries with no signal to
+      // the coach at all — notify (in-app + push) with a link to the inbox.
+      try {
+        const [{ insertNotificationForRecipient }, { triggerActionRequiredPush }] = await Promise.all([
+          import('@/lib/notifications'),
+          import('@/services/pushAlertService'),
+        ]);
+        const rowId = await insertNotificationForRecipient(
+          selectedProfile.coach_id,
+          'coach_inquiry',
+          'New client application',
+          'Someone applied to work with you from the marketplace.',
+          { deep_link: '/inquiry-inbox' },
+          null,
+          { cooldownMinutes: 5, maxPerDay: 50, dedupeKey: `coach_inquiry_${user.id}`, timingTag: 'immediate' }
+        );
+        if (rowId) {
+          await triggerActionRequiredPush(selectedProfile.coach_id, 'New client application', 'Someone applied to work with you from the marketplace.', {
+            type: 'coach_inquiry',
+            deep_link: '/inquiry-inbox',
+          });
+        }
+      } catch (_) {
+        /* notification is best-effort; the inquiry row is saved */
+      }
       toast.success('Application sent');
       setInquiryMessage('');
       setSelectedProfile(null);

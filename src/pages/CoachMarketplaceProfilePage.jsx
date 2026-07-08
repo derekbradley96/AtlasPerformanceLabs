@@ -151,6 +151,37 @@ function SectionHeading({ children }) {
   );
 }
 
+/**
+ * Result-story photos live in the private marketplace_coach_media bucket as
+ * storage paths — rendered raw they were permanent placeholder boxes, so the
+ * before/after proof coaches upload never showed to prospective clients.
+ */
+function StoryImage({ path, label }) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!path) return undefined;
+    import('@/lib/resultStories')
+      .then(({ getResultStoryImageUrl }) => getResultStoryImageUrl(path))
+      .then((signed) => {
+        if (!cancelled && signed) setUrl(signed);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+  return (
+    <div className="rounded-lg aspect-[3/4] overflow-hidden flex items-center justify-center" style={{ background: colors.surface2 }}>
+      {url ? (
+        <img src={url} alt={label} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : (
+        <ImageIcon size={24} style={{ color: colors.muted }} />
+      )}
+    </div>
+  );
+}
+
 export default function CoachMarketplaceProfilePage() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -862,14 +893,10 @@ export default function CoachMarketplaceProfilePage() {
                 {story.before_image_path || story.after_image_path ? (
                   <div className="grid grid-cols-2 gap-2 mt-3">
                     {story.before_image_path ? (
-                      <div className="rounded-lg aspect-[3/4] flex items-center justify-center" style={{ background: colors.surface2 }}>
-                        <ImageIcon size={24} style={{ color: colors.muted }} />
-                      </div>
+                      <StoryImage path={story.before_image_path} label="Before" />
                     ) : null}
                     {story.after_image_path ? (
-                      <div className="rounded-lg aspect-[3/4] flex items-center justify-center" style={{ background: colors.surface2 }}>
-                        <ImageIcon size={24} style={{ color: colors.muted }} />
-                      </div>
+                      <StoryImage path={story.after_image_path} label="After" />
                     ) : null}
                   </div>
                 ) : null}
