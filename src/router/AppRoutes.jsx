@@ -61,10 +61,8 @@ import SoloDashboardPage from '@/pages/SoloDashboardPage';
 import PersonalInsightsPage from '@/pages/PersonalInsightsPage';
 import CheckinReview from '@/pages/CheckinReview';
 import Intervention from '@/pages/Intervention';
-import ChatThread from '@/pages/ChatThread';
 import Messages from '@/pages/Messages';
 import Clients from '@/pages/Clients';
-import More from '@/pages/More';
 import Programs from '@/pages/Programs';
 import Account from '@/pages/Account';
 import EditProfile from '@/pages/EditProfile';
@@ -171,7 +169,6 @@ import NavigationAudit from '@/pages/NavigationAudit';
 import Profile from '@/pages/Profile';
 import DeleteAccountPage from '@/pages/DeleteAccountPage';
 import GoodbyePage from '@/pages/GoodbyePage';
-import ProgressPage from '@/pages/ProgressPage';
 import PrepProtocolsPage from '@/pages/PrepProtocolsPage';
 import SelfPoseAssessmentPage from '@/pages/SelfPoseAssessmentPage';
 import FederationGuidePage from '@/pages/FederationGuidePage';
@@ -192,7 +189,6 @@ import CheckIns from '@/pages/CheckIns';
 import CheckInTemplates from '@/pages/CheckInTemplates';
 import EditCheckInTemplate from '@/pages/EditCheckInTemplate';
 import ProgramDayEditor from '@/pages/ProgramDayEditor';
-import Nutrition from '@/pages/Nutrition';
 import PrepPrecisionPage from '@/pages/PrepPrecisionPage';
 import NutritionTargetsPage from '@/pages/NutritionTargetsPage';
 import MyTraining from '@/pages/MyTraining';
@@ -251,6 +247,12 @@ const ClientDetail = React.lazy(() => import('@/pages/ClientDetail'));
 const CheckInReviewPage = React.lazy(() => import('@/pages/CheckInReviewPage'));
 const CoachOnboardingFlow = React.lazy(() => import('@/pages/CoachOnboardingFlow'));
 const ProfileAccountPage = React.lazy(() => import('@/pages/ProfileAccountPage'));
+// These route only inside AppShell, which now wraps its <Outlet> in a single
+// <Suspense> — so no per-route wrapper is needed for anything below the shell.
+const ChatThread = React.lazy(() => import('@/pages/ChatThread'));
+const More = React.lazy(() => import('@/pages/More'));
+const ProgressPage = React.lazy(() => import('@/pages/ProgressPage'));
+const Nutrition = React.lazy(() => import('@/pages/Nutrition'));
 
 const LazyRouteFallback = () => (
   <div className="flex items-center justify-center min-h-[200px]">

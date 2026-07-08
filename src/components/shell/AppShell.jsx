@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useCallback, useState, useEffect, useMemo, Suspense } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle, Inbox, Crosshair, Dumbbell, ClipboardList } from 'lucide-react';
 import NotificationBell from '@/components/ui/NotificationBell';
@@ -46,6 +46,18 @@ function initialsFromName(name) {
   const parts = s.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase().slice(0, 2);
   return s.slice(0, 2).toUpperCase();
+}
+
+/** Fallback shown in the content area while a lazily-loaded route chunk loads.
+ * The shell chrome (header, tab bar) stays put — only the outlet swaps. This
+ * single boundary lets any page below the shell be code-split without its own
+ * per-route Suspense wrapper. */
+function ShellOutletFallback() {
+  return (
+    <div className="flex items-center justify-center" style={{ minHeight: 240 }}>
+      <div className="w-8 h-8 border-2 border-white/20 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
 }
 
 function DesktopShellUserFooter({ profile, user, role }) {
@@ -413,7 +425,9 @@ function DesktopShell({
                   minHeight: '100%',
                 }}
               >
-                <Outlet context={outletContext} />
+                <Suspense fallback={<ShellOutletFallback />}>
+                  <Outlet context={outletContext} />
+                </Suspense>
               </div>
             </ErrorBoundary>
           </div>
@@ -1061,7 +1075,9 @@ export default function AppShell() {
                   paddingBottom: noOuterScroll ? 0 : getAppShellOutletScrollPaddingBottom(showTabBar),
                 }}
               >
-                <Outlet context={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh, setChromeHeaderHidden }} />
+                <Suspense fallback={<ShellOutletFallback />}>
+                  <Outlet context={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh, setChromeHeaderHidden }} />
+                </Suspense>
               </div>
             </ErrorBoundary>
           </div>
