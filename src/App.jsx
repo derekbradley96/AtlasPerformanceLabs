@@ -298,12 +298,25 @@ function NativePlatformInit() {
         await createAndroidChannels();
 
         const { App: CapApp } = await import('@capacitor/app');
-        // Android hardware back button: navigate back, or exit on root screens.
+        // Android hardware back button.
+        // Root tab paths where back should exit (standard Android home behavior).
+        const ROOT_PATHS = new Set([
+          '/', '/home', '/clients', '/today', '/progress', '/messages',
+          '/more', '/earnings', '/programs', '/coach-home', '/discover',
+        ]);
         await CapApp.addListener('backButton', ({ canGoBack }) => {
           if (canGoBack) {
             window.history.back();
-          } else {
+            return;
+          }
+          // No history — e.g. launched cold from a push/deep link into a detail
+          // screen. Exiting here would be a dead end, so send them home first;
+          // only a root screen with no history exits the app.
+          const path = (window.location.pathname || '/').toLowerCase();
+          if (ROOT_PATHS.has(path)) {
             CapApp.exitApp();
+          } else {
+            navigate('/', { replace: true });
           }
         });
 

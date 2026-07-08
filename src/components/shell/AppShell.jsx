@@ -573,6 +573,10 @@ export default function AppShell() {
 
   const [titleOverride, setTitleOverride] = useState(null);
   const [headerRight, setHeaderRight] = useState(null);
+  // A page that renders its own <TopBar> sets this true (via outlet context) so
+  // the mobile chrome header below is hidden — otherwise both stack (double
+  // header). Desktop has no chrome header, so this is a no-op there.
+  const [chromeHeaderHidden, setChromeHeaderHidden] = useState(false);
   const logoTapCount = useRef(0);
   const logoTapTimer = useRef(null);
   const scrollContainerRef = useRef(null);
@@ -753,7 +757,7 @@ export default function AppShell() {
           <DesktopShell
             pathname={pathname}
             onNavigate={handleSegmentNavigate}
-            outletContext={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh }}
+            outletContext={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh, setChromeHeaderHidden }}
             contentRef={contentRef}
             noOuterScroll={noOuterScroll}
             profile={profile}
@@ -813,7 +817,9 @@ export default function AppShell() {
         }}
         aria-hidden
       />
-      {/* Sticky header: Safe Area aware, 52–56px + inset */}
+      {/* Sticky header: Safe Area aware, 52–56px + inset.
+          Hidden when a page mounts its own <TopBar> (avoids a double header). */}
+      {!chromeHeaderHidden && (
       <header
         className="sticky top-0 left-0 right-0 z-50 flex-shrink-0"
         style={{
@@ -889,6 +895,7 @@ export default function AppShell() {
           </div>
         </div>
       </header>
+      )}
 
       {showTopSegmentedNav && (
         <div
@@ -1054,7 +1061,7 @@ export default function AppShell() {
                   paddingBottom: noOuterScroll ? 0 : getAppShellOutletScrollPaddingBottom(showTabBar),
                 }}
               >
-                <Outlet context={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh }} />
+                <Outlet context={{ setHeaderTitle: setTitleOverride, setHeaderRight, registerRefresh, setChromeHeaderHidden }} />
               </div>
             </ErrorBoundary>
           </div>

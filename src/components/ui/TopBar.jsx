@@ -1,8 +1,20 @@
 import React from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import { colors, shell } from '@/ui/tokens';
 
 export default function TopBar({ title, onBack, rightAction, showBack = true }) {
+  // When rendered inside AppShell, tell the shell to hide its own chrome header
+  // so this page-owned TopBar doesn't stack a second header on mobile. Outside
+  // the shell (auth/onboarding/marketing) the context is absent and this no-ops.
+  const outletContext = useOutletContext();
+  const setChromeHeaderHidden = outletContext?.setChromeHeaderHidden;
+  React.useEffect(() => {
+    if (typeof setChromeHeaderHidden !== 'function') return undefined;
+    setChromeHeaderHidden(true);
+    return () => setChromeHeaderHidden(false);
+  }, [setChromeHeaderHidden]);
+
   return (
     <header
       className="flex items-center justify-center relative flex-shrink-0"
