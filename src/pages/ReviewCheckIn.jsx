@@ -32,7 +32,12 @@ export default function ReviewCheckIn() {
   const params = new URLSearchParams(location.search);
   const checkInId = params.get('id');
 
-  const { data: checkin } = useQuery({
+  const {
+    data: checkin,
+    isLoading: checkinLoading,
+    isError: checkinError,
+    refetch: refetchCheckin,
+  } = useQuery({
     queryKey: ['checkin-detail', checkInId],
     queryFn: async () => {
       if (!checkInId) return null;
@@ -193,7 +198,28 @@ export default function ReviewCheckIn() {
 
   const templateAnswers = useMemo(() => resolveCheckinTemplateAnswers(checkin), [checkin]);
 
-  if (!user || !checkin || !client) return <PageLoader />;
+  // Only block on auth + the check-in itself loading. `client` is enrichment
+  // (name display) and must NOT gate — a failed client fetch left this on a
+  // perpetual spinner, which the checkin_reviewed notification links clients into.
+  if (!user || (checkInId && checkinLoading && !checkin)) return <PageLoader />;
+  if (checkInId && (checkinError || !checkin)) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center px-6 text-center">
+        <p className="text-[16px] font-semibold mb-2" style={{ color: 'var(--app-text, #fff)' }}>
+          {checkinError ? "Couldn't load this check-in" : 'Check-in not found'}
+        </p>
+        <p className="text-[14px] mb-5" style={{ color: 'var(--app-muted, #9aa4b2)', lineHeight: 1.45 }}>
+          {checkinError ? 'This is usually a temporary connection issue.' : 'It may have been removed.'}
+        </p>
+        <div className="flex gap-2">
+          {checkinError ? (
+            <Button onClick={() => refetchCheckin()}>Try again</Button>
+          ) : null}
+          <Button variant="secondary" onClick={() => navigate(createPageUrl('CheckIns'))}>Back to check-ins</Button>
+        </div>
+      </div>
+    );
+  }
 
   const clientUserId = client?.user_id ?? clientUserLink?.user_id ?? null;
   const isClientViewer = Boolean(clientUserId && user?.id && String(clientUserId) === String(user.id));
