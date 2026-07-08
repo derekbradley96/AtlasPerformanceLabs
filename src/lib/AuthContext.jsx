@@ -830,6 +830,13 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async (redirectTo = '/') => {
+    // Drop THIS device's push registration while the session still exists
+    // (RLS needs it) — otherwise the next account signing in on this device
+    // would keep receiving the previous account's notifications.
+    try {
+      const { unregisterPushTokenForCurrentUser } = await import('@/services/pushNotifications');
+      await unregisterPushTokenForCurrentUser();
+    } catch (_) {}
     resetUser();
     clearAuthStorage();
     await clearAuthStoragePreferences();

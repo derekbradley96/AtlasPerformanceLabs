@@ -110,7 +110,20 @@ export async function sendPushToProfile(
           message: { token, notification: { title, body }, data: stringData },
         }),
       });
-      if (res.ok) sent += 1;
+      if (res.ok) {
+        sent += 1;
+        continue;
+      }
+      // Prune dead registrations (app uninstalled, token rotated) so they
+      // don't accumulate and slow every future send.
+      try {
+        const errText = await res.text();
+        if (res.status === 404 || /UNREGISTERED|NOT_FOUND|INVALID_ARGUMENT/i.test(errText)) {
+          await supabase.from("device_push_tokens").delete().eq("device_token", token);
+        }
+      } catch (_) {
+        /* pruning is best-effort */
+      }
     }
     return sent;
   } catch (e) {

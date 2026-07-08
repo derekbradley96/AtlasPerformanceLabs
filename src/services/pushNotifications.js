@@ -8,6 +8,30 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 const isNative = () => typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform?.() === true;
 
+const DEVICE_TOKEN_STORAGE_KEY = 'atlas_device_push_token';
+
+/**
+ * Remove THIS device's push registration for the signed-in user. Call before
+ * sign-out (RLS needs the session) so the next account on this device doesn't
+ * receive the previous account's notifications.
+ */
+export async function unregisterPushTokenForCurrentUser() {
+  if (!hasSupabase) return;
+  let token = null;
+  try {
+    token = localStorage.getItem(DEVICE_TOKEN_STORAGE_KEY);
+  } catch (_) {}
+  if (!token) return;
+  try {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    await supabase.from('device_push_tokens').delete().eq('device_token', token);
+    localStorage.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+  } catch (e) {
+    if (import.meta.env?.DEV) console.warn('[pushNotifications] unregister', e);
+  }
+}
+
 function getPlatform() {
   if (typeof Capacitor === 'undefined') return 'web';
   const p = Capacitor.getPlatform?.() ?? '';
@@ -64,11 +88,19 @@ export async function registerPushToken() {
 
     let removeReg;
     let removeErr;
+    let timeoutId;
     const token = await new Promise((resolve, reject) => {
       const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
         removeReg?.();
         removeErr?.();
       };
+      // A device where the registration event never fires (e.g. missing APNs
+      // forwarding) must not hang this promise forever.
+      timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('Push registration timed out'));
+      }, 15000);
       const onReg = (ev) => {
         cleanup();
         resolve(ev?.value ?? null);
@@ -85,8 +117,7 @@ export async function registerPushToken() {
         removeErr = () => errH?.remove?.();
         return PushNotifications.register();
       }).catch((e) => {
-        removeReg?.();
-        removeErr?.();
+        cleanup();
         reject(e);
       });
     });
@@ -99,10 +130,17 @@ export async function registerPushToken() {
           if (user?.id) {
             const platform = getPlatform();
             if (platform !== 'web') {
-              await supabase.from('device_push_tokens').upsert(
-                { user_id: user.id, device_token: token, platform },
-                { onConflict: 'user_id,device_token,platform' }
-              );
+              // The claim RPC also revokes any OTHER user's registration for
+              // this device token (shared devices) — RLS is own-rows-only, so
+              // that cleanup can't happen client-side.
+              const { error } = await supabase.rpc('claim_device_push_token', {
+                p_token: token,
+                p_platform: platform,
+              });
+              if (error) throw error;
+              try {
+                localStorage.setItem(DEVICE_TOKEN_STORAGE_KEY, token);
+              } catch (_) {}
             }
           }
         } catch (e) {

@@ -238,8 +238,29 @@ function IntercomPlanSync() {
 }
 
 function NativePlatformInit() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
+
+  // Push token registration. This was never called from anywhere — the
+  // device_push_tokens table stayed empty and every push went to zero
+  // devices. Runs on login and re-runs on account switch so the claim RPC
+  // can hand the device token to the new user.
+  useEffect(() => {
+    if (typeof Capacitor === 'undefined' || !Capacitor.isNativePlatform?.()) return undefined;
+    if (!isAuthenticated || !user?.id) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { initializePushNotifications } = await import('@/services/pushNotifications');
+        if (!cancelled) await initializePushNotifications();
+      } catch (e) {
+        if (import.meta.env.DEV) console.warn('[NativePlatformInit] push init failed', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.id]);
   function isSafeInternalPath(path) {
     if (typeof path !== 'string') return false;
     if (!path.startsWith('/')) return false;

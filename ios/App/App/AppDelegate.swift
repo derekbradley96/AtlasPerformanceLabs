@@ -1,5 +1,7 @@
 import UIKit
 import Capacitor
+import FirebaseCore
+import FirebaseMessaging
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,8 +9,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Firebase powers push delivery (the backend sends via FCM v1). Without
+        // this configure + the APNs handoff below, Capacitor's 'registration'
+        // event never fires on iOS and no device token ever reaches the backend.
+        FirebaseApp.configure()
         return true
+    }
+
+    // APNs → FCM → Capacitor. The push plugin listens for these notification
+    // center events; posting the FCM token (not the raw APNs token) is what
+    // lets the backend deliver through fcm.googleapis.com.
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Messaging.messaging().apnsToken = deviceToken
+        Messaging.messaging().token { token, error in
+            if let error = error {
+                NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+                return
+            }
+            NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications, object: token)
+        }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
