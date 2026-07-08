@@ -276,6 +276,19 @@ export default function ProfileAccountPage() {
     { key: 'checkins', label: 'Check-in reminders' },
     { key: 'progress_reminders', label: 'Progress reminders' },
   ];
+  // Clients receive workout and nutrition reminders too — without these the
+  // inline toggles disagreed with the dedicated Notifications page (which has
+  // all 8). Coaches don't get client-facing reminders, so their set stays lean.
+  const clientNotificationRows = [
+    { key: 'checkins', label: 'Check-ins' },
+    { key: 'messages', label: 'Messages' },
+    { key: 'workouts', label: 'Workout reminders' },
+    { key: 'habits', label: 'Habits' },
+    { key: 'nutrition', label: 'Nutrition & supplements' },
+    { key: 'peak_week', label: 'Peak week' },
+    { key: 'payments', label: 'Payments' },
+    { key: 'progress_reminders', label: 'Progress prompts' },
+  ];
   const defaultNotificationRows = [
     { key: 'checkins', label: 'Check-ins' },
     { key: 'messages', label: 'Messages' },
@@ -283,7 +296,12 @@ export default function ProfileAccountPage() {
     { key: 'peak_week', label: 'Peak week' },
     { key: 'payments', label: 'Payments' },
   ];
-  const visibleNotificationRows = roleType === 'personal' ? personalNotificationRows : defaultNotificationRows;
+  const visibleNotificationRows =
+    roleType === 'personal'
+      ? personalNotificationRows
+      : roleType === 'client'
+        ? clientNotificationRows
+        : defaultNotificationRows;
 
   useEffect(() => {
     let cancelled = false;
