@@ -457,6 +457,23 @@ Deno.serve(async (req) => {
         safeLogWebhook("invoice.payment_failed", { objectId: invoice.id });
         break;
       }
+      case "charge.refunded": {
+        // Without this, refunded payments stay 'paid' in client_payments and
+        // the coach's revenue is overstated forever. charge.refunded is only
+        // true when FULLY refunded — partial refunds keep the row as paid.
+        const charge = event.data.object as Stripe.Charge;
+        const invoiceId = (charge.invoice as string) ?? null;
+        if (!invoiceId || charge.refunded !== true) {
+          safeLogWebhook("charge.refunded", { objectId: charge.id });
+          break;
+        }
+        await supabase
+          .from("client_payments")
+          .update({ status: "refunded" })
+          .eq("provider_payment_id", invoiceId);
+        safeLogWebhook("charge.refunded", { objectId: charge.id });
+        break;
+      }
       case "account.updated": {
         const account = event.data.object as Stripe.Account;
         const { data: coach } = await supabase.from(TABLE.coaches).select("id").eq("stripe_account_id", account.id).single();

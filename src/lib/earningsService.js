@@ -90,7 +90,7 @@ export async function getEarningsForPeriod(supabase, coachId, period) {
     .from('client_payments')
     .select(`
       id, amount, status, created_at, due_date,
-      client_id, clients(name, full_name)
+      client_id, payment_provider, provider_payment_id, clients(name, full_name)
     `)
     .eq('coach_id', coachId)
     .gte('created_at', toIsoDate(start))
@@ -98,12 +98,45 @@ export async function getEarningsForPeriod(supabase, coachId, period) {
     .order('created_at', { ascending: false });
   if (error) throw error;
 
-  const transactions = (Array.isArray(data) ? data : []).map((row) => {
+  const rawRows = Array.isArray(data) ? data : [];
+
+  // Atlas commission: Stripe-collected payments have a fee row keyed by the
+  // invoice id (client_payments.provider_payment_id). Net = the coach's share;
+  // manual payments carry no platform fee. Fee lookup failure → net = gross.
+  const stripeInvoiceIds = [
+    ...new Set(
+      rawRows
+        .filter((r) => r?.payment_provider === 'stripe' && r?.provider_payment_id)
+        .map((r) => r.provider_payment_id)
+    ),
+  ];
+  const feeByInvoiceId = {};
+  if (stripeInvoiceIds.length > 0) {
+    try {
+      const { data: feeRows } = await supabase
+        .from('atlas_invoice_fees')
+        .select('stripe_invoice_id, coach_amount_cents, platform_fee_cents')
+        .in('stripe_invoice_id', stripeInvoiceIds);
+      for (const f of feeRows || []) {
+        if (f?.stripe_invoice_id) feeByInvoiceId[f.stripe_invoice_id] = f;
+      }
+    } catch {
+      /* fee lookup is an enhancement — totals fall back to gross */
+    }
+  }
+
+  const transactions = rawRows.map((row) => {
     const status = normalizeStatus(row);
     const client = row?.clients;
+    const amount = safeAmount(row.amount);
+    const fee = row?.provider_payment_id ? feeByInvoiceId[row.provider_payment_id] : null;
+    const feeAmount = fee ? safeAmount(fee.platform_fee_cents) / 100 : 0;
+    const netAmount = fee ? safeAmount(fee.coach_amount_cents) / 100 : amount;
     return {
       id: row.id,
-      amount: safeAmount(row.amount),
+      amount,
+      netAmount,
+      feeAmount,
       status,
       date: row.created_at || null,
       due_date: row.due_date || null,
@@ -116,7 +149,7 @@ export async function getEarningsForPeriod(supabase, coachId, period) {
   const gross = transactions.filter((t) => t.status === 'paid').reduce((s, t) => s + t.amount, 0);
   const pending = transactions.filter((t) => t.status === 'pending').reduce((s, t) => s + t.amount, 0);
   const overdue = transactions.filter((t) => t.status === 'overdue').reduce((s, t) => s + t.amount, 0);
-  const net = gross;
+  const net = transactions.filter((t) => t.status === 'paid').reduce((s, t) => s + t.netAmount, 0);
 
   const byDay = {};
   for (const tx of transactions) {
