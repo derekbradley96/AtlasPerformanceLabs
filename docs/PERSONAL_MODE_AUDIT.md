@@ -74,9 +74,13 @@ Legend: ☐ todo · ☑ done
    Go to Today syncs (plan's Bench Press/Overhead Press appear on /today with Start workout).
    Full builder→hub→Today round trip works. (Fast-template quick-start deferred to #9 builder
    consolidation; legacy local-store `program` render path untested — Supabase path is live.)
-9. ☐ **The two builders** — `/program-builder?personal=1` (just made manual) vs
-   `PersonalPlanBuilderPage` (`/personal-plan-builder`) vs `programs/new` +
-   `programs/templates` routes: which are live, which are ghosts, one coherent path.
+9. ☑ **Builder route consolidation** (5dd94a6) — `/program-builder?personal=1` is the one
+   canonical builder. The `/personal-plan-builder` chooser was a fake: "scratch" set dead
+   state, "template" flag was never read — both landed on the same manual builder. Deleted
+   the chooser + dead SoloDashboard; pointed /workout no-plan straight at the builder; kept
+   /personal-plan-builder, /programs/new, /programs/templates as redirects (no 404s); removed
+   the builder's dead startFromScratchSelected/showEntryTemplates state. Verified all 4 entry
+   points land on /program-builder?personal=1, no chooser, no dead-ends.
 10. ☐ **Exercise library for personal** — search/filter/add flows, custom exercises,
     favorites (`exercise_favorites`).
 
