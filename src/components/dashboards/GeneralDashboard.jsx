@@ -51,6 +51,7 @@ import { deriveCoachBridgeMoment } from '@/lib/coachBridge';
 import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
 import CoachBridgeCard from '@/components/coaching/CoachBridgeCard';
 import { ANALYTICS_EVENTS, track } from '@/services/analyticsService';
+import { trackFirstDashboardView } from '@/services/firstSessionTracker';
 import { getPersonalGoalBucketFromProfile, personalHomeTrainingCardCopy } from '@/lib/personalGoalCopy';
 import {
   resolvePersonalUXContext,
@@ -88,18 +89,21 @@ export default function GeneralDashboard({ user }) {
   const isEnhanced = personalTier === 'enhanced' || personalTier === 'free';
 
   const [showPersonalPostOnboarding, setShowPersonalPostOnboarding] = useState(false);
-  const [personalPostOnboardingTier, setPersonalPostOnboardingTier] = useState('basic');
 
   useEffect(() => {
     try {
       setShowPersonalPostOnboarding(sessionStorage.getItem(PERSONAL_POST_ONBOARDING_SESSION_KEY) === '1');
-      const t = sessionStorage.getItem(PERSONAL_ONBOARDING_TIER_SESSION_KEY);
-      setPersonalPostOnboardingTier(t === 'enhanced' || t === 'free' ? 'enhanced' : 'basic');
     } catch (_) {
       setShowPersonalPostOnboarding(false);
-      setPersonalPostOnboardingTier('basic');
     }
   }, []);
+
+  // First-5-min funnel: personal home was the one dashboard not firing this
+  // (coach + client did), leaving a hole in signup→activation analytics.
+  useEffect(() => {
+    if (!user?.id) return;
+    trackFirstDashboardView(user.id, 'personal');
+  }, [user?.id]);
 
   const dismissPersonalPostOnboarding = () => {
     try {
@@ -438,108 +442,56 @@ export default function GeneralDashboard({ user }) {
             <p style={{ margin: 0, fontSize: 11, color: colors.primary, letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
               Welcome
             </p>
-            {personalPostOnboardingTier === 'enhanced' ? (
-              <>
-                <h2 style={{ margin: 0, marginTop: welcomeEyebrowToTitle, fontSize: 20, fontWeight: 700, color: colors.text }}>
-                  You&apos;re set — start training
-                </h2>
-                <p style={{ margin: 0, marginTop: welcomeTitleToBody, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
-                  Build your plan, set targets, then log a check-in when you&apos;re ready.
-                </p>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: welcomeCtaStackGap,
-                    marginTop: welcomeBodyToActions,
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      dismissPersonalPostOnboarding();
-                      navigate(createPageUrl('MyProgram'));
-                    }}
-                    style={welcomePrimaryBtn}
-                  >
-                    <Dumbbell size={20} className="shrink-0" />
-                    Review starter plan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      dismissPersonalPostOnboarding();
-                      navigate('/nutrition');
-                    }}
-                    style={welcomeSecondaryBtn}
-                  >
-                    <UtensilsCrossed size={18} className="shrink-0" />
-                    Review nutrition targets
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      dismissPersonalPostOnboarding();
-                      navigate('/readiness-checkin');
-                    }}
-                    style={welcomeSecondaryBtn}
-                  >
-                    <ClipboardList size={18} className="shrink-0" />
-                    Log readiness check-in
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2 style={{ margin: 0, marginTop: welcomeEyebrowToTitle, fontSize: 20, fontWeight: 700, color: colors.text }}>
-                  You&apos;re set — start manually
-                </h2>
-                <p style={{ margin: 0, marginTop: welcomeTitleToBody, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
-                  Build your plan, set targets, then log a check-in when you&apos;re ready.
-                </p>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: welcomeCtaStackGap,
-                    marginTop: welcomeBodyToActions,
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      dismissPersonalPostOnboarding();
-                      navigate(createPageUrl('MyProgram'));
-                    }}
-                    style={welcomePrimaryBtn}
-                  >
-                    <Dumbbell size={20} className="shrink-0" />
-                    Create your first plan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      dismissPersonalPostOnboarding();
-                      navigate('/nutrition');
-                    }}
-                    style={welcomeSecondaryBtn}
-                  >
-                    Set nutrition targets
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      dismissPersonalPostOnboarding();
-                      navigate('/readiness-checkin');
-                    }}
-                    style={welcomeSecondaryBtn}
-                  >
-                    <ClipboardList size={18} className="shrink-0" />
-                    Log your first check-in
-                  </button>
-                </div>
-              </>
-            )}
+            {/* Personal builds everything manually — no starter plan, no tier split.
+                CTAs point at empty surfaces to fill in. */}
+            <h2 style={{ margin: 0, marginTop: welcomeEyebrowToTitle, fontSize: 20, fontWeight: 700, color: colors.text }}>
+              You&apos;re all set
+            </h2>
+            <p style={{ margin: 0, marginTop: welcomeTitleToBody, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
+              Build your plan, set targets, then log a check-in when you&apos;re ready.
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: welcomeCtaStackGap,
+                marginTop: welcomeBodyToActions,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  dismissPersonalPostOnboarding();
+                  navigate(createPageUrl('MyProgram'));
+                }}
+                style={welcomePrimaryBtn}
+              >
+                <Dumbbell size={20} className="shrink-0" />
+                Create your first plan
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  dismissPersonalPostOnboarding();
+                  navigate('/nutrition');
+                }}
+                style={welcomeSecondaryBtn}
+              >
+                <UtensilsCrossed size={18} className="shrink-0" />
+                Set nutrition targets
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  dismissPersonalPostOnboarding();
+                  navigate('/readiness-checkin');
+                }}
+                style={welcomeSecondaryBtn}
+              >
+                <ClipboardList size={18} className="shrink-0" />
+                Log your first check-in
+              </button>
+            </div>
           </Card>
         </motion.div>
       ) : null}
