@@ -189,6 +189,8 @@
     "tar": "^7.0.0",
     "file-type": "^21.3.2",
     "quill": "^2.0.3",
-    "@xmldom/xmldom": "^0.8.12"
+    "@xmldom/xmldom": "^0.8.12",
+    "ws": "^8.21.0",
+    "protobufjs": "^7.6.5"
   }
 }
