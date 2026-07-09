@@ -155,7 +155,10 @@ const TAB_ROUTES_BY_ROLE = {
   coach: ['/home', '/clients', '/messages', '/inbox', '/prep-dashboard', '/more'],
   /** Third tab may be check-in, prep-precision, or peak-week depending on delivery / active prep. */
   client: ['/today', '/today-workout', '/clientcheckin', '/prep-precision', '/peak-week', '/more'],
-  personal: ['/today', '/workout', '/nutrition', '/progress'],
+  // Home is the personal daily hub (landing); More holds settings, find-a-coach,
+  // My Program, and the builder. Both were missing before, so the landing had no
+  // tab bar and settings/marketplace were unreachable from the nav.
+  personal: ['/home', '/nutrition', '/progress', '/more'],
 };
 /** Union of all tab paths (any role) — only for legacy callers that omit role; prefer `isTabRootForRole`. */
 const TAB_ROUTES = [
@@ -301,12 +304,13 @@ export function getTabRoutesForRole(role, coachFocus, navContext = null) {
       { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
     ];
   }
-  // personal (solo) — direct action tabs only.
+  // personal (solo) — Home hub + daily surfaces + More (settings, find-a-coach,
+  // My Program, builder). Keep to four so the bar stays uncramped.
   return [
-    { path: '/today', label: 'Today', iconKey: 'Calendar' },
-    { path: '/workout', label: 'Train', iconKey: 'Dumbbell' },
+    { path: '/home', label: 'Home', iconKey: 'Home' },
     { path: '/nutrition', label: 'Log', iconKey: 'UtensilsCrossed' },
     { path: '/progress', label: 'Progress', iconKey: 'TrendingUp' },
+    { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
   ];
 }
 

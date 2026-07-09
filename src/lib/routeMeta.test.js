@@ -6,6 +6,7 @@ import {
   isTabRoute,
   getShellNavState,
   isShellTabItemActive,
+  getTabRoutesForRole,
 } from '@/lib/routeMeta';
 
 describe('routeMeta shell navigation', () => {
@@ -35,6 +36,23 @@ describe('routeMeta shell navigation', () => {
   it('coach on /nutrition is tab for personal only', () => {
     expect(isTabRootForRole('/nutrition', 'personal')).toBe(true);
     expect(isTabRootForRole('/nutrition', 'coach')).toBe(false);
+  });
+
+  it('personal tab roots are Home / Log / Progress / More', () => {
+    // Home (landing) and More (settings, find-a-coach) must be roots or the bar
+    // vanishes on the landing and settings/marketplace are unreachable.
+    expect(isTabRootForRole('/home', 'personal')).toBe(true);
+    expect(isTabRootForRole('/more', 'personal')).toBe(true);
+    expect(isTabRootForRole('/nutrition', 'personal')).toBe(true);
+    expect(isTabRootForRole('/progress', 'personal')).toBe(true);
+    // Retired personal tabs — reachable, but pushed (back button, not roots).
+    expect(isTabRootForRole('/today', 'personal')).toBe(false);
+    expect(isTabRootForRole('/workout', 'personal')).toBe(false);
+  });
+
+  it('getTabRoutesForRole personal returns the four-tab bar', () => {
+    const tabs = getTabRoutesForRole('personal').map((t) => t.path);
+    expect(tabs).toEqual(['/home', '/nutrition', '/progress', '/more']);
   });
 
   it('pushed shell is inverse of tab root', () => {
