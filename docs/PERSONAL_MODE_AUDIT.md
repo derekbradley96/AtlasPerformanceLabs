@@ -48,9 +48,15 @@ Legend: ☐ todo · ☑ done
    end). Deleted dead duplicate WeeklyScoreCard, added a unit test. NOTE: inline Today
    readiness selectors save to localStorage only — the canonical logged check-in is
    /readiness-checkin (persists + marks the habit); minor, not fabricated.
-6. ☐ **Train tab (`/workout` → WorkoutPlayerRedirect)** — a redirect page as a tab:
-   where does it land with an in-progress session / a plan but no session / no plan?
-   No dead ends, back behavior sane.
+6. ☑ **Train tab (`/workout` → WorkoutPlayerRedirect)** (7dcae69) — redirect logic sound:
+   in-progress session/today's assignment → /workout-player, else → /personal-plan-builder
+   (chooser → /programs/new|templates → /program-builder?personal=1). No dead ends; chain
+   verified to the manual builder. FIXED (critical): /workout-player crashed on mount with a
+   TDZ ReferenceError (maybeTrackFirstSession deps read exercisesForSession/totalSets declared
+   ~100 lines later) — hit on the no-session path, affects the shared client+personal player.
+   Moved the callback below its deps; no-session now shows the proper "No workout scheduled"
+   empty state. NOTE for #9: /personal-plan-builder chooser vs direct /program-builder is
+   redundant builder-sprawl.
 7. ☐ **Workout player as personal** — logging sets, swapping exercises, finishing,
    offline queue, session summary, and that finished sessions show up on Today/Progress.
 8. ☐ **My Program hub (`/myprogram`)** — plan display, edit entry points, assignment
