@@ -57,8 +57,16 @@ Legend: ☐ todo · ☑ done
    Moved the callback below its deps; no-session now shows the proper "No workout scheduled"
    empty state. NOTE for #9: /personal-plan-builder chooser vs direct /program-builder is
    redundant builder-sprawl.
-7. ☐ **Workout player as personal** — logging sets, swapping exercises, finishing,
-   offline queue, session summary, and that finished sessions show up on Today/Progress.
+7. ☑ **Workout player as personal** (678e041) — drove the full flow with a seeded plan:
+   entry screen, start, log sets (weight+reps persist to workout_session_sets), finish →
+   summary (correct 248kg volume/duration/PR), swap options present, session marked
+   completed. Offline set-queue path code-reviewed (upsertSet queues on network failure),
+   not runtime-tested. FIXED 2 Progress bugs: athleteDevelopmentScore counted workouts/
+   check-ins by client_id only (null for personal → score stuck at 0) — now profile_id/
+   user_id; and the "Your next step / Complete your first workout" hero rendered the
+   empty-surface copy unconditionally — gated behind showEmptyProgressState. Progress now
+   reflects completed sessions. NOTE: exercise_library is empty in the dev DB (blocks the
+   builder search there; prod is seeded). Minor: "1 workouts in 28d" pluralization.
 8. ☐ **My Program hub (`/myprogram`)** — plan display, edit entry points, assignment
    state (`personal_program_assignments`), sync with Today.
 9. ☐ **The two builders** — `/program-builder?personal=1` (just made manual) vs
