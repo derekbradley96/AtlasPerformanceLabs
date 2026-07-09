@@ -528,7 +528,7 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
         onNoProgramAction={() => navigate('/program-builder?personal=1')}
         startLabel="Start workout →"
         accent={colors.primary}
-        restLabel={data.adaptiveSuggestion}
+        restLabel={data.restLabel}
         isDesktopWeb={isDesktopWeb}
         audience="personal"
         noProgramTitle={noPlanCopy.title}
@@ -1056,7 +1056,6 @@ export default function TodayPage() {
     readiness,
     setReadiness: setReadinessValue,
     readinessDone,
-    adaptiveSuggestion: 'Try 82.5kg on squat — you hit 80kg x 9 last session',
     weeklyScore,
     weeklyScoreDismissed: weeklyScoreDismissedState,
     setWeeklyScoreDismissed,
