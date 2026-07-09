@@ -8,10 +8,12 @@ Legend: ☐ todo · ☑ done
 
 ## First run
 
-1. ☐ **Signup → personal onboarding flow** — role selection, PersonalOnboardingFlow/
-   PersonalOnboardingPage/PersonalOnboardingTierPage: every step completes, skips
-   work, `onboarding_complete`/`onboarding_plan_status` end in the right state,
-   and abandoning mid-flow doesn't strand the account.
+1. ☑ **Signup → personal onboarding flow** (348cba0) — signup role picker works,
+   personal needs no coach code; 3-step flow (goal → about you → training) writes
+   profiles + `personal` rows, `onboarding_complete` flips true, exit-confirm guards
+   abandonment. FIXED: Step 4 done screen was dead (redirect raced it) — now shows;
+   "your coach can't see this" copy on the coachless flow corrected; deleted two
+   unrouted dead pages (PersonalOnboardingPage, PersonalOnboardingTierPage).
 2. ☐ **Post-onboarding landing** — `postOnboardingRoutes` one-time messaging, where
    the user actually lands, and whether the first-session analytics milestones fire.
 3. ☐ **Personal `/home` vs `/today`** — personal logs in to `/home` (a dashboard) but
@@ -61,15 +63,17 @@ Legend: ☐ todo · ☑ done
     protocols, pose self-assessments, `personal_contest_preps`/`personal_prep_precision*`
     — reachable, functional, hidden when no comp goal.
 
-## Tier & upgrade system
+## Tier & upgrade system — REMOVED by product decision
 
-19. ☐ **Tier model sanity** — `personal_plan_tier` values, `PERSONAL_FEATURES` gate
-    map vs `personalTierPolicy`, what basic vs paid actually unlocks; kill gates for
-    features that no longer exist (e.g. AUTO_PROGRAM_BUILDER after the manual-builder
-    change).
-20. ☐ **Upgrade prompts** — all 7 `PERSONAL_UPGRADE_PROMPT_TYPES`: do they fire, are
-    cooldowns respected, does the upgrade CTA lead to a real working purchase/tier
-    change, and is the copy honest?
+> Personal has NO tiers: it is free to use, with no AI features. The work here is
+> demolition, not verification.
+
+19. ☐ **Strip personal tier gating** — remove/neutralize `PERSONAL_FEATURES` gates,
+    `personalTierPolicy`, `personal_plan_tier` reads, tier badges/labels, and the
+    onboarding tier step (PersonalOnboardingTierPage); every free feature just works.
+20. ☐ **Strip personal upgrade prompts** — remove the 7 `PERSONAL_UPGRADE_PROMPT_TYPES`
+    surfaces and any upsell copy/CTAs in personal mode (coach-conversion CTAs stay —
+    that funnel is #21–23, not a tier upsell).
 
 ## Coach conversion funnel (personal → client)
 
