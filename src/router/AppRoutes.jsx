@@ -181,7 +181,6 @@ import MyProgram from '@/pages/MyProgram';
 import PersonalMyProgram from '@/pages/PersonalMyProgram';
 import PersonalCoachTransitionPage from '@/pages/personal/PersonalCoachTransitionPage';
 import PersonalCoachTierSelectionPage from '@/pages/personal/PersonalCoachTierSelectionPage';
-import PersonalPlanBuilderPage from '@/pages/PersonalPlanBuilderPage';
 import WorkoutPlayerRedirect from '@/pages/personal/WorkoutPlayerRedirect';
 import ClientCheckinTabPage from '@/pages/ClientCheckinTabPage';
 import ClientCheckIn from '@/pages/ClientCheckIn';
@@ -742,7 +741,6 @@ export default function AppRoutes({ isNative }) {
             PersonalCoachTierSelectionPage,
             NutritionTargetsPage,
             PersonalInsightsPage,
-            PersonalPlanBuilderPage,
             ImportMFPPage,
             ProgressPage,
             WorkoutPlayerRedirect,

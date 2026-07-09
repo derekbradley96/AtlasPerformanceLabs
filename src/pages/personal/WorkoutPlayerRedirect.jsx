@@ -19,7 +19,7 @@ export default function WorkoutPlayerRedirect() {
     let cancelled = false;
     (async () => {
       if (!uid) {
-        if (!cancelled) setTarget('/personal-plan-builder');
+        if (!cancelled) setTarget('/program-builder?personal=1');
         return;
       }
       if (!hasSupabase) {
@@ -38,7 +38,7 @@ export default function WorkoutPlayerRedirect() {
         setTarget('/workout-player');
         return;
       }
-      setTarget('/personal-plan-builder');
+      setTarget('/program-builder?personal=1');
     })();
     return () => {
       cancelled = true;

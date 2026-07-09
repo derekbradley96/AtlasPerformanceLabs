@@ -206,8 +206,6 @@ export default function ProgramBuilderPage() {
   const [entryWeeksPreset, setEntryWeeksPreset] = useState('4');
   const [entryCustomWeeks, setEntryCustomWeeks] = useState('6');
   const [entryWhoFor, setEntryWhoFor] = useState('');
-  const [startFromScratchSelected, setStartFromScratchSelected] = useState(false);
-  const [showEntryTemplates, setShowEntryTemplates] = useState(false);
   const [weekStructureType, setWeekStructureType] = useState('full_body');
   const [rankedResultsByQuery, setRankedResultsByQuery] = useState(() => new Map());
   const [libraryByName, setLibraryByName] = useState(() => new Map());
@@ -254,15 +252,6 @@ export default function ProgramBuilderPage() {
     navigate({ pathname: '/program-builder', search: qs ? `?${qs}` : '' }, { replace: true });
   }, [navigate, searchParams]);
 
-  useEffect(() => {
-    if (!isPersonalRole) return;
-    if (searchParams.get('scratch') !== '1') return;
-    setStartFromScratchSelected(true);
-    const next = new URLSearchParams(searchParams);
-    next.delete('scratch');
-    const qs = next.toString();
-    navigate({ pathname: '/program-builder', search: qs ? `?${qs}` : '' }, { replace: true });
-  }, [isPersonalRole, searchParams, navigate]);
 
   const canUsePersonalAutoBuilder = !isPersonalRole || canUsePersonalFeature({
     profile,
@@ -2173,8 +2162,6 @@ export default function ProgramBuilderPage() {
       setWeeks(wList);
       setBlock(insertedBlock);
       setClientId(isSelfTarget || isTemplateTarget ? '' : (insertedBlock.client_id || entryWhoFor));
-      setStartFromScratchSelected(false);
-      setShowEntryTemplates(false);
 
       if (isSelfTarget) {
         queryClient.invalidateQueries({ queryKey: ['personal-my-program-supabase'] });

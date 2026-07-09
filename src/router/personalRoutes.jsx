@@ -14,7 +14,6 @@ export default function PersonalRoutes({
   PersonalCoachTierSelectionPage,
   NutritionTargetsPage,
   PersonalInsightsPage,
-  PersonalPlanBuilderPage,
   ImportMFPPage,
   ProgressPage,
   WorkoutPlayerRedirect,
@@ -39,15 +38,12 @@ export default function PersonalRoutes({
       <Route path="athlete" element={<RequireRole allow={[Roles.PERSONAL]}><Navigate to="/home" replace /></RequireRole>} />
       <Route path="solo-dashboard" element={<RequireRole allow={[Roles.PERSONAL]}><Navigate to="/home" replace /></RequireRole>} />
       <Route path="personal/insights" element={<RequireRole allow={[Roles.PERSONAL]}><PersonalInsightsPage /></RequireRole>} />
-      <Route path="personal-plan-builder" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="This page is for Personal accounts."><PersonalPlanBuilderPage /></RequireRole>} />
-      <Route
-        path="programs/new"
-        element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]}><Navigate to="/program-builder?personal=1&scratch=1" replace /></RequireRole>}
-      />
-      <Route
-        path="programs/templates"
-        element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]}><Navigate to="/program-builder?personal=1&templates=1" replace /></RequireRole>}
-      />
+      {/* Legacy builder entry points → the one canonical builder. The old
+          /personal-plan-builder chooser (scratch vs template) is gone: both
+          options landed on the identical manual builder, so it was pure friction. */}
+      <Route path="personal-plan-builder" element={<Navigate to="/program-builder?personal=1" replace />} />
+      <Route path="programs/new" element={<Navigate to="/program-builder?personal=1" replace />} />
+      <Route path="programs/templates" element={<Navigate to="/program-builder?personal=1" replace />} />
       <Route path="import/mfp" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="MFP import is for Personal accounts."><ImportMFPPage /></RequireRole>} />
       {/* /prep-comparison lives in coachRoutes.jsx (first registration wins) and allows PERSONAL there. */}
     </>
