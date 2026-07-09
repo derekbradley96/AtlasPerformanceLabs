@@ -22,10 +22,14 @@ Legend: ☐ todo · ☑ done
    personal home was the only dashboard not firing `first_dashboard_view` — now
    fires (verified event lands). NOTE: `/home` shows a back chevron + the tab bar
    is Today/Nutrition/Progress while header says "Home" — carried into #3.
-3. ☐ **Personal `/home` vs `/today`** — personal logs in to `/home` (a dashboard) but
-   the tab bar's first tab is `/today`, and `/home` is NOT in personal tab roots —
-   suspect the landing page has no tab bar / inconsistent nav. Decide one canonical
-   home and make the shell agree.
+3. ☑ **Personal `/home` vs `/today` + missing nav** (c13a673) — CONFIRMED: /home
+   (landing) wasn't a personal tab root so the bar vanished there, and the tab set
+   (Today/Train/Log/Progress) had no More → settings, account, and the coach
+   marketplace were unreachable from the nav. FIXED: personal tabs are now
+   Home / Log / Progress / More (/home = the real dashboard hub; More = Today, My
+   Program, builder, Settings, Work-with-a-coach). Verified bar on all four pages,
+   Settings + find-a-coach navigate. NOTE for #19: More still shows a "Free" tier
+   badge under the profile — dead tier UI to strip.
 4. ☐ **Brand-new-account empty states** — every tab and page with zero data (no plan,
    no logs, no targets): copy, CTAs, nothing dead-ends or errors.
 
