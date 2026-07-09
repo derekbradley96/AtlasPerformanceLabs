@@ -889,17 +889,18 @@ export default function TodayPage() {
   const nutritionWeeklyTarget = Math.max(1, Number(retentionStreaks?.weeklyProgress?.nutrition?.target ?? 7) || 7);
   const workoutWeeklyDone = Number(retentionStreaks?.weeklyProgress?.workout?.done ?? 0);
   const workoutWeeklyTarget = Math.max(1, Number(retentionStreaks?.weeklyProgress?.workout?.target ?? 4) || 4);
+  const checkinWeeklyDone = Number(retentionStreaks?.weeklyProgress?.checkin?.done ?? 0);
+  const checkinWeeklyTarget = Math.max(1, Number(retentionStreaks?.weeklyProgress?.checkin?.target ?? 7) || 7);
   const weeklyScore = useMemo(
     () => calculateWeeklyScore({
       workoutsCompleted: workoutWeeklyDone,
       workoutsPlanned: workoutWeeklyTarget,
       nutritionDaysHit: nutritionWeeklyDone,
       totalDays: nutritionWeeklyTarget,
-      avgSleepHours: 7,
-      stepsDailyAvg: 8000,
-      stepsTarget: 8000,
+      recoveryDaysLogged: checkinWeeklyDone,
+      recoveryDaysTarget: checkinWeeklyTarget,
     }),
-    [workoutWeeklyDone, workoutWeeklyTarget, nutritionWeeklyDone, nutritionWeeklyTarget],
+    [workoutWeeklyDone, workoutWeeklyTarget, nutritionWeeklyDone, nutritionWeeklyTarget, checkinWeeklyDone, checkinWeeklyTarget],
   );
   const weeklyScoreDismissed = useMemo(() => {
     const week = getISOWeek();

@@ -7,9 +7,12 @@ export function calculateWeeklyScore({
   workoutsPlanned,
   nutritionDaysHit,
   totalDays,
-  avgSleepHours,
-  stepsDailyAvg,
-  stepsTarget,
+  // Recovery = real daily check-in adherence this week. Atlas doesn't track
+  // sleep hours or steps for personal users, so basing recovery on those was
+  // fabricated (it pinned recovery near max for everyone). Daily check-ins are
+  // the recovery signal we actually collect.
+  recoveryDaysLogged,
+  recoveryDaysTarget,
 }) {
   const trainingScore =
     workoutsPlanned > 0
@@ -21,14 +24,11 @@ export function calculateWeeklyScore({
   const nutritionScore =
     totalDays > 0 ? Math.round((nutritionDaysHit / totalDays) * 33) : 0;
 
-  const sleepH = Number(avgSleepHours);
-  const sleepPart = Number.isFinite(sleepH) && sleepH > 0 ? Math.min(20, (sleepH / 8) * 20) : 10;
-  const st = Number(stepsTarget) || 0;
-  const stepsPart =
-    st > 0
-      ? Math.min(13, Math.min(1, Number(stepsDailyAvg) / st) * 13)
-      : 13;
-  const recoveryScore = Math.round(sleepPart + stepsPart);
+  const recTarget = Number(recoveryDaysTarget) || 0;
+  const recoveryScore =
+    recTarget > 0
+      ? Math.round(Math.min(1, Number(recoveryDaysLogged || 0) / recTarget) * 33)
+      : 0;
 
   const total = Math.min(99, trainingScore + nutritionScore + recoveryScore);
 
@@ -54,7 +54,7 @@ export function calculateWeeklyScore({
             area: 'Training',
             tip: `Aim for ${workoutsPlanned || 3} sessions next week`,
           }
-        : { area: 'Recovery', tip: 'Aim for 7–9 hours sleep each night' };
+        : { area: 'Recovery', tip: 'Log a daily check-in to track recovery' };
 
   return {
     total,
