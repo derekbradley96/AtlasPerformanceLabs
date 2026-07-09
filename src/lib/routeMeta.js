@@ -150,7 +150,9 @@ const ROUTE_TITLES = {
 
 /** Tab roots: no back button, no edge-swipe back. Tab bar on these per-role tab paths. */
 const TAB_ROUTES_BY_ROLE = {
-  coach: ['/home', '/clients', '/inbox', '/prep-dashboard', '/more'],
+  // '/messages' is the Messages tab target (see getTabRoutesForRole) — without
+  // it here the page rendered as a pushed route: back chevron, no tab bar.
+  coach: ['/home', '/clients', '/messages', '/inbox', '/prep-dashboard', '/more'],
   /** Third tab may be check-in, prep-precision, or peak-week depending on delivery / active prep. */
   client: ['/today', '/today-workout', '/clientcheckin', '/prep-precision', '/peak-week', '/more'],
   personal: ['/today', '/workout', '/nutrition', '/progress'],

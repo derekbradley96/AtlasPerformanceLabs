@@ -23,7 +23,10 @@ describe('routeMeta shell navigation', () => {
     expect(isTabRootForRole('/inbox', 'coach')).toBe(true);
     expect(isTabRootForRole('/prep-dashboard', 'coach')).toBe(true);
     expect(isTabRootForRole('/more', 'coach')).toBe(true);
-    expect(isTabRootForRole('/messages', 'coach')).toBe(false);
+    // '/messages' is the Messages tab target — it must be a tab root or the
+    // page renders pushed (back chevron, no tab bar).
+    expect(isTabRootForRole('/messages', 'coach')).toBe(true);
+    expect(isTabRootForRole('/messages/some-thread-id', 'coach')).toBe(false);
     expect(isTabRootForRole('/review-center', 'coach')).toBe(false);
     expect(isTabRootForRole('/nutrition', 'coach')).toBe(false);
     expect(isTabRootForRole('/programs', 'coach')).toBe(false);

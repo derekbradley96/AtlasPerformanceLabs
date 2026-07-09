@@ -320,7 +320,7 @@ export const AuthProvider = ({ children }) => {
     }
     void (async () => {
       try {
-        const next = await fetchIsAdmin(supabase);
+        const next = await fetchIsAdmin(supabase, supabaseUser.id);
         if (!cancelled) setIsAdmin(Boolean(next));
       } catch {
         if (!cancelled) setIsAdmin(false);
