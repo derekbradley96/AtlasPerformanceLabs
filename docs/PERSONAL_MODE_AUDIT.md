@@ -88,13 +88,20 @@ Legend: ☐ todo · ☑ done
     (in ExercisePickerModal). FIXED: exercise_library DB catalog never seeded — RLS had SELECT
     only, no INSERT/UPDATE, so ensureAtlasExerciseLibrarySeeded silently failed every builder
     open (DB-backed usage/favourites ranking + aliases dead). Added authed INSERT/UPDATE
-    policies + skip-if-populated guard; catalog now seeds (788 rows). MINOR GAP: the inline
-    day-editor search has no "add custom exercise" for a no-match name (the modal does).
+    policies + skip-if-populated guard; catalog now seeds (788 rows). Inline day-editor custom-
+    exercise gap FIXED (d932528): a no-match name now offers "Add '<query>' as a custom
+    exercise" (verified live — "Sled Push Sprint" added to the day).
 
 ## Nutrition loop
 
-11. ☐ **Log tab (`/nutrition`)** — meal logging round trip (`meal_logs`), day keys/
-    timezones, edit/delete, daily totals vs targets.
+11. ☑ **Log tab (`/nutrition`)** (26c5bb4) — round trip verified: set targets ("Targets set"),
+    logged a 160-kcal snack → persisted to DB meal_logs (correct local log_date 2026-07-09),
+    /nutrition daily total updated. FIXED (cross-surface sync): Today's macro ring showed 0
+    consumed for personal — the Today bundle only fetched meal totals by client_id (null for
+    personal) AND TodayPage read the localStorage store (offline-only, empty for online users
+    who write to the DB). Now fetches by profile_id + uses DB totals (localStorage = offline
+    fallback). Ring now reads "2040 kcal remaining", protein counted. Note: personal Nutrition
+    add path writes DB when online (addMealLog), localStorage only when offline.
 12. ☐ **Nutrition targets (`/nutrition-targets`)** — setup flow, profile target
     columns, units, and targets actually driving the Log tab and adherence.
 13. ☐ **Barcode scan quick add** — feature-gated; works on the gated tier, prompt
