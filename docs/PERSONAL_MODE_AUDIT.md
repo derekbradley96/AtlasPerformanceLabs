@@ -14,8 +14,14 @@ Legend: ☐ todo · ☑ done
    abandonment. FIXED: Step 4 done screen was dead (redirect raced it) — now shows;
    "your coach can't see this" copy on the coachless flow corrected; deleted two
    unrouted dead pages (PersonalOnboardingPage, PersonalOnboardingTierPage).
-2. ☐ **Post-onboarding landing** — `postOnboardingRoutes` one-time messaging, where
-   the user actually lands, and whether the first-session analytics milestones fire.
+2. ☑ **Post-onboarding landing** (d25a0f6) — lands on `/home` (SoloDashboardPage →
+   GeneralDashboard). FIXED: welcome card branched on a dead tier ('free' → the
+   "enhanced" branch), showing "Review starter plan" (no starter plan exists for
+   manual personal) contradicting the "No training plan yet" card below it —
+   collapsed to one honest card ("You're all set / Create your first plan"). Also
+   personal home was the only dashboard not firing `first_dashboard_view` — now
+   fires (verified event lands). NOTE: `/home` shows a back chevron + the tab bar
+   is Today/Nutrition/Progress while header says "Home" — carried into #3.
 3. ☐ **Personal `/home` vs `/today`** — personal logs in to `/home` (a dashboard) but
    the tab bar's first tab is `/today`, and `/home` is NOT in personal tab roots —
    suspect the landing page has no tab bar / inconsistent nav. Decide one canonical
