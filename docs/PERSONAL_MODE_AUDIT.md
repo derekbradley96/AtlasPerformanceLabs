@@ -67,8 +67,13 @@ Legend: ☐ todo · ☑ done
    empty-surface copy unconditionally — gated behind showEmptyProgressState. Progress now
    reflects completed sessions. NOTE: exercise_library is empty in the dev DB (blocks the
    builder search there; prod is seeded). Minor: "1 workouts in 28d" pluralization.
-8. ☐ **My Program hub (`/myprogram`)** — plan display, edit entry points, assignment
-   state (`personal_program_assignments`), sync with Today.
+8. ☑ **My Program hub (`/myprogram`)** — CLEAN PASS, no code changes. MyProgram delegates
+   to PersonalMyProgram for personal. Verified with a seeded plan: empty state ("No plan
+   yet / Create your first plan / Fast template") → builder; populated state shows title/
+   week/days ("Push Day / 2 exercises"); Edit plan → /program-builder?personal=1&blockId=…;
+   Go to Today syncs (plan's Bench Press/Overhead Press appear on /today with Start workout).
+   Full builder→hub→Today round trip works. (Fast-template quick-start deferred to #9 builder
+   consolidation; legacy local-store `program` render path untested — Supabase path is live.)
 9. ☐ **The two builders** — `/program-builder?personal=1` (just made manual) vs
    `PersonalPlanBuilderPage` (`/personal-plan-builder`) vs `programs/new` +
    `programs/templates` routes: which are live, which are ghosts, one coherent path.
