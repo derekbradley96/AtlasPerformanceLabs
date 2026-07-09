@@ -270,6 +270,12 @@ async function upsertSubstitutionsForSeed(supabase, libraryRows, seedRows) {
 export async function ensureAtlasExerciseLibrarySeeded() {
   const supabase = db();
   if (!supabase) return { seeded: false, reason: 'no_supabase' };
+  // Skip the full upsert once the catalog is populated — this runs on every
+  // builder open, so re-upserting ~130 rows each time is pure waste.
+  const { count, error: countError } = await supabase
+    .from('exercise_library')
+    .select('id', { head: true, count: 'exact' });
+  if (!countError && (count ?? 0) > 0) return { seeded: false, reason: 'already_populated' };
   const normalizedRows = EXERCISES.map(toLibraryRow).filter((row) => row.name);
   const rows = normalizeExternalExerciseDataset(normalizedRows).map((x) => sanitizeExerciseLibraryPayload(x.library));
   if (!rows.length) return { seeded: false, reason: 'empty_seed' };
