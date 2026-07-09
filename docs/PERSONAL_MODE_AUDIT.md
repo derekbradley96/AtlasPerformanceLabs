@@ -40,8 +40,14 @@ Legend: ☐ todo · ☑ done
 
 ## Daily training loop
 
-5. ☐ **Today tab** — plan/session surfacing, "what to do next" logic, readiness
-   check-in entry, states for rest day vs training day vs no plan.
+5. ☑ **Today tab** (9ffae0f) — no-plan/rest/training restLabels honest; weight logging
+   round-trips to personal_checkins (verified); macro ring + coach-upsell gated on real
+   data. FIXED: weekly-effort score's Recovery third was hardcoded sleep=7/steps=8000
+   (pinned ~31/33 for everyone) — now scores real daily check-in adherence
+   (retention_habit_daily, which the readiness check-in marks; chain verified end-to-
+   end). Deleted dead duplicate WeeklyScoreCard, added a unit test. NOTE: inline Today
+   readiness selectors save to localStorage only — the canonical logged check-in is
+   /readiness-checkin (persists + marks the habit); minor, not fabricated.
 6. ☐ **Train tab (`/workout` → WorkoutPlayerRedirect)** — a redirect page as a tab:
    where does it land with an in-progress session / a plan but no session / no plan?
    No dead ends, back behavior sane.
