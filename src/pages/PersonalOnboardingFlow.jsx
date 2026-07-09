@@ -3,7 +3,7 @@
  * Finish path saves profile + suggested macro targets only (`applyPersonalOnboardingFinish`); no auto-assigned programme.
  * `profiles.personal_plan_tier` is persisted as `free`.
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
@@ -109,6 +109,11 @@ export default function PersonalOnboardingFlow() {
 
   const [stepIndex, setStepIndex] = useState(0);
   const [atDone, setAtDone] = useState(false);
+  // Set true synchronously before the completion write so the "already complete →
+  // redirect home" effect below doesn't race past the Step 4 done screen the flow
+  // is about to show. Without this the profile refresh fired the redirect first
+  // and the done screen (summary + Build my programme CTA) never appeared.
+  const finishingInFlowRef = useRef(false);
 
   const [goalId, setGoalId] = useState('');
   const [competitionShowIntent, setCompetitionShowIntent] = useState('');
@@ -172,6 +177,9 @@ export default function PersonalOnboardingFlow() {
     if (!authReady) return;
     if (!userId && !isDemoMode) return;
     if (!profile?.id && !isDemoMode) return;
+    // Let the flow's own Step 4 done screen take over when we just completed
+    // in-session; only redirect users who arrive already-complete.
+    if (finishingInFlowRef.current) return;
     if (profile && isProfileOnboardingComplete(profile)) {
       navigate(getPostOnboardingPath('personal'), { replace: true });
     }
@@ -309,6 +317,9 @@ export default function PersonalOnboardingFlow() {
           }
         }
 
+        // Claim the terminal state before the write so the completion-redirect
+        // effect yields to this flow's done screen (destination === null path).
+        if (destination == null) finishingInFlowRef.current = true;
         const result = await updateProfile({
           onboarding_complete: true,
           personal_plan_tier: PROFILE_PLAN_TIER,
@@ -764,7 +775,7 @@ export default function PersonalOnboardingFlow() {
           style={{ background: 'rgba(255,255,255,0.08)', color: colors.text, minHeight: touchTargetMin }}
         />
         <p className="text-[12px] mb-4" style={{ color: colors.muted }}>
-          Stored privately — your coach can&apos;t see this unless you share it.
+          Stored privately on your account — used only to set your starting targets.
         </p>
         <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: colors.muted }}>
           Biological sex (optional)
