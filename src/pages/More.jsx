@@ -417,6 +417,29 @@ function MoreContent() {
   const coachFocusEffective = resolvedAccess?.coachFocus || 'transformation';
   const personalTier = resolvedAccess?.personalPlanTier || 'basic';
   const realRoleKey = isCoach(effectiveRole) ? 'coach' : isClient(effectiveRole) ? 'client' : 'personal';
+
+  // Admin: really switch the account role (profiles.role + reload) — the old
+  // card only previewed this page's menus, which read as "does nothing".
+  const [switchingRole, setSwitchingRole] = useState(false);
+  const handleRealRoleSwitch = async (newRole) => {
+    const uid = profile?.id ?? supabaseSession?.user?.id;
+    if (switchingRole || newRole === realRoleKey || !uid) return;
+    impactLight();
+    setSwitchingRole(true);
+    try {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', uid);
+      if (error) {
+        toast.error(error.message || 'Could not switch role');
+        return;
+      }
+      toast.success(`Switched to ${newRole} — reloading…`);
+      setTimeout(() => window.location.reload(), 800);
+    } finally {
+      setSwitchingRole(false);
+    }
+  };
   const [previewRole, setPreviewRole] = useState(() => (isPlatformAdmin ? realRoleKey : null));
   const [previewCoachSubtype, setPreviewCoachSubtype] = useState(() => String(coachFocusEffective || 'transformation'));
   const [previewCoachTier, setPreviewCoachTier] = useState(() => String(planId || 'basic'));
@@ -912,100 +935,29 @@ function MoreContent() {
       {isPlatformAdmin ? (
         <Card style={{ marginBottom: spacing[16], padding: spacing[16] }}>
           <p className="text-xs font-semibold mb-2" style={{ color: colors.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Role preview
+            Switch role
           </p>
-          <p className="text-xs mb-2" style={{ color: colors.muted }}>Preview wrapper as</p>
-          <div className="flex flex-wrap gap-2 mb-3">
-            {['coach', 'client', 'personal', 'admin'].map((r) => (
+          <p className="text-xs mb-3" style={{ color: colors.muted }}>
+            Changes your account role for the whole app, then reloads. Coach focus, tier, and client delivery are in Settings → Account.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {['coach', 'client', 'personal'].map((r) => (
               <button
                 key={r}
                 type="button"
-                onClick={() => setPreviewRole(r)}
-                className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
+                disabled={switchingRole}
+                onClick={() => handleRealRoleSwitch(r)}
+                className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90 disabled:opacity-60"
                 style={{
-                  background: previewRole === r ? colors.primary : colors.surface1,
-                  color: previewRole === r ? '#fff' : colors.text,
+                  background: realRoleKey === r ? colors.primary : colors.surface1,
+                  color: realRoleKey === r ? '#fff' : colors.text,
                   border: 'none',
                 }}
               >
-                {r === 'coach' ? 'Coach' : r === 'client' ? 'Client' : r === 'personal' ? 'Personal' : 'Admin'}
+                {r.charAt(0).toUpperCase() + r.slice(1)}
               </button>
             ))}
           </div>
-
-          {previewRole === 'coach' && (
-            <>
-              <p className="text-xs font-medium mb-2" style={{ color: colors.muted }}>Coach subtype</p>
-              <div className="flex flex-wrap gap-2">
-                {['transformation', 'competition', 'integrated'].map((focus) => (
-                  <button
-                    key={focus}
-                    type="button"
-                    onClick={() => setPreviewCoachSubtype(focus)}
-                    className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
-                    style={{
-                      background: previewCoachSubtype === focus ? colors.primary : colors.surface1,
-                      color: previewCoachSubtype === focus ? '#fff' : colors.text,
-                      border: 'none',
-                    }}
-                  >
-                    {focus.charAt(0).toUpperCase() + focus.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs font-medium mt-4 mb-2" style={{ color: colors.muted }}>Coach tier</p>
-              <div className="flex flex-wrap gap-2">
-                {PLAN_TIER_IDS.map((tierId) => (
-                  <button
-                    key={tierId}
-                    type="button"
-                    onClick={() => setPreviewCoachTier(tierId)}
-                    className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
-                    style={{
-                      background: previewCoachTier === tierId ? colors.primary : colors.surface1,
-                      color: previewCoachTier === tierId ? '#fff' : colors.text,
-                    }}
-                  >
-                    {tierId.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {previewRole === 'client' && (
-            <>
-              <p className="text-xs font-medium mt-4 mb-2" style={{ color: colors.muted }}>Client subtype</p>
-              <div className="flex flex-wrap gap-2">
-                {['transformation', 'competition'].map((ctx) => (
-                  <button
-                    key={ctx}
-                    type="button"
-                    onClick={() => setPreviewClientSubtype(ctx)}
-                    className="rounded-lg px-3 py-2 text-sm font-medium transition-opacity active:opacity-90"
-                    style={{
-                      background: previewClientSubtype === ctx ? colors.primary : colors.surface1,
-                      color: previewClientSubtype === ctx ? '#fff' : colors.text,
-                      border: 'none',
-                    }}
-                  >
-                    {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {previewModeActive && (
-            <button
-              type="button"
-              onClick={() => setPreviewRole(realRoleKey)}
-              className="mt-2 text-sm font-medium"
-              style={{ color: colors.muted, background: 'none', border: 'none' }}
-            >
-              Use my real role
-            </button>
-          )}
         </Card>
       ) : null}
 
