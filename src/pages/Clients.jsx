@@ -5,7 +5,7 @@ import { journeyRosterBucket, journeyRosterBadgeLabel } from '@/lib/clientJourne
 import { useAppRefresh } from '@/lib/useAppRefresh';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Search, MessageSquare as MessageIcon, ChevronRight, UserPlus } from 'lucide-react';
+import { Search, MessageSquare as MessageIcon, ChevronRight, UserPlus, Megaphone } from 'lucide-react';
 import { getClientHealth } from '@/lib/health/healthEngineBridge';
 import { getMonthsWithTrainer } from '@/lib/loyaltyAwardsStore';
 import { getRetentionItem } from '@/lib/retention/retentionRepo';
@@ -237,10 +237,12 @@ export default function Clients() {
           <button
             type="button"
             onClick={() => setBroadcastOpen(true)}
-            className="rounded-lg min-h-[40px] px-3 text-xs font-medium"
-            style={{ color: colors.primary, border: `1px solid ${colors.border}`, background: colors.surface1 }}
+            className="flex items-center justify-center rounded-lg min-w-[44px] min-h-[44px]"
+            style={{ color: colors.primary, background: 'transparent', border: 'none' }}
+            aria-label="Broadcast message to clients"
+            title="Broadcast message"
           >
-            Broadcast message
+            <Megaphone size={22} strokeWidth={2.25} aria-hidden />
           </button>
         ) : null}
         {showManualAcquisition ? (

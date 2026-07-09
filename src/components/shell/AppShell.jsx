@@ -560,7 +560,6 @@ export default function AppShell() {
   }, [navigate]);
 
   const showTabBar = !isDesktopWeb && isTabRoot;
-  const showTopSegmentedNav = isTabRoot;
   const showBack = !isTabRoot;
   const isChatThread = /^\/messages\/[^/]+$/.test(pathname);
   const isMessagesList = pathname === '/messages';
@@ -649,34 +648,7 @@ export default function AppShell() {
     setHeaderRight(null);
   }
   const title = titleOverride ?? getRouteTitle(location.pathname);
-  const topNavTitle = navItems.find((i) => i.key === navActiveKey)?.label || title;
   const brandedHeaderTitle = clientBranded ? coachBrand.name : title;
-  const brandedTopNavTitle = clientBranded ? coachBrand.name : topNavTitle;
-  const topNavContext = useMemo(() => {
-    if (pathname === '/home' || pathname === '/client-dashboard' || pathname === '/solo-dashboard') {
-      return 'Your daily overview';
-    }
-    if (pathname === '/today') return 'Today’s plan and next actions';
-    if (pathname === '/progress') return 'Consistency and trend signals';
-    if (pathname === '/nutrition') return 'Targets, logging, and daily fuel status';
-    if (pathname === '/messages') {
-      return isCoach(shellRole) ? 'Coach and client conversations' : 'Messages with your coach';
-    }
-    if (pathname === '/community') {
-      return isCoach(shellRole) ? 'Team room · your roster' : "Team room · your coach's community";
-    }
-    if (pathname === '/more') {
-      const r = normalizeRole(shellRole);
-      if (r === 'coach') return 'Growth, coaching tools, and business';
-      if (r === 'client') return 'Training, account, and support';
-      return 'Training, nutrition, and account';
-    }
-    return 'Your workflow, tailored to this section';
-  }, [pathname, shellRole]);
-  const activeSegmentIdx = (() => {
-    const idx = navItems.findIndex((i) => isShellTabItemActive(i.key, location.pathname, shellRole));
-    return idx >= 0 ? idx : 0;
-  })();
 
   const tabBarActiveKey =
     navItems.find((i) => isShellTabItemActive(i.key, location.pathname, shellRole))?.key ?? navActiveKey;
@@ -903,13 +875,16 @@ export default function AppShell() {
               </div>
             )}
           </div>
+          {/* Title takes exactly the space between the side actions — absolute
+              centering overlapped wide right-side actions (e.g. Broadcast, call
+              controls) on narrow screens. */}
           <h1
-            className="atlas-header-title absolute left-1/2 -translate-x-1/2 text-[17px] font-semibold truncate max-w-[50%]"
+            className="atlas-header-title flex-1 min-w-0 flex items-center justify-center text-[17px] font-semibold px-1"
             style={{ color: colors.text }}
           >
-            {brandedHeaderTitle}
+            <span className="truncate min-w-0">{brandedHeaderTitle}</span>
           </h1>
-          <div className="flex items-center justify-end gap-1" style={{ minWidth: 88, minHeight: 44 }}>
+          <div className="flex items-center justify-end gap-1 flex-shrink-0" style={{ minHeight: 44 }}>
             <NotificationBell />
             {headerRight != null ? headerRight : null}
           </div>
@@ -917,108 +892,8 @@ export default function AppShell() {
       </header>
       )}
 
-      {showTopSegmentedNav && (
-        <div
-          className="w-full border-b"
-          style={{
-            borderColor: colors.border,
-            background: isDesktopWeb ? 'rgba(17,24,39,0.92)' : 'rgba(17,24,39,0.76)',
-            backdropFilter: isDesktopWeb ? 'none' : 'blur(14px)',
-          }}
-        >
-          <div
-            className="py-2"
-            style={{
-              maxWidth: contentMaxWidth,
-              marginLeft: 'auto',
-              marginRight: 'auto',
-              paddingLeft: shellPaddingH,
-              paddingRight: shellPaddingH,
-            }}
-          >
-            <div style={{ marginBottom: 8 }}>
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.text }}>
-                {brandedTopNavTitle}
-              </h2>
-              <p style={{ margin: '2px 0 0', fontSize: 12, color: colors.muted }}>
-                {topNavContext}
-              </p>
-            </div>
-            <div
-            style={{
-              position: 'relative',
-              width: '100%',
-              borderRadius: 24,
-              border: `1px solid ${colors.border}`,
-              background: 'rgba(15,23,42,0.62)',
-              padding: 5,
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              aria-hidden
-              style={{
-                position: 'absolute',
-                top: 5,
-                bottom: 5,
-                left: 5,
-                width: `calc((100% - 10px) / ${Math.max(1, navItems.length)})`,
-                  borderRadius: 20,
-                  background: clientAccent || colors.primary,
-                  boxShadow: clientAccent
-                    ? '0 0 0 1px rgba(255,255,255,0.08) inset, 0 8px 18px rgba(0,0,0,0.25)'
-                    : '0 0 0 1px rgba(255,255,255,0.08) inset, 0 8px 18px rgba(37,99,235,0.35)',
-                  transform: `translateX(${activeSegmentIdx * 100}%)`,
-                  transition: 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)',
-                }}
-              />
-              <div
-                style={{
-                  position: 'relative',
-                  zIndex: 1,
-                  display: 'grid',
-                  gridTemplateColumns: `repeat(${Math.max(1, navItems.length)}, minmax(0, 1fr))`,
-                  gap: 4,
-                }}
-              >
-                {navItems.map((item) => {
-                  const active = isShellTabItemActive(item.key, location.pathname, shellRole);
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => handleSegmentNavigate(item)}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-2xl"
-                      style={{
-                        minHeight: 36,
-                        border: 'none',
-                        background: 'transparent',
-                        color: active ? '#fff' : colors.muted,
-                        fontSize: 12,
-                        fontWeight: active ? 700 : 600,
-                        cursor: 'pointer',
-                        transition: 'color 180ms ease, transform 180ms ease',
-                        transform: active ? 'scale(1.01)' : 'scale(1)',
-                      }}
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
-                      {item.badge > 0 ? (
-                        <span
-                          className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full text-[10px] px-1"
-                          style={{ background: active ? 'rgba(255,255,255,0.22)' : colors.danger, color: '#fff' }}
-                        >
-                          {item.badge > 99 ? '99+' : item.badge}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* No top segmented nav on mobile: the bottom tab bar is the single tab
+          navigation (a second title + tab strip here triplicated the header). */}
       <NetworkBanner />
 
       {/* Main content: tab bar padding only when showTabBar so pushed routes have no blank bottom gap. */}

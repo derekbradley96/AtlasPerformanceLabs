@@ -43,10 +43,12 @@ export default function TopBar({ title, onBack, rightAction, showBack = true }) 
             <span style={{ width: 44, height: 44 }} aria-hidden />
           )}
         </div>
-        <h1 className="atlas-header-title absolute left-1/2 -translate-x-1/2 text-[17px] font-semibold truncate max-w-[50%]" style={{ color: colors.text }}>
-          {title}
+        {/* Title takes the space between the side actions — absolute centering
+            overlapped wide right actions on narrow screens. */}
+        <h1 className="atlas-header-title flex-1 min-w-0 flex items-center justify-center text-[17px] font-semibold px-1" style={{ color: colors.text }}>
+          <span className="truncate min-w-0">{title}</span>
         </h1>
-        <div className="flex items-center justify-end" style={{ minWidth: 88, minHeight: 44 }}>
+        <div className="flex items-center justify-end flex-shrink-0" style={{ minHeight: 44 }}>
           {rightAction != null ? rightAction : <span className="w-10" aria-hidden />}
         </div>
       </div>

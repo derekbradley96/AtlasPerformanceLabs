@@ -828,19 +828,7 @@ function MoreContent() {
         <>
       {!showPersonalMoreDesktop ? (
         <>
-      <Card style={{ marginBottom: spacing[12], padding: spacing[16] }}>
-        <p className="text-[20px] font-semibold" style={{ color: colors.text }}>
-          {isCoachCreateSurface && !isPlatformAdmin ? 'Create' : 'More'}
-        </p>
-        <p className="text-sm mt-1" style={{ color: colors.muted }}>
-          {isPlatformAdmin
-            ? 'Preview role wrappers and manage platform controls'
-            : isCoachCreateSurface
-              ? 'Build programmes, plans, and templates — then publish, grow, and sell'
-              : 'Directory for tools, settings, and profile — same app, role-specific shortcuts'}
-        </p>
-      </Card>
-
+      {/* No in-page title card: the shell header already names this tab. */}
       <Card
         style={{
           marginBottom: spacing[16],
