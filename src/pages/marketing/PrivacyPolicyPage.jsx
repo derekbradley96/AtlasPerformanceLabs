@@ -126,10 +126,10 @@ export default function PrivacyPolicyPage() {
       <H2>6. Your rights (UK GDPR)</H2>
       <Ul
         items={[
-          'Access: request a copy of your data',
+          'Access: download a copy of your data (Settings → Account → Download my data)',
           'Correction: update any inaccurate data',
           'Deletion: delete your account and all data (Settings → Delete account)',
-          'Portability: export your data on request',
+          'Portability: your export is a machine-readable JSON file you can take anywhere',
           'Objection: opt out of analytics tracking',
         ]}
       />

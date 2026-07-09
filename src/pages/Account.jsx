@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield, FlaskConical } from 'lucide-react';
+import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield, FlaskConical, Download } from 'lucide-react';
 import { getRouteTitle } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { createPageUrl } from '@/utils';
@@ -15,6 +15,7 @@ import { COACH_FOCUS_OPTIONS, coachFocusLabel } from '@/lib/data/coachTypeHelper
 import { normalizeRole, isCoach } from '@/lib/roles';
 import { atlasMigrationDataAttributes, deriveAccountHubRouteState } from '@/lib/atlasMigrationPhases';
 import { getSupabase } from '@/lib/supabaseClient';
+import { downloadMyData } from '@/lib/accountDataExport';
 
 /**
  * Account hub: iOS list style. No in-page header (AppShell provides back + title).
@@ -30,6 +31,23 @@ export default function Account() {
   const [updatingFocus, setUpdatingFocus] = useState(false);
   const [updatingTier, setUpdatingTier] = useState(false);
   const [updatingRole, setUpdatingRole] = useState(false);
+  const [exportingData, setExportingData] = useState(false);
+
+  const handleDownloadMyData = useCallback(async () => {
+    if (exportingData) return;
+    impactLight();
+    setExportingData(true);
+    try {
+      const result = await downloadMyData();
+      if (result.ok) {
+        toast.success('Your data export has been downloaded.');
+      } else {
+        toast.error(result.error || 'Could not export your data.');
+      }
+    } finally {
+      setExportingData(false);
+    }
+  }, [exportingData]);
   const canonicalRole = normalizeRole(effectiveRole ?? role ?? null);
 
   const displayFocus = (profile?.coach_focus ?? coachFocus ?? 'transformation').toLowerCase();
@@ -234,6 +252,13 @@ export default function Account() {
             </div>
           </div>
         )}
+        <Row
+          left={<Download size={20} style={{ color: colors.muted }} />}
+          title={exportingData ? 'Preparing your export…' : 'Download my data'}
+          subtitle="Everything we hold about you, as a JSON file"
+          showChevron={false}
+          onPress={handleDownloadMyData}
+        />
         <Row
           left={<LogOut size={20} style={{ color: colors.muted }} />}
           title="Sign out"

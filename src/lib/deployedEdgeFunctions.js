@@ -21,6 +21,7 @@ export const DEPLOYED_EDGE_FUNCTIONS = [
   'conversation-get',
   'conversation-update',
   'delete-account',
+  'export-my-data',
   'generateInviteCode',
   'get-coach',
   'getTrainerEarnings',

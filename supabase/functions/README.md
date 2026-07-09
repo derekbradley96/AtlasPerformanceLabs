@@ -10,6 +10,7 @@
 | stripe-checkout-session | Client payment checkout | STRIPE_SECRET_KEY |
 | send-reminders | Weekly check-in reminders | none |
 | delete-account | GDPR account deletion | none |
+| export-my-data | GDPR data export (all rows about the caller as JSON) | none |
 
 ## Deployment commands
 
