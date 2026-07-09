@@ -6,6 +6,7 @@
 
 import { getSupabase } from '@/lib/supabaseClient';
 import { isDeployedEdgeFunction } from '@/lib/deployedEdgeFunctions';
+import { trackCheckoutStarted } from '@/services/analyticsService';
 
 const SUPABASE_URL_ERROR = 'Supabase URL not configured. Set VITE_SUPABASE_URL in .env.local.';
 
@@ -173,6 +174,7 @@ export async function stripeServiceUpsert(payload) {
 export async function stripeCreatePlanCheckout(payload) {
   const { data, error } = await invokeSupabaseFunction('stripe-create-plan-checkout', payload);
   if (error) return { error };
+  if (data?.url) trackCheckoutStarted({ flow: 'plan_upgrade', plan_tier: payload?.plan_tier ?? null });
   return { url: data?.url ?? null, session_id: data?.session_id ?? null };
 }
 
@@ -184,6 +186,7 @@ export async function stripeCreatePlanCheckout(payload) {
 export async function stripeCheckoutSession(payload) {
   const { data, error } = await invokeSupabaseFunction('stripe-checkout-session', payload);
   if (error) return { error };
+  if (data?.url) trackCheckoutStarted({ flow: 'lead_service', service_id: payload?.service_id ?? null });
   return {
     url: data?.url ?? null,
     session_id: data?.session_id ?? null,
@@ -206,6 +209,7 @@ export async function fetchClientCoachOfferContext() {
 export async function clientCoachOfferCheckoutSession() {
   const { data, error } = await invokeSupabaseFunction('client-coach-checkout-session', {});
   if (error) return { error };
+  if (data?.url) trackCheckoutStarted({ flow: 'client_coach_offer' });
   return { url: data?.url ?? null, session_id: data?.session_id ?? null };
 }
 

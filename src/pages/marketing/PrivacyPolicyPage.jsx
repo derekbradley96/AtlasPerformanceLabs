@@ -130,7 +130,7 @@ export default function PrivacyPolicyPage() {
           'Correction: update any inaccurate data',
           'Deletion: delete your account and all data (Settings → Delete account)',
           'Portability: your export is a machine-readable JSON file you can take anywhere',
-          'Objection: opt out of analytics tracking',
+          'Objection: opt out of usage analytics (Settings → Account → Usage analytics)',
         ]}
       />
       <P>

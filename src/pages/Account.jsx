@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield, FlaskConical, Download } from 'lucide-react';
+import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield, FlaskConical, Download, BarChart2 } from 'lucide-react';
 import { getRouteTitle } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { createPageUrl } from '@/utils';
@@ -16,6 +16,8 @@ import { normalizeRole, isCoach } from '@/lib/roles';
 import { atlasMigrationDataAttributes, deriveAccountHubRouteState } from '@/lib/atlasMigrationPhases';
 import { getSupabase } from '@/lib/supabaseClient';
 import { downloadMyData } from '@/lib/accountDataExport';
+import { setAnalyticsOptOut } from '@/services/analyticsService';
+import { Switch } from '@/components/ui/switch';
 
 /**
  * Account hub: iOS list style. No in-page header (AppShell provides back + title).
@@ -48,6 +50,37 @@ export default function Account() {
       setExportingData(false);
     }
   }, [exportingData]);
+
+  const [analyticsOptOut, setAnalyticsOptOutState] = useState(!!profile?.analytics_opt_out);
+  const [updatingAnalytics, setUpdatingAnalytics] = useState(false);
+  useEffect(() => {
+    setAnalyticsOptOutState(!!profile?.analytics_opt_out);
+  }, [profile?.analytics_opt_out]);
+
+  const handleAnalyticsToggle = useCallback(async (enabled) => {
+    // Switch shows "share usage analytics"; the stored flag is the inverse.
+    const optOut = !enabled;
+    if (updatingAnalytics || !supabaseUser?.id) return;
+    impactLight();
+    setUpdatingAnalytics(true);
+    try {
+      const supabase = getSupabase();
+      if (!supabase) return;
+      const { error } = await supabase
+        .from('profiles')
+        .update({ analytics_opt_out: optOut })
+        .eq('id', supabaseUser.id);
+      if (error) {
+        toast.error(error.message || 'Could not update analytics preference');
+        return;
+      }
+      setAnalyticsOptOut(supabaseUser.id, optOut);
+      setAnalyticsOptOutState(optOut);
+      toast.success(optOut ? 'Usage analytics off' : 'Usage analytics on');
+    } finally {
+      setUpdatingAnalytics(false);
+    }
+  }, [updatingAnalytics, supabaseUser?.id]);
   const canonicalRole = normalizeRole(effectiveRole ?? role ?? null);
 
   const displayFocus = (profile?.coach_focus ?? coachFocus ?? 'transformation').toLowerCase();
@@ -259,6 +292,24 @@ export default function Account() {
           showChevron={false}
           onPress={handleDownloadMyData}
         />
+        <div
+          className="flex items-center justify-between gap-3"
+          style={{ padding: spacing[16], borderBottom: `1px solid ${colors.border}`, minHeight: touchTargetMin }}
+        >
+          <div className="flex items-center gap-3">
+            <BarChart2 size={20} style={{ color: colors.muted }} />
+            <div>
+              <p className="text-sm font-medium" style={{ color: colors.text }}>Usage analytics</p>
+              <p className="text-xs" style={{ color: colors.muted }}>Share usage events to help improve the app</p>
+            </div>
+          </div>
+          <Switch
+            checked={!analyticsOptOut}
+            disabled={updatingAnalytics}
+            onCheckedChange={handleAnalyticsToggle}
+            aria-label="Usage analytics"
+          />
+        </div>
         <Row
           left={<LogOut size={20} style={{ color: colors.muted }} />}
           title="Sign out"

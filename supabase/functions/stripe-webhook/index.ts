@@ -32,6 +32,72 @@ function jsonResp(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
+/**
+ * payment_succeeded analytics (audit #22: first-payment funnel). Attributed to
+ * the paying client's auth user (falls back to the coach when the client has
+ * no account). Called only where a client_payments row transitions to paid,
+ * so invoice.paid + invoice.payment_succeeded double-delivery can't double-track.
+ * Best-effort: analytics must never fail the webhook.
+ */
+async function recordPaymentAnalytics(
+  supabase: ReturnType<typeof createClient>,
+  {
+    clientRowId,
+    coachProfileId,
+    amountCents,
+    currency,
+    invoiceId,
+  }: {
+    clientRowId: string;
+    coachProfileId: string | null;
+    amountCents: number;
+    currency: string;
+    invoiceId: string;
+  },
+): Promise<void> {
+  try {
+    const { data: clientRow } = await supabase
+      .from("clients")
+      .select("user_id")
+      .eq("id", clientRowId)
+      .maybeSingle();
+    const subjectId = (clientRow?.user_id as string | null) ?? coachProfileId;
+    if (!subjectId) return;
+
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("analytics_opt_out")
+      .eq("id", subjectId)
+      .maybeSingle();
+    if (prof?.analytics_opt_out) return;
+
+    // NULL-safe exclusion of this invoice's own row: plain .neq() would also
+    // drop manual payments whose provider_payment_id is NULL.
+    const { count } = await supabase
+      .from("client_payments")
+      .select("id", { count: "exact", head: true })
+      .eq("client_id", clientRowId)
+      .eq("status", "paid")
+      .or(`provider_payment_id.is.null,provider_payment_id.neq.${invoiceId}`);
+
+    await supabase.from("platform_usage_events").insert({
+      event_name: "payment_succeeded",
+      user_id: subjectId,
+      properties: {
+        client_id: clientRowId,
+        coach_id: coachProfileId,
+        amount: amountCents / 100,
+        currency,
+        invoice_id: invoiceId,
+        first_payment: (count ?? 0) === 0,
+        source: "stripe_webhook",
+      },
+    });
+  } catch (err) {
+    console.error("stripe-webhook payment analytics failed", invoiceId, err);
+  }
+}
+
 async function resolveCoachProfileId(
   supabase: ReturnType<typeof createClient>,
   {
@@ -376,6 +442,13 @@ Deno.serve(async (req) => {
                 amount: amountPaidCents / 100,
                 paid_at: paidAtIso,
               }).eq("id", existingClientPayment.id);
+              await recordPaymentAnalytics(supabase, {
+                clientRowId: pay.client_id,
+                coachProfileId: profileId,
+                amountCents: amountPaidCents,
+                currency: (invoice.currency ?? "gbp").toUpperCase(),
+                invoiceId: invoice.id,
+              });
             }
           } else {
             await supabase.from("client_payments").insert({
@@ -387,6 +460,13 @@ Deno.serve(async (req) => {
               payment_provider: "stripe",
               provider_payment_id: invoice.id,
               paid_at: paidAtIso,
+            });
+            await recordPaymentAnalytics(supabase, {
+              clientRowId: pay.client_id,
+              coachProfileId: profileId,
+              amountCents: amountPaidCents,
+              currency: (invoice.currency ?? "gbp").toUpperCase(),
+              invoiceId: invoice.id,
             });
           }
         }

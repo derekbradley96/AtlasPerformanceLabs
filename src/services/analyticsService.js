@@ -12,6 +12,11 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 /** Canonical event names for platform usage. */
 export const ANALYTICS_EVENTS = {
+  /** Signup funnel top — written server-side by a trigger on profiles insert. */
+  SIGNUP_COMPLETED: 'signup_completed',
+  /** Payment funnel: checkout session created (client), invoice paid (stripe-webhook). */
+  CHECKOUT_STARTED: 'checkout_started',
+  PAYMENT_SUCCEEDED: 'payment_succeeded',
   CLIENT_CREATED: 'client_created',
   PROGRAM_ASSIGNED: 'program_assigned',
   CHECKIN_REVIEWED: 'checkin_reviewed',
@@ -62,6 +67,47 @@ export const ANALYTICS_EVENTS = {
 
 const VALID_EVENTS = new Set(Object.values(ANALYTICS_EVENTS));
 
+// Analytics opt-out (profiles.analytics_opt_out; GDPR objection right).
+// localStorage mirror gives a synchronous answer across sessions; the profile
+// row is fetched once per session when no mirror exists yet.
+const OPT_OUT_LS_PREFIX = 'atlas_analytics_opt_out';
+let optOutCache = null; // { userId, value }
+
+function optOutKey(userId) {
+  return `${OPT_OUT_LS_PREFIX}:${userId}`;
+}
+
+/** Record the user's opt-out choice locally (call after persisting to profiles). */
+export function setAnalyticsOptOut(userId, value) {
+  if (!userId) return;
+  optOutCache = { userId, value: !!value };
+  try {
+    window.localStorage.setItem(optOutKey(userId), value ? '1' : '0');
+  } catch { /* private mode */ }
+}
+
+async function isOptedOut(supabase, userId) {
+  if (optOutCache?.userId === userId) return optOutCache.value;
+  try {
+    const stored = window.localStorage.getItem(optOutKey(userId));
+    if (stored === '1' || stored === '0') {
+      optOutCache = { userId, value: stored === '1' };
+      return optOutCache.value;
+    }
+  } catch { /* private mode */ }
+  try {
+    const { data } = await supabase
+      .from('profiles')
+      .select('analytics_opt_out')
+      .eq('id', userId)
+      .maybeSingle();
+    setAnalyticsOptOut(userId, !!data?.analytics_opt_out);
+    return !!data?.analytics_opt_out;
+  } catch {
+    return false;
+  }
+}
+
 function isDevLogEnabled() {
   try {
     return typeof import.meta !== 'undefined' && import.meta.env?.VITE_DEV_ANALYTICS_LOG === 'true';
@@ -101,6 +147,7 @@ export async function track(eventName, properties = {}, options = {}) {
     const { data: { user } } = await supabase.auth.getUser();
     const userId = options.userId ?? user?.id ?? null;
     if (!userId) return;
+    if (await isOptedOut(supabase, userId)) return;
 
     const { error } = await supabase.from('platform_usage_events').insert({
       event_name: event,
@@ -154,6 +201,14 @@ export function trackMessageSent(properties = {}) {
  */
 export function trackWorkoutLogged(properties = {}) {
   return track(ANALYTICS_EVENTS.WORKOUT_LOGGED, properties);
+}
+
+/**
+ * Convenience: track checkout_started (a Stripe Checkout session was created).
+ * @param {Record<string, unknown>} [properties] - e.g. { flow: 'client_coach_offer'|'plan_upgrade'|'lead_service' }
+ */
+export function trackCheckoutStarted(properties = {}) {
+  return track(ANALYTICS_EVENTS.CHECKOUT_STARTED, properties);
 }
 
 /**
