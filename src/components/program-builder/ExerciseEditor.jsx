@@ -215,6 +215,23 @@ export default function ExerciseEditor({
                 <div style={{ fontSize: 11, color: colors.muted }}>{row.primaryMuscle} · {(row.equipment || []).join(', ') || 'Equipment varies'}</div>
               </button>
             ))}
+            {/* Add exactly what was typed when it isn't in the library — day
+                exercises are free-text names, so no library row is needed. */}
+            {debouncedQuery.trim()
+              && !searchResults.some((row) => String(row.name || '').toLowerCase() === debouncedQuery.trim().toLowerCase()) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onAddExercise?.({ exercise_name: debouncedQuery.trim() }, { silent: true });
+                  setInlineSearchOpen(false);
+                  setInlineSearchQuery('');
+                }}
+                style={{ textAlign: 'left', border: `1px dashed ${colors.primary}`, borderRadius: 10, background: colors.primarySubtle, color: colors.primary, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={14} strokeWidth={2.5} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Add &ldquo;{debouncedQuery.trim()}&rdquo; as a custom exercise</span>
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
