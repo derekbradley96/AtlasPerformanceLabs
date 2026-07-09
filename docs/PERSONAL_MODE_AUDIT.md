@@ -81,8 +81,15 @@ Legend: ☐ todo · ☑ done
    /personal-plan-builder, /programs/new, /programs/templates as redirects (no 404s); removed
    the builder's dead startFromScratchSelected/showEntryTemplates state. Verified all 4 entry
    points land on /program-builder?personal=1, no chooser, no dead-ends.
-10. ☐ **Exercise library for personal** — search/filter/add flows, custom exercises,
-    favorites (`exercise_favorites`).
+10. ☑ **Exercise library for personal** (0e47c89) — search/filter/add all WORK: the picker
+    reads the bundled exerciseLibrary.js (113 core + extended), so search returned results
+    ("Bench Press" etc.) and adding to a day worked. Favourites = localStorage
+    (atlas_exercise_favorites_<uid>), custom exercises = localStorage via saveCustomExercise
+    (in ExercisePickerModal). FIXED: exercise_library DB catalog never seeded — RLS had SELECT
+    only, no INSERT/UPDATE, so ensureAtlasExerciseLibrarySeeded silently failed every builder
+    open (DB-backed usage/favourites ranking + aliases dead). Added authed INSERT/UPDATE
+    policies + skip-if-populated guard; catalog now seeds (788 rows). MINOR GAP: the inline
+    day-editor search has no "add custom exercise" for a no-match name (the modal does).
 
 ## Nutrition loop
 
