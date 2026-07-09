@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useOutletContext } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -258,6 +258,7 @@ function SandboxToolsSheet({ onClose, onAdded, getTrainerId, addClient: addClien
 function MoreContent() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setHeaderTitle } = useOutletContext() || {};
   const scrollRef = useRef(null);
   const queryClient = useQueryClient();
   const { openFeedback, openSupport } = useFeedbackModal();
@@ -489,6 +490,15 @@ function MoreContent() {
 
   const previewModeActive = isPlatformAdmin && previewRole && previewRole !== realRoleKey;
   const activePreviewRole = isPlatformAdmin ? previewRole : realRoleKey;
+
+  // AJB tester feedback: for coaches this tab is "Create", not "More" — the
+  // shell header title follows the tab label. Coach role only.
+  const isCoachCreateSurface = activePreviewRole === 'coach';
+  useEffect(() => {
+    if (typeof setHeaderTitle !== 'function' || !isCoachCreateSurface) return undefined;
+    setHeaderTitle('Create');
+    return () => setHeaderTitle(null);
+  }, [setHeaderTitle, isCoachCreateSurface]);
   /** Website shell: wide Personal More uses sidebar + sections (not mobile list). */
   const showPersonalMoreDesktop =
     isWideWeb && activePreviewRole === 'personal' && (isSolo || isPlatformAdmin);
@@ -518,17 +528,10 @@ function MoreContent() {
       const includePrepTools = coachSubtype === 'competition' || coachSubtype === 'integrated';
       return (
         <div className="grid gap-4 md:grid-cols-2">
+          {/* AJB tester feedback: creation tools lead — this tab is "Create". */}
           <div className="md:col-span-2">
             <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
-              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>Community</p>
-            </Card>
-            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
-              {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'Community room', 'Group space for your clients', '/community')}
-            </div>
-          </div>
-          <div>
-            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
-              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>BUILD</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>CREATE</p>
             </Card>
             <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
               {menuRow(<FileText size={20} style={{ color: colors.muted }} />, 'Programs', 'Build and assign training plans', '/programs')}
@@ -568,6 +571,15 @@ function MoreContent() {
                 ? menuRow(<Zap size={20} style={{ color: colors.muted }} />, 'Client branding', 'Elite white-label and custom join page', '/settings/branding')
                 : null}
               {menuRow(<UsersRound size={20} style={{ color: colors.muted }} />, 'Team', 'Seats, members, and permissions', '/team')}
+            </div>
+          </div>
+
+          <div>
+            <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
+              <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: colors.muted }}>COMMUNITY</p>
+            </Card>
+            <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
+              {menuRow(<Users size={20} style={{ color: colors.muted }} />, 'Community room', 'Group space for your clients', '/community')}
             </div>
           </div>
 
@@ -817,11 +829,15 @@ function MoreContent() {
       {!showPersonalMoreDesktop ? (
         <>
       <Card style={{ marginBottom: spacing[12], padding: spacing[16] }}>
-        <p className="text-[20px] font-semibold" style={{ color: colors.text }}>More</p>
+        <p className="text-[20px] font-semibold" style={{ color: colors.text }}>
+          {isCoachCreateSurface && !isPlatformAdmin ? 'Create' : 'More'}
+        </p>
         <p className="text-sm mt-1" style={{ color: colors.muted }}>
           {isPlatformAdmin
             ? 'Preview role wrappers and manage platform controls'
-            : 'Directory for tools, settings, and profile — same app, role-specific shortcuts'}
+            : isCoachCreateSurface
+              ? 'Build programmes, plans, and templates — then publish, grow, and sell'
+              : 'Directory for tools, settings, and profile — same app, role-specific shortcuts'}
         </p>
       </Card>
 

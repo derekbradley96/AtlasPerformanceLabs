@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useOutletContext } from 'react-router-dom';
+import FeatureHelpButton from '@/components/ui/FeatureHelpButton';
 import { useAuth } from '@/lib/AuthContext';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { createPageUrl } from '@/utils';
@@ -16,7 +17,15 @@ import { toast } from 'sonner';
 
 export default function CheckInTemplates() {
   const navigate = useNavigate();
+  const { setHeaderRight } = useOutletContext() || {};
   const { user, profile } = useAuth();
+
+  // AJB tester feedback #7: Learn-more affordance on creation screens.
+  useEffect(() => {
+    if (typeof setHeaderRight !== 'function') return undefined;
+    setHeaderRight(<FeatureHelpButton feature="checkin-templates" />);
+    return () => setHeaderRight(null);
+  }, [setHeaderRight]);
   const supabase = getSupabase();
   const [assigningTemplateId, setAssigningTemplateId] = useState(null);
   const [selectedClientIds, setSelectedClientIds] = useState([]);

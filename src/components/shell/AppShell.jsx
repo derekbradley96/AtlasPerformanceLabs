@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useState, useEffect, useMemo, Suspense } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle, Inbox, Crosshair, Dumbbell, ClipboardList } from 'lucide-react';
+import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle, Inbox, Crosshair, Dumbbell, ClipboardList, Plus } from 'lucide-react';
 import NotificationBell from '@/components/ui/NotificationBell';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
@@ -471,7 +471,7 @@ export default function AppShell() {
   const trainerId = user?.id ?? null;
   const messagesThreadUnreadCount = useInboxBadgeCount();
 
-  const NAV_ICONS = { Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, Inbox, Crosshair, Dumbbell, ClipboardList };
+  const NAV_ICONS = { Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, Inbox, Crosshair, Dumbbell, ClipboardList, Plus };
   const navItems = useMemo(() => {
     const routes = getTabRoutesForRole(
       effectiveRole ?? role ?? DEFAULT_ROLE,
@@ -638,10 +638,16 @@ export default function AppShell() {
     setPullDistance(0);
   }, []);
 
-  useEffect(() => {
+  // Reset per-page header slots on navigation. Render-phase (not an effect):
+  // a [pathname] effect runs AFTER the new page's mount effects (child effects
+  // fire first), wiping anything the page set synchronously at mount — pages
+  // only appeared to work because async data re-fired their setHeaderRight.
+  const headerResetPathRef = useRef(pathname);
+  if (headerResetPathRef.current !== pathname) {
+    headerResetPathRef.current = pathname;
     setTitleOverride(null);
     setHeaderRight(null);
-  }, [pathname]);
+  }
   const title = titleOverride ?? getRouteTitle(location.pathname);
   const topNavTitle = navItems.find((i) => i.key === navActiveKey)?.label || title;
   const brandedHeaderTitle = clientBranded ? coachBrand.name : title;

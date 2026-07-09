@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { getMessagesThreadPathWithQuery } from '@/lib/messagesPath';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
@@ -40,6 +40,8 @@ import {
   ImageIcon,
   ListChecks,
   MessageSquare,
+  Settings,
+  Store,
   UserPlus,
   Users,
   Copy,
@@ -507,6 +509,7 @@ export default function CoachHomePage() {
   const navigate = useNavigate();
   const { user, effectiveRole, profile, coachFocus: coachFocusFromAuth, isDemoMode } = useAuth();
   const { isDesktopWeb } = usePresentationMode();
+  const { setHeaderRight } = useOutletContext() || {};
 
   const coachId = user?.id ?? null;
   const isCoachRole = isCoach(effectiveRole);
@@ -543,6 +546,27 @@ export default function CoachHomePage() {
   const [integratedRosterLane, setIntegratedRosterLane] = useState('prep');
 
   const showOnboardingResumeBanner = isCoachOnboardingInProgress(profile) && !resumeBannerDismissed;
+
+  // AJB tester feedback #6: settings entry on the dashboard header — "configure"
+  // shouldn't hide behind More. Coach role only.
+  useEffect(() => {
+    if (typeof setHeaderRight !== 'function' || !isCoachRole) return undefined;
+    setHeaderRight(
+      <button
+        type="button"
+        onClick={() => {
+          hapticNavigation();
+          navigate('/profile-account');
+        }}
+        className="flex items-center justify-center rounded-lg min-w-[44px] min-h-[44px]"
+        style={{ color: colors.muted, background: 'transparent', border: 'none' }}
+        aria-label="Settings"
+      >
+        <Settings size={22} strokeWidth={2.25} aria-hidden />
+      </button>
+    );
+    return () => setHeaderRight(null);
+  }, [setHeaderRight, isCoachRole, navigate]);
 
   useEffect(() => {
     if (typeof sessionStorage === 'undefined') return;
@@ -1663,6 +1687,32 @@ export default function CoachHomePage() {
                 {revenuePulseEl}
               </section>
             ) : null}
+
+            {/* SECTION 7 — Marketplace (AJB tester feedback #8: setup was two
+                taps deep in More → Grow; surface it on the dashboard) */}
+            <section style={{ marginBottom: sectionGap }}>
+              <PressableCard
+                className="rounded-xl p-4 text-left w-full"
+                style={{ background: colors.surface2, border: `1px solid ${colors.border}` }}
+                onClick={() => { hapticNavigation(); navigate('/marketplace-setup'); }}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ background: colors.primarySubtle }}
+                  >
+                    <Store size={20} style={{ color: colors.primary }} aria-hidden />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[15px] font-semibold" style={{ color: colors.text }}>Marketplace</p>
+                    <p className="text-xs mt-0.5" style={{ color: colors.muted }}>
+                      Get discovered — set up your public coach profile and sell your coaching
+                    </p>
+                  </div>
+                  <ChevronRight size={18} style={{ color: colors.muted }} aria-hidden />
+                </div>
+              </PressableCard>
+            </section>
           </div>
           {isDesktopWeb ? (
             <div className="lg:col-span-1">

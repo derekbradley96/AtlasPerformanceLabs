@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import TopBar from '@/components/ui/TopBar';
+import FeatureHelpButton from '@/components/ui/FeatureHelpButton';
 import Card from '@/ui/Card';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
@@ -138,7 +139,7 @@ export default function MethodologyPackagePage() {
 
   return (
     <div style={{ minHeight: '100vh', background: colors.bg, color: colors.text }}>
-      <TopBar title="Coaching Pack" onBack={() => navigate(-1)} />
+      <TopBar title="Coaching Pack" onBack={() => navigate(-1)} rightAction={<FeatureHelpButton feature="methodology-packages" />} />
       <div style={{ ...PAGE_PADDING, paddingTop: spacing[16], paddingBottom: spacing[24], display: 'grid', gap: spacing[12] }}>
         <Card style={{ padding: spacing[14] }}>
           <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Build pack</p>

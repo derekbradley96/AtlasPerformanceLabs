@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import TopBar from '@/components/ui/TopBar';
+import FeatureHelpButton from '@/components/ui/FeatureHelpButton';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import { colors, spacing, radii } from '@/ui/tokens';
@@ -185,7 +186,7 @@ export default function SupplementStackBuilder() {
 
   return (
     <div className="min-h-screen pb-24" style={{ background: colors.bg, color: colors.text }}>
-      <TopBar title="Supplement stacks" onBack={() => navigate(-1)} />
+      <TopBar title="Supplement stacks" onBack={() => navigate(-1)} rightAction={<FeatureHelpButton feature="supplement-stacks" />} />
 
       <div className="p-4 space-y-4">
         <Card style={{ padding: spacing[16] }}>

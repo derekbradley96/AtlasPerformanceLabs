@@ -3,10 +3,10 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { getTabRoutesForRole } from '@/lib/routeMeta';
 import { useInboxBadgeCount } from '@/hooks/useInboxBadgeCount';
-import { Home, Inbox, Users, MessageSquare, MoreHorizontal, HelpCircle, Dumbbell, ClipboardList, Crosshair, Calendar } from 'lucide-react';
+import { Home, Inbox, Users, MessageSquare, MoreHorizontal, HelpCircle, Dumbbell, ClipboardList, Crosshair, Calendar, Plus } from 'lucide-react';
 import { colors } from '@/ui/tokens';
 
-const ICONS = { Home, Inbox, Users, MessageSquare, MoreHorizontal, Dumbbell, ClipboardList, Crosshair, Calendar };
+const ICONS = { Home, Inbox, Users, MessageSquare, MoreHorizontal, Dumbbell, ClipboardList, Crosshair, Calendar, Plus };
 const FALLBACK_ICON = HelpCircle;
 const TAB_BAR_HEIGHT = 76;
 

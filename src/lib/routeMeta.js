@@ -268,14 +268,15 @@ export function getTabRoutesForRole(role, coachFocus, navContext = null) {
         { path: '/home', label: 'Home', iconKey: 'Home' },
         { path: '/clients', label: 'Clients', iconKey: 'Users' },
         { path: '/messages', label: 'Messages', iconKey: 'MessageSquare' },
-        { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
+        // AJB tester feedback: coach's last tab is a creation surface, not a junk drawer.
+        { path: '/more', label: 'Create', iconKey: 'Plus' },
       ];
     }
     return [
       { path: '/home', label: 'Home', iconKey: 'Home' },
       { path: '/clients', label: 'Clients', iconKey: 'Users' },
       { path: '/messages', label: 'Messages', iconKey: 'MessageSquare' },
-      { path: '/more', label: 'More', iconKey: 'MoreHorizontal' },
+      { path: '/more', label: 'Create', iconKey: 'Plus' },
     ];
   }
   if (r === 'client') {

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Plus, Search, Copy, Edit, Dumbbell, TrendingDown, Target, Users, Trash2, ClipboardList } from 'lucide-react';
@@ -25,6 +25,7 @@ import { colors, spacing } from '@/ui/tokens';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { desktopRhythm, cardContentRhythm } from '@/ui/pageLayout';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import FeatureHelpButton from '@/components/ui/FeatureHelpButton';
 
 async function lightHaptic() {
   try {
@@ -51,7 +52,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 export default function Programs() {
   const navigate = useNavigate();
+  const { setHeaderRight } = useOutletContext() || {};
   const { isDesktopWeb } = usePresentationMode();
+
+  // AJB tester feedback #7: Learn-more affordance on creation screens.
+  useEffect(() => {
+    if (typeof setHeaderRight !== 'function') return undefined;
+    setHeaderRight(<FeatureHelpButton feature="programs" />);
+    return () => setHeaderRight(null);
+  }, [setHeaderRight]);
   const rhythm = desktopRhythm(isDesktopWeb);
   const cardRhythm = cardContentRhythm(isDesktopWeb);
   const cardPad = isDesktopWeb ? spacing[20] : spacing[16];
