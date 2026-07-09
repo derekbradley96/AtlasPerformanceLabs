@@ -30,8 +30,13 @@ Legend: ☐ todo · ☑ done
    Program, builder, Settings, Work-with-a-coach). Verified bar on all four pages,
    Settings + find-a-coach navigate. NOTE for #19: More still shows a "Free" tier
    badge under the profile — dead tier UI to strip.
-4. ☐ **Brand-new-account empty states** — every tab and page with zero data (no plan,
-   no logs, no targets): copy, CTAs, nothing dead-ends or errors.
+4. ☑ **Brand-new-account empty states** (bc03e74) — walked Home, Today, Nutrition/Log,
+   Progress, My Program, readiness on a zero-data account. Home/My Program/Progress/
+   readiness all honest with working CTAs; Nutrition surfaces the targets editor inline
+   (fine). FIXED: personal Today hero showed a fabricated "Try 82.5kg on squat — you hit
+   80kg x 9 last session" on accounts with no history — swapped to the honest restLabel.
+   NOTE for #19/#20: Nutrition's "Barcode scanning is free — forever / No paywall, ever"
+   banner is leftover tier-era anti-upsell noise.
 
 ## Daily training loop
 
