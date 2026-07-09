@@ -207,49 +207,74 @@ export default function ProgramEntryPanel({
         )}
       </div>
 
-      {/* Generate CTA */}
-      <button
-        type="button"
-        onClick={onGenerate}
-        disabled={saving || !canGenerate}
-        style={{
-          width: '100%',
-          minHeight: 50,
-          borderRadius: radii.button,
-          background: canGenerate && !saving ? colors.primary : colors.surface2,
-          color: canGenerate && !saving ? '#fff' : colors.muted,
-          border: 'none',
-          fontSize: 15,
-          fontWeight: 700,
-          cursor: saving || !canGenerate ? 'not-allowed' : 'pointer',
-          marginBottom: spacing[10],
-          transition: 'background 0.15s, opacity 0.15s',
-          opacity: saving ? 0.7 : 1,
-        }}
-      >
-        {saving ? 'Generating…' : isPersonalRole ? 'Generate my plan' : 'Generate program'}
-      </button>
-
-      {/* Start blank */}
-      {canStartBlank && (
+      {/* Personal builds manually — no auto-generated plan. Coaches keep the
+          generator plus the blank option. */}
+      {isPersonalRole ? (
         <button
           type="button"
           onClick={onStartBlank}
-          disabled={saving}
+          disabled={saving || !canStartBlank}
           style={{
             width: '100%',
-            minHeight: 44,
+            minHeight: 50,
             borderRadius: radii.button,
-            background: 'transparent',
-            color: colors.muted,
-            border: `1px solid ${colors.border}`,
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: saving ? 'not-allowed' : 'pointer',
+            background: canStartBlank && !saving ? colors.primary : colors.surface2,
+            color: canStartBlank && !saving ? '#fff' : colors.muted,
+            border: 'none',
+            fontSize: 15,
+            fontWeight: 700,
+            cursor: saving || !canStartBlank ? 'not-allowed' : 'pointer',
+            transition: 'background 0.15s, opacity 0.15s',
+            opacity: saving ? 0.7 : 1,
           }}
         >
-          Start blank
+          {saving ? 'Creating…' : 'Create my plan'}
         </button>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={onGenerate}
+            disabled={saving || !canGenerate}
+            style={{
+              width: '100%',
+              minHeight: 50,
+              borderRadius: radii.button,
+              background: canGenerate && !saving ? colors.primary : colors.surface2,
+              color: canGenerate && !saving ? '#fff' : colors.muted,
+              border: 'none',
+              fontSize: 15,
+              fontWeight: 700,
+              cursor: saving || !canGenerate ? 'not-allowed' : 'pointer',
+              marginBottom: spacing[10],
+              transition: 'background 0.15s, opacity 0.15s',
+              opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saving ? 'Generating…' : 'Generate program'}
+          </button>
+
+          {canStartBlank && (
+            <button
+              type="button"
+              onClick={onStartBlank}
+              disabled={saving}
+              style={{
+                width: '100%',
+                minHeight: 44,
+                borderRadius: radii.button,
+                background: 'transparent',
+                color: colors.muted,
+                border: `1px solid ${colors.border}`,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: saving ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Start blank
+            </button>
+          )}
+        </>
       )}
     </Card>
   );

@@ -2,16 +2,13 @@
  * Personal-only program planning copy: no coach/client/database jargon in user-facing strings.
  */
 
-/** Intro under TopBar when editing an existing personal plan in the builder. */
-export function personalBuilderIntro({ hasBlock, basic }) {
+/** Intro under TopBar when editing an existing personal plan in the builder.
+ *  Personal plans are built manually — no generate/draft framing. */
+export function personalBuilderIntro({ hasBlock }) {
   if (hasBlock) {
-    return basic
-      ? 'Pick a week and day, add or swap exercises, then save. Your plan updates Today automatically.'
-      : 'Use weeks, Quick start, or Generate when you want a smart draft — you still edit every exercise.';
+    return 'Pick a week and day, add or swap exercises, then save. Your plan updates Today automatically.';
   }
-  return basic
-    ? 'Name your plan, save it, then add training days one at a time.'
-    : 'Name your plan, save, then add days or let Atlas draft a week you can refine.';
+  return 'Name your plan, save it, then add training days one at a time.';
 }
 
 export function personalBuilderLoadingMessage() {
