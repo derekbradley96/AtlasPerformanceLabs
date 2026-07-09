@@ -240,31 +240,6 @@ export default function WorkoutPlayerPage() {
     todayKey,
   });
 
-  const maybeTrackFirstSession = useCallback(async () => {
-    if (clientMode || !profileId || firstSessionHandledRef.current) return;
-    firstSessionHandledRef.current = true;
-    if (authProfile?.first_session_at) return;
-    if (!hasSupabaseConfigured) return;
-    const sb = getSupabase();
-    if (!sb) return;
-    const nowIso = new Date().toISOString();
-    const { error } = await sb
-      .from('profiles')
-      .update({ first_session_at: nowIso })
-      .eq('id', profileId)
-      .is('first_session_at', null);
-    if (error) return;
-    const durationMinutes = sessionStartedAtRef.current
-      ? Math.max(1, Math.round((Date.now() - new Date(sessionStartedAtRef.current).getTime()) / 60000))
-      : null;
-    setFirstSessionCelebration({
-      exercises: exercisesForSession.length,
-      sets: totalSets,
-      minutes: durationMinutes,
-    });
-    queryClient.invalidateQueries({ queryKey: ['auth-profile'] });
-  }, [clientMode, profileId, authProfile?.first_session_at, exercisesForSession.length, totalSets, queryClient]);
-
   const exercises = useMemo(
     () => (assignedWorkout?.exercises ?? []).map(normaliseExercise),
     [assignedWorkout?.exercises]
@@ -350,6 +325,37 @@ export default function WorkoutPlayerPage() {
     () => exercisesForSession.reduce((acc, ex) => acc + Math.max(1, Number(ex.sets) || 1), 0),
     [exercisesForSession]
   );
+
+  // Defined here (after exercisesForSession + totalSets) not earlier: its deps
+  // array reads exercisesForSession.length/totalSets, which are evaluated during
+  // render at the useCallback call site — placing it above their declarations
+  // hit the const TDZ and crashed the player on every mount (no-session path
+  // surfaced it as a hard error instead of the empty fallback).
+  const maybeTrackFirstSession = useCallback(async () => {
+    if (clientMode || !profileId || firstSessionHandledRef.current) return;
+    firstSessionHandledRef.current = true;
+    if (authProfile?.first_session_at) return;
+    if (!hasSupabaseConfigured) return;
+    const sb = getSupabase();
+    if (!sb) return;
+    const nowIso = new Date().toISOString();
+    const { error } = await sb
+      .from('profiles')
+      .update({ first_session_at: nowIso })
+      .eq('id', profileId)
+      .is('first_session_at', null);
+    if (error) return;
+    const durationMinutes = sessionStartedAtRef.current
+      ? Math.max(1, Math.round((Date.now() - new Date(sessionStartedAtRef.current).getTime()) / 60000))
+      : null;
+    setFirstSessionCelebration({
+      exercises: exercisesForSession.length,
+      sets: totalSets,
+      minutes: durationMinutes,
+    });
+    queryClient.invalidateQueries({ queryKey: ['auth-profile'] });
+  }, [clientMode, profileId, authProfile?.first_session_at, exercisesForSession.length, totalSets, queryClient]);
+
   const supersetGroups = useMemo(() => {
     const groups = {};
     exercisesForSession.forEach((ex, idx) => {
