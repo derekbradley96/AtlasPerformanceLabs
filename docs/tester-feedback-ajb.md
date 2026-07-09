@@ -1,5 +1,12 @@
 # Tester feedback — AJB Boardrooms (Antony Barnett), 8 Jul 2026
 
+> **Status (9 Jul 2026, commit 46d72c1):** Items 1–4 built and verified in-browser
+> on coach + client roles. Item 5's tab set is already the target after item 3
+> (Home/Clients/Messages + Create) — what remains is the TestFlight device pass,
+> which also covers the "already done" login/keyboard re-check. Item 6 skipped as
+> recommended. Learn-more copy in `src/lib/featureHelp.js` is baseline — Derek to
+> review/replace.
+
 Usability review of the Atlas iOS beta. **All coach-side, first-time-experience UX
 — no bugs.** The core message: Atlas's best coach tools are buried in the *More*
 menu, so a new coach thinks the app is smaller than it is. Make it look as capable
