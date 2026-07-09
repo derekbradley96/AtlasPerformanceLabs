@@ -859,6 +859,10 @@ export default function ProgressPage() {
               </Card>
             </section>
           ) : null}
+          {/* "Your next step" uses the empty-surface copy ("Complete your first
+              workout") — only show it while the user genuinely has no data, or it
+              tells someone who just trained to complete their first workout. */}
+          {showEmptyProgressState ? (
           <section style={{ marginBottom: rhythm.section }}>
             <Card
               style={{
@@ -916,6 +920,7 @@ export default function ProgressPage() {
               </div>
             </Card>
           </section>
+          ) : null}
 
           <section style={{ marginBottom: rhythm.section }}>
             <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>

@@ -70,12 +70,16 @@ export async function computeAthleteDevelopmentForProfile({ profileId, clientId 
             .order('week_start', { ascending: false })
             .limit(12)
         : Promise.resolve({ data: [] }),
+      // Personal users have no clients-row id — their check-ins and sessions are
+      // keyed by profile_id/user_id. The old client_id-only branch made both
+      // counts fall through to 0, pinning every personal user's dev score at 0
+      // (Progress stuck on "Complete your first workout" after real sessions).
       clientId
         ? sb.from('checkins').select('id', { head: true, count: 'exact' }).eq('client_id', clientId)
-        : Promise.resolve({ count: 0 }),
+        : sb.from('personal_checkins').select('id', { head: true, count: 'exact' }).eq('user_id', profileId),
       clientId
         ? sb.from('workout_sessions').select('id', { head: true, count: 'exact' }).eq('client_id', clientId).eq('status', 'completed')
-        : Promise.resolve({ count: 0 }),
+        : sb.from('workout_sessions').select('id', { head: true, count: 'exact' }).eq('profile_id', profileId).eq('status', 'completed'),
     ]);
 
     const createdAt = profileRes?.data?.created_at ? new Date(profileRes.data.created_at) : null;
