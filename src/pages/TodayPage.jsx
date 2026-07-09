@@ -877,12 +877,16 @@ export default function TodayPage() {
     );
   }, [isPersonalRole, userId, todayBundle]);
 
-  const caloriesLogged = isPersonalRole
-    ? personalMealTotalsToday.calories
-    : Number(mealTotalsToday?.calories) || 0;
-  const proteinLogged = isPersonalRole
-    ? personalMealTotalsToday.protein
-    : Number(mealTotalsToday?.protein) || 0;
+  // Online, personal meals live in the DB (mealTotalsToday, keyed by
+  // profile_id); the localStorage personalMealTotalsToday is only the offline
+  // fallback. Reading localStorage first meant meals logged on /nutrition (DB)
+  // never reached the macro ring.
+  const caloriesLogged = mealTotalsToday
+    ? Number(mealTotalsToday.calories) || 0
+    : (isPersonalRole ? personalMealTotalsToday.calories : 0);
+  const proteinLogged = mealTotalsToday
+    ? Number(mealTotalsToday.protein) || 0
+    : (isPersonalRole ? personalMealTotalsToday.protein : 0);
   const calorieTarget = Number(nutritionPlan?.calories || nutritionPlan?.calorie_target || nutritionPlan?.target_calories || 0);
   const proteinTarget = Number(nutritionPlan?.protein || nutritionPlan?.protein_g || nutritionPlan?.target_protein_g || 0);
   const nutritionWeeklyDone = Number(retentionStreaks?.weeklyProgress?.nutrition?.done ?? 0);

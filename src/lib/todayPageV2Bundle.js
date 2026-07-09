@@ -38,13 +38,15 @@ async function fetchWeightRowsV2({ supabase, profileId, isPersonalRole }) {
   }));
 }
 
-async function fetchClientMealTotalsToday(supabase, clientId) {
-  if (!supabase || !clientId) return { calories: 0, protein: 0 };
+async function fetchMealTotalsToday(supabase, { clientId = null, profileId = null }) {
+  const idColumn = clientId ? 'client_id' : 'profile_id';
+  const idValue = clientId || profileId;
+  if (!supabase || !idValue) return { calories: 0, protein: 0 };
   const logDate = getLocalDateKey();
   const { data, error } = await supabase
     .from('meal_logs')
     .select('calories, protein_g')
-    .eq('client_id', clientId)
+    .eq(idColumn, idValue)
     .eq('log_date', logDate);
   if (error || !Array.isArray(data)) return { calories: 0, protein: 0 };
   let calories = 0;
@@ -170,7 +172,10 @@ export async function fetchTodayPageV2Bundle({ isPersonalRole, userId, authProfi
     fetchWeightRowsV2({ supabase: sb, profileId: pid, isPersonalRole }),
     getRetentionStreaks({ profileId: pid }),
     !isPersonalRole && sb ? fetchCoachMetaV2({ supabase: sb, profile }) : Promise.resolve(null),
-    !isPersonalRole && sb ? fetchClientMealTotalsToday(sb, pid) : Promise.resolve(null),
+    // Was client-only, so a personal user's logged meals never reached Today's
+    // macro ring (it read null → 0 consumed). Personal meals are keyed by
+    // profile_id; clients by client_id.
+    sb ? fetchMealTotalsToday(sb, isPersonalRole ? { profileId: pid } : { clientId: pid }) : Promise.resolve(null),
     !isPersonalRole && sb ? fetchClientCheckinsCount(sb, pid) : Promise.resolve(0),
     isPersonalRole && sb ? fetchPersonalCompletedWorkouts(sb, pid) : Promise.resolve(0),
   ]);
