@@ -300,8 +300,20 @@ Legend: ☐ todo · ☑ done
     handoff RPC fires with the coach id and linked_from_personal_at is stamped for personal
     (and neither for a non-personal join); 7/7 pass. The test no longer prints the
     "personal blocks handoff failed" warning.
-23. ☐ **Coach transition pages** — PersonalCoachTransitionPage +
-    PersonalCoachTierSelectionPage: reachable, accurate, don't reference stale flows.
+23. ☑ **Coach transition pages** — `PersonalCoachTransitionPage` (`/personal/coach-
+    transition`, reached from More "Work with a coach") is accurate and reachable: honest
+    solo-vs-coach framing, goal-aware coach-fit lines (now populated post-#18 goal fix), a
+    solo-vs-coach comparison, and Browse-marketplace / Enter-invite-code CTAs — no dead-tier
+    UI. Verified live (renders, fat-loss fit line shows, zero tier words). FIXED
+    `PersonalCoachTierSelectionPage` (`/personal/coach-tier-selection`): tiers were retired,
+    leaving it a single-option "Choose coach matching level" chooser — pure friction with
+    stale tier framing ("Conversion setup", "Pick the matching level", a dead `enhanced`
+    icon branch) between the many coach CTAs and the marketplace. Replaced the whole page with
+    a redirect to `/discover` that preserves the entry source, so every
+    `buildPersonalCoachTierSelectionUrl(...)` entry point (dashboard, nutrition, achievements,
+    invite-code, sidebar, transition page…) now lands straight on the source-contextual
+    marketplace. Verified live: `/personal/coach-tier-selection?source=from_plateau` →
+    `/discover?from=personal&source=from_plateau&tier=basic`, no chooser, no console errors.
 
 ## Account & platform
 
