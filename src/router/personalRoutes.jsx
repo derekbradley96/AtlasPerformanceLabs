@@ -13,7 +13,6 @@ export default function PersonalRoutes({
   PersonalCoachTransitionPage,
   PersonalCoachTierSelectionPage,
   NutritionTargetsPage,
-  PersonalInsightsPage,
   ImportMFPPage,
   ProgressPage,
   ProgressPhotos,
@@ -43,7 +42,6 @@ export default function PersonalRoutes({
       <Route path="nutrition-targets" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="Nutrition targets are for Personal accounts."><NutritionTargetsPage /></RequireRole>} />
       <Route path="athlete" element={<RequireRole allow={[Roles.PERSONAL]}><Navigate to="/home" replace /></RequireRole>} />
       <Route path="solo-dashboard" element={<RequireRole allow={[Roles.PERSONAL]}><Navigate to="/home" replace /></RequireRole>} />
-      <Route path="personal/insights" element={<RequireRole allow={[Roles.PERSONAL]}><PersonalInsightsPage /></RequireRole>} />
       {/* Legacy builder entry points → the one canonical builder. The old
           /personal-plan-builder chooser (scratch vs template) is gone: both
           options landed on the identical manual builder, so it was pure friction. */}

@@ -183,8 +183,19 @@ Legend: ☐ todo · ☑ done
     NOTE: no dedicated raw check-in history list for personal — data surfaces as Progress
     trends only (acceptable, not a defect); `motivation` column is an orphan (never
     written/read), left as-is.
-17. ☐ **Insights & Performance pages** (`/personal/insights`, PersonalPerformancePage)
-    — routed? fed with real data? tier-gated correctly?
+17. ☑ **Insights & Performance pages** — DELETED both; they were fabricated-data
+    mockups. `PersonalInsightsPage` (`/personal/insights`) was an orphan route (no nav/
+    link anywhere pointed to it) that showed the SAME hardcoded text to every user —
+    "Your weight has plateaued", "Habit adherence dropped this week" — plus coach framing
+    ("review your plan with your coach") on a personal page. `PersonalPerformancePage` was
+    fully dead (never imported/routed/linked); its own header comment said "Placeholder
+    data – these can be wired to real … data later" but it never was — hardcoded timeline/
+    trends/streaks/milestones dated 2025. Neither was fed real data, and a "Personal
+    coaching assistant" page conflicts with the no-AI-features direction. The genuine,
+    data-fed insights already live on Progress (#15: at-a-glance core insights, weight
+    milestones, athlete-dev score) and readiness (#16: Today's Adjustment). Removed both
+    page files + the orphan route + the AppRoutes import/prop; grep confirms zero remaining
+    references; app bundle compiles clean.
 18. ☐ **Comp-prep-personal surfaces** — `personalHasCompGoal`: pose library, prep
     protocols, pose self-assessments, `personal_contest_preps`/`personal_prep_precision*`
     — reachable, functional, hidden when no comp goal.

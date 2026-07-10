@@ -58,7 +58,6 @@ import ClientSessionsPage from '@/pages/ClientSessionsPage';
 import ClientSupplementStack from '@/pages/ClientSupplementStack';
 import CallRequestsPage from '@/pages/CallRequestsPage';
 import SoloDashboardPage from '@/pages/SoloDashboardPage';
-import PersonalInsightsPage from '@/pages/PersonalInsightsPage';
 import CheckinReview from '@/pages/CheckinReview';
 import Intervention from '@/pages/Intervention';
 import Messages from '@/pages/Messages';
@@ -740,7 +739,6 @@ export default function AppRoutes({ isNative }) {
             PersonalCoachTransitionPage,
             PersonalCoachTierSelectionPage,
             NutritionTargetsPage,
-            PersonalInsightsPage,
             ImportMFPPage,
             ProgressPage,
             ProgressPhotos,
