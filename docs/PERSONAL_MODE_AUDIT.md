@@ -108,8 +108,13 @@ Legend: ☐ todo · ☑ done
     protein_target/carbs_target/fats_target); write & read column names match. Verified live:
     set 2500 kcal "Higher protein" → persisted (2500/200p/288c/61f, split math correct) →
     Today ring shows "2500 kcal remaining · 200g protein still needed". Units kcal+grams only.
-13. ☐ **Barcode scan quick add** — feature-gated; works on the gated tier, prompt
-    behavior on basic.
+13. ☑ **Barcode scan quick add** — CLEAN PASS, no code changes. NOT gated: canUsePersonalFeature
+    always returns true (tier gating retired) and barcode ∈ BASIC_FEATURES, so "free forever"
+    is real. Native camera scan is app-only (native_only on web); web falls back to manual
+    barcode entry with a clear message. Verified live: barcode 5449000000996 → Open Food Facts
+    found Coca-Cola → prefilled 105kcal/26.5g carbs → logged to meal_logs (source=barcode,
+    barcode stored) → Today ring "1895 kcal remaining" (2000−105). Native camera itself
+    untestable in-browser (thin wrapper → same lookup path).
 14. ☐ **MFP import (`/import/mfp`)** — CSV import as personal: parse, preview, commit,
     errors.
 
