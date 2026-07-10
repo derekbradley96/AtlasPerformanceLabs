@@ -160,8 +160,29 @@ Legend: ☐ todo · ☑ done
     Verified live: route resolves (no redirect/403), renders the personal upload UI;
     full RLS round-trip as the real user passes (storage upload → row insert → list →
     signed URL). No console errors.
-16. ☐ **Personal check-ins** (`personal_checkins`, readiness) — entry points, history,
-    and whether anything consumes them (insights/Today).
+16. ☑ **Personal check-ins** (`personal_checkins`, readiness) — FIXED critical schema
+    drift. Three call sites used columns `personal_checkins` never had (`recovery`,
+    `performance`, `workout_session_id`): (a) `PersonalBasicPostWorkoutCheckIn` (rendered
+    from PostWorkoutCompletion after a personal workout — `showPersonalBasicCheckIn:
+    !clientMode`) inserted all three with NO fallback, so every post-workout check-in save
+    threw 42703 and was lost; (b) `ReadinessCheckinPage` inserted `recovery` — it only
+    "worked" via a retry that stripped and DISCARDED the value (plus a guaranteed-failing
+    first insert every submit); (c) `fetchPersonalCheckinPerformanceSeries` selected
+    `performance`/`recovery`, so the query errored → silently returned [] → the personal
+    adaptation matrix never saw performance history. Migration 20260710140000 adds the three
+    columns (integers matching the 1–5 feel cols; workout_session_id uuid FK →
+    workout_sessions ON DELETE SET NULL). Verified as the real RLS-enforced user: post-workout
+    insert OK (recovery/performance/FK all set), readiness insert persists recovery on first
+    try, performance series returns rows. **Entry points**: /readiness-checkin (route allows
+    PERSONAL; RequireClientCoachOfferSettled returns children for non-clients so a coachless
+    personal passes — verified live, form renders + full submit reaches the "Today's
+    Adjustment" screen with recovery=4 persisted + 1 program_adjustments + 1
+    nutrition_adjustments row); post-workout check-in; Today + Nutrition weight quick-logs
+    (weight-only inserts, already fine). **Consumers**: Progress weight/adherence (#15),
+    athleteDevelopmentScore (count), adaptation matrix (performance series, now un-broken).
+    NOTE: no dedicated raw check-in history list for personal — data surfaces as Progress
+    trends only (acceptable, not a defect); `motivation` column is an orphan (never
+    written/read), left as-is.
 17. ☐ **Insights & Performance pages** (`/personal/insights`, PersonalPerformancePage)
     — routed? fed with real data? tier-gated correctly?
 18. ☐ **Comp-prep-personal surfaces** — `personalHasCompGoal`: pose library, prep
