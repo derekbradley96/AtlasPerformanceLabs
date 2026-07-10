@@ -329,9 +329,24 @@ Legend: ☐ todo · ☑ done
     training. Connecting with a coach unlocks check-in, messaging, and payment alerts"),
     hiding the coach/client-only ones. Verified live: personal settings shows exactly 2
     toggles, coach/client keep all 8; no console errors.
-25. ☐ **Personal account surfaces** — Account page as personal (no coach-only rows
-    leaking), delete-account personal flow, data export covers `personal_*` tables,
-    More menu personal sections all navigate correctly.
+25. ☑ **Personal account surfaces** — mostly clean, one leak fixed. **Data export**
+    (`export-my-data` edge fn) is complete for personal: covers all 7 `personal*` tables
+    (personal, personal_checkins, personal_contest_preps, personal_nutrition_adherence,
+    personal_prep_precision(_daily), personal_program_assignments) plus meal_logs,
+    workout_sessions, program_blocks, progress_photos, pose_self_assessments,
+    readiness_checkins, retention_habit_daily, profiles, notifications + user storage
+    folders — no gap. **Account page** (`/settings/account`): coach-focus, the "View as
+    role" switcher, and the Admin panel are correctly gated behind `isCoach` /
+    `showTesterControls` / `isAdmin` — nothing coach/admin leaks to a regular personal user.
+    **Delete-account** (`/settings/delete-account`): role-aware (personal gets personal
+    reason/impact copy; coach-only active-client checks are `isCoachRole`-gated) and calls
+    the role-agnostic `delete-account` edge fn — works for personal. FIXED: the personal
+    More menu offered "Supplements" → `/client/supplements`, a coach-ASSIGNED feature whose
+    empty state literally reads "Your coach can add your supplement plan from their
+    dashboard" — a dead-end for coachless personal users. Removed it from the personal menu
+    (returns after the coach handoff). Verified live: personal `/more` no longer shows
+    Supplements; Nutrition / MFP import / Progress photos / Work-with-a-coach still present;
+    /achievements + /notifications reachable and personal-aware.
 26. ☐ **Role guards & shell polish** — personal can't reach coach/client routes (spot-
     check RequireRole coverage), headers/tab bar correct on every personal page after
     the shell rework, keyboard behavior on personal forms.

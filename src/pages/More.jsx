@@ -734,7 +734,9 @@ function MoreContent() {
         <div className="app-card overflow-hidden" style={{ marginBottom: spacing[12] }}>
           {menuRow(<UtensilsCrossed size={20} style={{ color: colors.muted }} />, 'Nutrition', 'Logging and daily fuel', '/nutrition')}
           {menuRow(<Target size={20} style={{ color: colors.muted }} />, 'Nutrition targets', 'Calories and macros', '/nutrition-targets')}
-          {menuRow(<Pill size={20} style={{ color: colors.muted }} />, 'Supplements', 'Your protocol and daily logging', '/client/supplements')}
+          {/* Supplements is a coach-assigned client feature ("your coach can add
+              your plan") — omitted from the personal menu so a coachless user isn't
+              sent to a dead-end. It returns via the coach-conversion handoff. */}
           {menuRow(<RefreshCw size={20} style={{ color: colors.muted }} />, 'Import from MyFitnessPal', 'Bring your diary history into Atlas', '/import/mfp')}
         </div>
         <Card style={{ marginBottom: spacing[8], padding: spacing[12] }}>
