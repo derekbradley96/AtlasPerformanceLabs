@@ -2,10 +2,10 @@ import { supabase } from '@/lib/supabaseClient';
 
 /** Columns for profiles select; split so we can retry if DB is behind migrations (e.g. plan_tier). */
 const PROFILE_SELECT_FULL_LEGACY =
-  'id, role, full_name, display_name, coach_type, coach_focus, plan_tier, personal_plan_tier, personal_training_equipment, personal_training_confidence, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit, food_quantity_unit, nutrition_label_display, water_unit, sodium_unit, taking_clients, brand_name, brand_logo_url, brand_accent_colour, onboarding_headline, onboarding_message, onboarding_bullets, coach_discovery_prompt_seen_at, coach_upsell_seen_at';
+  'id, role, full_name, display_name, coach_type, coach_focus, goal, plan_tier, personal_plan_tier, personal_training_equipment, personal_training_confidence, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit, food_quantity_unit, nutrition_label_display, water_unit, sodium_unit, taking_clients, brand_name, brand_logo_url, brand_accent_colour, onboarding_headline, onboarding_message, onboarding_bullets, coach_discovery_prompt_seen_at, coach_upsell_seen_at';
 const PROFILE_SELECT_FULL = `${PROFILE_SELECT_FULL_LEGACY}, avatar_url`;
 const PROFILE_SELECT_WITHOUT_PLAN_TIER_LEGACY =
-  'id, role, full_name, display_name, coach_type, coach_focus, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit, food_quantity_unit, nutrition_label_display, water_unit, sodium_unit';
+  'id, role, full_name, display_name, coach_type, coach_focus, goal, onboarding_plan_status, is_beta_user, beta_group, is_admin, onboarding_complete, referral_code, coaching_style, niche_tags, created_at, linked_from_personal_at, height_unit, bodyweight_unit, load_unit, food_quantity_unit, nutrition_label_display, water_unit, sodium_unit';
 const PROFILE_SELECT_WITHOUT_PLAN_TIER = `${PROFILE_SELECT_WITHOUT_PLAN_TIER_LEGACY}, avatar_url`;
 /** When nutrition columns are not migrated yet */
 const PROFILE_SELECT_BODY_AND_LOAD_LEGACY =
@@ -60,7 +60,7 @@ export async function fetchProfile(userId) {
       }
       lastError = error;
       if (
-        !/plan_tier|personal_plan_tier|personal_training_equipment|personal_training_confidence|linked_from_personal_at|height_unit|bodyweight_unit|load_unit|weight_unit|food_quantity_unit|nutrition_label_display|water_unit|sodium_unit|taking_clients|brand_name|brand_logo_url|brand_accent_colour|onboarding_headline|onboarding_message|onboarding_bullets|avatar_url|schema cache|PGRST204/i.test(
+        !/goal|plan_tier|personal_plan_tier|personal_training_equipment|personal_training_confidence|linked_from_personal_at|height_unit|bodyweight_unit|load_unit|weight_unit|food_quantity_unit|nutrition_label_display|water_unit|sodium_unit|taking_clients|brand_name|brand_logo_url|brand_accent_colour|onboarding_headline|onboarding_message|onboarding_bullets|avatar_url|schema cache|PGRST204/i.test(
           error.message || ''
         )
       ) {

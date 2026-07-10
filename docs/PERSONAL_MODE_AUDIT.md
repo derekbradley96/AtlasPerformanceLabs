@@ -196,9 +196,24 @@ Legend: ☐ todo · ☑ done
     milestones, athlete-dev score) and readiness (#16: Today's Adjustment). Removed both
     page files + the orphan route + the AppRoutes import/prop; grep confirms zero remaining
     references; app bundle compiles clean.
-18. ☐ **Comp-prep-personal surfaces** — `personalHasCompGoal`: pose library, prep
-    protocols, pose self-assessments, `personal_contest_preps`/`personal_prep_precision*`
-    — reachable, functional, hidden when no comp goal.
+18. ☑ **Comp-prep-personal surfaces** — FIXED a two-layer bug that made the entire
+    Competition Prep area (pose library, prep protocols, pose self-assessment) invisible
+    to EVERY personal user, including those who explicitly pick "Competition prep" at
+    onboarding. (1) `personalHasCompGoal` gated on `profile.goal === 'competition'`, but
+    onboarding stores the human label (`profile.goal = 'Competition prep'`), and the OR
+    fallback `Boolean(profile.competition_date)` referenced a column that doesn't exist on
+    profiles — so the gate was permanently false. Broadened it to
+    `personalGoal.includes('competition')`. (2) Deeper root cause: `goal` was in NONE of the
+    `PROFILE_SELECT_*` column lists in auth/fetchProfile.js, so `profile.goal` was undefined
+    app-wide — silently breaking not just this gate but every goal-based personal surface
+    (coach-upsell goal matching, personalScreenMatrix UX, coach-bridge messaging). Added
+    `goal` to the two primary selects + the column-missing retry regex (smaller fallbacks
+    left goal-free so an un-migrated DB still loads). Verified live with a comp-goal personal
+    user: More now shows the Competition Prep section, all three pages render for personal
+    (no access-denied; copy is personal-appropriate — "run without a coach"), and flipping
+    the goal to "Build muscle" correctly HIDES the section. RLS/columns for the personal
+    write paths verified as the real user (personal_contest_preps + pose_self_assessments
+    insert/select on profile_id = auth.uid()). No console errors.
 
 ## Tier & upgrade system — REMOVED by product decision
 

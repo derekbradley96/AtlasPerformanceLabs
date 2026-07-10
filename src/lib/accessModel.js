@@ -93,8 +93,15 @@ export function resolveAtlasAccess({
   const isClientTransformationDelivery = client && clientDeliveryContext === 'transformation';
   const hasActiveContestPrepClient = Boolean(activeContestPrep && (activeContestPrep.id || activeContestPrep.show_date));
 
-  const personalGoal = personal ? String(profile?.goal ?? '').trim().toLowerCase() : null;
-  const personalHasCompGoal = personal && (personalGoal === 'competition' || Boolean(profile?.competition_date));
+  // profiles.goal stores the human label picked in personal onboarding
+  // ('Competition prep'), never the literal 'competition' — and there is no
+  // competition_date column on profiles. The old exact `=== 'competition'` match
+  // (plus a dead competition_date check) was therefore always false, so the
+  // personal Competition Prep surfaces (pose library, prep protocols, pose
+  // self-assessment) were unreachable even for users who explicitly chose that
+  // goal. Match any competition-prep variant instead (label, id, or bare word).
+  const personalGoal = personal ? String(profile?.goal ?? '').trim().toLowerCase() : '';
+  const personalHasCompGoal = personal && personalGoal.includes('competition');
 
   return {
     role: resolvedRole,
