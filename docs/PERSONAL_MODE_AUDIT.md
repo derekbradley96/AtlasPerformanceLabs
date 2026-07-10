@@ -114,9 +114,26 @@ Legend: ☐ todo · ☑ done
     barcode entry with a clear message. Verified live: barcode 5449000000996 → Open Food Facts
     found Coca-Cola → prefilled 105kcal/26.5g carbs → logged to meal_logs (source=barcode,
     barcode stored) → Today ring "1895 kcal remaining" (2000−105). Native camera itself
-    untestable in-browser (thin wrapper → same lookup path).
-14. ☐ **MFP import (`/import/mfp`)** — CSV import as personal: parse, preview, commit,
-    errors.
+    untestable in-browser (thin wrapper → same lookup path). FEATURE ADDED (4a34a20): crowd-
+    sourced barcode cache — OFF-miss + manual entry now saves to shared public.barcode_products
+    so the next scanner (any user) gets it. Verified cross-user: A types "My Protein Bar" for an
+    OFF-unknown barcode → B scans same barcode → resolves.
+14. ☑ **MFP import (`/import/mfp`)** — CSV import as personal. FIXED (import was fully
+    broken, silently): two stacked bugs meant every import reported success but wrote
+    0 rows. (1) `importMFPMealsToAtlas` upserted with `onConflict:
+    'profile_id,log_date,meal_type,food_name'` but meal_logs has no matching unique
+    index → Postgres 42P10, whole batch rejected. Rewrote to app-level dedup (fetch
+    existing rows in the CSV's date range, skip exact `date|meal_type|food_name`
+    matches) + plain insert in batches of 50 — a blanket unique index was rejected as
+    it would wrongly block logging the same food twice in a day. (2) the parser sets
+    `source: 'mfp_import'`, but `meal_logs_source_check` only allowed
+    manual/barcode/quick_add/template → 23514, insert rejected. Migration
+    20260710130000 adds 'mfp_import' to the CHECK (keeps import attribution). Verified
+    end-to-end against the real DB (Node round-trip): parse skips Date/Totals header
+    rows, first import 4 imported/0 skipped/4 rows landed, re-import 0 imported/4
+    skipped (dedup), still 4 rows. Also made the result card honest on re-import
+    ("Everything in this file was already imported · N duplicates skipped") instead of
+    a bare "0 meals imported". Coach-side client_id path preserved (ownerColumn switch).
 
 ## Progress & insights
 

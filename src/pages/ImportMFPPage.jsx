@@ -177,8 +177,17 @@ export default function ImportMFPPage() {
 
       {result ? (
         <Card style={{ marginTop: spacing[14], padding: spacing[14], border: `1px solid ${colors.success}` }}>
-          <p style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{result.imported} meals imported from MyFitnessPal</p>
-          <p style={{ margin: `${spacing[6]}px 0 0`, color: colors.muted }}>Your full food history is now in Atlas.</p>
+          <p style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+            {result.imported > 0
+              ? `${result.imported} meal${result.imported === 1 ? '' : 's'} imported from MyFitnessPal`
+              : 'Everything in this file was already imported'}
+          </p>
+          <p style={{ margin: `${spacing[6]}px 0 0`, color: colors.muted }}>
+            {result.imported > 0 ? 'Your full food history is now in Atlas.' : 'Nothing was duplicated.'}
+            {result.skipped > 0
+              ? ` ${result.skipped} duplicate${result.skipped === 1 ? ' was' : 's were'} skipped.`
+              : ''}
+          </p>
           <Button style={{ marginTop: spacing[10] }} onClick={() => navigate('/nutrition')}>
             View my nutrition →
           </Button>

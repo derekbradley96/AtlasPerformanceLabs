@@ -99,29 +99,58 @@ export async function importMFPMealsToAtlas({
       return;
     }
 
+    // Dedupe in app code, not via ON CONFLICT: meal_logs has no unique index on
+    // (profile_id, log_date, meal_type, food_name) — an upsert on those columns
+    // errors 42P10, which used to fail the whole import silently. And a blanket
+    // unique index would wrongly block logging the same food twice in a day via
+    // the normal meal logger. So we fetch the existing rows in range and skip
+    // exact matches (re-import safe) before a plain insert.
+    const ownerColumn = clientId ? 'client_id' : 'profile_id';
+    const ownerValue = clientId || profileId;
+    if (!ownerValue) {
+      onError?.('Sign in before importing.');
+      return;
+    }
+
+    const dates = meals.map((m) => m.log_date).filter(Boolean).sort();
+    const dedupeKey = (m) => `${m.log_date}|${m.meal_type}|${String(m.food_name || '').toLowerCase()}`;
+    const existingKeys = new Set();
+    if (dates.length) {
+      const { data: existing } = await supabase
+        .from('meal_logs')
+        .select('log_date, meal_type, food_name')
+        .eq(ownerColumn, ownerValue)
+        .gte('log_date', dates[0])
+        .lte('log_date', dates[dates.length - 1]);
+      for (const row of existing || []) existingKeys.add(dedupeKey(row));
+    }
+
+    const seen = new Set();
+    const toInsert = [];
+    let skipped = 0;
+    for (const m of meals) {
+      const key = dedupeKey(m);
+      if (existingKeys.has(key) || seen.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(key);
+      toInsert.push({ ...m, profile_id: profileId || null, client_id: clientId || null });
+    }
+
     const BATCH = 50;
     let imported = 0;
-    let skipped = 0;
-
-    for (let i = 0; i < meals.length; i += BATCH) {
-      const slice = meals.slice(i, i + BATCH);
-      const batch = slice.map((m) => ({
-        ...m,
-        profile_id: profileId || null,
-        client_id: clientId || null,
-      }));
-
-      const { error } = await supabase
-        .from('meal_logs')
-        .upsert(batch, {
-          onConflict: 'profile_id,log_date,meal_type,food_name',
-          ignoreDuplicates: true,
-        });
-
-      if (error) skipped += batch.length;
-      else imported += batch.length;
-      onProgress?.(Math.min(100, Math.round(((i + slice.length) / meals.length) * 100)));
+    for (let i = 0; i < toInsert.length; i += BATCH) {
+      const slice = toInsert.slice(i, i + BATCH);
+      const { error } = await supabase.from('meal_logs').insert(slice);
+      if (error) {
+        skipped += slice.length;
+      } else {
+        imported += slice.length;
+      }
+      onProgress?.(Math.min(100, Math.round(((i + slice.length) / Math.max(1, toInsert.length)) * 100)));
     }
+    onProgress?.(100);
 
     onComplete?.({ imported, skipped, total: meals.length });
   } catch (e) {
