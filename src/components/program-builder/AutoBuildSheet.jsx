@@ -30,8 +30,6 @@ export default function AutoBuildSheet({
   personalEnhancedExperience,
   sectionGap,
   isPersonalRole,
-  canUsePersonalAutoBuilder,
-  personalUpgradeCopy,
   autoBuildExplainability,
   quickGoal,
   setQuickGoal,
@@ -377,14 +375,6 @@ export default function AutoBuildSheet({
               ? 'Build your week faster. Atlas drafts a smart week, and you keep full control to edit everything.'
               : 'Build your first week. Atlas creates a clean starting point you can edit manually.'}
           </p>
-          {isPersonalRole && !canUsePersonalAutoBuilder && !personalBasicExperience && (
-            <div style={{ marginBottom: spacing[10], padding: spacing[12], border: `1px solid ${shell.cardBorder}`, borderRadius: shell.cardRadius, background: colors.surface1 }}>
-              <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{personalUpgradeCopy.title}</p>
-              <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted }}>
-                {personalUpgradeCopy.body}
-              </p>
-            </div>
-          )}
           {personalEnhancedExperience && autoBuildExplainability.length > 0 && (
             <ul className="space-y-1" style={{ margin: `0 0 ${spacing[16]}px`, paddingLeft: spacing[16] }}>
               {autoBuildExplainability.slice(0, 3).map((line, idx) => (

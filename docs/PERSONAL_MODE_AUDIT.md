@@ -239,9 +239,24 @@ Legend: ☐ todo · ☑ done
     (STEP_SEQUENCE = goal→about_you→training; PersonalOnboardingTierPage deleted back in #1);
     the residual `personal_plan_tier: 'free'` write on finish is benign. Upgrade-prompt
     surfaces are #20.
-20. ☐ **Strip personal upgrade prompts** — remove the 7 `PERSONAL_UPGRADE_PROMPT_TYPES`
-    surfaces and any upsell copy/CTAs in personal mode (coach-conversion CTAs stay —
-    that funnel is #21–23, not a tier upsell).
+20. ☑ **Strip personal upgrade prompts** — the prompt engine was already neutralized
+    (`canShowPersonalUpgradePrompt` → false, `getPersonalUpgradeCopy` → empty), so the
+    prompts rendered nothing, but the dead render blocks + a `/pricing` CTA + an
+    anti-upsell banner remained. REMOVED: (1) Nutrition's "Barcode scanning is free —
+    forever / No paywall, ever" banner (the tier-era anti-upsell noise flagged in #4) +
+    its state/effect/`radii` import; (2) the ExerciseEntryRow builder-empty upgrade card
+    with its "See plans" → `/pricing` link; (3) the ProgramBuilder feature-gate upgrade
+    prompts — the two `if (isPersonalRole && !canUsePersonalAutoBuilder)` blocks were
+    unreachable (canUsePersonalAutoBuilder is always true) and fired `toast.error('')`
+    (empty), replaced with an honest "built manually" message; (4) the WorkoutPlayer +
+    PostWorkoutCompletion post-workout upgrade prompt (dead + empty copy); (5) the dead
+    upgrade block in the orphaned AutoBuildSheet. Removed all `getPersonalUpgradeCopy`/
+    `canShowPersonalUpgradePrompt`/`markPersonalUpgradePromptShown`/
+    `PERSONAL_UPGRADE_PROMPT_TYPES` imports from consuming files (kept `canUsePersonalFeature`
+    where still used). Verified live: no "free forever" banner on /nutrition, page renders,
+    no console errors; lint 0 errors. Coach-conversion CTAs (Work-with-a-coach, coach
+    bridge) intentionally KEPT — that funnel is #21–23. The neutralized no-op stubs in
+    personalPlanAccess.js are left as harmless retired scaffolding (no app consumers).
 
 ## Coach conversion funnel (personal → client)
 

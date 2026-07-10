@@ -65,8 +65,6 @@ export default function PostWorkoutCompletion({
   isRecoverySession,
   weeklyConsistency,
   nextAction,
-  showPostWorkoutUpgradePrompt,
-  personalUpgradeCopy,
   effectiveRuntimeRecommendation,
   dashboardPath,
   checkInPath,
@@ -284,26 +282,6 @@ export default function PostWorkoutCompletion({
           >
             <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600, letterSpacing: 0.2 }}>PLAN</span>
             <span style={{ fontSize: 12, color: colors.text, fontWeight: 600 }}>{effectiveRuntimeRecommendation.summary}</span>
-          </div>
-        )}
-
-        {showPostWorkoutUpgradePrompt && (
-          <div
-            style={{
-              marginTop: spacing[10],
-              display: 'inline-block',
-              textAlign: 'left',
-              padding: `${spacing[10]}px ${spacing[12]}px`,
-              borderRadius: radii.card,
-              border: `1px solid ${colors.border}`,
-              background: colors.surface2,
-              maxWidth: 480,
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{personalUpgradeCopy.title}</p>
-            <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>
-              {personalUpgradeCopy.body}
-            </p>
           </div>
         )}
 

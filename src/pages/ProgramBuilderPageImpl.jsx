@@ -50,14 +50,7 @@ import {
 
 
 import { generateStarterProgram, chooseSplitForContext } from '@/lib/autoProgramBuilder';
-import {
-  canShowPersonalUpgradePrompt,
-  canUsePersonalFeature,
-  getPersonalUpgradeCopy,
-  markPersonalUpgradePromptShown,
-  PERSONAL_FEATURES,
-  PERSONAL_UPGRADE_PROMPT_TYPES,
-} from '@/lib/personalPlanAccess';
+import { canUsePersonalFeature, PERSONAL_FEATURES } from '@/lib/personalPlanAccess';
 import { resolvePersonalPlanTier } from '@/config/plans';
 import {
   personalBuilderIntro,
@@ -258,13 +251,6 @@ export default function ProgramBuilderPage() {
     user,
     feature: PERSONAL_FEATURES.AUTO_PROGRAM_BUILDER,
   });
-  const personalUpgradeCopy = getPersonalUpgradeCopy('builder_empty');
-  const personalFeatureGateCopy = getPersonalUpgradeCopy('feature_access');
-  const personalBuilderEmptyCopy = getPersonalUpgradeCopy('builder_empty');
-  const showPersonalBuilderEmptyHint =
-    isPersonalRole
-    && !canUsePersonalAutoBuilder
-    && canShowPersonalUpgradePrompt(PERSONAL_UPGRADE_PROMPT_TYPES.BUILDER_EMPTY, Date.now(), profile);
   const canUseBuilder = isCoachRole || isPersonalRole;
   const supabase = hasSupabase ? getSupabase() : null;
   const isUuid = (value) =>
@@ -1799,10 +1785,7 @@ export default function ProgramBuilderPage() {
       return;
     }
     if (isPersonalRole && !canUsePersonalAutoBuilder) {
-      if (canShowPersonalUpgradePrompt(PERSONAL_UPGRADE_PROMPT_TYPES.FEATURE_ACCESS, Date.now(), profile)) {
-        markPersonalUpgradePromptShown(PERSONAL_UPGRADE_PROMPT_TYPES.FEATURE_ACCESS);
-      }
-      toast.error(personalFeatureGateCopy.body);
+      toast.error('Personal plans are built manually — add your exercises below.');
       return;
     }
     setSaving(true);
@@ -1873,10 +1856,7 @@ export default function ProgramBuilderPage() {
     }
 
     if (isPersonalRole && !canUsePersonalAutoBuilder) {
-      if (canShowPersonalUpgradePrompt(PERSONAL_UPGRADE_PROMPT_TYPES.FEATURE_ACCESS, Date.now(), profile)) {
-        markPersonalUpgradePromptShown(PERSONAL_UPGRADE_PROMPT_TYPES.FEATURE_ACCESS);
-      }
-      toast.error(personalFeatureGateCopy.body);
+      toast.error('Personal plans are built manually — add your exercises below.');
       return;
     }
 
@@ -2028,7 +2008,6 @@ export default function ProgramBuilderPage() {
     entryWhoFor,
     canUsePersonalAutoBuilder,
     profile,
-    personalFeatureGateCopy.body,
     resolveEntryTotalWeeks,
     entryGoal,
     entryDaysPerWeek,
@@ -2592,8 +2571,6 @@ export default function ProgramBuilderPage() {
             personalExperienceLevel,
             handleLinkSuperset,
             handleRemoveSuperset,
-            showPersonalBuilderEmptyHint,
-            personalBuilderEmptyCopy,
           }}
           handleSaveBlock={handleSaveBlock}
           headerEffectiveWeeksRef={headerEffectiveWeeksRef}

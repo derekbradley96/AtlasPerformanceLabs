@@ -14,7 +14,7 @@ import MealLogList from '@/components/nutrition/MealLogList';
 import { useAuth } from '@/lib/AuthContext';
 import { isClient as isClientRoleFn, isPersonal as isPersonalRoleFn, isCoach as isCoachRoleFn } from '@/lib/roles';
 import { toast } from 'sonner';
-import { colors, radii, shell, spacing } from '@/ui/tokens';
+import { colors, shell, spacing } from '@/ui/tokens';
 import Card from '@/ui/Card';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import {
@@ -213,7 +213,6 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   const [presetMealType, setPresetMealType] = useState(null);
   const [activeLogSection, setActiveLogSection] = useState('food');
   const [showRecentFoods, setShowRecentFoods] = useState(false);
-  const [scannerBannerVisible, setScannerBannerVisible] = useState(false);
   const [editingMeal, setEditingMeal] = useState(null);
   const [editDraft, setEditDraft] = useState({ calories: '', protein_g: '', carbs_g: '', fats_g: '' });
   const todaysNutritionRef = useRef(null);
@@ -303,16 +302,6 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   );
 
   const recentBarcodeScans = useMemo(() => listUserBarcodeCacheEntries(10), [nutritionFoodCache, todayMeals]);
-  useEffect(() => {
-    const hasScans = Array.isArray(recentBarcodeScans) && recentBarcodeScans.length > 0;
-    let dismissed = false;
-    try {
-      dismissed = localStorage.getItem('atlas_scanner_banner_dismissed') === '1';
-    } catch {
-      dismissed = false;
-    }
-    setScannerBannerVisible(!dismissed && !hasScans);
-  }, [recentBarcodeScans]);
 
   const prepMacroPhaseLine = useMemo(() => {
     if (!prepContext?.phase) return null;
@@ -1115,45 +1104,6 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
               ? personalNutritionPageCopy.pageSubtitle
               : 'Targets · today’s budget · log — stay fueled for your next session.'}
         </p>
-        {scannerBannerVisible ? (
-          <div
-            style={{
-              background: colors.surface1,
-              border: `1px solid ${colors.border}`,
-              borderRadius: radii.md,
-              padding: `${spacing[10]}px ${spacing[14]}px`,
-              display: 'flex',
-              alignItems: 'center',
-              gap: spacing[10],
-              marginTop: spacing[10],
-              marginBottom: spacing[12],
-            }}
-          >
-            <span style={{ fontSize: 20 }}>📷</span>
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 500, color: colors.text, margin: 0 }}>
-                Barcode scanning is free — forever
-              </p>
-              <p style={{ fontSize: 12, color: colors.muted, margin: `${spacing[2]}px 0 0` }}>
-                Scan any packaged food instantly. No paywall, ever.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                try {
-                  localStorage.setItem('atlas_scanner_banner_dismissed', '1');
-                } catch {
-                  // ignore
-                }
-                setScannerBannerVisible(false);
-              }}
-              style={{ marginLeft: 'auto', fontSize: 16, background: 'none', border: 'none', color: colors.muted, cursor: 'pointer' }}
-            >
-              ×
-            </button>
-          </div>
-        ) : null}
         {isPersonal && (
           <button
             type="button"

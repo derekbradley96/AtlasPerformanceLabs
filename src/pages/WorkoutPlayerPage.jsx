@@ -48,14 +48,7 @@ import { PageLoader } from '@/components/ui/LoadingState';
 import EmptyState from '@/components/ui/EmptyState';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import {
-  canShowPersonalUpgradePrompt,
-  canUsePersonalFeature,
-  getPersonalUpgradeCopy,
-  markPersonalUpgradePromptShown,
-  PERSONAL_FEATURES,
-  PERSONAL_UPGRADE_PROMPT_TYPES,
-} from '@/lib/personalPlanAccess';
+import { canUsePersonalFeature, PERSONAL_FEATURES } from '@/lib/personalPlanAccess';
 import {
   personalEditPlanCta,
   personalFatigueHintEnhanced,
@@ -161,20 +154,10 @@ export default function WorkoutPlayerPage() {
   const [readinessSheetOpen, setReadinessSheetOpen] = useState(false);
   const [readinessSaving, setReadinessSaving] = useState(false);
   const [pendingReadinessSessionId, setPendingReadinessSessionId] = useState(null);
-  const personalUpgradeCopy = getPersonalUpgradeCopy('post_workout');
-  const showPostWorkoutUpgradePrompt =
-    !clientMode
-    && !canUseEnhancedGuidance
-    && phase === 'complete'
-    && canShowPersonalUpgradePrompt(PERSONAL_UPGRADE_PROMPT_TYPES.POST_WORKOUT, Date.now(), authProfile);
 
   const viewerLoadUnit = useMemo(() => resolveViewerLoadUnit(authProfile), [authProfile?.load_unit, authProfile]);
   const workoutGoal = authProfile?.goal || authProfile?.personal_goal || '';
 
-  useEffect(() => {
-    if (!showPostWorkoutUpgradePrompt) return;
-    markPersonalUpgradePromptShown(PERSONAL_UPGRADE_PROMPT_TYPES.POST_WORKOUT);
-  }, [showPostWorkoutUpgradePrompt]);
   /** Recover session-complete when user refreshed mid-flow (all sets already logged). */
   const recoveryFiredRef = useRef(false);
   const personalBasicAdjToastRef = useRef(false);
@@ -1310,24 +1293,6 @@ export default function WorkoutPlayerPage() {
                     ) : null}
                   </div>
                 )}
-                {!clientMode && !canUseEnhancedGuidance && !assignedWorkout?.personalBasicAdjustmentNote && (
-                  <div
-                    style={{
-                      marginTop: spacing[12],
-                      borderRadius: radii.card,
-                      border: `1px solid ${colors.border}`,
-                      background: colors.surface2,
-                      padding: spacing[12],
-                    }}
-                  >
-                    <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>
-                      {personalUpgradeCopy.title}
-                    </p>
-                    <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>
-                      {personalUpgradeCopy.body}
-                    </p>
-                  </div>
-                )}
                 {!clientMode && assignedWorkout?.personalBasicAdjustmentNote && (
                   <div
                     style={{
@@ -1657,8 +1622,6 @@ export default function WorkoutPlayerPage() {
             isRecoverySession: isRecoverySessionPost,
             weeklyConsistency,
             nextAction: postWorkoutNext,
-            showPostWorkoutUpgradePrompt,
-            personalUpgradeCopy,
             effectiveRuntimeRecommendation,
             dashboardPath,
             checkInPath,
