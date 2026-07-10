@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/drawer';
 import { scanBarcodeValue } from '@/lib/barcodeScanner';
 import { fetchOpenFoodFactsProduct, searchFoodProducts } from '@/lib/openFoodFacts';
+import { fetchSharedBarcodeProduct, upsertSharedBarcodeProduct } from '@/lib/sharedBarcodeCache';
 import { formatNumber } from '@/lib/format';
 import { useAuth } from '@/lib/AuthContext';
 import {
@@ -154,6 +155,11 @@ export default function MealLogForm({
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
   const [manualBarcode, setManualBarcode] = useState('');
+  // Barcode carried into the generic manual form when a scan found nothing, so
+  // what the user types by hand gets saved to the shared cache for the next
+  // person. Distinct from the transient lookup state so a stale value can't
+  // attach a barcode to an unrelated manual entry.
+  const [pendingSaveBarcode, setPendingSaveBarcode] = useState('');
   const [lookupBarcode, setLookupBarcode] = useState('');
   const [scannedFood, setScannedFood] = useState(null);
   const [consumedGrams, setConsumedGrams] = useState('100');
@@ -353,6 +359,7 @@ export default function MealLogForm({
     const extraNotes = (notes || '').trim();
     const finalNotes = [formattedFood || null, extraNotes || null].filter(Boolean).join(' | ') || null;
 
+    const barcodeToSave = String(pendingSaveBarcode || '').trim();
     const payload = {
       meal_type: mealType,
       calories: parseFloat(calories),
@@ -365,6 +372,7 @@ export default function MealLogForm({
       portion_ml: portion.portion_ml,
       household_unit: portion.household_unit,
       household_amount: portion.household_amount,
+      ...(barcodeToSave ? { barcode: barcodeToSave, source: 'barcode' } : {}),
     };
 
     try {
@@ -375,6 +383,27 @@ export default function MealLogForm({
       return;
     }
     hapticSuccess();
+
+    // A scan found nothing and the user typed the nutrition in — save it to the
+    // shared cache so the next person who scans this barcode gets it. Needs a
+    // gram portion to convert to per-100g; skipped for household-unit entries.
+    const grams = Number(portion.portion_grams);
+    if (barcodeToSave && profileId && Number.isFinite(grams) && grams > 0 && parseFloat(calories) > 0) {
+      const per100 = (v) => (v ? Math.round((parseFloat(v) / grams) * 1000) / 10 : null);
+      void upsertSharedBarcodeProduct({
+        barcode: barcodeToSave,
+        userId: profileId,
+        product: {
+          name: trimmedFood || 'Unnamed product',
+          calories_per_100g: per100(calories),
+          protein_per_100g: per100(protein),
+          carbs_per_100g: per100(carbs),
+          fats_per_100g: per100(fats),
+          serving_size_grams: grams,
+        },
+      });
+    }
+    setPendingSaveBarcode('');
 
     setMealTypeWithPref('breakfast');
     setCalories('');
@@ -529,6 +558,27 @@ export default function MealLogForm({
 
     const result = await fetchOpenFoodFactsProduct(clean);
     if (!result.ok || !result.product) {
+      // OFF miss — fall back to the crowd-sourced cache (a barcode a previous
+      // user filled in by hand). OFF stays primary; this only fills its gaps.
+      const community = await fetchSharedBarcodeProduct(clean);
+      if (community.ok && community.product) {
+        setScannedFood(community.product);
+        setUserBarcodeCacheEntry(clean, { ...community.product, barcode: clean });
+        const servingG = Number(community.product?.serving_size_grams);
+        const liquid = isLikelyLiquid(community.product?.serving_size);
+        if (Number.isFinite(servingG) && servingG > 0) {
+          setConsumedServings('1');
+          setConsumedGrams(String(Math.round(servingG)));
+          setBarcodeServingMode('serving');
+        } else {
+          setConsumedGrams(String(liquid ? 250 : 100));
+          setBarcodeServingMode('100g');
+        }
+        setManualFromScanned(community.product);
+        setLookupError('');
+        setLookupLoading(false);
+        return;
+      }
       setScannedFood(null);
       setLookupError('Food not found');
       setLookupLoading(false);
@@ -625,6 +675,10 @@ export default function MealLogForm({
         fats_per_100g: Number.isFinite(f100) ? f100 : null,
       };
       setUserBarcodeCacheEntry(code, productForCache);
+      // Contribute to the shared cache so the next person who scans this barcode
+      // gets it — especially the case the user asked about: OFF had no match and
+      // they typed the nutrition in themselves. Best-effort, never blocks the log.
+      if (profileId) void upsertSharedBarcodeProduct({ barcode: code, userId: profileId, product: productForCache });
     }
 
     setLookupOpen(false);
@@ -653,6 +707,12 @@ export default function MealLogForm({
       clearTimeout(t);
     };
   }, [foodSearchQuery, showForm]);
+
+  // Drop a carried barcode once the manual form closes, so it can never attach
+  // to a later, unrelated manual entry.
+  useEffect(() => {
+    if (!showForm) setPendingSaveBarcode('');
+  }, [showForm]);
 
   /** Open the same confirm sheet used for barcode scans with a text-search result. */
   const openConfirmFromSearchResult = useCallback((product) => {
@@ -772,7 +832,8 @@ export default function MealLogForm({
                 ) : lookupError ? (
                   <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
                     <p className="text-sm text-amber-200">Product not found ({lookupBarcode || manualBarcode || webBarcodeInput}).</p>
-                    <button type="button" className="text-xs text-slate-200 underline mt-1 mr-3" onClick={() => { setLookupOpen(false); setFood(''); setShowForm(true); }}>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Add it manually below — we&apos;ll remember it for next time you scan.</p>
+                    <button type="button" className="text-xs text-slate-200 underline mt-1 mr-3" onClick={() => { setPendingSaveBarcode(String(lookupBarcode || manualBarcode || webBarcodeInput || '').trim()); setLookupOpen(false); setFood(''); setShowForm(true); }}>
                       Open manual entry
                     </button>
                     <button type="button" className="text-xs text-blue-300 underline mt-1" onClick={() => window.open(`https://world.openfoodfacts.org/product/${encodeURIComponent(lookupBarcode || manualBarcode || webBarcodeInput)}`, '_blank', 'noopener,noreferrer')}>Help improve our database</button>
@@ -824,7 +885,8 @@ export default function MealLogForm({
                 ) : (
                   <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
                     <p className="text-sm text-amber-200">Product not found ({lookupBarcode || webBarcodeInput}).</p>
-                    <button type="button" className="text-xs text-slate-200 underline mt-1 mr-3" onClick={() => { setLookupOpen(false); setFood(''); setShowForm(true); }}>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Add it manually below — we&apos;ll remember it for next time you scan.</p>
+                    <button type="button" className="text-xs text-slate-200 underline mt-1 mr-3" onClick={() => { setPendingSaveBarcode(String(lookupBarcode || webBarcodeInput || '').trim()); setLookupOpen(false); setFood(''); setShowForm(true); }}>
                       Open manual entry
                     </button>
                     <button type="button" className="text-xs text-blue-300 underline mt-1" onClick={() => window.open(`https://world.openfoodfacts.org/product/${encodeURIComponent(lookupBarcode || webBarcodeInput)}`, '_blank', 'noopener,noreferrer')}>Help improve our database</button>
