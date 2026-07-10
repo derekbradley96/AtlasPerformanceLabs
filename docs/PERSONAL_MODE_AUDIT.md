@@ -102,8 +102,12 @@ Legend: ☐ todo · ☑ done
     who write to the DB). Now fetches by profile_id + uses DB totals (localStorage = offline
     fallback). Ring now reads "2040 kcal remaining", protein counted. Note: personal Nutrition
     add path writes DB when online (addMealLog), localStorage only when offline.
-12. ☐ **Nutrition targets (`/nutrition-targets`)** — setup flow, profile target
-    columns, units, and targets actually driving the Log tab and adherence.
+12. ☑ **Nutrition targets (`/nutrition-targets`)** — CLEAN PASS, no code changes. Standalone
+    page and the inline /nutrition editor both render the same PersonalNutritionTargetsPanel
+    (consistent). Saves dual-write localStorage + profiles columns (calories_target/
+    protein_target/carbs_target/fats_target); write & read column names match. Verified live:
+    set 2500 kcal "Higher protein" → persisted (2500/200p/288c/61f, split math correct) →
+    Today ring shows "2500 kcal remaining · 200g protein still needed". Units kcal+grams only.
 13. ☐ **Barcode scan quick add** — feature-gated; works on the gated tier, prompt
     behavior on basic.
 14. ☐ **MFP import (`/import/mfp`)** — CSV import as personal: parse, preview, commit,
