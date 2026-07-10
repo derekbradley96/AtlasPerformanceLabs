@@ -54,7 +54,7 @@ const GOAL_CARDS = [
 const HEIGHT_UNIT_OPTIONS = HEIGHT_SEGMENT_OPTIONS.filter((o) => o.id === 'cm' || o.id === 'ft_in');
 const WEIGHT_UNIT_OPTIONS_TWO = WEIGHT_SEGMENT_OPTIONS.filter((o) => o.id === 'kg' || o.id === 'lb');
 
-const DAYS_OPTIONS = [2, 3, 4, 5, 6];
+const DAYS_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
 const EXPERIENCE_CARDS = [
   { confidenceId: 'low', title: 'Beginner', sub: 'New to structured training' },

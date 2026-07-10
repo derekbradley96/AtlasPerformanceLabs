@@ -10,7 +10,7 @@ const GOAL_OPTIONS = [
   { value: 'competition', label: 'Comp Prep', icon: Zap },
 ];
 
-const DAYS_OPTIONS = [2, 3, 4, 5, 6];
+const DAYS_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
 const DURATION_PRESETS = [
   { value: '4', label: '4 weeks' },
@@ -153,7 +153,7 @@ export default function ProgramEntryPanel({
       {/* Days per week */}
       <div style={{ marginBottom: spacing[16] }}>
         <p style={labelStyle}>Days per week</p>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {DAYS_OPTIONS.map((n) => (
             <button
               key={n}
