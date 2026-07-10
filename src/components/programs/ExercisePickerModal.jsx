@@ -26,6 +26,10 @@ import {
 
 const RECENT_MAX = 8;
 const FAVORITE_MAX = 8;
+// Stable reference — an inline snapPoints={[0.85]} is a new array every render,
+// which drove vaul's snap-point effect into a setState→re-render→setState loop
+// ("Maximum update depth exceeded") whenever the picker opened.
+const DRAWER_SNAP_POINTS = [0.85];
 
 /** Personal Basic: common lifts — matched by exact `name` in library. */
 const QUICK_PICK_NAMES = [
@@ -369,7 +373,7 @@ export default function ExercisePickerModal({
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
-      snapPoints={[0.85]}
+      snapPoints={DRAWER_SNAP_POINTS}
       dismissible
       shouldScaleBackground
     >

@@ -2,6 +2,13 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getLatestExercisePerformanceByName, getPreviousExercisePerformance } from '@/lib/workoutSessionApi';
 
+// Stable fallbacks: `?? []` / `?? {}` create a NEW reference every render when a
+// query is disabled/undefined (e.g. a block with no days yet). Those values are
+// used as effect dependencies in ProgramBuilderPageImpl, so an unstable fallback
+// re-runs the sync effect → setState → re-render forever ("Maximum update depth").
+const EMPTY_ARRAY = Object.freeze([]);
+const EMPTY_OBJECT = Object.freeze({});
+
 /**
  * ProgramBuilderPageImpl.jsx query map (read queries only; mutations stay in page)
  *
@@ -181,14 +188,14 @@ export function useProgramBuilderData({
 
   return {
     block: blockQuery.data ?? null,
-    weeks: weeksQuery.data ?? [],
-    days: daysQuery.data ?? [],
-    exercises: exercisesQuery.data ?? [],
-    coachClients: coachClientsQuery.data ?? [],
-    suggestionsRows: suggestionsQuery.data ?? [],
+    weeks: weeksQuery.data ?? EMPTY_ARRAY,
+    days: daysQuery.data ?? EMPTY_ARRAY,
+    exercises: exercisesQuery.data ?? EMPTY_ARRAY,
+    coachClients: coachClientsQuery.data ?? EMPTY_ARRAY,
+    suggestionsRows: suggestionsQuery.data ?? EMPTY_ARRAY,
     builderLoading: blockQuery.isLoading || weeksQuery.isLoading,
     blockError: blockQuery.error ?? null,
-    latestCoachPerformanceByName: latestCoachPerformanceByNameQuery.data ?? {},
+    latestCoachPerformanceByName: latestCoachPerformanceByNameQuery.data ?? EMPTY_OBJECT,
     previousExercisePerformanceQueries,
     latestCoachPerformanceByNameLoading: latestCoachPerformanceByNameQuery.isLoading,
   };
