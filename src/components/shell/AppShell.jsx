@@ -573,8 +573,11 @@ export default function AppShell() {
     || /^\/community-room\//.test(pathname);
   // CallRequestsPage has an internal scroll on mobile
   const isCallRequests = pathname === '/call-requests';
-  // Program builder and edit profile manage their own scroll region.
-  const isProgramBuilder = pathname === '/program-builder' || pathname === '/programbuilder' || /^\/program-builder\//.test(pathname);
+  // Edit profile manages its own scroll region. The program builder does NOT — its
+  // content (weeks/days/exercise library) is tall with a `sticky bottom-0` action
+  // bar, so it needs the shell as its scroll container. Putting it in noOuterScroll
+  // wrapped it in overflow-hidden with no internal scroller, clipping everything
+  // below the fold (the exercise library was unreachable on both mobile and desktop).
   const isEditProfile = pathname === '/editprofile';
   const noOuterScroll =
     isChatThread
@@ -583,7 +586,6 @@ export default function AppShell() {
     || isReviewDetail
     || isCommunityRoom
     || isCallRequests
-    || isProgramBuilder
     || isEditProfile;
 
   const [titleOverride, setTitleOverride] = useState(null);
