@@ -260,8 +260,25 @@ Legend: ☐ todo · ☑ done
 
 ## Coach conversion funnel (personal → client)
 
-21. ☐ **Discover/marketplace as personal** — `/discover`, coach profiles, enquiry
-    submit, FindCoachCTA + the 8 `marketplace_opened_from_*` triggers.
+21. ☑ **Discover/marketplace as personal** — FIXED a crash that broke the whole
+    coach-conversion funnel for personal users. `/discover` (RequireAuth +
+    ClientCoachOfferAppGate, which passes non-clients) renders coaches for personal with
+    source-contextual hero copy; the 8 `marketplace_opened_from_*` events fire via
+    `trackPersonalMarketplaceOpened` (verified live: 3× `platform_usage_events` POST 201 on
+    landing with source=from_plateau). BUT opening any coach profile
+    (`/marketplace/coach/:slug` → CoachMarketplaceProfilePage) CRASHED the page for personal
+    visitors: an isPersonal-gated mount effect called
+    `trackCoachProfileOpenedFromPersonal(...).catch()`, but that wrapper (and
+    `trackCoachConsultationRequestedFromPersonal`, used in the enquiry-submit handler)
+    never `return`ed its promise → `.catch()` on undefined → TypeError → ErrorBoundary.
+    Added `return` to the three `personalMarketplaceEntry.js` track wrappers. Verified
+    live end-to-end: coach profile now renders (name/pricing/CTAs), and the enquiry drawer
+    (`#enquire`) opens with its 4 fields — no DEV ERROR. Enquiry submits via the
+    `submit-public-enquiry` edge function (shared public path); `coach_inquiries` RLS
+    already allows personal (INSERT `user_profile_id = auth.uid()`). Deleted the dead
+    `FindCoachCTA` component (never imported/rendered). NOTE: pre-existing fail-soft 400 on
+    the AuthContext `contest_preps` active-prep fallback query (wrapped in try/catch) —
+    unrelated, not personal-marketplace.
 22. ☐ **Invite code → client conversion** — full handoff: role flip, clients row,
     program/data migration (`linked_from_personal_at`); unit tests print
     "[inviteConversion] personal blocks handoff failed" — verify against the real

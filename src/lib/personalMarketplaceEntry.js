@@ -278,20 +278,24 @@ export function trackPersonalMarketplaceOpened(entrySource) {
   if (specific) track(specific, { entry_source: normalized }).catch(() => {});
 }
 
+// These return the promise so callers can safely chain `.catch(...)`; without
+// the return they yielded undefined and `trackX(...).catch()` threw
+// "Cannot read properties of undefined (reading 'catch')", crashing the coach
+// marketplace profile page for personal visitors (the effect is isPersonal-gated).
 export function trackCoachConsultationRequestedFromPersonal(extra = {}) {
-  track(ANALYTICS_EVENTS.COACH_CONSULTATION_REQUESTED_FROM_PERSONAL, {
+  return track(ANALYTICS_EVENTS.COACH_CONSULTATION_REQUESTED_FROM_PERSONAL, {
     ...extra,
     entry_source: readMarketplaceEntrySource(),
   }).catch(() => {});
 }
 
 export function trackCoachProfileOpenedFromPersonal(extra = {}) {
-  track(ANALYTICS_EVENTS.COACH_PROFILE_OPENED_FROM_PERSONAL, {
+  return track(ANALYTICS_EVENTS.COACH_PROFILE_OPENED_FROM_PERSONAL, {
     ...extra,
     entry_source: readMarketplaceEntrySource(),
   }).catch(() => {});
 }
 
 export function trackInviteCodeEnteredFromPersonal(extra = {}) {
-  track(ANALYTICS_EVENTS.INVITE_CODE_ENTERED_FROM_PERSONAL, extra).catch(() => {});
+  return track(ANALYTICS_EVENTS.INVITE_CODE_ENTERED_FROM_PERSONAL, extra).catch(() => {});
 }
