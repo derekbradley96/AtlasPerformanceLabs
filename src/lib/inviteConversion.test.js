@@ -15,7 +15,7 @@ function createSupabaseStub({
   insertErrorsSequence = null,
   profileRoleUpdateError = null,
 } = {}) {
-  const calls = { profileRoleUpdates: 0, clientUpdates: 0 };
+  const calls = { profileRoleUpdates: 0, clientUpdates: 0, blockHandoffs: 0, lastHandoffCoach: null, lastProfilePatch: null };
   const existingQueue = Array.isArray(existingClientSequence)
     ? [...existingClientSequence]
     : [existingClient];
@@ -35,12 +35,17 @@ function createSupabaseStub({
 
   return {
     __calls: calls,
-    async rpc(name) {
+    async rpc(name, args) {
       if (name === 'validate_invite_code') {
         return {
           data: inviteCoachId ? { valid: true, coach_id: inviteCoachId } : null,
           error: null,
         };
+      }
+      if (name === 'handoff_personal_blocks_to_coach') {
+        calls.blockHandoffs += 1;
+        calls.lastHandoffCoach = args?.p_coach_id ?? null;
+        return { data: 1, error: null };
       }
       return { data: null, error: null };
     },
@@ -95,6 +100,7 @@ function createSupabaseStub({
               }
               if (table === 'profiles' && column === 'id') {
                 calls.profileRoleUpdates += 1;
+                calls.lastProfilePatch = values;
                 return Promise.resolve({ data: null, error: profileRoleUpdateError });
               }
               return Promise.resolve({ data: null, error: null });
@@ -133,6 +139,27 @@ describe('applyInviteCodeForUser', () => {
     expect(result.coach_id).toBe('coach-123');
     expect(result.was_personal).toBe(true);
     expect(result.clientProfile?.id).toBe('client-1');
+    // Personal→client conversion must hand off owned program blocks to the new
+    // coach (via the SECURITY DEFINER RPC — a direct UPDATE is RLS-blocked) and
+    // stamp linked_from_personal_at so the client dashboard shows the migration.
+    expect(supabase.__calls.blockHandoffs).toBe(1);
+    expect(supabase.__calls.lastHandoffCoach).toBe('coach-123');
+    expect(supabase.__calls.lastProfilePatch?.role).toBe('client');
+    expect(supabase.__calls.lastProfilePatch?.linked_from_personal_at).toBeTruthy();
+  });
+
+  it('does not stamp linked_from_personal_at or hand off blocks for a non-personal join', async () => {
+    const supabase = createSupabaseStub({
+      inviteCoachId: 'coach-9',
+      existingClient: { id: 'client-9', user_id: 'user-9', coach_id: null, trainer_id: null },
+    });
+    await applyInviteCodeForUser({
+      supabase,
+      user: { id: 'user-9', role: 'client', user_type: 'client' },
+      inviteCode: 'ATLAS123',
+    });
+    expect(supabase.__calls.blockHandoffs).toBe(0);
+    expect(supabase.__calls.lastProfilePatch).toBe(null);
   });
 
   it('throws on invalid invite code', async () => {

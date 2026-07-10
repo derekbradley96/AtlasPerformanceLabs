@@ -279,10 +279,27 @@ Legend: ☐ todo · ☑ done
     `FindCoachCTA` component (never imported/rendered). NOTE: pre-existing fail-soft 400 on
     the AuthContext `contest_preps` active-prep fallback query (wrapped in try/catch) —
     unrelated, not personal-marketplace.
-22. ☐ **Invite code → client conversion** — full handoff: role flip, clients row,
-    program/data migration (`linked_from_personal_at`); unit tests print
-    "[inviteConversion] personal blocks handoff failed" — verify against the real
-    schema, that smells like a live bug hidden by a mock.
+22. ☑ **Invite code → client conversion** — the smell was right: the mock hid a live
+    bug, and verifying against real RLS uncovered THREE stacked failures that broke the
+    whole personal→client handoff. (1) CRITICAL — `clients` had only a coach-scoped INSERT
+    policy (`clients_insert_own`: COALESCE(coach_id,trainer_id)=auth.uid()), so a user
+    entering an invite code could not create their own link row → 42501 →
+    "Could not connect coach link yet." Nobody could join a coach by code. Added
+    `clients_insert_self` (WITH CHECK user_id = auth.uid()), consistent with the existing
+    SELECT/UPDATE policies that already trust user_id. (2) `clients.name` is NOT NULL but
+    `insertClientLink` never supplied it (only the coach-add path did) → 23502 — now passes
+    the joiner's name. (3) the program-blocks handoff (`update coach_id` on owned blocks)
+    is RLS-blocked by program_blocks' WITH CHECK (requires coach_id=auth.uid()) — the direct
+    UPDATE silently affected 0 rows, so coaches never saw invited clients' history. Replaced
+    with a SECURITY DEFINER RPC `handoff_personal_blocks_to_coach` (scoped to the caller's own
+    blocks + their linked coach). Also FIXED: `linked_from_personal_at` was only ever READ
+    (client dashboard's "welcome from personal" state) — never set — now stamped on the
+    personal→client flip. Verified end-to-end as real RLS-enforced users: self-insert OK →
+    role flip + linked_from_personal_at set → RPC reassigns the block → **the coach now sees
+    the handed-off block**. Strengthened the unit test (the one that hid this) to assert the
+    handoff RPC fires with the coach id and linked_from_personal_at is stamped for personal
+    (and neither for a non-personal join); 7/7 pass. The test no longer prints the
+    "personal blocks handoff failed" warning.
 23. ☐ **Coach transition pages** — PersonalCoachTransitionPage +
     PersonalCoachTierSelectionPage: reachable, accurate, don't reference stale flows.
 

@@ -44,7 +44,10 @@ async function readExistingClientLink(supabase, userId) {
   return result.data ?? null;
 }
 
-async function insertClientLink(supabase, userId, coachId) {
+async function insertClientLink(supabase, userId, coachId, name) {
+  // clients.name is NOT NULL, so the self-join insert must supply one (the
+  // coach-add path always had a name; invite-join did not — the insert 23502'd).
+  const safeName = String(name || '').trim() || 'New client';
   const payloads = [
     {
       user_id: userId,
@@ -52,17 +55,20 @@ async function insertClientLink(supabase, userId, coachId) {
       trainer_id: coachId,
       billing_status: 'active',
       client_type: 'transformation',
+      name: safeName,
     },
     {
       user_id: userId,
       coach_id: coachId,
       trainer_id: coachId,
       client_type: 'transformation',
+      name: safeName,
     },
     {
       user_id: userId,
       coach_id: coachId,
       trainer_id: coachId,
+      name: safeName,
     },
   ];
   let lastError = null;
@@ -134,6 +140,12 @@ export async function applyInviteCodeForUser({ supabase, user, inviteCode }) {
   if (coachId === userId) {
     throw new Error('You cannot use your own invite code');
   }
+  const joinDisplayName = String(
+    user?.full_name ?? user?.user_metadata?.full_name ?? user?.display_name ?? ''
+  ).trim();
+  const joinEmail = String(user?.email ?? user?.user_metadata?.email ?? '').trim();
+  const joinName = joinDisplayName || joinEmail;
+
   const existing = await readExistingClientLink(supabase, userId);
   let clientProfile = null;
   try {
@@ -141,7 +153,7 @@ export async function applyInviteCodeForUser({ supabase, user, inviteCode }) {
       clientProfile = (await updateClientLink(supabase, existing.id, coachId)) ?? { ...existing, coach_id: coachId, trainer_id: coachId };
     } else {
       try {
-        clientProfile = await insertClientLink(supabase, userId, coachId);
+        clientProfile = await insertClientLink(supabase, userId, coachId, joinName);
       } catch (insertError) {
         if (!isDuplicateClientLinkError(insertError)) throw insertError;
         const racedExisting = await readExistingClientLink(supabase, userId);
@@ -155,10 +167,18 @@ export async function applyInviteCodeForUser({ supabase, user, inviteCode }) {
     throw humanizeInviteJoinError(error);
   }
 
+  const wasPersonal = isPersonal(user?.user_type ?? user?.role);
+
   if (normalizeRole(user?.role ?? user?.user_type) !== 'client') {
+    // Stamp linked_from_personal_at on the personal→client flip so the client
+    // dashboard can show the "welcome across from personal" migration state
+    // (it reads profile.linked_from_personal_at, which nothing set before).
+    const profilePatch = wasPersonal
+      ? { role: 'client', linked_from_personal_at: new Date().toISOString() }
+      : { role: 'client' };
     const { error } = await supabase
       .from('profiles')
-      .update({ role: 'client' })
+      .update(profilePatch)
       .eq('id', userId);
     if (error) throw humanizeInviteJoinError(error);
   }
@@ -184,19 +204,15 @@ export async function applyInviteCodeForUser({ supabase, user, inviteCode }) {
     }
   }
 
-  const wasPersonal = isPersonal(user?.user_type ?? user?.role);
-
   // Transfer personal program blocks to the new coach so they can see the client's
   // full workout history. Personal blocks have owner_profile_id = userId and
-  // coach_id = userId; updating coach_id = coachId lets the coach's RLS policy
-  // (coach_id = auth.uid()) include these blocks without copying any data.
+  // coach_id = userId. A direct UPDATE is blocked by program_blocks' RLS WITH CHECK
+  // (which requires coach_id = auth.uid()), so this goes through a SECURITY DEFINER
+  // RPC scoped to the caller's own blocks and their linked coach.
   if (wasPersonal && coachId && userId) {
     try {
-      await supabase
-        .from('program_blocks')
-        .update({ coach_id: coachId })
-        .eq('owner_profile_id', userId)
-        .eq('coach_id', userId);
+      const { error } = await supabase.rpc('handoff_personal_blocks_to_coach', { p_coach_id: coachId });
+      if (error) throw error;
     } catch (e) {
       // Non-fatal: coach can still coach this client, just won't see historical blocks
       if (import.meta.env.DEV) console.warn('[inviteConversion] personal blocks handoff failed', e);
