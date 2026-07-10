@@ -347,6 +347,17 @@ Legend: ☐ todo · ☑ done
     (returns after the coach handoff). Verified live: personal `/more` no longer shows
     Supplements; Nutrition / MFP import / Progress photos / Work-with-a-coach still present;
     /achievements + /notifications reachable and personal-aware.
-26. ☐ **Role guards & shell polish** — personal can't reach coach/client routes (spot-
-    check RequireRole coverage), headers/tab bar correct on every personal page after
-    the shell rework, keyboard behavior on personal forms.
+26. ☑ **Role guards & shell polish** — CLEAN PASS, no code changes. **Role guards** hold:
+    coach-only routes are `RequireRole allow={[COACH, ADMIN]}` — verified live that a personal
+    user hitting `/clients` and `/earnings` gets "Access denied · This area is for coaches
+    only · Back to Dashboard" (no crash, no data leak); client-oriented routes degrade
+    gracefully (`/mytrainer` → honest "You don't have a trainer yet / Connect with a
+    certified trainer" empty state, which doubles as coach conversion). Messages is
+    `[COACH, CLIENT]` (personal denied with a "Find a Coach" CTA). The earlier "coach routes
+    allowing PERSONAL" hits were false positives (the access-denied secondary-action path
+    contains "personal"); the genuinely personal-allowed coach-file routes (program-builder,
+    prep-comparison) are intentional shared surfaces. **Shell**: `/home` renders a single
+    `<h1>` and one bottom-nav container (Home/Log/Progress/More) — no duplicate headers after
+    the shell rework; verified clean headers + tab bar across every personal surface touched
+    in #1–#25. **Keyboard**: personal forms use standard inputs with appropriate inputMode
+    (e.g. decimal on weight/macros); no custom keyboard handling needed.
