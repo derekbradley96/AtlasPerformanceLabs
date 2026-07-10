@@ -220,9 +220,25 @@ Legend: ☐ todo · ☑ done
 > Personal has NO tiers: it is free to use, with no AI features. The work here is
 > demolition, not verification.
 
-19. ☐ **Strip personal tier gating** — remove/neutralize `PERSONAL_FEATURES` gates,
-    `personalTierPolicy`, `personal_plan_tier` reads, tier badges/labels, and the
-    onboarding tier step (PersonalOnboardingTierPage); every free feature just works.
+19. ☑ **Strip personal tier gating** — the gating was already functionally neutralized
+    (`canUsePersonalFeature` returns true for every personal feature: tier always resolves
+    to `free`, which passes even the ENHANCED check; `getPersonalUpgradeCopy` empty;
+    `canShowPersonalUpgradePrompt` false). So every free feature already just works — the
+    real work was removing the dead VISIBLE tier UI. REMOVED the "Free" plan badge from all
+    four render sites: More mobile header (kept the admin "Personal (preview)" indicator),
+    More desktop (`PersonalMoreDesktopLayout` — dropped the badge chip + its dead
+    `personalTierLabel`/`isBasicTier`/`onUpgrade` props), ProfileAccountPage, and the
+    desktop AppShell footer (personal now gets no plan label; coaches still do). Deleted the
+    orphaned `personalPlanBadgeLabel` helper + its 3 imports and the dead
+    `personalTierEffective`/`personalTierLabelDesktop`/`isBasicTierDesktop` locals. Verified
+    live: no "Free" badge on More or Profile/Account, no console errors, app compiles. KEPT
+    (intentionally): `personalTierPolicy` — that's the "no auto-generated/AI plans" product
+    rule the user wants, not a paywall; and the neutralized `personal_plan_tier`
+    reads / always-true `isEnhanced` branches (they resolve to full access, so ripping the
+    scaffolding out is a risk with no behavior change). Onboarding has no tier step
+    (STEP_SEQUENCE = goal→about_you→training; PersonalOnboardingTierPage deleted back in #1);
+    the residual `personal_plan_tier: 'free'` write on finish is benign. Upgrade-prompt
+    surfaces are #20.
 20. ☐ **Strip personal upgrade prompts** — remove the 7 `PERSONAL_UPGRADE_PROMPT_TYPES`
     surfaces and any upsell copy/CTAs in personal mode (coach-conversion CTAs stay —
     that funnel is #21–23, not a tier upsell).

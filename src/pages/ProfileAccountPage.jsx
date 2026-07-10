@@ -17,7 +17,6 @@ import { fetchMergedPersonalNutritionTargets, formatPersonalNutritionTargetsSumm
 import { usePresentationMode } from '@/lib/presentationMode';
 import TopBar from '@/components/ui/TopBar';
 import { PersonalCanvas, PersonalColumn } from '@/components/personal/PersonalSurface';
-import { personalPlanBadgeLabel } from '@/lib/personalAccountUx';
 import MeasurementUnitSegments, {
   HEIGHT_SEGMENT_OPTIONS,
   BODYWEIGHT_SEGMENT_OPTIONS,
@@ -857,19 +856,6 @@ export default function ProfileAccountPage() {
             <div style={{ minWidth: 0, flex: 1 }}>
               <p style={{ margin: 0, fontSize: 17, fontWeight: 700, color: colors.text }}>{form.full_name || profile?.display_name || 'Your name'}</p>
               <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 13, color: colors.muted, wordBreak: 'break-word' }}>{form.email || user?.email}</p>
-              <span
-                style={{
-                  display: 'inline-block',
-                  marginTop: spacing[8],
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: 0.04,
-                  textTransform: 'uppercase',
-                  color: colors.primary,
-                }}
-              >
-                {personalPlanBadgeLabel({ profile, user })}
-              </span>
             </div>
           </div>
         </Card>

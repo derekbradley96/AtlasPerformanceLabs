@@ -29,7 +29,7 @@ import { pageContainer, standardCard } from '@/ui/pageLayout';
 import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';
 import RequestConsultationModal from '@/components/consultation/RequestConsultationModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { personalMoreHubHelperText, personalPlanBadgeLabel } from '@/lib/personalAccountUx';
+import { personalMoreHubHelperText } from '@/lib/personalAccountUx';
 import PersonalSurface from '@/components/personal/PersonalSurface';
 import { usePresentationMode } from '@/lib/presentationMode';
 import PersonalMoreDesktopLayout from '@/components/personal/PersonalMoreDesktopLayout';
@@ -525,10 +525,6 @@ function MoreContent() {
   /** Website shell: wide Personal More uses sidebar + sections (not mobile list). */
   const showPersonalMoreDesktop =
     isWideWeb && activePreviewRole === 'personal' && (isSolo || isPlatformAdmin);
-  const personalTierEffective =
-    isPlatformAdmin && activePreviewRole === 'personal' ? previewPersonalTier : personalTier;
-  const personalTierLabelDesktop = personalPlanBadgeLabel({ profile, user: displayUser });
-  const isBasicTierDesktop = false;
 
   const renderRolePreviewMenus = () => {
     const menuRow = (icon, title, subtitle, to) => (
@@ -885,11 +881,9 @@ function MoreContent() {
             {(displayUser?.email ?? displayUser?.user_metadata?.email) && (
               <p className="text-xs truncate mt-0.5" style={{ color: colors.muted }}>{displayUser?.email ?? displayUser?.user_metadata?.email}</p>
             )}
-            {activePreviewRole === 'personal' && (
+            {activePreviewRole === 'personal' && isPlatformAdmin && (
               <p className="text-xs mt-1.5 font-semibold" style={{ color: colors.primary }}>
-                {isPlatformAdmin
-                  ? 'Personal (preview)'
-                  : personalPlanBadgeLabel({ profile, user: displayUser })}
+                Personal (preview)
               </p>
             )}
           </div>
@@ -968,9 +962,6 @@ function MoreContent() {
           displayUser={displayUser}
           profile={profile}
           trainerProfile={trainerProfile}
-          personalTierLabel={personalTierLabelDesktop}
-          isBasicTier={isBasicTierDesktop}
-          onUpgrade={() => navigate('/pricing')}
           previewIdentityLine={previewIdentityLine}
           previewModeActive={previewModeActive}
           navigate={navigate}

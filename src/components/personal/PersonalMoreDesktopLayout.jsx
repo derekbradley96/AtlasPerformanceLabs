@@ -97,9 +97,6 @@ export default function PersonalMoreDesktopLayout({
   displayUser,
   profile,
   trainerProfile,
-  personalTierLabel,
-  isBasicTier,
-  onUpgrade,
   previewIdentityLine,
   previewModeActive,
   navigate,
@@ -255,14 +252,6 @@ export default function PersonalMoreDesktopLayout({
                 <p className="text-sm mt-1 m-0" style={{ color: colors.muted }}>
                   {previewIdentityLine}
                 </p>
-                <div className="flex flex-wrap items-center gap-2 mt-3">
-                  <span
-                    className="rounded-full px-3 py-1 text-xs font-bold"
-                    style={{ background: colors.surface2, color: colors.primary, border: `1px solid ${colors.border}` }}
-                  >
-                    {personalTierLabel}
-                  </span>
-                </div>
               </div>
             </div>
           </Card>

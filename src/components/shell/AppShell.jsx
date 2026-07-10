@@ -11,7 +11,6 @@ import BottomNavPremium, { BOTTOM_NAV_HEIGHT } from '@/components/ui/BottomNavPr
 import { getTabRoutesForRole } from '@/lib/routeMeta';
 import { DEFAULT_ROLE, normalizeRole, isCoach, isClient, isPersonal, getLandingPathForRole, Roles } from '@/lib/roles';
 import { isEliteTier, resolveCoachPlanTier, PLANS } from '@/config/plans';
-import { personalPlanBadgeLabel } from '@/lib/personalAccountUx';
 import { getSidebarSections } from '@/lib/sidebarNav';
 import { hapticNavigation } from '@/lib/haptics';
 import { isNative } from '@/lib/platform';
@@ -63,8 +62,9 @@ function ShellOutletFallback() {
 function DesktopShellUserFooter({ profile, user, role }) {
   const displayName = String(profile?.full_name || user?.email || 'Account').trim() || 'Account';
   const normalizedRole = normalizeRole(role ?? profile?.role);
+  // Personal has no tiers, so no plan badge — only coaches show a plan label.
   const planLabel = isPersonal(normalizedRole)
-    ? personalPlanBadgeLabel({ profile, user })
+    ? null
     : coachPlanDisplayName(resolveCoachPlanTier(profile, user));
   return (
     <div
@@ -101,12 +101,14 @@ function DesktopShellUserFooter({ profile, user, role }) {
         >
           {displayName}
         </p>
-        <span
-          className="inline-block mt-0.5 text-[10px] font-semibold px-2 py-0.5 rounded-full"
-          style={{ background: colors.primarySubtle, color: colors.primary }}
-        >
-          {planLabel}
-        </span>
+        {planLabel ? (
+          <span
+            className="inline-block mt-0.5 text-[10px] font-semibold px-2 py-0.5 rounded-full"
+            style={{ background: colors.primarySubtle, color: colors.primary }}
+          >
+            {planLabel}
+          </span>
+        ) : null}
       </div>
       <div className="flex-shrink-0 flex items-center" style={{ marginLeft: 'auto' }}>
         <NotificationBell />

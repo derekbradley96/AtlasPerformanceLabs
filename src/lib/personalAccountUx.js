@@ -2,15 +2,7 @@
  * Personal account / More hub copy — no coach-client jargon.
  */
 
-import { resolvePersonalPlanTier } from '@/config/plans';
 import { getPersonalMoreHubCopy, resolvePersonalUXContext } from '@/lib/personalScreenMatrix';
-
-/** @param {{ profile: object|null, user: object|null }} p */
-export function personalPlanBadgeLabel({ profile, user }) {
-  const tier = resolvePersonalPlanTier(profile, user);
-  if (tier === 'free') return 'Free';
-  return 'Personal';
-}
 
 /**
  * @param {{ profile?: object|null, user?: object|null }} [auth]
