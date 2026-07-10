@@ -563,29 +563,23 @@ export default function AppShell() {
 
   const showTabBar = !isDesktopWeb && isTabRoot;
   const showBack = !isTabRoot;
+  // noOuterScroll = the shell wrapper becomes overflow-hidden and the PAGE must
+  // supply its own overflow-y-auto scroll region (chat-style: fixed input +
+  // scrollable list). ONLY put a route here if it genuinely has that internal
+  // scroller — otherwise tall content is clipped and unscrollable (this bit the
+  // program builder, /clients/:id/checkins/:id, /review/:x/:y and /call-requests,
+  // which use plain `.app-screen` / min-h-screen with no vertical scroll). Those
+  // now scroll normally via the shell.
   const isChatThread = /^\/messages\/[^/]+$/.test(pathname);
   const isMessagesList = pathname === '/messages';
-  const isCheckinReview = /^\/clients\/[^/]+\/checkins\/[^/]+$/.test(pathname);
-  const isReviewDetail = /^\/review\/[^/]+\/[^/]+$/.test(pathname);
-  // Community room owns its own scroll (chat-style layout)
   const isCommunityRoom = pathname === '/community'
     || /^\/community\//.test(pathname)
     || /^\/community-room\//.test(pathname);
-  // CallRequestsPage has an internal scroll on mobile
-  const isCallRequests = pathname === '/call-requests';
-  // Edit profile manages its own scroll region. The program builder does NOT — its
-  // content (weeks/days/exercise library) is tall with a `sticky bottom-0` action
-  // bar, so it needs the shell as its scroll container. Putting it in noOuterScroll
-  // wrapped it in overflow-hidden with no internal scroller, clipping everything
-  // below the fold (the exercise library was unreachable on both mobile and desktop).
   const isEditProfile = pathname === '/editprofile';
   const noOuterScroll =
     isChatThread
     || isMessagesList
-    || isCheckinReview
-    || isReviewDetail
     || isCommunityRoom
-    || isCallRequests
     || isEditProfile;
 
   const [titleOverride, setTitleOverride] = useState(null);
