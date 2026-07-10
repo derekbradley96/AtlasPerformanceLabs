@@ -743,6 +743,7 @@ export default function AppRoutes({ isNative }) {
             PersonalInsightsPage,
             ImportMFPPage,
             ProgressPage,
+            ProgressPhotos,
             WorkoutPlayerRedirect,
           })}
 

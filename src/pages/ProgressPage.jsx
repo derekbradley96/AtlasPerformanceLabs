@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Calendar,
   ArrowRight,
+  Camera,
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, ReferenceDot } from 'recharts';
 import { useAuth } from '@/lib/AuthContext';
@@ -70,7 +71,6 @@ import { resolveViewerBodyweightUnit,
 import {
   resolvePersonalUXContext,
   getPersonalProgressEmptySurfaceCopy,
-  getPersonalScreenFeatures,
 } from '@/lib/personalScreenMatrix';
 import { syncAthleteDevelopmentScore } from '@/lib/athleteDevelopmentScore';
 import { getMyClientProfile } from '@/lib/clientProfiles';
@@ -237,14 +237,6 @@ export default function ProgressPage() {
     () => (personalProgressUx ? getPersonalProgressEmptySurfaceCopy(personalProgressUx) : PROGRESS_SURFACE_FALLBACK),
     [personalProgressUx],
   );
-  const personalProgressFeatures = useMemo(
-    () =>
-      personalProgressUx
-        ? getPersonalScreenFeatures(personalProgressUx)
-        : { showProgressWeightInterpretation: false },
-    [personalProgressUx],
-  );
-
   const timeframe = useMemo(() => parseTimeframeFromSearchParams(searchParams), [searchParams]);
   const setTimeframe = (key) => {
     setSearchParams((prev) => {
@@ -526,15 +518,6 @@ export default function ProgressPage() {
       dash.nutrition7d?.proteinAdherence7dAvg != null && dash.nutrition7d?.calorieAdherence7dAvg != null
         ? Math.round((dash.nutrition7d.proteinAdherence7dAvg + dash.nutrition7d.calorieAdherence7dAvg) / 2)
         : dash.nutrition7d?.proteinAdherence7dAvg ?? dash.nutrition7d?.calorieAdherence7dAvg;
-    const personalViewerWU = resolveViewerBodyweightUnit(profile);
-    const weightChartPersonal = dash.weightSeries.map((p) => {
-      const kg = Number(p.weight);
-      return {
-        date: p.dateLabel,
-        weight: weightKgToChartValue(kg, personalViewerWU),
-        weightKg: kg,
-      };
-    });
     const nutritionLineData = dash.nutritionDailySeries.filter((d) => d.pct != null).map((d) => ({ date: d.dateLabel, pct: d.pct }));
     const hasNutritionLine = nutritionLineData.length >= 2;
     const noWorkouts = Number(dash.completedLast28d || 0) < 1;
@@ -1105,11 +1088,18 @@ export default function ProgressPage() {
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
-                  {!personalProgressFeatures.showProgressWeightInterpretation ? (
+                  {weightMilestones ? (
+                    <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>
+                      First {formatWeightForViewer(weightMilestones.first.weightKg, personalViewerWU)}
+                      {' · '}Lowest {formatWeightForViewer(weightMilestones.lowest.weightKg, personalViewerWU)}
+                      {' · '}Highest {formatWeightForViewer(weightMilestones.highest.weightKg, personalViewerWU)}
+                      {' · '}Now {formatWeightForViewer(weightMilestones.current.weightKg, personalViewerWU)}
+                    </p>
+                  ) : (
                     <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted, lineHeight: 1.45 }}>
                       From check-in weights — more logs clarify the trend.
                     </p>
-                  ) : null}
+                  )}
                 </Card>
               ) : (
                 <Card style={{ padding: rhythm.cardPadding, border: `1px dashed ${colors.border}`, background: 'linear-gradient(165deg, rgba(59,130,246,0.06) 0%, rgba(15,23,42,0.85) 100%)', boxShadow: supportCardShadow, minHeight: isWideWeb ? 220 : undefined }}>
@@ -1233,6 +1223,43 @@ export default function ProgressPage() {
             </section>
           </div>
             )}
+          </section>
+
+          <section style={{ marginBottom: rhythm.section }}>
+            <p style={{ margin: `0 0 ${spacing[10]}px`, fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: colors.muted }}>
+              Progress photos
+            </p>
+            <Card style={{ padding: rhythm.cardPadding, boxShadow: supportCardShadow }}>
+              <div style={{ display: 'flex', gap: spacing[12], alignItems: 'flex-start' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 12, background: colors.surface2, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Camera size={20} color={colors.primary} aria-hidden />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.text }}>Track visual change</p>
+                  <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
+                    Private, dated photos stored just for you — the scale doesn&apos;t tell the whole story.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/progressphotos')}
+                    style={{
+                      marginTop: spacing[10],
+                      border: 'none',
+                      background: 'none',
+                      padding: 0,
+                      color: colors.primary,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: 3,
+                    }}
+                  >
+                    Add progress photos →
+                  </button>
+                </div>
+              </div>
+            </Card>
           </section>
 
           {showPeakCoachUpsell ? (

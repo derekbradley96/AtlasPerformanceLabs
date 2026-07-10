@@ -16,6 +16,7 @@ export default function PersonalRoutes({
   PersonalInsightsPage,
   ImportMFPPage,
   ProgressPage,
+  ProgressPhotos,
   WorkoutPlayerRedirect,
 }) {
   return (
@@ -28,6 +29,11 @@ export default function PersonalRoutes({
           role blocks. Each is independently role-gated.
           This is intentional — not a duplicate bug. */}
       <Route path="progress" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="This page is for Personal accounts."><ProgressPage /></RequireRole>} />
+      {/* Shared route: also registered in client/coach blocks, independently
+          role-gated. The page + progressPhotosService + progress_photos table
+          & storage RLS all support the coachless personal path
+          (progress_photos/personal/{uid}); this exposes it to personal. */}
+      <Route path="progressphotos" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="Progress photos are for Personal accounts."><ProgressPhotos /></RequireRole>} />
       <Route path="marketplace" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="This page is for Personal accounts."><Navigate to="/discover" replace /></RequireRole>} />
       <Route path="coach/:slug" element={<RequireRole allow={[Roles.PERSONAL, Roles.ADMIN]} accessDeniedMessage="This page is for Personal accounts."><PersonalCoachSlugRedirect /></RequireRole>} />
       <Route path="personal-my-program" element={<Navigate to="/myprogram" replace />} />

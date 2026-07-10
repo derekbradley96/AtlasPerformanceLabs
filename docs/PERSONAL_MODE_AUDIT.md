@@ -137,8 +137,29 @@ Legend: ☐ todo · ☑ done
 
 ## Progress & insights
 
-15. ☐ **Progress tab** — weight logging, charts, trends, photos (storage path
-    `progress_photos/personal/{uid}`), milestones/achievements for personal.
+15. ☑ **Progress tab** — weight round-trip verified: /readiness-checkin writes
+    `personal_checkins.weight`; the personal Progress weight chart + at-a-glance trend
+    read it back (source of truth, no localStorage drift). Stats (28d/this-week/streak/
+    nutrition), nutrition-adherence line, Athlete Development Score, coach-bridge all
+    wired. FIXED two gaps: (1) the weight card rendered NO supporting text — the
+    half-wired `showProgressWeightInterpretation` flag (always true for personal, since
+    all personal accounts resolve to tier 'free' → isEnhanced) HID the fallback caption
+    but nothing replaced it, and the already-computed `weightMilestones`/
+    `weightInterpretation` (from a personal `weightLogsYear` query that re-read
+    personal_checkins) were only ever rendered in the client/coach path — a wasted query
+    for personal. Now the personal weight card shows a unit-correct milestones line
+    (First/Lowest/Highest/Now via `formatWeightForViewer` — verified rendering as
+    "12 st 12.8 lb" for a stone/lb viewer, which the kg-hardcoded `buildWeightInterpretation`
+    would have gotten wrong), consuming that query. Removed the dead
+    `getPersonalScreenFeatures`/`personalProgressFeatures` flag path and a dead
+    `weightChartPersonal` in the migration memo. (2) Progress photos were fully built for
+    personal — page (`isPersonalSelf`), `progressPhotosService` (`personal/{uid}/…`),
+    and table + storage RLS (`progress_photos_*_personal` policies) all support the
+    coachless path — but UNREACHABLE (no route, no link). Added a personal
+    `/progressphotos` route (role-gated) + a "Progress photos" card on the Progress tab.
+    Verified live: route resolves (no redirect/403), renders the personal upload UI;
+    full RLS round-trip as the real user passes (storage upload → row insert → list →
+    signed URL). No console errors.
 16. ☐ **Personal check-ins** (`personal_checkins`, readiness) — entry points, history,
     and whether anything consumes them (insights/Today).
 17. ☐ **Insights & Performance pages** (`/personal/insights`, PersonalPerformancePage)
