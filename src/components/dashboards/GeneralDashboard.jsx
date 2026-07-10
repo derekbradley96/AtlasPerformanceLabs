@@ -621,6 +621,49 @@ export default function GeneralDashboard({ user }) {
               </Card>
             </motion.div>
 
+            {hasProgram ? (
+              <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => navigate(createPageUrl('MyProgram'))}
+                  aria-label="Open my plan"
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: spacing[12],
+                    padding: cardPad,
+                    borderRadius: radii.md,
+                    border: `1px solid ${colors.primary}`,
+                    background: colors.surface2,
+                    color: colors.text,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ width: 40, height: 40, borderRadius: 12, background: colors.primarySubtle, color: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Dumbbell size={20} strokeWidth={2} aria-hidden />
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 11, color: colors.muted, letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 700 }}>Your plan</span>
+                    <span style={{ display: 'block', fontSize: 15, fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {assignedToday?.block?.title || 'Your plan'}
+                    </span>
+                    <span style={{ display: 'block', fontSize: 12, color: colors.muted, marginTop: 2 }}>
+                      {(() => {
+                        const cur = assignedToday?.week?.week_number;
+                        const tot = Number(assignedToday?.block?.total_weeks) || null;
+                        if (cur && tot) return `Week ${cur} of ${tot} · tap to view or edit`;
+                        if (tot) return `${tot}-week plan · tap to view or edit`;
+                        return 'Tap to view or edit';
+                      })()}
+                    </span>
+                  </span>
+                  <span style={{ color: colors.muted, fontSize: 22, lineHeight: 1, flexShrink: 0 }} aria-hidden>›</span>
+                </button>
+              </motion.div>
+            ) : null}
+
             <div
               style={{
                 display: 'grid',

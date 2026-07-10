@@ -729,22 +729,31 @@ export default function ProgramBuilderPage() {
 
   const trackUsageFromCurrentWeek = useCallback(async () => {
     if (!coachId || !Array.isArray(exercises) || exercises.length === 0) return;
-    await trackUsageBatch({
-      userId: coachId,
-      rows: exercises
-        .map((ex) => {
-          const name = String(ex.exercise_name || '').trim();
-          const lib = libraryByName.get(name.toLowerCase());
-          return {
-            exerciseId: lib?.id || ex.exercise_library_id || null,
-            sets: ex.sets ?? null,
-            reps: ex.reps ?? null,
-            restSeconds: ex.rest_seconds ?? null,
-          };
-        })
-        .filter((row) => !!row.exerciseId),
-    });
-    await refreshExerciseRankings();
+    // Non-critical: exercise-usage tracking + library-ranking refresh must never
+    // fail or block a save. This runs AFTER the plan is already persisted and the
+    // success toast has fired; a slow ranking query (N searchAtlasExercises calls)
+    // was hitting the DB statement timeout and surfacing "canceling statement due
+    // to statement timeout" as if the save itself had failed. Swallow all errors.
+    try {
+      await trackUsageBatch({
+        userId: coachId,
+        rows: exercises
+          .map((ex) => {
+            const name = String(ex.exercise_name || '').trim();
+            const lib = libraryByName.get(name.toLowerCase());
+            return {
+              exerciseId: lib?.id || ex.exercise_library_id || null,
+              sets: ex.sets ?? null,
+              reps: ex.reps ?? null,
+              restSeconds: ex.rest_seconds ?? null,
+            };
+          })
+          .filter((row) => !!row.exerciseId),
+      });
+      await refreshExerciseRankings();
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('[ProgramBuilder] trackUsageFromCurrentWeek (non-fatal)', e?.message || e);
+    }
   }, [coachId, exercises, libraryByName, refreshExerciseRankings]);
 
   const handleSaveBlock = async (saveOpts = {}) => {
@@ -822,7 +831,7 @@ export default function ProgramBuilderPage() {
             : 'Saved',
         );
         if (ensureErr) toast.warning('Save again for week tabs');
-        await trackUsageFromCurrentWeek();
+        void trackUsageFromCurrentWeek();
         queryClient.invalidateQueries({ queryKey: ['personal-my-program-supabase'] });
         queryClient.invalidateQueries({ queryKey: ['personal-home-assigned-today'] });
       } else if (isPersonalRole) {
@@ -867,7 +876,7 @@ export default function ProgramBuilderPage() {
           setExercises([]);
         }
         toast.success(personalCreateSuccessToast());
-        await trackUsageFromCurrentWeek();
+        void trackUsageFromCurrentWeek();
         queryClient.invalidateQueries({ queryKey: ['personal-my-program-supabase'] });
         queryClient.invalidateQueries({ queryKey: ['personal-home-assigned-today'] });
         navigate(`/program-builder?personal=1&blockId=${encodeURIComponent(inserted.id)}`, { replace: true });
@@ -915,7 +924,7 @@ export default function ProgramBuilderPage() {
           setExercises([]);
         }
         toast.success('Block created');
-        await trackUsageFromCurrentWeek();
+        void trackUsageFromCurrentWeek();
         if (coachId) trackFirstProgramCreated(coachId, { client_id: cId, block_id: inserted.id });
         navigate(`/program-builder?clientId=${encodeURIComponent(cId)}&blockId=${encodeURIComponent(inserted.id)}`, { replace: true });
         window.setTimeout(() => {
