@@ -317,9 +317,18 @@ Legend: ☐ todo · ☑ done
 
 ## Account & platform
 
-24. ☐ **Personal notifications/reminders** — what does a personal user get (push,
-    reminders)? `send-reminders` is coach/client-centric; either personal reminders
-    work or the settings UI shouldn't promise them.
+24. ☑ **Personal notifications/reminders** — CONFIRMED the mismatch: `send-reminders`
+    is explicitly "for clients" (iterates the `clients` table only), and the one local
+    reminder (`scheduleWorkoutReminderIfNeeded`) was wired only into the CLIENT Today
+    surfaces — so a personal user got NO reminders, yet the settings page offered all 8
+    coach/client toggles (Messages, Check-ins/pose/review, Peak week, Payments…). FIXED both
+    sides: (a) wired the native workout reminder into the shared `TodayPage` for personal
+    (idempotent per-day, no-op on web) so "Workouts" is a real notification; (b) made
+    `NotificationSettingsPage` role-aware — personal now sees only the two categories that
+    apply (Workouts + Progress prompts) with an honest note ("Reminders for your solo
+    training. Connecting with a coach unlocks check-in, messaging, and payment alerts"),
+    hiding the coach/client-only ones. Verified live: personal settings shows exactly 2
+    toggles, coach/client keep all 8; no console errors.
 25. ☐ **Personal account surfaces** — Account page as personal (no coach-only rows
     leaking), delete-account personal flow, data export covers `personal_*` tables,
     More menu personal sections all navigate correctly.

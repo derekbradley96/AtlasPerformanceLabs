@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { isClient } from '@/lib/roles';
+import { scheduleWorkoutReminderIfNeeded } from '@/lib/workoutReminder';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { getLocalDateKey } from '@/lib/readinessCheckinApi';
 import { colors, shell, spacing, radii } from '@/ui/tokens';
@@ -932,6 +933,20 @@ export default function TodayPage() {
     });
     return list[0] || null;
   }, [hasWorkoutToday, calorieTarget, proteinTarget, habits]);
+
+  // Personal users get a native workout reminder too — it was only wired into the
+  // client Today surfaces, so the Workouts notification toggle was an empty promise
+  // for personal. No-op on web (native only) and deduped per day inside the helper.
+  useEffect(() => {
+    if (!isPersonalRole || !user?.id) return;
+    scheduleWorkoutReminderIfNeeded({
+      role: 'personal',
+      profileId: user.id,
+      workoutName: assignedWorkout?.day?.title || assignedWorkout?.block?.title || "Today's session",
+      hasWorkoutToday,
+      hasStartedWorkoutToday: false,
+    }).catch(() => {});
+  }, [isPersonalRole, user?.id, hasWorkoutToday, assignedWorkout?.day?.title, assignedWorkout?.block?.title]);
 
   const calorieDiff = caloriesLogged - calorieTarget;
   const nowHour = new Date().getHours();

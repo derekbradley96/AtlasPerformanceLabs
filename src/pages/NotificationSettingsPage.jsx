@@ -3,6 +3,7 @@ import { Switch } from '@/components/ui/switch';
 import Card from '@/ui/Card';
 import { colors, spacing } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
+import { isPersonal } from '@/lib/roles';
 import { getNotificationPreferences, updateNotificationPreference } from '@/lib/notificationPreferences';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { impactLight } from '@/lib/haptics';
@@ -11,17 +12,27 @@ import { atlasMigrationDataAttributes, deriveNotificationPrefsPageRouteState } f
 const TOGGLES = [
   { key: 'checkins', label: 'Check-ins', description: 'Check-in due, pose check, and review notifications' },
   { key: 'messages', label: 'Messages', description: 'New message alerts' },
-  { key: 'workouts', label: 'Workouts', description: 'Workout due and missed-session reminders' },
+  { key: 'workouts', label: 'Workouts', description: 'Workout reminders when a session is scheduled' },
   { key: 'habits', label: 'Habits', description: 'Daily habit reminders' },
   { key: 'nutrition', label: 'Nutrition & supplements', description: 'Supplement and nutrition reminders' },
   { key: 'peak_week', label: 'Peak week', description: 'Peak week updates and day instructions' },
   { key: 'payments', label: 'Payments', description: 'Payment due and overdue alerts' },
-  { key: 'progress_reminders', label: 'Progress prompts', description: 'Occasional prompts to share progress and feedback' },
+  { key: 'progress_reminders', label: 'Progress prompts', description: 'Occasional prompts to review your progress' },
 ];
 
+// Personal users get workout reminders + occasional progress prompts. The rest
+// (messages, check-in/pose/review, peak week, coaching payments) only fire for
+// coach-linked clients, so we don't show — or promise — them here.
+const PERSONAL_TOGGLE_KEYS = new Set(['workouts', 'progress_reminders']);
+
 export default function NotificationSettingsPage() {
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const profileId = user?.id;
+  const isPersonalUser = isPersonal(effectiveRole);
+  const visibleToggles = useMemo(
+    () => (isPersonalUser ? TOGGLES.filter((t) => PERSONAL_TOGGLE_KEYS.has(t.key)) : TOGGLES),
+    [isPersonalUser],
+  );
   const [prefs, setPrefs] = useState({
     checkins: true,
     messages: true,
@@ -95,12 +106,14 @@ export default function NotificationSettingsPage() {
     >
       <div style={{ marginBottom: spacing[8] }}>
         <p className="text-[13px]" style={{ color: colors.muted }}>
-          Choose which notification types you want to receive.
+          {isPersonalUser
+            ? 'Reminders for your solo training. Connecting with a coach unlocks check-in, messaging, and payment alerts.'
+            : 'Choose which notification types you want to receive.'}
         </p>
       </div>
 
       <Card style={{ padding: 0, marginBottom: spacing[16] }}>
-        {TOGGLES.map((t, idx) => (
+        {visibleToggles.map((t, idx) => (
           <div
             key={t.key}
             style={{
@@ -108,7 +121,7 @@ export default function NotificationSettingsPage() {
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: spacing[16],
-              borderBottom: idx < TOGGLES.length - 1 ? `1px solid ${colors.border}` : 'none',
+              borderBottom: idx < visibleToggles.length - 1 ? `1px solid ${colors.border}` : 'none',
               minHeight: 68,
             }}
           >
