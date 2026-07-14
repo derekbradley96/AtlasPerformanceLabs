@@ -18,7 +18,7 @@ export default function SoloDashboardPage() {
         className="min-h-[40vh] flex flex-col items-center justify-center"
         style={{
           background: colors.bg,
-          paddingTop: `calc(${spacing[24]}px + env(safe-area-inset-top, 0px))`,
+          paddingTop: `${spacing[24]}px`,
           paddingBottom: `calc(${spacing[24]}px + env(safe-area-inset-bottom, 0px))`,
         }}
       >

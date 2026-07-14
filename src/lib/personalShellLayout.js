@@ -45,7 +45,10 @@ export function personalMainColumnStyle({ isDesktopWeb, isWideWeb = false, nativ
     marginRight: 'auto',
     paddingLeft: padH,
     paddingRight: padH,
-    paddingTop: `calc(${topPad}px + env(safe-area-inset-top, 0px))`,
+    // No safe-area-top here: this column always sits below a header that already
+    // clears the notch (AppShell chrome header, or a page-owned <TopBar>). Adding
+    // it again double-counted the inset → a ~50px empty band on notch iPhones.
+    paddingTop: `${topPad}px`,
     paddingBottom: native
       ? `calc(${spacing[28]}px + env(safe-area-inset-bottom, 0px))`
       : `calc(${spacing[28]}px + env(safe-area-inset-bottom, 0px))`,

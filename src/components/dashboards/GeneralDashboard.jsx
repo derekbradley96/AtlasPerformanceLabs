@@ -318,7 +318,6 @@ export default function GeneralDashboard({ user }) {
         <div
           {...atlasMigrationDataAttributes(m.phase, m.primary)}
           style={{
-            paddingTop: `calc(${spacing[16]}px + env(safe-area-inset-top, 0px))`,
             paddingBottom: `calc(${spacing[24]}px + env(safe-area-inset-bottom, 0px))`,
           }}
         >
