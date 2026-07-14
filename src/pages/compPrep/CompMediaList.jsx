@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { useNavigate, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery } from '@tanstack/react-query';
@@ -226,23 +227,16 @@ export default function CompMediaList() {
         </div>
       )}
 
-      {selectedLog && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60"
-          onClick={() => setSelectedId(null)}
-          onKeyDown={(e) => e.key === 'Escape' && setSelectedId(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="w-full max-w-lg rounded-t-2xl overflow-hidden"
-            style={{
-              background: colors.card,
-              paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 border-b" style={{ borderColor: colors.border }}>
+      <BottomSheet
+        open={!!selectedLog}
+        onClose={() => setSelectedId(null)}
+        title="Media"
+        maxWidth={512}
+        padded={false}
+      >
+        {selectedLog && (
+          <>
+            <div className="px-4 pb-3 border-b" style={{ borderColor: colors.border }}>
               <p className="text-xs" style={{ color: colors.muted }}>
                 {new Date(selectedLog.createdAt).toLocaleString()} · {selectedLog.category}
                 {selectedLog.poseId && ` · ${selectedLog.poseId}`}
@@ -278,9 +272,9 @@ export default function CompMediaList() {
                 Close
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </BottomSheet>
     </div>
   );
 }

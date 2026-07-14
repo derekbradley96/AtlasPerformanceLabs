@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useData } from '@/data/useData';
@@ -317,37 +318,25 @@ export default function TrainerCompClient() {
         )}
       </Card>
 
-      {reviewingId && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60"
-          onClick={() => setReviewingId(null)}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div
-            className="w-full max-w-lg rounded-t-2xl p-4"
-            style={{
-              background: colors.card,
-              paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="font-semibold mb-2">Add review comment</h3>
-            <textarea
-              value={reviewComment}
-              onChange={(e) => setReviewComment(e.target.value)}
-              placeholder="Comment for client..."
-              rows={3}
-              className="w-full rounded-lg border bg-slate-800 text-white text-sm mb-3"
-              style={{ padding: '10px 12px', borderColor: colors.border }}
-            />
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setReviewingId(null)}>Cancel</Button>
-              <Button onClick={() => handleMarkReviewed(reviewingId)}>Mark reviewed</Button>
-            </div>
-          </div>
+      <BottomSheet
+        open={!!reviewingId}
+        onClose={() => setReviewingId(null)}
+        title="Add review comment"
+        maxWidth={512}
+      >
+        <textarea
+          value={reviewComment}
+          onChange={(e) => setReviewComment(e.target.value)}
+          placeholder="Comment for client..."
+          rows={3}
+          className="w-full rounded-lg border bg-slate-800 text-white text-sm mb-3"
+          style={{ padding: '10px 12px', borderColor: colors.border }}
+        />
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={() => setReviewingId(null)}>Cancel</Button>
+          <Button onClick={() => handleMarkReviewed(reviewingId)}>Mark reviewed</Button>
         </div>
-      )}
+      </BottomSheet>
 
       <HealthBreakdownSheet
         open={healthSheetOpen}

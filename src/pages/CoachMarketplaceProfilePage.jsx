@@ -3,6 +3,7 @@
  * Route: /marketplace/coach/:slug. Data: coach_marketplace_profiles.listing_details, profiles, stories.
  */
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import TopBar from '@/components/ui/TopBar';
@@ -966,40 +967,17 @@ export default function CoachMarketplaceProfilePage() {
         </div>
       ) : null}
 
-      {enquireOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
-          style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
-          onClick={() => !submitting && setEnquireOpen(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto"
-            style={{ background: colors.card, border: `1px solid ${colors.border}` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="sticky top-0 flex items-center justify-between p-4 border-b"
-              style={{ borderColor: colors.border, background: colors.card }}
-            >
-              <div>
-                <h2 className="text-lg font-semibold" style={{ color: colors.text }}>
-                  {isPersonalVisitor ? 'Join this coach' : 'Request consultation'}
-                </h2>
-                <p className="text-xs mt-0.5" style={{ color: colors.muted }}>
-                  {coachName} will reply by email. Add context below or send the default intro.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => !submitting && setEnquireOpen(false)}
-                className="p-2 rounded-lg shrink-0"
-                style={{ color: colors.muted }}
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleEnquireSubmit} className="p-4 space-y-4">
+      <BottomSheet
+        open={!!enquireOpen}
+        onClose={() => !submitting && setEnquireOpen(false)}
+        title={isPersonalVisitor ? 'Join this coach' : 'Request consultation'}
+        maxWidth={448}
+        padded={false}
+      >
+            <p className="text-xs px-4 pb-3" style={{ color: colors.muted }}>
+              {coachName} will reply by email. Add context below or send the default intro.
+            </p>
+            <form onSubmit={handleEnquireSubmit} className="p-4 pt-0 space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1" style={{ color: colors.textSecondary }}>
                   Name *
@@ -1070,9 +1048,7 @@ export default function CoachMarketplaceProfilePage() {
                 </Button>
               </div>
             </form>
-          </div>
-        </div>
-      ) : null}
+      </BottomSheet>
     </div>
   );
 }

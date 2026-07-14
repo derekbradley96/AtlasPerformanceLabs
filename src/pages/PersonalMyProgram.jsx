@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { PageLoader } from '@/components/ui/LoadingState';
 import TopBar from '@/components/ui/TopBar';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { createPageUrl } from '@/utils';
@@ -296,66 +297,43 @@ export default function PersonalMyProgram() {
         >
         <TopBar title="My plan" onBack={() => navigate(-1)} />
 
-        {isEnhancedPersonal && createModalOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-            style={{ background: 'rgba(0,0,0,0.65)' }}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Quick start program"
-            onClick={() => !templateBusy && setCreateModalOpen(false)}
-            onKeyDown={(e) => e.key === 'Escape' && !templateBusy && setCreateModalOpen(false)}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-              role="presentation"
-            >
-              <Card
-                style={{
-                  ...standardCard,
-                  padding: spacing[20],
-                  maxWidth: 400,
-                  width: '100%',
-                }}
+        <BottomSheet
+          open={isEnhancedPersonal && createModalOpen}
+          onClose={() => !templateBusy && setCreateModalOpen(false)}
+          title="Quick start"
+          maxWidth={400}
+        >
+          <p className="text-sm mb-4" style={{ color: colors.muted, lineHeight: 1.45 }}>
+            Pick how many days you train. We&apos;ll sketch a week you can edit anytime in your planner.
+          </p>
+          <p className="text-xs mb-4" style={{ color: colors.muted }}>
+            2d upper/lower · 3d push/pull/legs · 4d upper/lower split.
+          </p>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {[2, 3, 4].map((d) => (
+              <Button
+                key={d}
+                type="button"
+                className="min-h-11"
+                style={{ background: colors.primary, color: '#fff' }}
+                disabled={templateBusy}
+                onClick={() => runTemplateCreate(d)}
               >
-                <h2 className="text-lg font-bold mb-2" style={{ color: colors.text }}>
-                  Quick start
-                </h2>
-                <p className="text-sm mb-4" style={{ color: colors.muted, lineHeight: 1.45 }}>
-                  Pick how many days you train. We&apos;ll sketch a week you can edit anytime in your planner.
-                </p>
-                <p className="text-xs mb-4" style={{ color: colors.muted }}>
-                  2d upper/lower · 3d push/pull/legs · 4d upper/lower split.
-                </p>
-                <div className="grid grid-cols-3 gap-2 mb-4">
-                  {[2, 3, 4].map((d) => (
-                    <Button
-                      key={d}
-                      type="button"
-                      className="min-h-11"
-                      style={{ background: colors.primary, color: '#fff' }}
-                      disabled={templateBusy}
-                      onClick={() => runTemplateCreate(d)}
-                    >
-                      {d} days
-                    </Button>
-                  ))}
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full min-h-11"
-                  style={{ borderColor: shell.cardBorder, color: colors.text }}
-                  disabled={templateBusy}
-                  onClick={() => setCreateModalOpen(false)}
-                >
-                  Cancel
-                </Button>
-              </Card>
-            </div>
+                {d} days
+              </Button>
+            ))}
           </div>
-        )}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full min-h-11"
+            style={{ borderColor: shell.cardBorder, color: colors.text }}
+            disabled={templateBusy}
+            onClick={() => setCreateModalOpen(false)}
+          >
+            Cancel
+          </Button>
+        </BottomSheet>
 
         <PersonalColumn variant="default">
           <div style={personalColumnInnerBodyStyle()}>

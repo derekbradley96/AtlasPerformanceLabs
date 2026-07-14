@@ -8,10 +8,11 @@ import { hasSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
 import { toGuardRole } from '@/lib/roles';
 import Button from '@/ui/Button';
-import { colors, spacing, shell } from '@/ui/tokens';
-import { X, AlertCircle, HelpCircle, BookOpen } from 'lucide-react';
+import { colors, spacing } from '@/ui/tokens';
+import { AlertCircle, HelpCircle, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { insertBetaSupportRequest } from '@/data/betaSupportRepo';
+import BottomSheet from '@/components/ui/BottomSheet';
 
 const REQUEST_TYPES = [
   { value: 'urgent_issue', label: 'Report urgent issue', icon: AlertCircle },
@@ -67,51 +68,11 @@ export default function BetaSupportModal({ open, onClose }) {
     supportMutation.mutate({ msg, type: requestType });
   };
 
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget) onClose?.();
-  };
-
-  if (!open) return null;
-
   const submitting = supportMutation.isPending;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{
-        background: colors.overlay,
-        paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="beta-support-title"
-      onClick={handleBackdropClick}
-    >
-      <div
-        className="w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
-        style={{
-          background: colors.card,
-          border: `1px solid ${colors.border}`,
-          boxShadow: shell.cardShadow,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: colors.border }}>
-          <h2 id="beta-support-title" className="text-lg font-semibold" style={{ color: colors.text }}>
-            Get help
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg"
-            style={{ color: colors.muted }}
-            aria-label="Close"
-          >
-            <X size={20} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} style={{ padding: spacing[16] }}>
+    <BottomSheet open={open} onClose={() => onClose?.()} title="Get help" maxWidth={448} padded={false}>
+      <form onSubmit={handleSubmit} style={{ padding: spacing[16], paddingTop: 0 }}>
           <p className="text-sm font-medium mb-2" style={{ color: colors.muted }}>
             What do you need?
           </p>
@@ -169,8 +130,7 @@ export default function BetaSupportModal({ open, onClose }) {
               {submitting ? 'Sending…' : 'Send'}
             </Button>
           </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </BottomSheet>
   );
 }

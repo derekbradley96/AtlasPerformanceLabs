@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
@@ -519,38 +520,21 @@ export default function ProgressPhotos() {
         ) : null}
       </div>
 
-      {!isDesktopWeb && mobileUploadOpen ? (
-        <div
-          role="presentation"
-          className="fixed inset-0 z-40 flex items-end justify-center"
-          style={{ background: 'rgba(0,0,0,0.6)' }}
-          onClick={() => setMobileUploadOpen(false)}
-        >
-          <div
-            className="w-full max-h-[90vh] overflow-y-auto rounded-t-2xl p-4"
-            style={{ background: colors.card, borderTop: `1px solid ${colors.border}` }}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Upload photo</h2>
-              <button type="button" className="p-2 rounded-md" style={{ color: colors.muted }} onClick={() => setMobileUploadOpen(false)} aria-label="Close">
-                <X size={22} />
-              </button>
-            </div>
-            <UploadFormFields
-              uploadForm={uploadForm}
-              setUploadForm={setUploadForm}
-              pendingFile={pendingFile}
-              onPickFile={handlePickFile}
-              onSubmit={submitUpload}
-              isPending={uploadMutation.isPending}
-              disabled={uploadDisabled}
-            />
-          </div>
-        </div>
-      ) : null}
+      <BottomSheet
+        open={!isDesktopWeb && mobileUploadOpen}
+        onClose={() => setMobileUploadOpen(false)}
+        title="Upload photo"
+      >
+        <UploadFormFields
+          uploadForm={uploadForm}
+          setUploadForm={setUploadForm}
+          pendingFile={pendingFile}
+          onPickFile={handlePickFile}
+          onSubmit={submitUpload}
+          isPending={uploadMutation.isPending}
+          disabled={uploadDisabled}
+        />
+      </BottomSheet>
     </div>
   );
 }

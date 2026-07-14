@@ -29,6 +29,7 @@ import { pageContainer, standardCard } from '@/ui/pageLayout';
 import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';
 import RequestConsultationModal from '@/components/consultation/RequestConsultationModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { personalMoreHubHelperText } from '@/lib/personalAccountUx';
 import PersonalSurface from '@/components/personal/PersonalSurface';
 import { usePresentationMode } from '@/lib/presentationMode';
@@ -168,18 +169,9 @@ function SandboxToolsSheet({ onClose, onAdded, getTrainerId, addClient: addClien
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)' }}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto" style={{ background: colors.bg }}>
-        <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: colors.border }}>
-          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Sandbox Tools</h2>
-          <button type="button" onClick={onClose} className="text-sm" style={{ color: colors.accent }}>Close</button>
-        </div>
-        <div style={{ padding: spacing[16] }}>
+    /* Parent mounts this conditionally, so `open` is constant here. */
+    <BottomSheet open onClose={() => onClose?.()} title="Sandbox tools" maxWidth={448} padded={false}>
+      <div style={{ padding: spacing[16], paddingTop: 0 }}>
           <p className="text-sm font-medium mb-2" style={{ color: colors.muted }}>Add temp client</p>
           <input
             placeholder="Name"
@@ -239,7 +231,6 @@ function SandboxToolsSheet({ onClose, onAdded, getTrainerId, addClient: addClien
           >
             Reset sandbox
           </button>
-        </div>
       </div>
       <ConfirmDialog
         open={resetConfirmOpen}
@@ -251,7 +242,7 @@ function SandboxToolsSheet({ onClose, onAdded, getTrainerId, addClient: addClien
         onConfirm={handleResetConfirm}
         onCancel={() => setResetConfirmOpen(false)}
       />
-    </div>
+    </BottomSheet>
   );
 }
 
@@ -1113,26 +1104,9 @@ function LeaveCoachSheet({
   onCancel,
   onConfirm,
 }) {
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)' }}
-      role="dialog"
-      aria-modal="true"
-      onClick={onCancel}
-    >
-      <div
-        className="w-full max-w-xl rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto"
-        style={{ background: colors.bg }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: colors.border }}>
-          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Leave my coach</h2>
-          <button type="button" onClick={onCancel} className="text-sm" style={{ color: colors.accent }}>Cancel</button>
-        </div>
-        <div style={{ padding: spacing[16] }}>
+    <BottomSheet open={open} onClose={() => onCancel?.()} title="Leave my coach" maxWidth={576} padded={false}>
+      <div style={{ padding: spacing[16], paddingTop: 0 }}>
           <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>Why do you want to leave your coach?</p>
           <div className="flex flex-col gap-2" style={{ marginBottom: spacing[14] }}>
             {CLIENT_LEAVE_REASON_OPTIONS.map((option) => (
@@ -1197,9 +1171,8 @@ function LeaveCoachSheet({
           >
             {isSubmitting ? 'Leaving...' : `Leave ${coachName}'s coaching`}
           </Button>
-        </div>
       </div>
-    </div>
+    </BottomSheet>
   );
 }
 

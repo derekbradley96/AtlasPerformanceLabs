@@ -21,20 +21,17 @@ Status key: [ ] open · [~] partially done · [x] done
   container, scoped away from `noOuterScroll` (chat) pages which lift their own
   composer. **Needs an on-device pass** to confirm feel across forms.
 
-- [~] **Bottom sheets don't swipe-down to dismiss.** CORRECTION to the first
+- [x] **Bottom sheets don't swipe-down to dismiss.** CORRECTION to the first
   pass: the "~50" figure conflated centred dialogs and full-screen modals (which
-  correctly use `fixed inset-0` and should NOT drag) with real bottom sheets.
-  The true count is **17** bottom-anchored sheets not using a drawer. A shared
-  `components/ui/BottomSheet.jsx` (vaul: drag-to-dismiss + backdrop + Escape)
-  now exists; `ProgramBuilderPageImpl` assign sheet migrated. Remaining to
-  migrate:
-  `BetaSupportModal`, `BetaFeedbackModal`, `prep/PosingLogSheet`,
-  `consultation/RequestConsultationModal`, `program/ExerciseSelector`,
-  `coaching/CoachMarketplaceQuickCompleteModal`, `workout/ExerciseSearchModal`,
-  `ProgressPhotos`, `More`, `PersonalMyProgram`, `CoachMarketplaceProfilePage`,
-  `PublicCoachProfilePage`, `plan/TrainerPlan`, `client-detail/ClientDetailModals`,
-  `compPrep/CompMediaList`, `compPrep/TrainerCompClient`.
-  (~10 files already use the `ui/drawer` vaul primitive and are fine.)
+  correctly use `fixed inset-0` and should NOT drag) with real bottom sheets. The
+  true count was **17**, one of which (`workout/ExerciseSearchModal`) was dead
+  code and deleted. Added `components/ui/BottomSheet.jsx` (vaul): drag-to-dismiss
+  + backdrop tap + Escape + grab handle on mobile, and a centred dialog on wide
+  web so the old `sm:items-center` treatment isn't regressed. All 15 remaining
+  sheets migrated; zero hand-rolled `items-end` overlays remain.
+  Gotcha found: vite does NOT error on a missing import for a JSX identifier —
+  it builds clean and throws at runtime. Verify imports explicitly after this
+  kind of migration.
 
 - [x] **Inconsistent / missing delete confirmation.** (this pass) `Nutrition`
   meal delete fired instantly on one tap with no confirm/undo → now goes through

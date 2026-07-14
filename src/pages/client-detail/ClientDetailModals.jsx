@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import BottomSheet from '@/components/ui/BottomSheet';
 import FullScreenModal from '@/components/ui/FullScreenModal';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
@@ -17,27 +18,11 @@ export function RemoveClientSheet({
   onConfirm,
   isSubmitting,
 }) {
-  if (!open) return null;
   const firstName = (clientName || 'Client').trim().split(' ')[0] || 'Client';
 
   return (
-    <div
-      className="fixed inset-0 z-[150] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)' }}
-      role="dialog"
-      aria-modal="true"
-      onClick={onCancel}
-    >
-      <div
-        className="w-full max-w-xl rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto"
-        style={{ background: colors.bg }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: colors.border }}>
-          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Remove from roster</h2>
-          <button type="button" onClick={onCancel} className="text-sm" style={{ color: colors.accent }}>Cancel</button>
-        </div>
-        <div style={{ padding: spacing[16] }}>
+    <BottomSheet open={open} onClose={() => onCancel?.()} title="Remove from roster" maxWidth={576} padded={false}>
+        <div style={{ padding: spacing[16], paddingTop: 0 }}>
           <p className="text-sm font-semibold mb-2" style={{ color: colors.text }}>
             Why are you ending this coaching relationship?
           </p>
@@ -94,8 +79,7 @@ export function RemoveClientSheet({
             {isSubmitting ? 'Removing...' : `Remove ${firstName} from roster`}
           </Button>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 
@@ -109,18 +93,9 @@ export function GymEditModal({ clientId, initial, onSave, onClose }) {
   const [machinesNotes, setMachinesNotes] = useState(initial.machinesNotes ?? '');
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)' }}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto" style={{ background: colors.bg }}>
-        <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: colors.border }}>
-          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Gym & equipment</h2>
-          <button type="button" onClick={onClose} className="text-sm" style={{ color: colors.accent }}>Cancel</button>
-        </div>
-        <div style={{ padding: spacing[16] }}>
+    /* Parent mounts this conditionally, so `open` is constant here. */
+    <BottomSheet open onClose={() => onClose?.()} title="Gym & equipment" maxWidth={448} padded={false}>
+        <div style={{ padding: spacing[16], paddingTop: 0 }}>
           <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Gym name</label>
           <input
             value={gymName}
@@ -159,25 +134,15 @@ export function GymEditModal({ clientId, initial, onSave, onClose }) {
           />
           <Button variant="primary" onClick={() => onSave({ gymName, rack, smith, cables, hackSquat, dbMax, machinesNotes })} style={{ width: '100%', marginTop: spacing[16] }}>Save</Button>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 
 export function PhaseEditModal({ phaseForm, setPhaseForm, onSave, onClose }) {
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)' }}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto" style={{ background: colors.bg }}>
-        <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: colors.border }}>
-          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Change phase</h2>
-          <button type="button" onClick={onClose} className="text-sm" style={{ color: colors.accent }}>Cancel</button>
-        </div>
-        <div style={{ padding: spacing[16] }}>
+    /* Parent mounts this conditionally, so `open` is constant here. */
+    <BottomSheet open onClose={() => onClose?.()} title="Change phase" maxWidth={448} padded={false}>
+        <div style={{ padding: spacing[16], paddingTop: 0 }}>
           <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Phase</label>
           <select
             value={phaseForm.phase}
@@ -208,8 +173,7 @@ export function PhaseEditModal({ phaseForm, setPhaseForm, onSave, onClose }) {
           />
           <Button variant="primary" onClick={onSave} disabled={!phaseForm.phase} style={{ width: '100%', marginTop: spacing[16] }}>Save</Button>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 
@@ -311,18 +275,9 @@ export function SetPhaseFullScreenModal({ form, setForm, onSave, onClose, saving
 
 export function CreateProgramBlockSheet({ form, setForm, onSave, onClose, saving }) {
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)' }}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto" style={{ background: colors.bg }}>
-        <div className="p-4 border-b flex justify-between items-center" style={{ borderColor: colors.border }}>
-          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Create Program Block</h2>
-          <button type="button" onClick={onClose} className="text-sm" style={{ color: colors.accent }}>Cancel</button>
-        </div>
-        <div style={{ padding: spacing[16] }}>
+    /* Parent mounts this conditionally, so `open` is constant here. */
+    <BottomSheet open onClose={() => onClose?.()} title="Create program block" maxWidth={448} padded={false}>
+        <div style={{ padding: spacing[16], paddingTop: 0 }}>
           <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Title</label>
           <input
             type="text"
@@ -355,7 +310,6 @@ export function CreateProgramBlockSheet({ form, setForm, onSave, onClose, saving
             {saving ? 'Creating…' : 'Create block'}
           </Button>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }

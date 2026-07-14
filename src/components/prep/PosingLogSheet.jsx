@@ -2,9 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { getPosesForDivision } from '@/lib/compPrep/poseSets';
 import { logPosingSession } from '@/lib/posingPractice';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { colors, spacing } from '@/ui/tokens';
-import Card from '@/ui/Card';
+import { colors } from '@/ui/tokens';
 import Button from '@/ui/Button';
+import BottomSheet from '@/components/ui/BottomSheet';
 
 const DURATIONS = [5, 10, 15, 20, 30];
 
@@ -29,8 +29,8 @@ export default function PosingLogSheet({
     }
   }, [division]);
 
-  if (!open) return null;
-
+  // No `if (!open) return null` — BottomSheet owns open/closed so vaul can play
+  // its slide-out animation instead of the sheet vanishing on close.
   const togglePose = (id) => {
     setSelectedPoses((prev) => {
       const next = new Set(prev);
@@ -67,24 +67,8 @@ export default function PosingLogSheet({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-end justify-center"
-      style={{ background: 'rgba(0,0,0,0.55)' }}
-      role="dialog"
-      aria-modal
-    >
-      <button
-        type="button"
-        aria-label="Close"
-        className="absolute inset-0 cursor-default"
-        onClick={() => onClose?.()}
-      />
-      <Card
-        className="relative w-full max-w-lg rounded-t-2xl"
-        style={{ padding: spacing[16], paddingBottom: `calc(${spacing[20]}px + env(safe-area-inset-bottom, 0px))`, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}
-      >
-        <p className="text-sm font-semibold m-0" style={{ color: colors.text }}>Log posing session</p>
-        <p className="text-xs mt-1 m-0" style={{ color: colors.muted }}>Duration</p>
+    <BottomSheet open={open} onClose={() => onClose?.()} title="Log posing session">
+      <p className="text-xs m-0" style={{ color: colors.muted }}>Duration</p>
         <div className="flex flex-wrap gap-2 mt-2">
           {DURATIONS.map((m) => (
             <button
@@ -120,13 +104,12 @@ export default function PosingLogSheet({
             </button>
           ))}
         </div>
-        <Button className="w-full mt-4" disabled={saving} onClick={() => void submit()}>
-          {saving ? 'Saving…' : 'Log posing session'}
-        </Button>
-        <Button variant="secondary" className="w-full mt-2" type="button" onClick={() => onClose?.()}>
-          Cancel
-        </Button>
-      </Card>
-    </div>
+      <Button className="w-full mt-4" disabled={saving} onClick={() => void submit()}>
+        {saving ? 'Saving…' : 'Log posing session'}
+      </Button>
+      <Button variant="secondary" className="w-full mt-2" type="button" onClick={() => onClose?.()}>
+        Cancel
+      </Button>
+    </BottomSheet>
   );
 }

@@ -4,6 +4,7 @@
  * (profiles, marketplace_coach_profiles, atlas_services, client count).
  */
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { invokeSupabaseFunction } from '@/lib/supabaseStripeApi';
@@ -834,37 +835,15 @@ export default function PublicCoachProfilePage() {
         </div>
       ) : null}
 
-      {enquireOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
-          style={{
-            background: colors.overlay,
-            paddingTop: 'env(safe-area-inset-top)',
-            paddingBottom: 'env(safe-area-inset-bottom)',
-          }}
-          onClick={() => !submitting && setEnquireOpen(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto"
-            style={{ background: colors.card, border: `1px solid ${colors.border}` }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 flex items-center justify-between p-4 border-b gap-2" style={{ borderColor: colors.border, background: colors.card }}>
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Message {displayName}</h2>
-                <p className="text-xs mt-0.5" style={{ color: colors.muted }}>They&apos;ll reply by email.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => !submitting && setEnquireOpen(false)}
-                className="p-2 rounded-lg shrink-0"
-                style={{ color: colors.muted }}
-                aria-label="Close"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleEnquireSubmit} className="p-4 space-y-4">
+      <BottomSheet
+        open={!!enquireOpen}
+        onClose={() => !submitting && setEnquireOpen(false)}
+        title={`Message ${displayName}`}
+        maxWidth={448}
+        padded={false}
+      >
+            <p className="text-xs px-4 pb-3" style={{ color: colors.muted }}>They&apos;ll reply by email.</p>
+            <form onSubmit={handleEnquireSubmit} className="p-4 pt-0 space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1" style={{ color: colors.textSecondary }}>Name *</label>
                 <input
@@ -922,9 +901,7 @@ export default function PublicCoachProfilePage() {
                 </Button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </BottomSheet>
 
       {applyOpen && coach?.id && (
         <LeadApplicationForm

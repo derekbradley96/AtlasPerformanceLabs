@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import * as atlasRepo from '@/data/repos/atlasRepo';
@@ -155,32 +156,8 @@ export default function TrainerPlan() {
         </div>
       </div>
 
-      {upgradeModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="plans-modal-title"
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 animate-in fade-in duration-200"
-          style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
-          onClick={closeUpgrade}
-        >
-          <div
-            className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border animate-in slide-in-from-bottom-4 duration-200"
-            style={{ background: colors.card, borderColor: colors.border }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 flex items-center justify-between gap-3 p-4 border-b" style={{ borderColor: colors.border, background: colors.card }}>
-              <h2 id="plans-modal-title" className="text-lg font-semibold" style={{ color: colors.text }}>Plans</h2>
-              <Button
-                variant="secondary"
-                className="min-w-[72px]"
-                onClick={closeUpgrade}
-                aria-label="Done, close plans"
-              >
-                Done
-              </Button>
-            </div>
-            <div className="p-4 space-y-4">
+      <BottomSheet open={upgradeModalOpen} onClose={closeUpgrade} title="Plans" maxWidth={448} padded={false}>
+            <div className="p-4 pt-0 space-y-4">
               {PLANS.map((plan) => (
                 <div
                   key={plan.id}
@@ -245,9 +222,7 @@ export default function TrainerPlan() {
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      )}
+      </BottomSheet>
       {showPaymentUpgradePrompt && paymentUpgradePrompt && (
         <UpgradePrompt
           prompt={paymentUpgradePrompt}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Button from '@/ui/Button';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { colors, touchTargetMin } from '@/ui/tokens';
-import { X } from 'lucide-react';
 import { SERVICE_DEFS } from '@/lib/coachMarketplaceListingDetails';
 
 const QUICK_SERVICE_KEYS = ['training_plans', 'nutrition_support', 'weekly_checkins', 'messaging'];
@@ -56,30 +56,12 @@ export default function CoachMarketplaceQuickCompleteModal({
   ];
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4"
-      style={{ background: colors.overlay, paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
-      onClick={() => onClose?.()}
-    >
-      <div
-        className="w-full max-w-md rounded-t-2xl sm:rounded-2xl max-h-[90vh] overflow-y-auto"
-        style={{ background: colors.card, border: `1px solid ${colors.border}` }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: colors.border }}>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: colors.muted }}>
-              Get clients faster
-            </p>
-            <h2 className="text-lg font-semibold mt-0.5" style={{ color: colors.text }}>
-              {titles[step]}
-            </h2>
-          </div>
-          <button type="button" onClick={() => onClose?.()} className="p-2 rounded-lg" style={{ color: colors.muted }} aria-label="Close">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="p-4">
+    /* Parent mounts this conditionally, so `open` is constant here. */
+    <BottomSheet open onClose={() => onClose?.()} title={titles[step]} maxWidth={448} padded={false}>
+        <div className="p-4 pt-0">
+          <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: colors.muted }}>
+            Get clients faster
+          </p>
           <p className="text-sm mb-4" style={{ color: colors.muted, lineHeight: 1.5 }}>
             {bodies[step]}
           </p>
@@ -146,7 +128,6 @@ export default function CoachMarketplaceQuickCompleteModal({
             Step {step + 1} of 3 · You can edit every field in full detail anytime.
           </p>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }

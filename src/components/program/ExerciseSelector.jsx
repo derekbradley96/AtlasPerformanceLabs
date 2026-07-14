@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { base44 } from '@/lib/base44LegacyStub';
 import { useQuery } from '@tanstack/react-query';
-import { X, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import BottomSheet from '@/components/ui/BottomSheet';
 
 export default function ExerciseSelector({ onSelect, onClose }) {
   const [search, setSearch] = useState('');
@@ -28,15 +29,8 @@ export default function ExerciseSelector({ onSelect, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-slate-900 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Select Exercise</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
+    /* Parent mounts this conditionally, so `open` is constant here. */
+    <BottomSheet open onClose={() => onClose?.()} title="Select exercise" maxWidth={672} padded={false}>
         <div className="p-4 border-b border-slate-800">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -82,7 +76,6 @@ export default function ExerciseSelector({ onSelect, onClose }) {
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }

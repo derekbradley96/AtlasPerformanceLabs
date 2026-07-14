@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { createConsultationRequest } from '@/lib/consultationStore';
 import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
-import { X } from 'lucide-react';
 import { toast } from 'sonner';
+import BottomSheet from '@/components/ui/BottomSheet';
 
 export default function RequestConsultationModal({ onClose, userId, userName, userEmail }) {
   const [goal, setGoal] = useState('');
@@ -29,35 +29,9 @@ export default function RequestConsultationModal({ onClose, userId, userName, us
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center p-0 sm:p-4"
-      style={{
-        background: 'rgba(0,0,0,0.6)',
-        paddingTop: 'env(safe-area-inset-top)',
-      }}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div
-        className="w-full max-w-md rounded-t-2xl sm:rounded-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
-        style={{
-          background: colors.card,
-          border: `1px solid ${colors.border}`,
-        }}
-      >
-        <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: colors.border }}>
-          <h2 className="text-lg font-semibold" style={{ color: colors.text }}>Request consultation</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg"
-            style={{ color: colors.muted }}
-            aria-label="Close"
-          >
-            <X size={20} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} style={{ padding: spacing[16] }}>
+    /* Parent mounts this conditionally, so `open` is constant here. */
+    <BottomSheet open onClose={() => onClose?.()} title="Request consultation" maxWidth={448} padded={false}>
+      <form onSubmit={handleSubmit} style={{ padding: spacing[16], paddingTop: 0 }}>
           <label className="block text-sm font-medium mb-2" style={{ color: colors.muted }}>Goal</label>
           <input
             type="text"
@@ -132,8 +106,7 @@ export default function RequestConsultationModal({ onClose, userId, userName, us
             <Button type="button" variant="secondary" onClick={onClose} style={{ flex: 1 }}>Cancel</Button>
             <Button type="submit" variant="primary" style={{ flex: 1 }}>Send request</Button>
           </div>
-        </form>
-      </div>
-    </div>
+      </form>
+    </BottomSheet>
   );
 }

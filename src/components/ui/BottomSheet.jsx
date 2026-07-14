@@ -1,23 +1,27 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Drawer } from 'vaul';
 import { colors, spacing } from '@/ui/tokens';
+import { usePresentationMode } from '@/lib/presentationMode';
 
 /**
- * Standard bottom sheet — drag-to-dismiss, backdrop tap, and Escape, which is
- * what users expect from a native sheet.
+ * Standard sheet — the one place that owns "how a sheet behaves".
  *
- * Use this instead of hand-rolling a `fixed inset-0 ... items-end` overlay: the
- * hand-rolled ones don't drag, and several could only be closed by an explicit
- * button. Built on vaul (same primitive as the exercise picker).
+ * - Mobile / native: bottom sheet with drag-to-dismiss (vaul), backdrop tap, Esc.
+ *   Hand-rolled `fixed inset-0 ... items-end` overlays never dragged, and several
+ *   could only be closed via an explicit button.
+ * - Wide web: centred dialog, preserving the `sm:items-center` treatment the
+ *   hand-rolled sheets had (a bottom drawer on a desktop monitor reads wrong).
  *
- * Note: pass a stable reference for any array/object prop on vaul (an inline
- * `snapPoints={[0.85]}` previously caused an infinite render loop).
+ * Note: vaul is sensitive to unstable props — pass stable references for any
+ * array/object prop (an inline `snapPoints={[0.85]}` once caused an infinite
+ * render loop in the exercise picker).
  *
  * @param {boolean} open
- * @param {() => void} onClose Called when dragged down, backdrop tapped, or Esc.
- * @param {string} [title] Rendered as the sheet heading; also used for a11y.
- * @param {string} [maxHeight] CSS max-height for the sheet (default 88vh).
- * @param {boolean} [padded] Apply standard horizontal padding to the body.
+ * @param {() => void} onClose Called on drag-down, backdrop tap, or Escape.
+ * @param {string} [title] Sheet heading; also used for accessibility.
+ * @param {string} [maxHeight] Sheet max height on mobile (default 88vh).
+ * @param {number} [maxWidth] Dialog max width on wide web (default 560).
+ * @param {boolean} [padded] Standard horizontal padding on the body.
  */
 export default function BottomSheet({
   open,
@@ -25,8 +29,19 @@ export default function BottomSheet({
   title,
   children,
   maxHeight = '88vh',
+  maxWidth = 560,
   padded = true,
 }) {
+  const { isWideWeb } = usePresentationMode();
+
+  if (isWideWeb) {
+    return (
+      <CentredDialog open={open} onClose={onClose} title={title} maxWidth={maxWidth} padded={padded}>
+        {children}
+      </CentredDialog>
+    );
+  }
+
   return (
     <Drawer.Root
       open={!!open}
@@ -35,14 +50,7 @@ export default function BottomSheet({
       }}
     >
       <Drawer.Portal>
-        <Drawer.Overlay
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 100,
-            background: 'rgba(2,6,23,0.55)',
-          }}
-        />
+        <Drawer.Overlay style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(2,6,23,0.55)' }} />
         <Drawer.Content
           style={{
             position: 'fixed',
@@ -69,14 +77,10 @@ export default function BottomSheet({
               justifyContent: 'center',
             }}
           >
-            <div
-              style={{ width: 40, height: 4, borderRadius: 999, background: colors.border }}
-              aria-hidden
-            />
+            <div style={{ width: 40, height: 4, borderRadius: 999, background: colors.border }} aria-hidden />
           </div>
 
-          {/* vaul requires a Title for accessibility; keep it in the tree even
-              when the caller renders its own heading. */}
+          {/* vaul requires a Title for accessibility. */}
           {title ? (
             <Drawer.Title
               style={{
@@ -109,5 +113,71 @@ export default function BottomSheet({
         </Drawer.Content>
       </Drawer.Portal>
     </Drawer.Root>
+  );
+}
+
+function CentredDialog({ open, onClose, title, children, maxWidth, padded }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      style={{ background: 'rgba(2,6,23,0.55)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title || 'Dialog'}
+      onClick={() => onClose?.()}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          maxWidth,
+          maxHeight: '85vh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: colors.bg,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 16,
+          overflow: 'hidden',
+        }}
+      >
+        {title ? (
+          <h2
+            style={{
+              flexShrink: 0,
+              margin: 0,
+              padding: `${spacing[16]}px ${spacing[16]}px ${spacing[10]}px`,
+              fontSize: 16,
+              fontWeight: 700,
+              color: colors.text,
+            }}
+          >
+            {title}
+          </h2>
+        ) : null}
+        <div
+          style={{
+            minHeight: 0,
+            overflowY: 'auto',
+            paddingLeft: padded ? spacing[16] : 0,
+            paddingRight: padded ? spacing[16] : 0,
+            paddingTop: title ? 0 : spacing[16],
+            paddingBottom: spacing[16],
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
   );
 }
