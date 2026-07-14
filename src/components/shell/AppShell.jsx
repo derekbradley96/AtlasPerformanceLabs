@@ -831,7 +831,7 @@ export default function AppShell() {
             marginRight: 'auto',
           }}
         >
-          <div className="flex items-center" style={{ minWidth: 88, minHeight: 44 }}>
+          <div className="flex items-center flex-1 min-w-0" style={{ minHeight: 44 }}>
             {showBack ? (
               <button
                 type="button"
@@ -873,16 +873,17 @@ export default function AppShell() {
               </div>
             )}
           </div>
-          {/* Title takes exactly the space between the side actions — absolute
-              centering overlapped wide right-side actions (e.g. Broadcast, call
-              controls) on narrow screens. */}
+          {/* Title auto-width and screen-centered between two equal (flex-1) side
+              slots, so it sits dead-centre when the sides are light (e.g. just the
+              bell) instead of being pushed off to one side. maxWidth truncates long
+              titles without letting them overlap wide right-side actions. */}
           <h1
-            className="atlas-header-title flex-1 min-w-0 flex items-center justify-center text-[17px] font-semibold px-1"
-            style={{ color: colors.text }}
+            className="atlas-header-title flex-none flex items-center justify-center text-[17px] font-semibold px-2"
+            style={{ color: colors.text, maxWidth: '62%' }}
           >
             <span className="truncate min-w-0">{brandedHeaderTitle}</span>
           </h1>
-          <div className="flex items-center justify-end gap-1 flex-shrink-0" style={{ minHeight: 44 }}>
+          <div className="flex items-center justify-end gap-1 flex-1 min-w-0" style={{ minHeight: 44 }}>
             <NotificationBell />
             {headerRight != null ? headerRight : null}
           </div>
