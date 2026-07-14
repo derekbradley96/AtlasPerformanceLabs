@@ -8,6 +8,7 @@ import { getRouteTitle, getShellNavState, isShellTabItemActive } from '@/lib/rou
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { isBetaUser } from '@/lib/betaAccess';
 import BottomNavPremium, { BOTTOM_NAV_HEIGHT, BOTTOM_NAV_BASE_HEIGHT } from '@/components/ui/BottomNavPremium';
+import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { useKeyboardAwareFocus } from '@/hooks/useKeyboardAwareFocus';
 import { getTabRoutesForRole } from '@/lib/routeMeta';
@@ -386,7 +387,7 @@ function DesktopShell({
       >
         <div
           ref={scrollContainerRef}
-          className={`flex-1 min-h-0 min-w-0 max-w-full flex flex-col ${noOuterScroll ? 'no-outer-scroll overflow-hidden' : 'overflow-x-hidden overflow-y-auto'}`}
+          className={`app-shell-scroll flex-1 min-h-0 min-w-0 max-w-full flex flex-col ${noOuterScroll ? 'no-outer-scroll overflow-hidden' : 'overflow-x-hidden overflow-y-auto'}`}
           style={{
             ...(noOuterScroll ? {} : { WebkitOverflowScrolling: 'touch' }),
           }}
@@ -466,6 +467,7 @@ export default function AppShell() {
   useEdgeSwipeBack(contentRef);
 
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const location = useLocation();
   const pathname = (location.pathname || '').replace(/\/$/, '').toLowerCase();
   const { role, user, profile, effectiveRole, isAdmin, coachFocus, resolvedAccess, linkedCoachFocus, coachBrand, isCompPrepClient, activeContestPrep } = useAuth();
@@ -605,20 +607,41 @@ export default function AppShell() {
   const [ptrRefreshing, setPtrRefreshing] = useState(false);
   const touchStartY = useRef(0);
   const pullThreshold = 70;
-  const enablePullToRefresh = pathname === '/home' || pathname === '/inbox' || pathname === '/community' || pathname === '/clients' || pathname === '/messages' || pathname === '/comp-prep' || pathname === '/comp-prep/media' || pathname === '/briefing' || /^\/clients\/[^/]+$/.test(pathname);
+  /**
+   * Pull-to-refresh on every tab root (plus the pushed screens that already had
+   * it). It used to be a hardcoded path list AND required the page to call
+   * registerRefresh — only 9 pages ever did, so the data screens users most want
+   * to refresh (Progress, Log, Today, My programme) had nothing. Pages that
+   * register their own handler still win; everything else falls back to
+   * refetching that screen's active queries.
+   */
+  const enablePullToRefresh = !noOuterScroll && (
+    isTabRoot
+    || pathname === '/comp-prep/media'
+    || pathname === '/briefing'
+    || pathname === '/myprogram'
+    || /^\/clients\/[^/]+$/.test(pathname)
+  );
 
   const registerRefresh = useCallback((fn) => {
     refreshHandlerRef.current = fn;
     return () => { refreshHandlerRef.current = null; };
   }, []);
 
+  /** Page-supplied handler, else refetch whatever this screen is showing. */
+  const runRefresh = useCallback(() => {
+    const fn = refreshHandlerRef.current;
+    if (typeof fn === 'function') return Promise.resolve(fn());
+    return queryClient.invalidateQueries({ type: 'active' });
+  }, [queryClient]);
+
   const handlePtrTouchStart = useCallback((e) => {
-    if (!enablePullToRefresh || !refreshHandlerRef.current) return;
+    if (!enablePullToRefresh) return;
     touchStartY.current = e.touches[0].clientY;
   }, [enablePullToRefresh]);
 
   const handlePtrTouchMove = useCallback((e) => {
-    if (!enablePullToRefresh || !refreshHandlerRef.current || !scrollContainerRef.current) return;
+    if (!enablePullToRefresh || !scrollContainerRef.current) return;
     if (scrollContainerRef.current.scrollTop > 0) return;
     const currentY = e.touches[0].clientY;
     const delta = currentY - touchStartY.current;
@@ -630,19 +653,39 @@ export default function AppShell() {
 
   const handlePtrTouchEnd = useCallback(() => {
     if (!enablePullToRefresh) return;
-    if (pullDistance >= pullThreshold && refreshHandlerRef.current) {
-      const fn = refreshHandlerRef.current;
+    if (pullDistance >= pullThreshold) {
       setPtrRefreshing(true);
-      Promise.resolve(fn()).finally(() => {
+      runRefresh().finally(() => {
         setPtrRefreshing(false);
       });
     }
     setPullDistance(0);
-  }, [enablePullToRefresh, pullDistance]);
+  }, [enablePullToRefresh, pullDistance, runRefresh]);
 
   const handlePtrTouchCancel = useCallback(() => {
     setPullDistance(0);
   }, []);
+
+  /**
+   * Publish the real height of the content area as --app-content-h.
+   *
+   * 122 pages use Tailwind `min-h-screen`, but inside the shell 100vh is wrong:
+   * it ignores the header and the tab bar, so every screen got ~140px of dead
+   * scroll under it, and pages that vertically centre against it were centring
+   * on a box taller than what you can actually see. index.css remaps
+   * `min-h-screen` to this var inside the shell, so it means "fill the content
+   * area". Measured rather than calc()'d because banners (offline / admin
+   * impersonation) change the available height at runtime.
+   */
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const apply = () => el.style.setProperty('--app-content-h', `${el.clientHeight}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isDesktopWeb]);
 
   // Reset per-page header slots on navigation. Render-phase (not an effect):
   // a [pathname] effect runs AFTER the new page's mount effects (child effects
@@ -920,7 +963,7 @@ export default function AppShell() {
       >
         <div
           ref={scrollContainerRef}
-          className={`flex-1 min-h-0 min-w-0 max-w-full flex flex-col ${noOuterScroll ? 'no-outer-scroll overflow-hidden' : 'overflow-x-hidden overflow-y-auto'}`}
+          className={`app-shell-scroll flex-1 min-h-0 min-w-0 max-w-full flex flex-col ${noOuterScroll ? 'no-outer-scroll overflow-hidden' : 'overflow-x-hidden overflow-y-auto'}`}
           style={{
             ...(noOuterScroll ? {} : { WebkitOverflowScrolling: 'touch' }),
             ...(isPushedRoute ? { animation: 'app-shell-push-in 0.24s ease-out' } : {}),

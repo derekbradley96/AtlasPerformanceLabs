@@ -525,3 +525,14 @@ svg {
   transform: translateY(0);
   opacity: 1;
 }
+/* Pages inside AppShell render in a scroll area that is already sized to the
+   space between the header and the tab bar. Tailwind's `min-h-screen` (100vh)
+   ignores that chrome, so every screen carried ~140px of dead scroll beneath it,
+   and the ~56 pages that vertically centre against it were centring on a box
+   taller than the visible area. AppShell measures the real content height into
+   --app-content-h (ResizeObserver, so offline/impersonation banners and the
+   keyboard are accounted for); here `min-h-screen` is remapped to mean "fill the
+   content area". Falls back to 100% if the var is ever missing. */
+.app-shell-scroll .min-h-screen {
+  min-height: var(--app-content-h, 100%);
+}

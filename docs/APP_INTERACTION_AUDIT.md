@@ -54,30 +54,37 @@ Status key: [ ] open · [~] partially done · [x] done
   `client-detail/*` sheets. Momentum (`-webkit-overflow-scrolling`) is set on
   some and not others. Decide on ONE scroll owner per screen.
 
-- [ ] **`100vh` / `h-screen` on ~20 pages** (`Leads`, `Notifications`,
-  `Coaches`, `ReviewCheckIn`, dashboards, etc.). `100vh` is wrong on mobile
-  Safari (ignores the dynamic toolbar) → clipped bottoms / mis-sized screens.
-  Move to the shell's `flex-1 min-h-0` pattern or `100dvh`.
+- [x] **`min-h-screen` dead scroll.** CORRECTION: the first pass claimed `h-screen`
+  clipped bottoms on ~20 pages. Wrong — exactly **1** file uses fixed `h-screen`
+  (`ui/sidebar.jsx`, legitimately). The real issue is **122 pages using
+  `min-h-screen`**: inside the shell, 100vh ignores the header + tab bar, so every
+  screen carried ~140px of dead scroll, and the **56** pages that vertically
+  centre against it were centring on a box taller than the visible area.
+  Neutralising to 0 would have wrecked those 56, so instead AppShell measures the
+  content area into `--app-content-h` (ResizeObserver — survives banners and the
+  keyboard) and index.css remaps `min-h-screen` inside `.app-shell-scroll` to it.
+  `min-h-screen` now means "fill the content area". **Needs a device pass.**
 
 - [ ] **Swipe actions only on 2 lists.** `SwipeRow` (swipe-to-delete/pin) is
   used only in `Messages` and `Clients`. Every other list (programs, workouts,
   meals, exercises, check-ins, notifications) has no swipe affordance →
   inconsistent. Either add swipe to the main lists or drop the expectation.
 
-- [ ] **Long-press barely used + duplicated.** Two `useLongPress` hooks:
-  `hooks/useLongPress.js` (350ms, pointer events, haptic) is live but used ONLY
-  by `ChatBubble`; `components/app/useLongPress.js` (400ms, touch/mouse,
-  move-cancel, no haptic) is **dead code**. Delete the dead one; decide where
-  long-press should exist (list items? cards?) and apply it consistently.
+- [~] **Long-press barely used.** The dead duplicate (`components/app/useLongPress.js`)
+  is deleted (0b7253b), along with a second dead dupe `components/app/useKeyboardInset.js`.
+  `hooks/useLongPress.js` is live but still used ONLY by `ChatBubble`. Open
+  product decision: where else should long-press exist (list items? cards?).
 
-- [ ] **Pull-to-refresh hardcoded to a few routes** (`/home`, `/inbox`,
-  `/community`, `/clients`, `/messages`, `/comp-prep`, `/briefing`). Missing on
-  the personal data screens users most want to refresh: `/progress`,
-  `/nutrition` (Log), `/today`, `/myprogram`. Make PTR opt-in per scrollable
-  data screen, or enable on all tab roots.
+- [x] **Pull-to-refresh.** It was gated on a hardcoded path list AND required the
+  page to call `registerRefresh` — only **9** pages ever did, so enabling routes
+  alone would have done nothing. PTR now runs on every tab root (plus
+  /myprogram, /briefing, /comp-prep/media, /clients/:id); pages with their own
+  handler still win, everything else falls back to refetching that screen's
+  active queries. Progress, Log, Today and My programme now refresh.
 
-- [ ] **Escape-to-close on only 4 components.** Desktop-web modals mostly can't
-  be dismissed with Esc. Fold into the standard sheet/modal component.
+- [~] **Escape-to-close.** Much improved: all 15 migrated sheets get Escape via
+  BottomSheet, and ConfirmDialog already had it. Remaining: one-off overlays that
+  are neither a BottomSheet nor a ConfirmDialog.
 
 ## P2 — polish (confirm on device)
 
