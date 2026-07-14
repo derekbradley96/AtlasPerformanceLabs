@@ -12,26 +12,41 @@ Status key: [ ] open · [~] partially done · [x] done
 
 ## P0 — hits users constantly, fix first
 
-- [ ] **Keyboard covers inputs.** Only 13 / 191 pages handle the keyboard inset
-  (`useKeyboardInset` / scroll-focused-input-into-view). Major form pages have
-  NO handling — `EditProfile`, `ProfileAccountPage`, `NutritionTargetsPage`,
-  `ClientCheckIn`, `CoachOnboardingWizard`, and most onboarding/intake screens.
-  On native the software keyboard hides the field you're typing in. Needs a
-  shared "keyboard-aware scroll" wrapper applied app-wide, or `Keyboard`
-  (Capacitor) resize mode set to `native`/`ionic` + focused-input scroll.
+- [x] **Keyboard covers inputs.** (0b7253b) Root cause: `capacitor.config.ts`
+  sets `Keyboard.resize: 'none'`, so the WebView never shrinks — iOS paints the
+  keyboard over the page and, because the viewport still reports full height,
+  the browser never scrolls the focused field into view. Only ChatThread
+  compensated (13/191 screens had any handling). Fixed once in AppShell via new
+  `useKeyboardAwareFocus` + keyboard-inset bottom padding on the scroll
+  container, scoped away from `noOuterScroll` (chat) pages which lift their own
+  composer. **Needs an on-device pass** to confirm feel across forms.
 
-- [ ] **Bottom sheets don't swipe-down to dismiss.** ~50 sheets are custom
-  `fixed inset-0` overlays; only 2 use a real draggable drawer (`vaul`). Native
-  users expect to drag a sheet down to close. Worse, only ~22 of them even close
-  on backdrop tap, so some sheets can ONLY be closed by an explicit button.
-  Standardise on one sheet component (drag-to-dismiss + backdrop tap + Escape).
+- [~] **Bottom sheets don't swipe-down to dismiss.** CORRECTION to the first
+  pass: the "~50" figure conflated centred dialogs and full-screen modals (which
+  correctly use `fixed inset-0` and should NOT drag) with real bottom sheets.
+  The true count is **17** bottom-anchored sheets not using a drawer. A shared
+  `components/ui/BottomSheet.jsx` (vaul: drag-to-dismiss + backdrop + Escape)
+  now exists; `ProgramBuilderPageImpl` assign sheet migrated. Remaining to
+  migrate:
+  `BetaSupportModal`, `BetaFeedbackModal`, `prep/PosingLogSheet`,
+  `consultation/RequestConsultationModal`, `program/ExerciseSelector`,
+  `coaching/CoachMarketplaceQuickCompleteModal`, `workout/ExerciseSearchModal`,
+  `ProgressPhotos`, `More`, `PersonalMyProgram`, `CoachMarketplaceProfilePage`,
+  `PublicCoachProfilePage`, `plan/TrainerPlan`, `client-detail/ClientDetailModals`,
+  `compPrep/CompMediaList`, `compPrep/TrainerCompClient`.
+  (~10 files already use the `ui/drawer` vaul primitive and are fine.)
 
-- [ ] **Inconsistent / missing delete confirmation.** Chat message delete
-  confirms (pending-state), but e.g. `Nutrition` meal delete fires instantly on
-  tap (`deleteMealMutation.mutateAsync` with no confirm, no undo). Sweep every
-  destructive action for one consistent pattern (confirm dialog OR
-  delete-with-undo snackbar). `Workout.jsx` still uses raw `window.confirm`
-  (ugly browser dialog on native) — replace with the in-app `ConfirmDialog`.
+- [x] **Inconsistent / missing delete confirmation.** (this pass) `Nutrition`
+  meal delete fired instantly on one tap with no confirm/undo → now goes through
+  `ConfirmDialog`. `window.confirm` is gone from the codebase: its only user,
+  `pages/Workout.jsx`, was confirmed dead (unrouted, unimported — the build
+  never compiled it) and deleted. Sweep found only 5 no-confirm deletes total;
+  the rest are deliberate:
+  - `ActiveWorkout` set delete — stays instant on purpose (high-frequency,
+    trivially re-added; a confirm would be hostile).
+  - `CommunityRoomPage` — coach **soft**-delete (recoverable). Optional confirm.
+  - `AdminDevPanel`, `EditCheckInTemplate`, `CoachResultsStoryBuilderPage` —
+    admin/coach authoring surfaces, low blast radius.
 
 ## P1 — inconsistency & native feel
 

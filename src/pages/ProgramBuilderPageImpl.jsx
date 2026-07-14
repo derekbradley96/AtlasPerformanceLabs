@@ -30,6 +30,7 @@ import DuplicateToClientSheet from '@/components/program-builder/DuplicateToClie
 import { PersonalCanvas, PersonalColumn } from '@/components/personal/PersonalSurface';
 import { personalColumnInnerBodyStyle } from '@/lib/personalShellLayout';
 import ExercisePickerModal from '@/components/programs/ExercisePickerModal';
+import BottomSheet from '@/components/ui/BottomSheet';
 import { UserPlus, Save } from 'lucide-react';
 import { duplicateBlockToClient } from '@/lib/supabaseRepo/phaseProgramRepo';
 import { activatePersonalProgramAssignment } from '@/lib/personalProgramSeed';
@@ -2561,56 +2562,48 @@ export default function ProgramBuilderPage() {
         lastWeekExercises={pickerLastWeekExercises}
         compactBasic={personalBasicExperience}
       />
-      {assignSheetOpen && !isPersonalRole ? (
-        <div
-          className="fixed inset-0 z-50"
-          style={{ background: 'rgba(2,6,23,0.55)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: spacing[12] }}
-          onClick={() => setAssignSheetOpen(false)}
-        >
-          <Card
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: '100%', maxWidth: 560, padding: spacing[16], borderRadius: 16 }}
+      <BottomSheet
+        open={assignSheetOpen && !isPersonalRole}
+        onClose={() => setAssignSheetOpen(false)}
+        title="Assign programme"
+      >
+        <p style={{ margin: `0 0 ${spacing[12]}px`, fontSize: 12, color: colors.muted }}>Select client and start date, then assign now.</p>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <select
+            value={assignClientId}
+            onChange={(e) => setAssignClientId(e.target.value)}
+            style={{ minHeight: touchTargetMin, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, padding: '0 10px' }}
           >
-            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: colors.text }}>Assign programme</p>
-            <p style={{ margin: `${spacing[6]}px 0 ${spacing[12]}px`, fontSize: 12, color: colors.muted }}>Select client and start date, then assign now.</p>
-            <div style={{ display: 'grid', gap: 10 }}>
-              <select
-                value={assignClientId}
-                onChange={(e) => setAssignClientId(e.target.value)}
-                style={{ minHeight: touchTargetMin, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, padding: '0 10px' }}
-              >
-                <option value="">Select client</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-              <input
-                type="date"
-                value={assignStartDate}
-                onChange={(e) => setAssignStartDate(e.target.value)}
-                style={{ minHeight: touchTargetMin, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, padding: '0 10px' }}
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAssignSheetOpen(false)}
-                  style={{ flex: 1, minHeight: touchTargetMin, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, fontWeight: 600 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAssignNow}
-                  disabled={saving}
-                  style={{ flex: 1, minHeight: touchTargetMin, borderRadius: 10, border: 'none', background: colors.primary, color: '#fff', fontWeight: 700, opacity: saving ? 0.7 : 1 }}
-                >
-                  Assign now
-                </button>
-              </div>
-            </div>
-          </Card>
+            <option value="">Select client</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={assignStartDate}
+            onChange={(e) => setAssignStartDate(e.target.value)}
+            style={{ minHeight: touchTargetMin, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, padding: '0 10px' }}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setAssignSheetOpen(false)}
+              style={{ flex: 1, minHeight: touchTargetMin, borderRadius: 10, border: `1px solid ${colors.border}`, background: colors.surface1, color: colors.text, fontWeight: 600 }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleAssignNow}
+              disabled={saving}
+              style={{ flex: 1, minHeight: touchTargetMin, borderRadius: 10, border: 'none', background: colors.primary, color: '#fff', fontWeight: 700, opacity: saving ? 0.7 : 1 }}
+            >
+              Assign now
+            </button>
+          </div>
         </div>
-      ) : null}
+      </BottomSheet>
     </div>
     </PersonalCanvas>
   );

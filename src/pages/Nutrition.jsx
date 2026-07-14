@@ -7,6 +7,7 @@ import { Apple, Target, MessageSquare, Scale, TrendingUp, Zap, Clock3, Plus } fr
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageLoader, EmptyState, NutritionCalorieRingSkeleton } from '@/components/ui/LoadingState';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { motion } from 'framer-motion';
 import MealLogForm from '@/components/nutrition/MealLogForm';
 import DailyNutritionProgress from '@/components/nutrition/DailyNutritionProgress';
@@ -208,6 +209,9 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   const isNativeApp = isNativePlatform();
   const { isWideWeb } = usePresentationMode();
   const [deleting, setDeleting] = useState(null);
+  /** Deleting a logged meal is destructive and was firing on a single tap with
+   *  no confirm and no undo — hold the id until the user confirms. */
+  const [pendingDeleteMealId, setPendingDeleteMealId] = useState(null);
   const [openFormSignal, setOpenFormSignal] = useState(0);
   const [openScannerSignal, setOpenScannerSignal] = useState(0);
   const [presetMealType, setPresetMealType] = useState(null);
@@ -1711,10 +1715,7 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
               <h3 className="font-semibold text-white mb-3">Today&apos;s Food Log</h3>
               <MealLogList
                 meals={todayMeals}
-                onDelete={async (id) => {
-                  setDeleting(id);
-                  await deleteMealMutation.mutateAsync(id);
-                }}
+                onDelete={(id) => setPendingDeleteMealId(id)}
                 onRepeat={isPersonal ? (meal) => {
                   logMealMutation.mutate({
                     meal_type: meal.meal_type,
@@ -1956,6 +1957,22 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
         }}
       />
     )}
+    <ConfirmDialog
+      open={pendingDeleteMealId != null}
+      title="Delete this meal?"
+      message="This removes it from today's food log and your totals. You can log it again if you change your mind."
+      confirmLabel="Delete"
+      cancelLabel="Keep"
+      variant="danger"
+      onCancel={() => setPendingDeleteMealId(null)}
+      onConfirm={async () => {
+        const id = pendingDeleteMealId;
+        setPendingDeleteMealId(null);
+        if (!id) return;
+        setDeleting(id);
+        await deleteMealMutation.mutateAsync(id);
+      }}
+    />
     </PersonalSurface>
   );
 }
