@@ -10,7 +10,14 @@ import EmptyState from '@/components/ui/EmptyState';
 import ExerciseRow from './ExerciseRow';
 import { EXERCISES as LIBRARY_EXERCISES } from '@/data/exercises/exerciseLibrary';
 
-const EDITOR_MAX_H = 'min(75vh, 720px)';
+/**
+ * The exercise list used to be capped at min(75vh, 720px) with its own
+ * overflow-y:auto AND overscroll-behavior:contain, nested inside the builder
+ * page — which itself scrolls. With a finger over the list you scrolled the
+ * list, and `contain` then refused to chain the scroll on to the page, so the
+ * page simply would not move ("can't scroll down"). The page is now the single
+ * scroll owner: the list renders in normal flow at its natural height.
+ */
 
 export default function ExerciseEditor({
   exercises,
@@ -123,11 +130,10 @@ export default function ExerciseEditor({
         marginTop: spacing[8],
         display: 'flex',
         flexDirection: 'column',
-        maxHeight: isEmpty ? 'none' : EDITOR_MAX_H,
         borderRadius: shell.cardRadius,
         border: isEmpty ? 'none' : `1px solid ${colors.border}`,
         background: isEmpty ? 'transparent' : colors.surface1,
-        overflow: isEmpty ? 'visible' : 'hidden',
+        overflow: 'visible',
       }}
     >
       {/* Sticky-style header (within editor column) */}
@@ -268,14 +274,10 @@ export default function ExerciseEditor({
         </div>
       )}
 
-      {/* Scrollable cards */}
+      {/* Exercise cards — normal flow; the page scrolls, not this list. */}
       <div
         style={{
-          flex: isEmpty ? '0 0 auto' : '1 1 auto',
-          minHeight: 0,
-          overflowY: isEmpty ? 'visible' : 'auto',
-          WebkitOverflowScrolling: 'touch',
-          overscrollBehavior: 'contain',
+          flex: '0 0 auto',
           padding: isEmpty ? 0 : `${spacing[8]}px ${spacing[12]}px`,
         }}
       >

@@ -47,12 +47,24 @@ Status key: [ ] open · [~] partially done · [x] done
 
 ## P1 — inconsistency & native feel
 
-- [ ] **Nested / non-standard scrolling.** ~20 pages set their own
-  `overflow-y-auto` inside AppShell's own scroll container (double-scroll / trap
-  risk) — e.g. `More`, `ProfileAccountPage`, `ProgressPhotos`, `EditProfile`,
-  `CoachMarketplacePage/ProfilePage`, `PrepDashboardPage`, several
-  `client-detail/*` sheets. Momentum (`-webkit-overflow-scrolling`) is set on
-  some and not others. Decide on ONE scroll owner per screen.
+- [x] **Nested scrolling.** CORRECTION: the first pass flagged "~20 pages" for
+  having their own `overflow-y-auto`. That test was wrong — an inner
+  `overflow-y-auto` is harmless unless the element also has a *bounded height*.
+  Re-tested for bounded-height scrollers, and everything flagged turned out
+  legitimate (vaul drawers, search dropdowns, centred modal panels like
+  ProfileAccountPage, `.chat-messages`, and PersonalOnboardingFlow which renders
+  outside the shell) — except **one real trap**:
+  `program-builder/ExerciseEditor` capped the exercise list at
+  `min(75vh, 720px)` with its own `overflow-y: auto` **and**
+  `overscroll-behavior: contain`, nested inside the builder page. `contain`
+  refuses to chain the scroll onto the page, so once the list hit its end the
+  page would not move — almost certainly the original "can't scroll down" report
+  (the earlier `noOuterScroll` fix was a separate, real bug). The list now
+  renders in normal flow: the page is the single scroll owner.
+  Also deleted `pages/ProgramBuilder.jsx` — a dead 1117-line legacy builder
+  (unimported) that carried the same trap.
+  Momentum (`-webkit-overflow-scrolling`) inconsistency is moot now that pages
+  don't own scrollers; the shell's scroller sets it.
 
 - [x] **`min-h-screen` dead scroll.** CORRECTION: the first pass claimed `h-screen`
   clipped bottoms on ~20 pages. Wrong — exactly **1** file uses fixed `h-screen`
