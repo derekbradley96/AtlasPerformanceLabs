@@ -30,6 +30,9 @@ import { syncOfflineQueue } from '@/lib/offlineWorkoutQueue';
 import { colors, shell } from '@/ui/tokens';
 import { getAppShellOutletScrollPaddingBottom } from '@/ui/pageLayout';
 const HEADER_HEIGHT = shell.headerHeight;
+/** Both header side slots reserve the same width so the flex-1 title between
+ *  them lands dead centre on screen when the sides are light. */
+const HEADER_SIDE_MIN = 88;
 const BG = colors.bg;
 const ADMIN_TAPS = 5;
 const isDev = import.meta.env.DEV;
@@ -883,7 +886,7 @@ export default function AppShell() {
             marginRight: 'auto',
           }}
         >
-          <div className="flex items-center flex-1 min-w-0" style={{ minHeight: 44 }}>
+          <div className="flex items-center flex-shrink-0" style={{ minWidth: HEADER_SIDE_MIN, minHeight: 44 }}>
             {showBack ? (
               <button
                 type="button"
@@ -925,17 +928,24 @@ export default function AppShell() {
               </div>
             )}
           </div>
-          {/* Title auto-width and screen-centered between two equal (flex-1) side
-              slots, so it sits dead-centre when the sides are light (e.g. just the
-              bell) instead of being pushed off to one side. maxWidth truncates long
-              titles without letting them overlap wide right-side actions. */}
+          {/* Title fills the gap between the side slots and truncates. Both sides
+              share the same minWidth, so when they're light (a tab root: nothing
+              left, bell right) the gap is symmetric and the title lands dead
+              centre. When the right side is heavy (chat: bell + call + video) it
+              grows past the min and the title simply sits slightly left rather
+              than being crushed — an earlier attempt made both sides flex-1,
+              which ballooned the empty left slot to match and squeezed the chat
+              title to ~90px. */}
           <h1
-            className="atlas-header-title flex-none flex items-center justify-center text-[17px] font-semibold px-2"
-            style={{ color: colors.text, maxWidth: '62%' }}
+            className="atlas-header-title flex-1 min-w-0 flex items-center justify-center text-[17px] font-semibold px-2"
+            style={{ color: colors.text }}
           >
             <span className="truncate min-w-0">{brandedHeaderTitle}</span>
           </h1>
-          <div className="flex items-center justify-end gap-1 flex-1 min-w-0" style={{ minHeight: 44 }}>
+          <div
+            className="flex items-center justify-end gap-1 flex-shrink-0"
+            style={{ minWidth: HEADER_SIDE_MIN, minHeight: 44 }}
+          >
             <NotificationBell />
             {headerRight != null ? headerRight : null}
           </div>

@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import TrainerProfileSettings from '@/pages/settings/TrainerProfileSettings';
 import { useTrainerPermissions } from '@/components/hooks/useTrainerPermissions';
 import { isCoach } from '@/lib/roles';
+import AccessDenied from '@/components/AccessDenied';
 
 export default function EditProfile() {
   const navigate = useNavigate();

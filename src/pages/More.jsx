@@ -24,6 +24,7 @@ import { impactLight } from '@/lib/haptics';
 import { toast } from 'sonner';
 import Card from '@/ui/Card';
 import Row from '@/ui/Row';
+import Button from '@/ui/Button';
 import { colors, spacing } from '@/ui/tokens';
 import { pageContainer, standardCard } from '@/ui/pageLayout';
 import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';

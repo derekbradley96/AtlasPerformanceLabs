@@ -9,11 +9,15 @@ export default function QuickReplyChips({ options = [], onSelect, visible = true
   if (!visible || !Array.isArray(options) || options.length === 0) return null;
 
   return (
+    /* Deliberately quiet: these sit directly above the composer, so they read as
+       a suggestion strip rather than a row of buttons competing with Send. */
     <div
-      className="flex gap-2 overflow-x-auto overflow-y-hidden py-2 px-1"
+      className="flex gap-1.5 overflow-x-auto overflow-y-hidden px-1"
       style={{
-        minHeight: 40,
+        paddingTop: 4,
+        paddingBottom: 6,
         scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
         WebkitOverflowScrolling: 'touch',
       }}
     >
@@ -22,10 +26,14 @@ export default function QuickReplyChips({ options = [], onSelect, visible = true
           key={text}
           type="button"
           onClick={() => typeof onSelect === 'function' && onSelect(text)}
-          className="flex-shrink-0 rounded-full px-4 py-2 text-[13px] font-medium active:opacity-70 transition-opacity whitespace-nowrap"
+          className="flex-shrink-0 rounded-full active:opacity-70 transition-opacity whitespace-nowrap"
           style={{
-            color: colors.text,
-            background: colors.surface2,
+            height: 30,
+            padding: '0 12px',
+            fontSize: 12.5,
+            fontWeight: 500,
+            color: colors.muted,
+            background: colors.surface1,
             border: `1px solid ${colors.border}`,
           }}
         >

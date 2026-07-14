@@ -4,6 +4,7 @@
  */
 // TODO(refactor): Extract useProgressData hook.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import PillarRating from '@/components/marketplace/PillarRating';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
