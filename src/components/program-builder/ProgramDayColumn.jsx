@@ -13,6 +13,7 @@ import ExerciseEntryRow from '@/components/program-builder/ExerciseEntryRow';
 export default function ProgramDayColumn({
   selectedDay,
   personalBasicExperience,
+  isPersonalRole,
   sectionLabel,
   libraryFilterMovement,
   setLibraryFilterMovement,
@@ -25,9 +26,12 @@ export default function ProgramDayColumn({
 }) {
   if (!selectedDay) return null;
 
+  // Personal filters exercises inside the "Browse library" picker (which has its
+  // own search + muscle/equipment chips), so the build screen stays clean.
+  // Coaches keep the inline filters that shape their suggestion ranking.
   return (
     <>
-      {!personalBasicExperience ? (
+      {!personalBasicExperience && !isPersonalRole ? (
         <div style={{ marginBottom: spacing[12] }}>
           <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Library filters</p>
           <div className="flex flex-wrap gap-2" style={{ alignItems: 'center' }}>

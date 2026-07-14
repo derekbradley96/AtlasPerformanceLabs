@@ -1411,25 +1411,6 @@ export default function ProgramBuilderPage() {
     }
   };
 
-  const handleSmartSwapExercise = useCallback(async (exercise) => {
-    if (!exercise?.id) return;
-    const current = String(exercise.exercise_name || '').trim().toLowerCase();
-    const ranked = Array.from(libraryByName.values());
-    const candidate = ranked.find((row) => {
-      const name = String(row?.name || '').trim().toLowerCase();
-      return name && name !== current;
-    });
-    if (!candidate) {
-      toast.message('No smart swap available yet');
-      return;
-    }
-    await handleUpdateExercise(exercise.id, {
-      exercise_name: candidate.name,
-      exercise_library_id: candidate.id || null,
-    });
-    toast.success('Exercise swapped');
-  }, [libraryByName]);
-
   const handleDuplicateDay = async () => {
     if (!supabase || !selectedWeek || !selectedDay) return;
     setSaving(true);
@@ -2185,29 +2166,9 @@ export default function ProgramBuilderPage() {
     () => getQuickStartWeekPreviewTitles(weekStructureType, quickDaysPerWeek),
     [weekStructureType, quickDaysPerWeek]
   );
-  const dayPromptActions = useMemo(() => {
-    if (!personalEnhancedExperience) return [];
-    return [
-      {
-        id: 'upper-back-balance',
-        label: 'Add upper-back balance',
-        onClick: () => handleAddExercise({ exercise_name: 'Chest Supported Row', sets: 3, reps: '10-12', rest_seconds: 90 }),
-      },
-      {
-        id: 'simplify-session',
-        label: 'Simplify this session',
-        onClick: () => {
-          if (!selectedDay || exercises.length <= 4) return;
-          toast.message('Try keeping 4 core lifts for a lower-fatigue session.');
-        },
-      },
-      {
-        id: 'repeat-last-week',
-        label: 'Repeat last week structure',
-        onClick: handleCopyPreviousWeek,
-      },
-    ];
-  }, [personalEnhancedExperience, handleAddExercise, selectedDay, exercises.length, handleCopyPreviousWeek]);
+  // Personal is a fully manual builder — no AI-style day suggestions. (The
+  // useful "repeat last week" lives in the week ⋯ menu as "Copy previous week".)
+  const dayPromptActions = useMemo(() => [], []);
 
   const programBuilderRoleView = isPersonalRole ? 'personal' : 'coach';
   const showCoachNoClientsGateEarly = !isPersonalRole && !blockIdParam && clients.length === 0;
@@ -2572,7 +2533,6 @@ export default function ProgramBuilderPage() {
             saving,
             personalEnhancedExperience,
             dayPromptActions,
-            handleSmartSwapExercise,
             isPrepOriented,
             isCoachRole,
             clientId,

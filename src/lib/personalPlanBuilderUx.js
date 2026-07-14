@@ -6,7 +6,7 @@
  *  Personal plans are built manually — no generate/draft framing. */
 export function personalBuilderIntro({ hasBlock }) {
   if (hasBlock) {
-    return 'Pick a week and day, add or swap exercises, then save. Your plan updates Today automatically.';
+    return 'Pick a week and day, add your exercises, then save. Your plan updates Today automatically.';
   }
   return 'Name your plan, save it, then add training days one at a time.';
 }

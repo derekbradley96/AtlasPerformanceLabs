@@ -1,8 +1,8 @@
 /**
- * Block header: block name, weeks, save. Premium card styling.
+ * Block header: block name + weeks. Save lives in the sticky bottom bar
+ * (ProgramWeekView) so there's a single, always-reachable save action.
  */
 import React, { useEffect, useLayoutEffect, useState } from 'react';
-import { Save } from 'lucide-react';
 import Card from '@/ui/Card';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { standardCard } from '@/ui/pageLayout';
@@ -25,15 +25,9 @@ export default function BlockHeader({
   onBlockNameChange,
   totalWeeks,
   onTotalWeeksChange,
-  onSave,
   onEffectiveWeeksChange,
-  saving,
-  saveDisabled,
-  hasBlock,
   blockNamePlaceholder = 'Block name',
   saveHint = '',
-  /** Personal training plan: “plan” wording instead of “block”. */
-  planMode = false,
   /** Personal Basic: hide multi-week controls (single-week focus). */
   hideWeekCount = false,
 }) {
@@ -54,15 +48,6 @@ export default function BlockHeader({
     onTotalWeeksChange(nextWeeks);
     setWeeksInput(String(nextWeeks));
     return nextWeeks;
-  };
-
-  /** Commit weeks from the input immediately so Save/Create uses the value even if the weeks field never blurred. */
-  const handleSaveClick = () => {
-    if (saving) return;
-    const nextWeeks = commitWeeks();
-    if (typeof onSave === 'function') {
-      onSave({ totalWeeks: nextWeeks });
-    }
   };
 
   return (
@@ -105,34 +90,6 @@ export default function BlockHeader({
         <span className="text-sm shrink-0" style={{ color: colors.muted }}>weeks</span>
           </>
         ) : null}
-        <button
-          type="button"
-          onClick={handleSaveClick}
-          disabled={saving}
-          className="inline-flex items-center gap-2 shrink-0 transition-opacity"
-          style={{
-            padding: `${spacing[12]}px ${spacing[18]}px`,
-            borderRadius: 10,
-            background: colors.primary,
-            color: '#fff',
-            border: 'none',
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: saving ? 'not-allowed' : 'pointer',
-            opacity: saving ? 0.7 : 1,
-          }}
-        >
-          <Save size={18} />{' '}
-          {saving
-            ? hasBlock
-              ? 'Saving…'
-              : 'Creating…'
-            : hasBlock
-              ? 'Save'
-              : planMode
-                ? 'Create plan'
-                : 'Create block'}
-        </button>
       </div>
       {!!saveHint && (
         <p className="text-xs mt-2" style={{ color: colors.muted, marginBottom: 0 }}>

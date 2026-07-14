@@ -14,6 +14,7 @@ import {
   UtensilsCrossed,
   HeartPulse,
   BarChart3,
+  Settings,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { CardSkeleton, PageLoader } from '@/components/ui/LoadingState';
@@ -390,6 +391,15 @@ export default function GeneralDashboard({ user }) {
 
   const cardPad = rhythm.cardPadding;
 
+  const homeDisplayName = String(profile?.full_name || profile?.display_name || user?.full_name || '').trim();
+  const homeFirstName = homeDisplayName.split(/\s+/)[0] || '';
+  const homeGreeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
+  })();
+
   const welcomeHeroPad = cardRhythm.hero.padding;
   const welcomeEyebrowToTitle = spacing[12];
   const welcomeTitleToBody = cardRhythm.hero.titleToDescription;
@@ -429,6 +439,54 @@ export default function GeneralDashboard({ user }) {
   return (
     <PersonalSurface variant="home">
       <div {...atlasMigrationDataAttributes(homeDashboardMigration.phase, homeDashboardMigration.primary)}>
+      {/* Home header — greeting + a always-visible route to profile / settings /
+          sign out, so the account is reachable straight from the home tab. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: spacing[12],
+          marginBottom: rhythm.section,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 600 }}>{homeGreeting}</p>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: 22,
+              fontWeight: 700,
+              color: colors.text,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {homeFirstName ? `Hi, ${homeFirstName}` : 'Your training'}
+          </h1>
+        </div>
+        <button
+          type="button"
+          aria-label="Profile and settings"
+          onClick={() => navigate('/settings/account')}
+          style={{
+            flex: 'none',
+            width: touchTargetMin,
+            height: touchTargetMin,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: radii.button,
+            border: `1px solid ${shell.cardBorder}`,
+            background: colors.surface,
+            color: colors.text,
+            cursor: 'pointer',
+          }}
+        >
+          <Settings size={20} />
+        </button>
+      </div>
       {showPersonalPostOnboarding ? (
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: rhythm.section }}>
           <Card

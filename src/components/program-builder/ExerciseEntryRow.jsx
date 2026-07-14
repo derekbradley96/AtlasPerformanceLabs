@@ -23,7 +23,6 @@ export default function ExerciseEntryRow({
   saving,
   personalEnhancedExperience,
   dayPromptActions,
-  handleSmartSwapExercise,
   isPrepOriented,
   isCoachRole,
   clientId,
@@ -31,6 +30,8 @@ export default function ExerciseEntryRow({
   personalExperienceLevel,
   handleLinkSuperset,
   handleRemoveSuperset,
+  // handleSmartSwapExercise intentionally not destructured — personal has no AI
+  // swap; onSmartSwapExercise is hardwired off below.
 }) {
   return (
     <>
@@ -68,7 +69,7 @@ export default function ExerciseEntryRow({
           personalBasicExperience ? 'personal_basic' : personalEnhancedExperience ? 'personal_enhanced' : 'default'
         }
         dayPromptActions={dayPromptActions}
-        onSmartSwapExercise={personalEnhancedExperience ? handleSmartSwapExercise : undefined}
+        onSmartSwapExercise={undefined}
         showPrepEducationPicker={isPrepOriented && isCoachRole && Boolean(clientId || block?.client_id)}
         isAssignedProgramLive={Boolean(liveProgramContext?.clientId)}
         personalExperienceLevel={personalExperienceLevel}

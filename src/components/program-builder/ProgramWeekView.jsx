@@ -2,10 +2,9 @@ import React from 'react';
 import WeekTabs from '@/components/program-builder/WeekTabs';
 import DayTabs from '@/components/program-builder/DayTabs';
 import ProgramDayColumn from '@/components/program-builder/ProgramDayColumn';
+import BuilderActionMenu from '@/components/program-builder/BuilderActionMenu';
 import EmptyState from '@/components/ui/EmptyState';
-import Card from '@/ui/Card';
-import { Button } from '@/components/ui/button';
-import { Calendar } from 'lucide-react';
+import { Calendar, Copy, CopyPlus, ArrowDownToLine, Library } from 'lucide-react';
 import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
 
 export default function ProgramWeekView(props) {
@@ -26,7 +25,6 @@ export default function ProgramWeekView(props) {
     sourceBlocks,
     handleCopyFromSourceBlock,
     handleCopyPreviousWeek,
-    personalEnhancedExperience,
     days,
     handleAddDay,
     personalEmptyWeekDescription,
@@ -45,97 +43,120 @@ export default function ProgramWeekView(props) {
     handleSaveBlock,
     headerEffectiveWeeksRef,
     openExercisePicker,
-    isCoachRole,
-    clientId,
   } = props;
 
   if (!block?.id) return null;
 
+  // Week tools — hidden for Personal Basic (single-week focus, no copy tools).
+  const weekMenuItems = personalBasicExperience
+    ? []
+    : [
+        {
+          key: 'copy-prev',
+          label: 'Copy previous week',
+          icon: ArrowDownToLine,
+          onClick: handleCopyPreviousWeek,
+          disabled: saving || Number(selectedWeek?.week_number) <= 1,
+        },
+        {
+          key: 'copy-end',
+          label: 'Copy this week to end',
+          icon: CopyPlus,
+          onClick: handleCopyWeekToEnd,
+          disabled: saving || !selectedWeek,
+        },
+      ];
+
+  // Day tools — "Browse library" (modal picker) for everyone; Duplicate day for
+  // enhanced/coach. The quick inline add lives inside the exercise editor.
+  const dayMenuItems = [
+    {
+      key: 'browse-library',
+      label: 'Browse exercise library',
+      icon: Library,
+      onClick: openExercisePicker,
+      disabled: saving,
+    },
+    {
+      key: 'duplicate-day',
+      label: 'Duplicate day',
+      icon: Copy,
+      onClick: handleDuplicateDay,
+      disabled: saving,
+      hidden: personalBasicExperience,
+    },
+  ];
+
   return (
     <>
+      {/* Week selector */}
+      {personalBasicExperience ? (
+        <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Your week</p>
+      ) : (
+        <div className="flex items-start gap-2" style={{ marginBottom: spacing[10] }}>
+          <WeekTabs
+            weeks={props.weeks}
+            totalWeeks={totalWeeks}
+            selectedWeekIndex={selectedWeekIndex}
+            onSelectWeek={handleSelectWeek}
+          />
+          {selectedWeek ? (
+            <BuilderActionMenu ariaLabel="Week actions" items={weekMenuItems} disabled={saving} />
+          ) : null}
+        </div>
+      )}
+
       {isPersonalRole && selectedWeek ? (
-        <p style={{ margin: `0 0 ${spacing[8]}px`, fontSize: 12, color: colors.muted }}>
+        <p style={{ margin: `0 0 ${spacing[12]}px`, fontSize: 12, color: colors.muted }}>
           Week {selectedWeek.week_number || 1} of {Math.max(1, Number(totalWeeks) || 1)}
         </p>
       ) : null}
-      {personalBasicExperience ? (
-        <p style={{ ...sectionLabel, marginBottom: spacing[10] }}>Your week</p>
-      ) : (
-        <WeekTabs
-          weeks={props.weeks}
-          totalWeeks={totalWeeks}
-          selectedWeekIndex={selectedWeekIndex}
-          onSelectWeek={handleSelectWeek}
-          onCopyWeek={handleCopyWeekToEnd}
-          copyWeekDisabled={saving || !selectedWeek}
-        />
-      )}
 
-      {selectedWeek && (!isPersonalRole || personalEnhancedExperience) ? (
-        <Card style={{ ...props.standardCard, marginBottom: sectionGap, padding: spacing[12] }}>
-          <p style={{ ...sectionLabel, marginBottom: spacing[8] }}>Builder toolbar</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={handleCopyPreviousWeek}
-              disabled={saving || Number(selectedWeek.week_number) <= 1}
-              style={{
-                minHeight: touchTargetMin,
-                borderRadius: radii.button,
-                border: `1px solid ${colors.border}`,
-                background: colors.surface1,
-                color: colors.text,
-                fontWeight: 600,
-                opacity: saving || Number(selectedWeek.week_number) <= 1 ? 0.6 : 1,
-              }}
-            >
-              Copy previous week
-            </button>
-            {!isPersonalRole ? (
-              <div className="flex gap-2">
-                <select
-                  value={sourceBlockId}
-                  onChange={(e) => setSourceBlockId(e.target.value)}
-                  style={{
-                    flex: 1,
-                    minHeight: touchTargetMin,
-                    borderRadius: radii.button,
-                    border: `1px solid ${colors.border}`,
-                    background: colors.surface1,
-                    color: colors.text,
-                    padding: `0 ${spacing[10]}px`,
-                  }}
-                >
-                  <option value="">Copy from this client block…</option>
-                  {sourceBlocks.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.title || 'Untitled block'}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={handleCopyFromSourceBlock}
-                  disabled={saving || !sourceBlockId}
-                  style={{
-                    minHeight: touchTargetMin,
-                    borderRadius: radii.button,
-                    border: `1px solid ${colors.primary}`,
-                    background: 'transparent',
-                    color: colors.primary,
-                    fontWeight: 700,
-                    opacity: saving || !sourceBlockId ? 0.6 : 1,
-                    padding: `0 ${spacing[12]}px`,
-                  }}
-                >
-                  Copy
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </Card>
+      {/* Coach: copy from another client block (quiet inline control) */}
+      {!isPersonalRole && selectedWeek ? (
+        <div className="flex gap-2" style={{ marginBottom: sectionGap }}>
+          <select
+            value={sourceBlockId}
+            onChange={(e) => setSourceBlockId(e.target.value)}
+            style={{
+              flex: 1,
+              minHeight: touchTargetMin,
+              borderRadius: radii.button,
+              border: `1px solid ${colors.border}`,
+              background: colors.surface1,
+              color: colors.text,
+              padding: `0 ${spacing[10]}px`,
+              fontSize: 13,
+            }}
+          >
+            <option value="">Copy from another client block…</option>
+            {sourceBlocks.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.title || 'Untitled block'}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleCopyFromSourceBlock}
+            disabled={saving || !sourceBlockId}
+            style={{
+              minHeight: touchTargetMin,
+              borderRadius: radii.button,
+              border: `1px solid ${colors.primary}`,
+              background: 'transparent',
+              color: colors.primary,
+              fontWeight: 700,
+              opacity: saving || !sourceBlockId ? 0.5 : 1,
+              padding: `0 ${spacing[14]}px`,
+            }}
+          >
+            Copy
+          </button>
+        </div>
       ) : null}
 
+      {/* Days + exercises */}
       {selectedWeek && (
         <>
           {days.length === 0 ? (
@@ -150,18 +171,22 @@ export default function ProgramWeekView(props) {
             </div>
           ) : (
             <>
-              <DayTabs
-                days={days}
-                selectedDayIndex={selectedDayIndex}
-                onSelectDay={setSelectedDayIndex}
-                onAddDay={handleAddDay}
-                onDuplicateDay={handleDuplicateDay}
-                addDayDisabled={saving}
-                hideDuplicate={personalBasicExperience}
-              />
+              <div className="flex items-center gap-2" style={{ marginBottom: spacing[14] }}>
+                <DayTabs
+                  days={days}
+                  selectedDayIndex={selectedDayIndex}
+                  onSelectDay={setSelectedDayIndex}
+                  onAddDay={handleAddDay}
+                  addDayDisabled={saving}
+                />
+                {selectedDay ? (
+                  <BuilderActionMenu ariaLabel="Day actions" items={dayMenuItems} disabled={saving} />
+                ) : null}
+              </div>
               <ProgramDayColumn
                 selectedDay={selectedDay}
                 personalBasicExperience={personalBasicExperience}
+                isPersonalRole={isPersonalRole}
                 sectionLabel={sectionLabel}
                 libraryFilterMovement={libraryFilterMovement}
                 setLibraryFilterMovement={setLibraryFilterMovement}
@@ -177,7 +202,8 @@ export default function ProgramWeekView(props) {
         </>
       )}
 
-      {selectedDay ? (
+      {/* Single sticky primary action — always reachable while editing a block */}
+      {selectedWeek ? (
         <div
           className="sticky bottom-0"
           style={{
@@ -186,8 +212,6 @@ export default function ProgramWeekView(props) {
             paddingBottom: `calc(${spacing[10]}px + env(safe-area-inset-bottom, 0px))`,
             background: colors.bg,
             borderTop: `1px solid ${colors.border}`,
-            display: 'grid',
-            gap: spacing[8],
           }}
         >
           <button
@@ -195,28 +219,20 @@ export default function ProgramWeekView(props) {
             onClick={() => handleSaveBlock({ totalWeeks: headerEffectiveWeeksRef.current })}
             disabled={saving}
             style={{
+              width: '100%',
               minHeight: touchTargetMin + 4,
               borderRadius: radii.button,
               border: 'none',
               background: colors.primary,
               color: '#fff',
               fontWeight: 700,
-              fontSize: 14,
+              fontSize: 15,
               opacity: saving ? 0.7 : 1,
+              cursor: saving ? 'not-allowed' : 'pointer',
             }}
           >
-            {isPersonalRole ? 'Save plan' : personalBasicExperience ? 'Save plan' : 'Save block'}
+            {saving ? 'Saving…' : isPersonalRole || personalBasicExperience ? 'Save plan' : 'Save block'}
           </button>
-          <div className={personalBasicExperience ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-2 gap-2'}>
-            <Button type="button" variant="outline" onClick={openExercisePicker} disabled={saving}>
-              Add exercise
-            </Button>
-            {!personalBasicExperience ? (
-              <Button type="button" variant="outline" onClick={handleDuplicateDay} disabled={saving}>
-                Duplicate day
-              </Button>
-            ) : null}
-          </div>
         </div>
       ) : null}
     </>
