@@ -7,7 +7,9 @@ import { useAuth } from '@/lib/AuthContext';
 import { getRouteTitle, getShellNavState, isShellTabItemActive } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { isBetaUser } from '@/lib/betaAccess';
-import BottomNavPremium, { BOTTOM_NAV_HEIGHT } from '@/components/ui/BottomNavPremium';
+import BottomNavPremium, { BOTTOM_NAV_HEIGHT, BOTTOM_NAV_BASE_HEIGHT } from '@/components/ui/BottomNavPremium';
+import { useKeyboardInset } from '@/hooks/useKeyboardInset';
+import { useKeyboardAwareFocus } from '@/hooks/useKeyboardAwareFocus';
 import { getTabRoutesForRole } from '@/lib/routeMeta';
 import { DEFAULT_ROLE, normalizeRole, isCoach, isClient, isPersonal, getLandingPathForRole, Roles } from '@/lib/roles';
 import { isEliteTier, resolveCoachPlanTier, PLANS } from '@/config/plans';
@@ -587,6 +589,13 @@ export default function AppShell() {
   // A page that renders its own <TopBar> sets this true (via outlet context) so
   // the mobile chrome header below is hidden — otherwise both stack (double
   // header). Desktop has no chrome header, so this is a no-op there.
+  // Keyboard.resize is 'none' (capacitor.config.ts), so the WebView doesn't
+  // shrink when the keyboard opens — without this every screen would let the
+  // keyboard cover the focused field. Chat pages (noOuterScroll) compensate
+  // themselves, so the padding below is scoped away from them.
+  const { keyboardInset } = useKeyboardInset();
+  useKeyboardAwareFocus(keyboardInset);
+
   const [chromeHeaderHidden, setChromeHeaderHidden] = useState(false);
   const logoTapCount = useRef(0);
   const logoTapTimer = useRef(null);
@@ -915,6 +924,9 @@ export default function AppShell() {
           style={{
             ...(noOuterScroll ? {} : { WebkitOverflowScrolling: 'touch' }),
             ...(isPushedRoute ? { animation: 'app-shell-push-in 0.24s ease-out' } : {}),
+            // Room to scroll a bottom-of-page field up above the keyboard.
+            // Chat-style pages own their scroller and lift their own composer.
+            ...(!noOuterScroll && keyboardInset > 0 ? { paddingBottom: keyboardInset } : {}),
           }}
           onTouchStart={noOuterScroll ? undefined : handlePtrTouchStart}
           onTouchMove={noOuterScroll ? undefined : handlePtrTouchMove}
@@ -980,7 +992,9 @@ export default function AppShell() {
           onClick={() => openFeedback(getRouteTitle(location.pathname))}
           className="fixed right-4 z-40 flex items-center justify-center rounded-full shadow-lg active:opacity-90"
           style={{
-            bottom: showTabBar ? BOTTOM_NAV_HEIGHT + 12 : 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
+            bottom: showTabBar
+              ? `calc(${BOTTOM_NAV_BASE_HEIGHT}px + env(safe-area-inset-bottom, 0px) + 12px)`
+              : 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
             width: 48,
             height: 48,
             background: clientAccent || colors.primary,

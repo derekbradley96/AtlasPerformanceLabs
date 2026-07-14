@@ -3,8 +3,12 @@ import { colors, spacing, shell, touchTargetMin } from '@/ui/tokens';
 import { isNative } from '@/lib/platform';
 import { hapticNavigation } from '@/lib/haptics';
 
-/** Visual + safe-area; keep in sync with paddingTop/paddingBottom below */
-const NAV_BAR_HEIGHT = 94;
+/**
+ * Bar height ABOVE the safe-area inset (iOS tab bars are ~49-56pt). The inset is
+ * added on top via padding, and BOTTOM_NAV_HEIGHT below uses the same formula so
+ * the content padding matches the real bar height exactly (no dead gap).
+ */
+const NAV_BAR_BASE_HEIGHT = 56;
 const ICON_SIZE = 24;
 
 /**
@@ -33,9 +37,8 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate, ac
       className="fixed left-0 right-0 z-40 flex flex-shrink-0 items-center justify-around border-t"
       style={{
         bottom: 0,
-        minHeight: NAV_BAR_HEIGHT,
-        paddingTop: spacing[8],
-        paddingBottom: `calc(${spacing[10]}px + env(safe-area-inset-bottom, 0px))`,
+        height: `calc(${NAV_BAR_BASE_HEIGHT}px + env(safe-area-inset-bottom, 0px))`,
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         paddingLeft: `env(safe-area-inset-left, 0)`,
         paddingRight: `env(safe-area-inset-right, 0)`,
         background: colors.bg,
@@ -97,5 +100,10 @@ export default function BottomNavPremium({ items = [], activeKey, onNavigate, ac
   );
 }
 
-/** Use for main content paddingBottom when nav is visible. */
-export const BOTTOM_NAV_HEIGHT = `calc(${NAV_BAR_HEIGHT}px + env(safe-area-inset-bottom, 0px))`;
+/** Use for main content paddingBottom when nav is visible. Matches the bar's
+ *  real height exactly (base + safe-area inset) so no dead gap sits above it. */
+export const BOTTOM_NAV_HEIGHT = `calc(${NAV_BAR_BASE_HEIGHT}px + env(safe-area-inset-bottom, 0px))`;
+
+/** Base bar height without the safe-area inset — for callers doing their own
+ *  calc() offsets (e.g. floating buttons sitting above the bar). */
+export const BOTTOM_NAV_BASE_HEIGHT = NAV_BAR_BASE_HEIGHT;
