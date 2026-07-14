@@ -842,19 +842,23 @@ function MoreContent() {
       {!showPersonalMoreDesktop ? (
         <>
       {/* No in-page title card: the shell header already names this tab. */}
+      {/* The whole card opens the profile. It renders a chevron and an "Edit
+          profile" label, so it must be tappable for everyone — admins and solo
+          were excluded, which left the card looking tappable but doing nothing. */}
       <Card
-        style={{
-          marginBottom: spacing[16],
-          ...(isPlatformAdmin || isSolo ? {} : { cursor: 'pointer' }),
+        role="button"
+        tabIndex={0}
+        style={{ marginBottom: spacing[16], cursor: 'pointer' }}
+        onClick={() => {
+          impactLight();
+          navigate('/profile-account');
         }}
-        onClick={
-          isSolo || isPlatformAdmin
-            ? undefined
-            : () => {
-                impactLight();
-                navigate('/profile-account');
-              }
-        }
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            navigate('/profile-account');
+          }
+        }}
       >
         <div className="flex items-center gap-3">
           <div

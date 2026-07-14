@@ -305,7 +305,16 @@ export default function ProfileAccountPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!user?.id) return;
+      // Never leave the screen stuck on "Loading profile…": every exit path
+      // below resolves `loading`. Previously a bare `return` here (no user yet),
+      // or a throw from any await (native preferences, Supabase, notification
+      // prefs), skipped setLoading(false) entirely and the spinner ran forever
+      // with no error shown.
+      if (!user?.id) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      try {
       const preferredWeightUnit = await getNativePref(WEIGHT_UNIT_PREF_KEY, null);
       const preferredCallSoundEnabled = await getNativePref(CALL_SOUND_PREF_KEYS.enabled, null);
       const preferredCallRingbackVolume = await getNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, null);
@@ -405,7 +414,12 @@ export default function ProfileAccountPage() {
           callSoundEnabled: resolvedCallSoundEnabled,
           callRingbackVolume: resolvedRingbackVolume,
         }));
-        setLoading(false);
+      }
+      } catch (e) {
+        // Show the form with whatever we have rather than a dead spinner.
+        if (typeof console !== 'undefined') console.error('[ProfileAccountPage] load failed', e);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
