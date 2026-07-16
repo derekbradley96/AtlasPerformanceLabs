@@ -100,13 +100,20 @@ Status key: [ ] open · [~] partially done · [x] done
 
 ## P2 — polish (confirm on device)
 
-- [ ] Tap-target audit: icon-only buttons < 44×44 across headers, cards, rows.
+- [x] **Tap targets.** CORRECTION: "icon-only buttons < 44 across headers, cards,
+  rows" overstated it — 67 components already use `touchTargetMin` (44) and a
+  sweep of both inline-styled and Tailwind-sized buttons found exactly **one**
+  real offender: `chat/VoiceNoteButton` at 36×36. Given a 44px hit area with the
+  visual circle kept at 36 inside, so the composer looks unchanged. (The other
+  sub-44 hits were decorative icon/avatar spans, not tap targets.)
 - [ ] Loading / empty / error state coverage per screen (some lists jump from
   blank to populated with no skeleton/empty copy).
 - [ ] Haptics consistency — present in SwipeRow / some buttons, absent in many
   primary actions.
-- [ ] Image handling — broken-image fallbacks, `alt` text, load placeholders
-  (avatars, coach logos, progress photos).
+- [ ] Image handling — **32 of 49** files with `<img>` have no `onError`
+  fallback, so a dead URL renders as a broken-image icon (avatars, coach logos,
+  progress photos). A few `<img>` also lack `alt`. Real but low severity; wants a
+  shared `<Img>` with a fallback rather than 32 one-off patches.
 - [ ] Transition/animation consistency (some routes animate in, some snap).
 - [ ] Double-tap / rapid-tap protection beyond the 76 pages that disable on
   pending (spot-check the rest).

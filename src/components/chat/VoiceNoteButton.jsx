@@ -4,7 +4,7 @@
  */
 import React, { useState, useRef, useCallback } from 'react';
 import { Mic } from 'lucide-react';
-import { colors } from '@/ui/tokens';
+import { colors, touchTargetMin } from '@/ui/tokens';
 
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
@@ -79,20 +79,34 @@ export default function VoiceNoteButton({ onDone, disabled }) {
       onClick={handleTap}
       disabled={disabled}
       aria-label={recording ? 'Stop recording' : 'Record voice note'}
+      /* 44px hit area (the HIG minimum — this was 36), with the visual circle
+         kept at 36 inside it so the composer looks unchanged. */
       style={{
-        width: 36,
-        height: 36,
+        width: touchTargetMin,
+        height: touchTargetMin,
         flexShrink: 0,
-        borderRadius: 9999,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: recording ? colors.danger : 'transparent',
+        background: 'transparent',
         border: 'none',
-        color: recording ? '#fff' : colors.muted,
+        padding: 0,
       }}
     >
-      <Mic size={18} strokeWidth={2} />
+      <span
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: recording ? colors.danger : 'transparent',
+          color: recording ? '#fff' : colors.muted,
+        }}
+      >
+        <Mic size={18} strokeWidth={2} />
+      </span>
     </button>
   );
 }

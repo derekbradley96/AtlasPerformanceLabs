@@ -76,6 +76,27 @@ function withTimeout(promise, ms = LOAD_STEP_TIMEOUT_MS, fallback = null) {
   ]);
 }
 
+/** How long any single save step may take before we call it failed. */
+const SAVE_STEP_TIMEOUT_MS = 10000;
+
+/**
+ * Saving must never hang. Unlike the loader's withTimeout (which resolves to a
+ * fallback), this REJECTS — a save that didn't happen must not look like one
+ * that did. supabase-js has no default timeout, so without this a request that
+ * never returns left "saving…" spinning forever with nothing shown to the user
+ * and nothing to diagnose. The label names the step so the toast says which
+ * part failed.
+ */
+function saveStep(label, promise, ms = SAVE_STEP_TIMEOUT_MS) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out — check your connection and try again.`)), ms);
+    }),
+  ]);
+}
+
 const WEIGHT_UNIT_PREF_KEY = 'atlas_pref_weight_unit';
 
 function FieldEditor({ title, value, onChange, type = 'text', placeholder = '', multiline = false }) {
@@ -588,17 +609,17 @@ export default function ProfileAccountPage() {
           profilePatch,
         });
       }
-      let profileRes = await updateProfile(profilePatch);
+      let profileRes = await saveStep('Saving your profile', updateProfile(profilePatch));
       let optionalCoachRes = null;
       if (import.meta.env.DEV) console.info('[ProfileAccount] profile response', JSON.stringify(profileRes));
       if (profileRes?.error && supabase) {
         // Fallback explicit update path to avoid transient context/session drift.
-        const fallback = await supabase
+        const fallback = await saveStep('Saving your profile', supabase
           .from('profiles')
           .update(profilePatch)
           .eq('id', user.id)
           .select()
-          .single();
+          .single());
         if (import.meta.env.DEV) console.info('[ProfileAccount] fallback profile response', JSON.stringify(fallback));
         if (fallback.error) throw fallback.error;
         profileRes = { error: null, data: fallback.data ?? null };
@@ -653,13 +674,14 @@ export default function ProfileAccountPage() {
         }
         if (personalErr) throw personalErr;
       }
-      const notificationOk = await updateNotificationPreferences(user.id, notifications);
+      const notificationOk = await saveStep('Saving notification preferences', updateNotificationPreferences(user.id, notifications));
       if (!notificationOk) throw new Error('Failed to save notification preferences');
       setCallSoundEnabled(callSoundEnabled);
       setCallRingbackVolume(callRingbackVolume);
-      await setNativePref(CALL_SOUND_PREF_KEYS.enabled, callSoundEnabled ? '1' : '0');
-      await setNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, String(callRingbackVolume));
-      const refreshRes = await refreshProfile();
+      // Local cache only — never block the save on the native bridge.
+      void setNativePref(CALL_SOUND_PREF_KEYS.enabled, callSoundEnabled ? '1' : '0');
+      void setNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, String(callRingbackVolume));
+      const refreshRes = await saveStep('Refreshing your profile', refreshProfile());
       if (refreshRes?.error && import.meta.env.DEV) {
         console.warn('[ProfileAccount] refreshProfile failed', refreshRes.error);
       }
