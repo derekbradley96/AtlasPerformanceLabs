@@ -31,6 +31,7 @@ import AchievementUnlockedModal from '@/components/achievements/AchievementUnloc
 import RequestConsultationModal from '@/components/consultation/RequestConsultationModal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import BottomSheet from '@/components/ui/BottomSheet';
+import Img from '@/components/ui/Img';
 import { personalMoreHubHelperText } from '@/lib/personalAccountUx';
 import PersonalSurface from '@/components/personal/PersonalSurface';
 import { usePresentationMode } from '@/lib/presentationMode';
@@ -865,11 +866,14 @@ function MoreContent() {
             className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-semibold flex-shrink-0 overflow-hidden"
             style={{ background: colors.primarySubtle, color: colors.text }}
           >
-            {trainerProfile?.profileImage ? (
-              <img src={trainerProfile.profileImage} alt="" className="w-full h-full object-cover" />
-            ) : (
-              (profile?.full_name || profile?.display_name || displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || '?').slice(0, 2).toUpperCase()
-            )}
+            {/* Avatar URLs are signed and expire — fall back to initials rather
+                than a broken-image glyph. */}
+            <Img
+              src={trainerProfile?.profileImage}
+              alt=""
+              className="w-full h-full object-cover"
+              fallback={(profile?.full_name || profile?.display_name || displayUser?.full_name || displayUser?.name || displayUser?.user_metadata?.full_name || '?').slice(0, 2).toUpperCase()}
+            />
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-[17px] font-semibold truncate" style={{ color: colors.text }}>

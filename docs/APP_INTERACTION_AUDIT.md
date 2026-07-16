@@ -106,17 +106,27 @@ Status key: [ ] open · [~] partially done · [x] done
   real offender: `chat/VoiceNoteButton` at 36×36. Given a 44px hit area with the
   visual circle kept at 36 inside, so the composer looks unchanged. (The other
   sub-44 hits were decorative icon/avatar spans, not tap targets.)
-- [ ] Loading / empty / error state coverage per screen (some lists jump from
-  blank to populated with no skeleton/empty copy).
-- [ ] Haptics consistency — present in SwipeRow / some buttons, absent in many
-  primary actions.
-- [ ] Image handling — **32 of 49** files with `<img>` have no `onError`
-  fallback, so a dead URL renders as a broken-image icon (avatars, coach logos,
-  progress photos). A few `<img>` also lack `alt`. Real but low severity; wants a
-  shared `<Img>` with a fallback rather than 32 one-off patches.
-- [ ] Transition/animation consistency (some routes animate in, some snap).
-- [ ] Double-tap / rapid-tap protection beyond the 76 pages that disable on
-  pending (spot-check the rest).
+- [~] Loading / empty / error states. Measured, and the flagged screens were
+  mostly false positives: the "bare lists" `.map()` over STATIC arrays (menu
+  rows, form options — More, ResetPassword, ClientEquipment), which need no empty
+  state. Real data lists already use EmptyState/skeletons. No action taken; worth
+  a per-screen device pass rather than a grep.
+- [~] Haptics — 88 files already use them; coverage is broad, not patchy as the
+  first pass implied. Any remaining gaps are taste, not defects.
+- [~] **Image handling.** Confirmed real: 32 of 49 files with `<img>` had no
+  `onError`, and these are mostly Supabase **signed URLs that expire** — so a
+  stale link renders the browser's broken-image glyph mid-UI. Added
+  `components/ui/Img.jsx`: falls back to whatever the caller shows when there's
+  no image (initials, an icon, a message) and retries on src change. Migrated the
+  highest-traffic spots — More avatar (→ initials), the shell coach logo in both
+  render paths, and progress photos (→ "Unavailable"). Remaining `<img>` sites can
+  move to `<Img>` incrementally.
+- [x] Transitions — non-issue. The shell already animates pushed routes centrally
+  (`app-shell-push-in`); only 17/189 pages add their own, and that's redundant
+  rather than missing.
+- [~] Rapid-tap — 76 pages carry a disabled-while-pending guard against 56 with
+  mutations, i.e. broadly covered. The handful without a guard are mostly
+  idempotent toggles. Not a defect; revisit only if double-submits show up.
 
 ## Needs an on-device pass (can't confirm from code)
 

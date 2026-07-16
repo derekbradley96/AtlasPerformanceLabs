@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle, Inbox, Crosshair, Dumbbell, ClipboardList, Plus } from 'lucide-react';
 import NotificationBell from '@/components/ui/NotificationBell';
 import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
+import Img from '@/components/ui/Img';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { getRouteTitle, getShellNavState, isShellTabItemActive } from '@/lib/routeMeta';
@@ -210,7 +211,7 @@ function DesktopShell({
         >
           <div className="relative flex items-baseline flex-wrap gap-x-1">
             {clientBranded && coachBrand?.logoUrl ? (
-              <img src={coachBrand.logoUrl} alt="" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'cover', marginRight: 8 }} />
+              <Img src={coachBrand.logoUrl} alt="" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'cover', marginRight: 8 }} />
             ) : null}
             <span
               style={{
@@ -909,7 +910,7 @@ export default function AppShell() {
                 aria-hidden={!isDev}
               >
                 {clientBranded && coachBrand.logoUrl ? (
-                  <img src={coachBrand.logoUrl} alt="" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'cover' }} />
+                  <Img src={coachBrand.logoUrl} alt="" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'cover' }} />
                 ) : null}
                 {isDev ? (
                   <button

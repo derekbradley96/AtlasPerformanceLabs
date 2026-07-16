@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import BottomSheet from '@/components/ui/BottomSheet';
+import Img from '@/components/ui/Img';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { PageLoader, EmptyState } from '@/components/ui/LoadingState';
@@ -382,7 +383,7 @@ export default function ProgressPhotos() {
               <X size={20} />
             </button>
             {expandedPhoto.photo_url ? (
-              <img src={expandedPhoto.photo_url} alt="" className="max-h-[85vh] max-w-full rounded-lg object-contain" />
+              <Img src={expandedPhoto.photo_url} alt="Progress photo" className="max-h-[85vh] max-w-full rounded-lg object-contain" fallback={<p style={{ color: colors.muted, fontSize: 13 }}>This photo could not be loaded.</p>} />
             ) : null}
           </div>
         </button>
@@ -480,7 +481,7 @@ export default function ProgressPhotos() {
                         }}
                       >
                         {photo.photo_url ? (
-                          <img src={photo.photo_url} alt="" className="w-full h-full object-cover" />
+                          <Img src={photo.photo_url} alt="Progress photo" className="w-full h-full object-cover" fallback={<span style={{ color: colors.muted, fontSize: 11 }}>Unavailable</span>} />
                         ) : (
                           <div className="w-full h-full" style={{ background: colors.surface2 }} />
                         )}
