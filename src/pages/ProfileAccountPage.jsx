@@ -56,6 +56,23 @@ import {
   setCallSoundEnabled,
 } from '@/lib/callSoundPrefs';
 
+/** Last-resort: never spin longer than this, whatever is wedged. */
+const LOAD_SAFETY_TIMEOUT_MS = 5000;
+/** Per-call bound so one slow/hung dependency can't hold the whole screen. */
+const LOAD_STEP_TIMEOUT_MS = 2500;
+
+/**
+ * Resolve to `fallback` if `promise` doesn't settle in time. Nothing this screen
+ * awaits is time-bounded on its own (supabase-js has no default timeout; a
+ * native plugin call can wedge), and an unsettled promise skips finally.
+ */
+function withTimeout(promise, ms = LOAD_STEP_TIMEOUT_MS, fallback = null) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 const WEIGHT_UNIT_PREF_KEY = 'atlas_pref_weight_unit';
 
 function FieldEditor({ title, value, onChange, type = 'text', placeholder = '', multiline = false }) {
@@ -302,22 +319,36 @@ export default function ProfileAccountPage() {
         ? clientNotificationRows
         : defaultNotificationRows;
 
+  /**
+   * Hard backstop for "Loading profile…".
+   *
+   * try/catch/finally only covers a *throw*. It cannot help when an await never
+   * settles — and nothing here is time-bounded: supabase-js has no default
+   * timeout, and a wedged native Preferences call never resolves either. A
+   * single hung promise left this screen spinning forever with no error. This
+   * guarantees the screen always resolves; worst case the form renders with the
+   * values we already have from AuthContext.
+   */
+  useEffect(() => {
+    if (!loading) return undefined;
+    const t = setTimeout(() => setLoading(false), LOAD_SAFETY_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [loading]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Never leave the screen stuck on "Loading profile…": every exit path
-      // below resolves `loading`. Previously a bare `return` here (no user yet),
-      // or a throw from any await (native preferences, Supabase, notification
-      // prefs), skipped setLoading(false) entirely and the spinner ran forever
-      // with no error shown.
+      // Every exit path below resolves `loading`. Previously a bare `return`
+      // here (no user yet), or a throw from any await, skipped setLoading(false)
+      // entirely and the spinner ran forever with no error shown.
       if (!user?.id) {
         if (!cancelled) setLoading(false);
         return;
       }
       try {
-      const preferredWeightUnit = await getNativePref(WEIGHT_UNIT_PREF_KEY, null);
-      const preferredCallSoundEnabled = await getNativePref(CALL_SOUND_PREF_KEYS.enabled, null);
-      const preferredCallRingbackVolume = await getNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, null);
+      const preferredWeightUnit = await withTimeout(getNativePref(WEIGHT_UNIT_PREF_KEY, null));
+      const preferredCallSoundEnabled = await withTimeout(getNativePref(CALL_SOUND_PREF_KEYS.enabled, null));
+      const preferredCallRingbackVolume = await withTimeout(getNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, null));
       const supabase = hasSupabase ? getSupabase() : null;
       // Use AuthContext profile as source-of-truth. It already handles legacy
       // schema fallbacks and missing-column retries, which avoids silent resets
@@ -386,15 +417,15 @@ export default function ProfileAccountPage() {
       let prefs = notifications;
       if (supabase) {
         if (roleType === 'client') {
-          const { data } = await supabase.from('clients').select('training_days_per_week, injuries').eq('user_id', user.id).maybeSingle();
+          const { data } = (await withTimeout(supabase.from('clients').select('training_days_per_week, injuries').eq('user_id', user.id).maybeSingle(), LOAD_STEP_TIMEOUT_MS, { data: null })) ?? { data: null };
           base.training_days = data?.training_days_per_week != null ? String(data.training_days_per_week) : '';
           base.injuries = data?.injuries || '';
         }
         if (roleType === 'personal') {
-          const { data } = await supabase.from('personal').select('primary_goal').eq('user_id', user.id).maybeSingle();
+          const { data } = (await withTimeout(supabase.from('personal').select('primary_goal').eq('user_id', user.id).maybeSingle(), LOAD_STEP_TIMEOUT_MS, { data: null })) ?? { data: null };
           if (data?.primary_goal && !base.goal) base.goal = data.primary_goal;
         }
-        const loadedPrefs = await getNotificationPreferences(user.id);
+        const loadedPrefs = await withTimeout(getNotificationPreferences(user.id));
         if (loadedPrefs) prefs = loadedPrefs;
       }
       if (!cancelled) {

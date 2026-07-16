@@ -15,7 +15,20 @@ const LEFT_THRESHOLD = 60; // was 44 — needs more committed swipe
 const RIGHT_THRESHOLD = 60; // was 44
 const SCALE_DRAG = 0.985;
 const SPRING = { type: 'spring', stiffness: 500, damping: 40, mass: 0.8 };
-const SCROLL_LOCK_THRESHOLD = 12; // was 6 — needs more deliberate swipe
+/**
+ * Axis lock. The row used to translate from the first pixel of horizontal
+ * movement and never looked at dy, so any sideways drift while scrolling the
+ * list dragged rows open — it felt hair-trigger. A gesture now stays undecided
+ * until it travels GESTURE_SLOP, then commits to one axis for its lifetime:
+ * vertical gestures never move the row, and horizontal ones subtract the slop so
+ * the row doesn't jump when it engages. HORIZONTAL_BIAS > 1 favours scrolling,
+ * which is by far the more common intent.
+ */
+const GESTURE_SLOP = 14;
+const HORIZONTAL_BIAS = 1.25;
+const AXIS_UNDECIDED = 0;
+const AXIS_HORIZONTAL = 1;
+const AXIS_VERTICAL = 2;
 
 async function hapticLight() {
   try {
@@ -53,6 +66,8 @@ export default function SwipeRow({
   const translateXRef = useRef(0);
   const containerRef = useRef(null);
   const scrollLockRef = useRef(false);
+  /** Which axis this gesture committed to; reset on every pointer down. */
+  const axisRef = useRef(AXIS_UNDECIDED);
   const ignoreNextClickRef = useRef(false);
   const ignoreClickTimeoutRef = useRef(null);
   const actionsContainerRef = useRef(null);
@@ -91,6 +106,7 @@ export default function SwipeRow({
       startX.current = x;
       startY.current = y;
       startTranslateX.current = translateXRef.current;
+      axisRef.current = AXIS_UNDECIDED;
       setIsDragging(true);
     },
     [isDeleting, id, onSwipeStart]
@@ -110,12 +126,26 @@ export default function SwipeRow({
       if (e.pointerType === 'mouse') return;
       if (isDeleting || !isDragging) return;
       const x = e.clientX ?? e.touches?.[0]?.clientX ?? startX.current;
+      const y = e.clientY ?? e.touches?.[0]?.clientY ?? startY.current;
       const dx = x - startX.current;
-      if (scrollLockRef.current === false && Math.abs(dx) > SCROLL_LOCK_THRESHOLD) {
-        scrollLockRef.current = true;
-        setIgnoreNextClick();
+      const dy = y - startY.current;
+
+      // Decide the axis once, after enough travel to know the intent.
+      if (axisRef.current === AXIS_UNDECIDED) {
+        if (Math.abs(dx) < GESTURE_SLOP && Math.abs(dy) < GESTURE_SLOP) return;
+        axisRef.current =
+          Math.abs(dx) > Math.abs(dy) * HORIZONTAL_BIAS ? AXIS_HORIZONTAL : AXIS_VERTICAL;
+        if (axisRef.current === AXIS_HORIZONTAL) {
+          scrollLockRef.current = true;
+          setIgnoreNextClick();
+        }
       }
-      const next = Math.max(-RIGHT_WIDTH, Math.min(LEFT_WIDTH, startTranslateX.current + dx));
+      // A vertical gesture must never drag the row — let the list scroll.
+      if (axisRef.current !== AXIS_HORIZONTAL) return;
+
+      // Subtract the slop so the row starts from 0 instead of jumping.
+      const engaged = dx > 0 ? dx - GESTURE_SLOP : dx + GESTURE_SLOP;
+      const next = Math.max(-RIGHT_WIDTH, Math.min(LEFT_WIDTH, startTranslateX.current + engaged));
       translateXRef.current = next;
       setTranslateX(next);
     },
@@ -125,19 +155,23 @@ export default function SwipeRow({
   const handleTouchMove = useCallback(
     (e) => {
       if (isDeleting || !isDragging || !e.touches?.[0]) return;
-      const dx = e.touches[0].clientX - startX.current;
-      const dy = e.touches[0].clientY - startY.current;
-      if (Math.abs(dx) > SCROLL_LOCK_THRESHOLD && Math.abs(dx) >= Math.abs(dy)) {
-        e.preventDefault();
-      }
+      // Only claim the gesture once it's committed to horizontal, otherwise the
+      // list can't scroll.
+      if (axisRef.current === AXIS_HORIZONTAL) e.preventDefault();
     },
     [isDeleting, isDragging]
   );
 
   const endDrag = useCallback(
     (finalX) => {
+      const axis = axisRef.current;
       setIsDragging(false);
       scrollLockRef.current = false;
+      axisRef.current = AXIS_UNDECIDED;
+      // A tap or a vertical scroll is not a swipe. Without this, every touch end
+      // ran the snap branch below — firing a haptic and onClose on each scroll,
+      // which is a big part of why the row felt hair-trigger.
+      if (axis !== AXIS_HORIZONTAL && translateXRef.current === 0) return;
       if (finalX > LEFT_THRESHOLD) {
         applySnap(LEFT_WIDTH);
         hapticMedium();
