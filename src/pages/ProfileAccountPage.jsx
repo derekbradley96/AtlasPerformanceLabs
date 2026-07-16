@@ -47,6 +47,7 @@ import {
 import { deriveProfileAccountSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { humanizeSupabaseError } from '@/lib/supabaseErrorMessage';
 import { getNativePref, setNativePref } from '@/lib/nativePreferences';
+import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { trackRecoverableError } from '@/services/frictionTracker';
 import {
   CALL_SOUND_PREF_KEYS,
@@ -57,9 +58,11 @@ import {
 } from '@/lib/callSoundPrefs';
 
 /** Last-resort: never spin longer than this, whatever is wedged. */
-const LOAD_SAFETY_TIMEOUT_MS = 5000;
-/** Per-call bound so one slow/hung dependency can't hold the whole screen. */
-const LOAD_STEP_TIMEOUT_MS = 2500;
+const LOAD_SAFETY_TIMEOUT_MS = 2500;
+/** Per-call bound so one slow/hung dependency can't hold the whole screen.
+ *  Kept tight: everything here has a usable fallback, so waiting longer buys
+ *  nothing but a spinner. */
+const LOAD_STEP_TIMEOUT_MS = 1200;
 
 /**
  * Resolve to `fallback` if `promise` doesn't settle in time. Nothing this screen
@@ -227,6 +230,7 @@ export default function ProfileAccountPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isDesktopWeb } = usePresentationMode();
+  const { keyboardInset } = useKeyboardInset();
   const queryClient = useQueryClient();
   const { user, profile, effectiveRole, updateProfile, refreshProfile, signOut } = useAuth();
   const notificationsSectionRef = useRef(null);
@@ -346,9 +350,15 @@ export default function ProfileAccountPage() {
         return;
       }
       try {
-      const preferredWeightUnit = await withTimeout(getNativePref(WEIGHT_UNIT_PREF_KEY, null));
-      const preferredCallSoundEnabled = await withTimeout(getNativePref(CALL_SOUND_PREF_KEYS.enabled, null));
-      const preferredCallRingbackVolume = await withTimeout(getNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, null));
+      // In parallel: these are independent, and awaiting them one after another
+      // meant a slow/wedged Preferences bridge cost 3x the timeout (~7.5s) before
+      // the screen could even continue — which is why the profile took 5-8s.
+      const [preferredWeightUnit, preferredCallSoundEnabled, preferredCallRingbackVolume] =
+        await Promise.all([
+          withTimeout(getNativePref(WEIGHT_UNIT_PREF_KEY, null)),
+          withTimeout(getNativePref(CALL_SOUND_PREF_KEYS.enabled, null)),
+          withTimeout(getNativePref(CALL_SOUND_PREF_KEYS.ringbackVolume, null)),
+        ]);
       const supabase = hasSupabase ? getSupabase() : null;
       // Use AuthContext profile as source-of-truth. It already handles legacy
       // schema fallbacks and missing-column retries, which avoids silent resets
@@ -1224,7 +1234,14 @@ export default function ProfileAccountPage() {
             alignItems: 'flex-end',
             justifyContent: 'center',
             zIndex: 60,
-            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            // Lift above the keyboard. This sheet is position:fixed, so the
+            // shell's scroll-focused-field-into-view can't help it — without
+            // this the keyboard sits straight on top of the field you're
+            // editing. When the keyboard is up it also covers the home
+            // indicator, so the safe-area inset must not be added as well or a
+            // dead gap appears between sheet and keyboard.
+            paddingBottom: keyboardInset > 0 ? `${keyboardInset}px` : 'env(safe-area-inset-bottom, 0px)',
+            transition: 'padding-bottom 140ms ease-out',
           }}
         >
           <Card
@@ -1235,7 +1252,7 @@ export default function ProfileAccountPage() {
               borderRadius: 16,
               margin: spacing[12],
               padding: spacing[14],
-              maxHeight: '72vh',
+              maxHeight: keyboardInset > 0 ? '50vh' : '72vh',
               overflowY: 'auto',
             }}
           >

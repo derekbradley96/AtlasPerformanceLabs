@@ -46,7 +46,11 @@ export default function ChatThreadComposer({
           left: isDesktopWeb ? `calc(${desktopSidebarWidth}px + env(safe-area-inset-left, 0px))` : 0,
           right: 0,
           bottom: 0,
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
+          // The bottom inset clears the home indicator — but an open keyboard
+          // already covers it, and the bar is lifted by translateY on top of
+          // that, so keeping the inset left a dead ~34px band between the
+          // message bar and the keyboard.
+          paddingBottom: keyboardInset > 0 ? 8 : 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
           transform: `translateY(-${keyboardInset}px)`,
           zIndex: 40,
           paddingTop: 8,

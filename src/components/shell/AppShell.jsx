@@ -33,6 +33,9 @@ const HEADER_HEIGHT = shell.headerHeight;
 /** Both header side slots reserve the same width so the flex-1 title between
  *  them lands dead centre on screen when the sides are light. */
 const HEADER_SIDE_MIN = 88;
+/** Pull distance that triggers a refresh. Module-level: DesktopShell renders the
+ *  indicator too and doesn't receive it as a prop. */
+const PULL_THRESHOLD = 70;
 const BG = colors.bg;
 const ADMIN_TAPS = 5;
 const isDev = import.meta.env.DEV;
@@ -61,6 +64,50 @@ function ShellOutletFallback() {
   return (
     <div className="flex items-center justify-center" style={{ minHeight: 240 }}>
       <div className="w-8 h-8 border-2 border-white/20 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
+}
+
+/**
+ * Pull-to-refresh indicator. The old one reserved a fixed 70px row and read
+ * "Release to refresh" from the very first pixel of pull — before you'd pulled
+ * far enough to release anything. This reveals with the gesture instead: the
+ * puck tracks the pull, rotates toward the threshold, tints once you're past it,
+ * and spins while refreshing.
+ */
+function PullToRefreshIndicator({ pullDistance, refreshing, threshold }) {
+  const progress = Math.min(1, Math.max(0, pullDistance / threshold));
+  const ready = progress >= 1;
+  return (
+    <div
+      className="flex items-end justify-center flex-shrink-0 overflow-hidden"
+      style={{
+        height: refreshing ? 48 : Math.min(pullDistance, 90),
+        transition: refreshing ? 'height 140ms ease-out' : 'none',
+      }}
+    >
+      <div
+        className="flex items-center justify-center"
+        style={{
+          width: 30,
+          height: 30,
+          marginBottom: 9,
+          borderRadius: 999,
+          background: colors.surface2,
+          border: `1px solid ${ready || refreshing ? colors.primary : colors.border}`,
+          opacity: refreshing ? 1 : Math.max(0.35, progress),
+          transform: refreshing ? 'none' : `scale(${0.75 + 0.25 * progress})`,
+        }}
+      >
+        <Loader2
+          size={15}
+          className={refreshing ? 'animate-spin' : undefined}
+          style={{
+            color: ready || refreshing ? colors.primary : colors.muted,
+            transform: refreshing ? 'none' : `rotate(${progress * 270}deg)`,
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -407,21 +454,11 @@ function DesktopShell({
             }}
           >
             {enablePullToRefresh && (pullDistance > 0 || ptrRefreshing) && (
-              <div
-                className="flex items-center justify-center flex-shrink-0"
-                style={{
-                  height: 70,
-                  color: colors.muted,
-                  fontSize: 13,
-                  gap: 8,
-                }}
-              >
-                {ptrRefreshing ? (
-                  <Loader2 size={22} className="animate-spin" style={{ flexShrink: 0 }} />
-                ) : (
-                  <span>Release to refresh</span>
-                )}
-              </div>
+              <PullToRefreshIndicator
+                pullDistance={pullDistance}
+                refreshing={ptrRefreshing}
+                threshold={PULL_THRESHOLD}
+              />
             )}
             <ErrorBoundary>
               <div
@@ -609,7 +646,7 @@ export default function AppShell() {
   const [pullDistance, setPullDistance] = useState(0);
   const [ptrRefreshing, setPtrRefreshing] = useState(false);
   const touchStartY = useRef(0);
-  const pullThreshold = 70;
+  const pullThreshold = PULL_THRESHOLD;
   /**
    * Pull-to-refresh on every tab root (plus the pushed screens that already had
    * it). It used to be a hardcoded path list AND required the page to call
@@ -994,21 +1031,11 @@ export default function AppShell() {
             }}
           >
             {enablePullToRefresh && (pullDistance > 0 || ptrRefreshing) && (
-              <div
-                className="flex items-center justify-center flex-shrink-0"
-                style={{
-                  height: 70,
-                  color: colors.muted,
-                  fontSize: 13,
-                  gap: 8,
-                }}
-              >
-                {ptrRefreshing ? (
-                  <Loader2 size={22} className="animate-spin" style={{ flexShrink: 0 }} />
-                ) : (
-                  <span>Release to refresh</span>
-                )}
-              </div>
+              <PullToRefreshIndicator
+                pullDistance={pullDistance}
+                refreshing={ptrRefreshing}
+                threshold={PULL_THRESHOLD}
+              />
             )}
             <ErrorBoundary>
               <div
