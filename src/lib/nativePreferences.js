@@ -1,43 +1,39 @@
 import { Capacitor } from '@capacitor/core';
 
 /**
- * Reading a preference must never be able to break a caller. `getPreferences()`
- * dynamically imports the Capacitor plugin, and that await used to sit OUTSIDE
- * the try/catch in both helpers — so a plugin/chunk failure threw straight into
- * the caller instead of falling back to localStorage. ProfileAccountPage awaited
- * these before setting loading=false with no catch of its own, which is one way
- * the profile screen could hang on "Loading profile…" forever.
+ * Preferences are a local cache — nothing here is worth blocking a screen on.
+ *
+ * The native bridge can wedge: a plugin promise that never settles doesn't throw
+ * and can't be caught, so every caller that awaited it inherited the hang. That
+ * is what left profile save spinning forever ("saving…" that never finished) and
+ * made the profile screen take seconds to appear — three reads, each stalling.
+ *
+ * So: every native call is time-bounded, and localStorage is kept in sync as a
+ * fallback. If the bridge is slow or dead we degrade to localStorage instead of
+ * hanging, and preferences still persist.
  */
+const PREF_TIMEOUT_MS = 700;
+const TIMED_OUT = Symbol('pref-timed-out');
+
+function timeBox(promise, fallback) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((resolve) => setTimeout(() => resolve(fallback), PREF_TIMEOUT_MS)),
+  ]);
+}
+
 async function getPreferences() {
   try {
     if (!Capacitor.isNativePlatform()) return null;
-    const { Preferences } = await import('@capacitor/preferences');
-    return Preferences ?? null;
+    const mod = await timeBox(import('@capacitor/preferences'), null);
+    return mod?.Preferences ?? null;
   } catch {
     return null;
   }
 }
 
-export async function setNativePref(key, value) {
+function readLocal(key, fallback) {
   try {
-    const prefs = await getPreferences();
-    if (prefs) {
-      await prefs.set({ key, value: JSON.stringify(value) });
-      return;
-    }
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (_) {
-    /* preferences are best-effort — never surface to the caller */
-  }
-}
-
-export async function getNativePref(key, fallback = null) {
-  try {
-    const prefs = await getPreferences();
-    if (prefs) {
-      const { value } = await prefs.get({ key });
-      return value != null ? JSON.parse(value) : fallback;
-    }
     const raw = localStorage.getItem(key);
     return raw != null ? JSON.parse(raw) : fallback;
   } catch {
@@ -45,3 +41,36 @@ export async function getNativePref(key, fallback = null) {
   }
 }
 
+function writeLocal(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (_) {
+    /* storage can be unavailable; preferences are best-effort */
+  }
+}
+
+export async function setNativePref(key, value) {
+  // Write locally first: it's synchronous, it's the fallback the reader uses if
+  // the bridge is unresponsive, and it means the value is never lost waiting on
+  // native.
+  writeLocal(key, value);
+  const prefs = await getPreferences();
+  if (!prefs) return;
+  await timeBox(prefs.set({ key, value: JSON.stringify(value) }), undefined);
+}
+
+export async function getNativePref(key, fallback = null) {
+  const prefs = await getPreferences();
+  if (prefs) {
+    const res = await timeBox(prefs.get({ key }), TIMED_OUT);
+    if (res !== TIMED_OUT && res?.value != null) {
+      try {
+        return JSON.parse(res.value);
+      } catch {
+        return fallback;
+      }
+    }
+    // Timed out, or native has no value for this key — localStorage may.
+  }
+  return readLocal(key, fallback);
+}

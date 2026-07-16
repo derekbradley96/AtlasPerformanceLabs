@@ -561,7 +561,11 @@ export default function ProfileAccountPage() {
         water_unit: normalizeWaterUnit(form.water_unit),
         sodium_unit: normalizeSodiumUnit(form.sodium_unit),
       };
-      await setNativePref(WEIGHT_UNIT_PREF_KEY, wUSave);
+      // Fire-and-forget: this is a local cache (and setNativePref writes
+      // localStorage synchronously before touching native), so the real save
+      // must never wait on it. Awaiting it here is what left "saving…" spinning
+      // forever when the native Preferences bridge stopped responding.
+      void setNativePref(WEIGHT_UNIT_PREF_KEY, wUSave);
       const coachOptionalPatch =
         roleType === 'coach'
           ? {

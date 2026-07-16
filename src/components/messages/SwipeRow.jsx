@@ -345,7 +345,11 @@ export default function SwipeRow({
           backgroundColor: colors.card,
           transformOrigin: 'left center',
           WebkitTapHighlightColor: 'transparent',
-          pointerEvents: Math.abs(translateX) >= LEFT_THRESHOLD || Math.abs(translateX) >= RIGHT_THRESHOLD ? 'none' : 'auto',
+          // Always interactive. This used to become pointerEvents:'none' once
+          // open, which killed handleContentClick — the one thing that closes
+          // the row — so an open row got stuck and swallowed taps. The revealed
+          // action sits beside the content, not under it, so it stays tappable.
+          pointerEvents: 'auto',
           willChange: isDragging ? 'transform' : undefined,
           boxSizing: 'border-box',
         }}

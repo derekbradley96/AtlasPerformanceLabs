@@ -562,6 +562,9 @@ export default function Messages() {
           <div
             ref={scrollElRef}
             className="flex-1 min-h-0 overflow-y-auto"
+            /* Scrolling dismisses an open swipe action, as it does natively —
+               otherwise a row you opened stays open while you scroll past it. */
+            onScroll={openRowId ? handleClose : undefined}
             style={{
               WebkitOverflowScrolling: 'touch',
               paddingLeft: shell.pagePaddingH,
@@ -743,8 +746,8 @@ export default function Messages() {
               );
 
               return (
+                <div key={threadId} style={{ marginBottom: isDesktopWeb ? spacing[12] : 10 }}>
                 <SwipeRow
-                  key={threadId}
                   id={threadId}
                   isOpenLeft={openRowId === threadId && openSide === 'left'}
                   isOpenRight={openRowId === threadId && openSide === 'right'}
@@ -758,19 +761,24 @@ export default function Messages() {
                   isDeleting={deletingId === threadId}
                   onDeleteAnimationEnd={() => handleDeleteAnimationEnd(threadId)}
                 >
+                  {/* No marginBottom here: the gap belongs OUTSIDE the swipe
+                      container. Inside, it made the container taller than the
+                      card, and the actions layer showed through that strip —
+                      the blue sliver of the Pin action under a swiped row.
+                      Radius matches SwipeRow's so the reveal lines up. */}
                   <Card
                     style={{
-                      borderRadius: 18,
+                      borderRadius: 16,
                       overflow: 'hidden',
                       border: `1px solid ${colors.border}`,
                       background: colors.surface1,
-                      marginBottom: isDesktopWeb ? spacing[12] : 10,
                       padding: 0,
                     }}
                   >
                     {rowContent}
                   </Card>
                 </SwipeRow>
+                </div>
               );
             }) : null}
           </div>

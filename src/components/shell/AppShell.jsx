@@ -2,6 +2,7 @@ import React, { useRef, useCallback, useState, useEffect, useMemo, Suspense } fr
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle, Inbox, Crosshair, Dumbbell, ClipboardList, Plus } from 'lucide-react';
 import NotificationBell from '@/components/ui/NotificationBell';
+import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/AuthContext';
 import { getRouteTitle, getShellNavState, isShellTabItemActive } from '@/lib/routeMeta';
@@ -64,50 +65,6 @@ function ShellOutletFallback() {
   return (
     <div className="flex items-center justify-center" style={{ minHeight: 240 }}>
       <div className="w-8 h-8 border-2 border-white/20 border-t-blue-500 rounded-full animate-spin" />
-    </div>
-  );
-}
-
-/**
- * Pull-to-refresh indicator. The old one reserved a fixed 70px row and read
- * "Release to refresh" from the very first pixel of pull — before you'd pulled
- * far enough to release anything. This reveals with the gesture instead: the
- * puck tracks the pull, rotates toward the threshold, tints once you're past it,
- * and spins while refreshing.
- */
-function PullToRefreshIndicator({ pullDistance, refreshing, threshold }) {
-  const progress = Math.min(1, Math.max(0, pullDistance / threshold));
-  const ready = progress >= 1;
-  return (
-    <div
-      className="flex items-end justify-center flex-shrink-0 overflow-hidden"
-      style={{
-        height: refreshing ? 48 : Math.min(pullDistance, 90),
-        transition: refreshing ? 'height 140ms ease-out' : 'none',
-      }}
-    >
-      <div
-        className="flex items-center justify-center"
-        style={{
-          width: 30,
-          height: 30,
-          marginBottom: 9,
-          borderRadius: 999,
-          background: colors.surface2,
-          border: `1px solid ${ready || refreshing ? colors.primary : colors.border}`,
-          opacity: refreshing ? 1 : Math.max(0.35, progress),
-          transform: refreshing ? 'none' : `scale(${0.75 + 0.25 * progress})`,
-        }}
-      >
-        <Loader2
-          size={15}
-          className={refreshing ? 'animate-spin' : undefined}
-          style={{
-            color: ready || refreshing ? colors.primary : colors.muted,
-            transform: refreshing ? 'none' : `rotate(${progress * 270}deg)`,
-          }}
-        />
-      </div>
     </div>
   );
 }
@@ -455,9 +412,10 @@ function DesktopShell({
           >
             {enablePullToRefresh && (pullDistance > 0 || ptrRefreshing) && (
               <PullToRefreshIndicator
-                pullDistance={pullDistance}
+                pullY={pullDistance}
                 refreshing={ptrRefreshing}
                 threshold={PULL_THRESHOLD}
+                position="static"
               />
             )}
             <ErrorBoundary>
@@ -1032,9 +990,10 @@ export default function AppShell() {
           >
             {enablePullToRefresh && (pullDistance > 0 || ptrRefreshing) && (
               <PullToRefreshIndicator
-                pullDistance={pullDistance}
+                pullY={pullDistance}
                 refreshing={ptrRefreshing}
                 threshold={PULL_THRESHOLD}
+                position="static"
               />
             )}
             <ErrorBoundary>
