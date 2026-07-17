@@ -53,6 +53,20 @@ function scrollFieldIntoView(target) {
   }, 300);
 }
 
+/**
+ * User dismissed the provider sheet — not a failure, so no error toast.
+ * ASAuthorizationError 1001 is Apple's "canceled" code.
+ */
+function isOAuthCancel(e) {
+  return /cancel|1001/i.test(e?.message || '');
+}
+
+function oauthErrorToast(action, provider, e) {
+  const name = provider === 'google' ? 'Google' : 'Apple';
+  const detail = (e?.message || '').slice(0, 140);
+  toast.error(`Could not ${action} with ${name} — try email instead${detail ? ` (${detail})` : ''}`);
+}
+
 function getAuthErrorMessage(authError) {
   if (!authError) return 'Invalid email or password';
   if (import.meta.env.DEV) {
@@ -875,7 +889,8 @@ export default function AuthScreen() {
                       await signInWithProvider(provider);
                     } catch (e) {
                       if (import.meta.env.DEV) console.warn('[Auth] OAuth', provider, e);
-                      toast.error(`Could not sign in with ${provider === 'google' ? 'Google' : 'Apple'} — try email instead`);
+                      if (isOAuthCancel(e)) return;
+                      oauthErrorToast('sign in', provider, e);
                     }
                   }}
                 />
@@ -1131,7 +1146,8 @@ export default function AuthScreen() {
                     } catch (e) {
                       clearOAuthSignupIntent();
                       if (import.meta.env.DEV) console.warn('[Auth] OAuth signup', provider, e);
-                      toast.error(`Could not sign up with ${provider === 'google' ? 'Google' : 'Apple'} — try email instead`);
+                      if (isOAuthCancel(e)) return;
+                      oauthErrorToast('sign up', provider, e);
                     }
                   }}
                 />

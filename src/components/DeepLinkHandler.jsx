@@ -29,6 +29,19 @@ function applyUrlToRouter(url, navigate) {
       // Returning from external-browser OAuth — dismiss the SFSafariViewController sheet.
       import('@capacitor/browser').then(({ Browser }) => Browser.close()).catch(() => {});
     }
+    // Auth returns carry their payload in the URL fragment (#access_token=…).
+    // Native runs HashRouter, where location.hash IS the route: writing the
+    // fragment to window.location.hash and then navigate()-ing rewrote the hash
+    // route over it, destroying the tokens before AuthCallback could read them
+    // — every native OAuth/magic-link return died this way. Fold the fragment
+    // into the query string instead; AuthCallback reads both.
+    if (pathname.startsWith('/auth/callback')) {
+      const fragment = hash.startsWith('#') ? hash.slice(1) : hash;
+      const fragmentParams = fragment.includes('=') && !fragment.startsWith('/') ? fragment : '';
+      const merged = [search.replace(/^\?/, ''), fragmentParams].filter(Boolean).join('&');
+      navigate(pathname + (merged ? `?${merged}` : ''), { replace: true });
+      return;
+    }
     if (pathname !== window.location.pathname || search !== window.location.search || hash !== window.location.hash) {
       if (hash) window.location.hash = hash;
       navigate(pathname + search, { replace: true });

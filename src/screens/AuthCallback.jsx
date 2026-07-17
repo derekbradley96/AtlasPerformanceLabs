@@ -64,10 +64,15 @@ export default function AuthCallback() {
     let cancelled = false;
     const hash = window.location.hash;
     const hashParams = parseHashParams(hash);
-    const access_token = hashParams.access_token;
-    const refresh_token = hashParams.refresh_token;
+    // Native (HashRouter) can't carry auth fragments — location.hash is the
+    // route there — so DeepLinkHandler folds them into the query string.
+    // Accept tokens from either place.
+    const access_token = hashParams.access_token || searchParams.get('access_token');
+    const refresh_token = hashParams.refresh_token || searchParams.get('refresh_token');
     const token_hash = searchParams.get('token_hash') || hashParams.token_hash;
     const typeFromHash = hashParams.type;
+    const providerError = hashParams.error_description || hashParams.error
+      || searchParams.get('error_description') || searchParams.get('error');
     let oauthCode = searchParams.get('code');
     if (!oauthCode && hash.includes('code=')) {
       const qIdx = hash.indexOf('?');
@@ -110,11 +115,13 @@ export default function AuthCallback() {
             return;
           }
           hasSetSessionFromUrl.current = true;
-        } else if (hashParams.error_description || hashParams.error) {
-          setError(hashParams.error_description || hashParams.error || 'Auth failed');
+        } else if (providerError) {
+          setError(providerError || 'Auth failed');
           setStatus('error');
           return;
-        } else if (!hash && !token_hash) {
+        } else if (!access_token && !refresh_token && !token_hash && !oauthCode) {
+          // Under HashRouter the route itself lives in location.hash, so "no
+          // hash" was never true on native — test for actual credentials.
           // No tokens in URL: might be cold start and session will come from storage, or invalid link
           const { data: { session } } = await supabase.auth.getSession();
           if (cancelled) return;
