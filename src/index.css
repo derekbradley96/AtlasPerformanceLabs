@@ -586,3 +586,17 @@ svg {
     background-color: rgba(255, 255, 255, 0.06) !important;
   }
 }
+
+/* Tab-swipe transition: the incoming tab slides in from the side the finger
+   revealed. Kept subtle — full interactive paging would fight page scrollers. */
+@keyframes atlas-tab-slide-from-right {
+  from { transform: translateX(24px); opacity: 0.55; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes atlas-tab-slide-from-left {
+  from { transform: translateX(-24px); opacity: 0.55; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell-scroll { animation-duration: 0.01ms !important; }
+}

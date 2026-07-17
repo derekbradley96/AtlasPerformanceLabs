@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useState, useEffect, useMemo, Suspense } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { ChevronLeft, Loader2, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle, Inbox, Crosshair, Dumbbell, ClipboardList, Plus } from 'lucide-react';
+import { ChevronLeft, Home, Users, MessageSquare, MoreHorizontal, Calendar, TrendingUp, UtensilsCrossed, MessageCircle, Inbox, Crosshair, Dumbbell, ClipboardList, Plus } from 'lucide-react';
 import NotificationBell from '@/components/ui/NotificationBell';
 import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
 import Img from '@/components/ui/Img';
@@ -22,6 +22,7 @@ import { isNative } from '@/lib/platform';
 import { useMessagingInboxRealtimeBump } from '@/hooks/useMessagingInboxRealtimeBump';
 import { useInboxBadgeCount } from '@/hooks/useInboxBadgeCount';
 import { useEdgeSwipeBack } from '@/components/app/useEdgeSwipeBack';
+import { useTabSwipeNavigation } from '@/hooks/useTabSwipeNavigation';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import NetworkBanner from '@/components/system/NetworkBanner';
 import AdminImpersonationBanner from '@/components/system/AdminImpersonationBanner';
@@ -704,6 +705,30 @@ export default function AppShell() {
   const tabBarActiveKey =
     navItems.find((i) => isShellTabItemActive(i.key, location.pathname, shellRole))?.key ?? navActiveKey;
 
+  // Instagram-style tab swiping: a horizontal fling on a tab root slides to the
+  // adjacent tab in tab-bar order (swipe right = previous, left = next, no
+  // wrap). showTabBar already implies mobile + tab root, so pushed routes
+  // (chat threads etc.) and desktop never get the gesture. The screen-edge
+  // dead zone in the hook (28px) sits outside useEdgeSwipeBack's 24px claim,
+  // so the two gestures can't both fire.
+  const [tabSwipeDir, setTabSwipeDir] = useState(null);
+  useTabSwipeNavigation({
+    containerRef: contentRef,
+    enabled: showTabBar,
+    tabPaths: navItems.map((i) => i.to),
+    activeKey: tabBarActiveKey,
+    onSwitch: (path, dir) => {
+      if (isNative()) void hapticNavigation();
+      setTabSwipeDir(dir);
+      navigate(path);
+    },
+  });
+  useEffect(() => {
+    if (!tabSwipeDir) return undefined;
+    const id = setTimeout(() => setTabSwipeDir(null), 260);
+    return () => clearTimeout(id);
+  }, [tabSwipeDir]);
+
   const clearMoreScrollMemory = useCallback(() => {
     try {
       sessionStorage.removeItem(MORE_SCROLL_KEY);
@@ -975,6 +1000,10 @@ export default function AppShell() {
           style={{
             ...(noOuterScroll ? {} : { WebkitOverflowScrolling: 'touch' }),
             ...(isPushedRoute ? { animation: 'app-shell-push-in 0.24s ease-out' } : {}),
+            // Tab roots aren't pushed, so this never competes with push-in.
+            ...(tabSwipeDir
+              ? { animation: `atlas-tab-slide-from-${tabSwipeDir === 'next' ? 'right' : 'left'} 0.22s ease-out` }
+              : {}),
             // Room to scroll a bottom-of-page field up above the keyboard.
             // Chat-style pages own their scroller and lift their own composer.
             ...(!noOuterScroll && keyboardInset > 0 ? { paddingBottom: keyboardInset } : {}),
