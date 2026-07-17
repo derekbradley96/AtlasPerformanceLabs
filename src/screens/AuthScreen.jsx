@@ -10,6 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { User, ChevronLeft, Check } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
+import { useKeyboardInset } from '@/hooks/useKeyboardInset';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { invokeSupabaseFunction, normalizeInviteCode } from '@/lib/supabaseApi';
 import {
@@ -157,6 +158,7 @@ export default function AuthScreen() {
     enableBiometricSetup,
     dismissBiometricSetup,
   } = useAuth();
+  const { keyboardInset } = useKeyboardInset();
   const paramMode = searchParams.get('mode');
   const paramAccount = searchParams.get('account');
   /** From marketing links: keep user on email/password screen (do not auto-route to onboarding). */
@@ -727,12 +729,18 @@ export default function AuthScreen() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center justify-center p-4 overflow-x-hidden"
+      className={`min-h-screen flex flex-col items-center p-4 overflow-x-hidden overflow-y-auto ${keyboardInset > 0 ? 'justify-start' : 'justify-center'}`}
       {...atlasMigrationDataAttributes(authMigration.phase, authMigration.primary)}
       style={{
         background: colors.bg,
         paddingTop: 'max(env(safe-area-inset-top), 24px)',
-        paddingBottom: 'max(env(safe-area-inset-bottom), 24px)',
+        // The WebView doesn't shrink for the keyboard (Keyboard.resize:'none'),
+        // so reserve its height as scroll room — combined with scrollFieldIntoView
+        // on focus this lifts the password field above the keyboard.
+        paddingBottom: keyboardInset > 0
+          ? keyboardInset + 24
+          : 'max(env(safe-area-inset-bottom), 24px)',
+        WebkitOverflowScrolling: 'touch',
       }}
     >
       <div className="w-full max-w-sm min-w-0">

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Phone, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { colors } from '@/ui/tokens';
@@ -79,67 +79,10 @@ export default function ChatThreadCallControls({
     return () => setHeaderRight(null);
   }, [setHeaderRight, client, isClientView, handlePhoneAction, handleVideoAction]);
 
-  const canStartAcceptedVideoCall = useMemo(
-    () => latestCallRequest?.status === 'accepted' && latestCallRequest?.call_type === 'video',
-    [latestCallRequest],
-  );
-
-  return (
-    <div
-      className="mx-4 mt-2 mb-2 px-3 py-2 rounded-xl flex items-center justify-between gap-2"
-      style={{
-        background: colors.surface1,
-        border: `1px solid ${colors.border}`,
-      }}
-    >
-      <div style={{ minWidth: 0 }}>
-        <p style={{ margin: 0, fontSize: 12, color: colors.muted }}>
-          {canStartAcceptedVideoCall
-            ? 'Call accepted - ready to start'
-            : 'Call options'}
-        </p>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={handlePhoneAction}
-          className="rounded-full active:opacity-80"
-          style={{
-            width: 36,
-            height: 36,
-            border: `1px solid ${colors.border}`,
-            background: colors.surface2,
-            color: colors.text,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          aria-label={isClientView ? 'Open call requests' : 'Call'}
-          title={isClientView ? 'Open call requests' : 'Call'}
-        >
-          <Phone size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={handleVideoAction}
-          className="rounded-full active:opacity-80"
-          style={{
-            width: 36,
-            height: 36,
-            border: `1px solid ${colors.primary}`,
-            background: canStartAcceptedVideoCall ? colors.primary : colors.primarySubtle,
-            color: canStartAcceptedVideoCall ? '#fff' : colors.primary,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          aria-label={canStartAcceptedVideoCall ? 'Start call' : 'Video call'}
-          title={canStartAcceptedVideoCall ? 'Start call' : 'Video call'}
-        >
-          <Video size={14} />
-        </button>
-      </div>
-    </div>
-  );
+  // Phone + video live in the header (set above). The old duplicate "Call
+  // options" strip below the header was redundant — the header video button
+  // already starts an accepted call (onOpenAcceptedCall runs first), so this
+  // component now only wires the header and renders nothing inline.
+  return null;
 }
 
