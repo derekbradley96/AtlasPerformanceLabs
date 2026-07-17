@@ -4,16 +4,16 @@ import { atlasMigrationDataAttributes, deriveMessagesListRouteState } from '@/li
 import { useNavigate, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Pin, PinOff, Trash2, MessageSquare, Search, Plus, ChevronRight, Send } from 'lucide-react';
+import { Pin, PinOff, Trash2, MessageSquare, Search, Plus, ChevronRight, Send, MailOpen } from 'lucide-react';
 import { useData } from '@/data/useData';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { normalizeRole } from '@/lib/roles';
 import { getPinnedIds, togglePinned, removeFromPinned } from '@/lib/pinsStore';
-import { getDeletedIds, addDeletedId } from '@/lib/deletedThreadsStore';
+import { getDeletedIds } from '@/lib/deletedThreadsStore';
 import { sortThreadsWithPinned } from '@/lib/messagesThreadsSelectors';
-import SwipeRow from '@/components/messages/SwipeRow';
-import Card from '@/ui/Card';
+import HoldMenu from '@/components/ui/HoldMenu';
+import ThreadRow from '@/components/messages/ThreadRow';
 import EmptyState from '@/components/ui/EmptyState';
 import { MessagesListSkeleton } from '@/components/ui/LoadingState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
@@ -27,9 +27,6 @@ import { usePresentationMode } from '@/lib/presentationMode';
 import { toast } from 'sonner';
 import { getMessagesListPath, navigateToThread } from '@/lib/messagesPath';
 
-const PIN_BG = colors.primary;
-const UNPIN_BG = colors.surface2;
-const DELETE_BG = colors.danger;
 // Stable default for the threads query: an inline `= []` makes a new array
 // identity every render while data is undefined (loading/error), and the
 // state-mirroring effect below then loops setState → "Maximum update depth".
@@ -91,18 +88,17 @@ export default function Messages() {
   }, [data?.ensureThreadForClient, data?.sendMessage, isCoachView]);
   const { isDesktopWeb } = usePresentationMode();
   const rhythm = desktopRhythm(isDesktopWeb);
-  const rowPadY = isDesktopWeb ? 16 : 14;
-  const rowPadX = isDesktopWeb ? 16 : 14;
+  // Flat rows sit inside the scroller's own page padding, so they only need
+  // enough inset for the press tint to breathe — the card's 14 double-indented.
+  const rowPadY = isDesktopWeb ? 12 : 10;
+  const rowPadX = isDesktopWeb ? 12 : 6;
   const outletContext = useOutletContext() || {};
   const { registerRefresh, setHeaderRight } = outletContext;
   const [refreshKey, setRefreshKey] = useState(0);
   const [clients, setClientsState] = useState([]);
   const [threads, setThreadsState] = useState([]);
   const [deletedIds, setDeletedIds] = useState(() => getDeletedIds());
-  const [deletingId, setDeletingId] = useState(null);
   const [pinnedIds, setPinnedIds] = useState(() => getPinnedIds());
-  const [openRowId, setOpenRowId] = useState(null);
-  const [openSide, setOpenSide] = useState(null);
   const [startConversationOpen, setStartConversationOpen] = useState(false);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
@@ -271,9 +267,6 @@ export default function Messages() {
 
   const handleRow = useCallback(
     async (clientId, threadId, clientName) => {
-      if (openRowId != null) return;
-      if (openRowId === clientId) return;
-      if (deletingId === clientId) return;
       await lightHaptic();
       const readTarget = threadId ?? clientId;
       if (readTarget) {
@@ -286,7 +279,7 @@ export default function Messages() {
         state: name ? { clientName: name } : undefined,
       });
     },
-    [navigate, openRowId, deletingId, data]
+    [navigate, data]
   );
 
   const handleDeleteRequest = useCallback((clientId) => {
@@ -313,42 +306,17 @@ export default function Messages() {
     setClientIdToDelete(null);
   }, []);
 
-  const handleDeleteAnimationEnd = useCallback((clientId) => {
-    addDeletedId(clientId);
-    removeFromPinned(clientId);
-    setDeletedIds(getDeletedIds());
-    setDeletingId(null);
-    setOpenRowId(null);
-    setOpenSide(null);
-  }, []);
-
   const handlePinToggle = useCallback((clientId) => {
-    lightHaptic();
     togglePinned(clientId);
     setPinnedIds(getPinnedIds());
-    setOpenRowId(null);
-    setOpenSide(null);
   }, []);
 
-  const handleSwipeStart = useCallback((id) => {
-    setOpenRowId(null);
-    setOpenSide(null);
-  }, []);
-
-  const handleOpenLeft = useCallback((id) => {
-    setOpenRowId(id);
-    setOpenSide('left');
-  }, []);
-
-  const handleOpenRight = useCallback((id) => {
-    setOpenRowId(id);
-    setOpenSide('right');
-  }, []);
-
-  const handleClose = useCallback(() => {
-    setOpenRowId(null);
-    setOpenSide(null);
-  }, []);
+  const handleMarkRead = useCallback((clientId, threadId) => {
+    try {
+      data.markThreadRead?.(threadId ?? clientId);
+    } catch (_) {}
+    loadData();
+  }, [data, loadData]);
 
   const handleStartConversation = useCallback(async (client) => {
     if (!client?.id) return;
@@ -562,9 +530,6 @@ export default function Messages() {
           <div
             ref={scrollElRef}
             className="flex-1 min-h-0 overflow-y-auto"
-            /* Scrolling dismisses an open swipe action, as it does natively —
-               otherwise a row you opened stays open while you scroll past it. */
-            onScroll={openRowId ? handleClose : undefined}
             style={{
               WebkitOverflowScrolling: 'touch',
               paddingLeft: shell.pagePaddingH,
@@ -615,170 +580,66 @@ export default function Messages() {
               const clientId = client?.id ?? thread?.client_id;
               const timeLabel = formatThreadTime(lastMessageAt);
 
-              const stopActionEvent = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.nativeEvent?.stopImmediatePropagation?.();
-              };
-              const leftActions = (
-                <button
-                  type="button"
-                  onPointerDown={stopActionEvent}
-                  onPointerUp={stopActionEvent}
-                  onTouchStart={stopActionEvent}
-                  onTouchEnd={stopActionEvent}
-                  onClick={(e) => {
-                    stopActionEvent(e);
-                    handlePinToggle(threadId);
-                  }}
-                  className="flex flex-col items-center justify-center gap-0.5 w-full h-full border-0 cursor-pointer"
-                  style={{
-                    background: isPinned ? UNPIN_BG : PIN_BG,
-                    color: '#fff',
-                    padding: 8,
-                    WebkitTapHighlightColor: 'transparent',
-                    minHeight: 44,
-                  }}
-                  aria-label={isPinned ? 'Unpin' : 'Pin'}
-                >
-                  {isPinned ? <PinOff size={22} /> : <Pin size={22} />}
-                  <span className="text-[10px] font-semibold uppercase tracking-wide opacity-90">
-                    {isPinned ? 'Unpin' : 'Pin'}
-                  </span>
-                </button>
-              );
-
-              const rightActions = (
-                <button
-                  type="button"
-                  onPointerDown={stopActionEvent}
-                  onPointerUp={stopActionEvent}
-                  onTouchStart={stopActionEvent}
-                  onTouchEnd={stopActionEvent}
-                  onClick={(e) => {
-                    stopActionEvent(e);
-                    handleDeleteRequest(threadId);
-                  }}
-                  className="flex flex-col items-center justify-center gap-0.5 w-full h-full border-0 cursor-pointer"
-                  style={{
-                    background: DELETE_BG,
-                    color: '#fff',
-                    padding: 8,
-                    WebkitTapHighlightColor: 'transparent',
-                    minHeight: 44,
-                  }}
-                  aria-label="Delete"
-                >
-                  <Trash2 size={22} />
-                  <span className="text-[10px] font-semibold uppercase tracking-wide opacity-90">
-                    Delete
-                  </span>
-                </button>
-              );
+              const menuItems = isClientView ? [] : [
+                {
+                  key: 'pin',
+                  label: isPinned ? 'Unpin' : 'Pin',
+                  icon: isPinned ? PinOff : Pin,
+                  onSelect: () => handlePinToggle(threadId),
+                },
+                ...(unreadCount > 0 ? [{
+                  key: 'read',
+                  label: 'Mark as read',
+                  icon: MailOpen,
+                  onSelect: () => handleMarkRead(clientId, thread?.id),
+                }] : []),
+                {
+                  key: 'delete',
+                  label: 'Delete',
+                  icon: Trash2,
+                  destructive: true,
+                  onSelect: () => handleDeleteRequest(threadId),
+                },
+              ];
 
               const rowContent = (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Open chat with ${name}`}
-                  className="flex items-center gap-3 active:opacity-90 transition-opacity w-full text-left"
-                  style={{
-                    paddingTop: rowPadY,
-                    paddingBottom: rowPadY,
-                    paddingLeft: rowPadX,
-                    paddingRight: rowPadX,
-                    minHeight: isDesktopWeb ? 80 : 76,
-                    borderLeft: unreadCount > 0 ? `3px solid ${colors.primary}` : '3px solid transparent',
-                  }}
-                >
-                  <div
-                    className="flex-shrink-0 flex-shrink-0"
-                    style={{ width: 44, height: 44, borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}
-                  >
-                    {client?.profiles?.avatar_url || client?.avatar_url ? (
-                      <img
-                        src={client.profiles?.avatar_url ?? client.avatar_url}
-                        alt={name}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      />
-                    ) : (
-                      <div
-                        className="w-full h-full flex items-center justify-center text-[14px] font-semibold"
-                        style={{ background: 'rgba(255,255,255,0.08)', color: colors.muted }}
-                      >
-                        {(name || '?').slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0 flex flex-col justify-center gap-1.5">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {isPinned && <Pin size={12} style={{ color: colors.muted, flexShrink: 0 }} />}
-                      <span
-                        className="truncate font-semibold"
-                        style={{ fontSize: 15, fontWeight: 600, color: colors.text }}
-                      >
-                        {name}
-                      </span>
-                      {unreadCount > 0 && (
-                        <div
-                          className="flex-shrink-0 flex items-center justify-center rounded-full text-[11px] font-bold"
-                          style={{ width: 20, height: 20, minWidth: 20, background: colors.primary, color: '#fff' }}
-                        >
-                          {unreadCount > 9 ? '9+' : unreadCount}
-                        </div>
-                      )}
-                    </div>
-                    <p
-                      className="truncate"
-                      style={{ fontSize: 13, color: colors.muted, lineHeight: 1.3 }}
-                    >
-                      {lastMessage}
-                    </p>
-                  </div>
-                  <div className="flex-shrink-0 flex items-center gap-1">
-                    {timeLabel ? (
-                      <span style={{ fontSize: 12, color: colors.muted }}>{timeLabel}</span>
-                    ) : null}
-                    <ChevronRight size={18} style={{ color: colors.muted }} aria-hidden />
-                  </div>
-                </div>
+                <ThreadRow
+                  name={name}
+                  avatarUrl={client?.profiles?.avatar_url ?? client?.avatar_url}
+                  lastMessage={lastMessage}
+                  timeLabel={timeLabel}
+                  unreadCount={unreadCount}
+                  isPinned={isPinned}
+                  padY={rowPadY}
+                  padX={rowPadX}
+                />
               );
 
               return (
-                <div key={threadId} style={{ marginBottom: isDesktopWeb ? spacing[12] : 10 }}>
-                <SwipeRow
-                  id={threadId}
-                  isOpenLeft={openRowId === threadId && openSide === 'left'}
-                  isOpenRight={openRowId === threadId && openSide === 'right'}
-                  onOpenLeft={handleOpenLeft}
-                  onOpenRight={handleOpenRight}
-                  onClose={handleClose}
-                  onSwipeStart={handleSwipeStart}
-                  onRowPress={() => handleRow(clientId, thread?.id, name)}
-                  leftActions={isClientView ? null : leftActions}
-                  rightActions={isClientView ? null : rightActions}
-                  isDeleting={deletingId === threadId}
-                  onDeleteAnimationEnd={() => handleDeleteAnimationEnd(threadId)}
+                <HoldMenu
+                  key={threadId}
+                  items={menuItems}
+                  label={name}
+                  onPress={() => handleRow(clientId, thread?.id, name)}
+                  disabled={isClientView}
+                  radius={16}
+                  liftBackground={colors.surface1}
                 >
-                  {/* No marginBottom here: the gap belongs OUTSIDE the swipe
-                      container. Inside, it made the container taller than the
-                      card, and the actions layer showed through that strip —
-                      the blue sliver of the Pin action under a swiped row.
-                      Radius matches SwipeRow's so the reveal lines up. */}
-                  <Card
-                    style={{
-                      borderRadius: 16,
-                      overflow: 'hidden',
-                      border: `1px solid ${colors.border}`,
-                      background: colors.surface1,
-                      padding: 0,
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open chat with ${name}`}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      e.preventDefault();
+                      handleRow(clientId, thread?.id, name);
                     }}
+                    className="atlas-thread-row"
+                    style={{ borderRadius: 16, cursor: 'pointer' }}
                   >
                     {rowContent}
-                  </Card>
-                </SwipeRow>
-                </div>
+                  </div>
+                </HoldMenu>
               );
             }) : null}
           </div>

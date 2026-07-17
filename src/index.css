@@ -536,3 +536,53 @@ svg {
 .app-shell-scroll .min-h-screen {
   min-height: var(--app-content-h, 100%);
 }
+
+/* Press-and-hold row menu (components/ui/HoldMenu). The lifted row scales a
+   touch above the dimmed backdrop so the row you held reads as "picked up". */
+@keyframes atlas-hold-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes atlas-hold-lift-in {
+  from { transform: scale(1); }
+  to { transform: scale(1.03); }
+}
+@keyframes atlas-hold-menu-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+.atlas-hold-backdrop { animation: atlas-hold-backdrop-in 0.18s ease-out both; }
+.atlas-hold-lift { animation: atlas-hold-lift-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.atlas-hold-menu { animation: atlas-hold-menu-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .atlas-hold-backdrop,
+  .atlas-hold-lift,
+  .atlas-hold-menu { animation-duration: 0.01ms; }
+  .atlas-hold-lift { transform: scale(1); }
+}
+
+/* Message thread rows: flat and continuous rather than carded, so the list
+   reads as one surface. The press tint replaces the card's active state. */
+.atlas-thread-row {
+  transition: background-color 0.15s ease;
+}
+.atlas-thread-row:active {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+@media (hover: hover) {
+  .atlas-thread-row:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.atlas-hold-menu-item {
+  transition: background-color 0.12s ease;
+}
+.atlas-hold-menu-item:active {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+@media (hover: hover) {
+  .atlas-hold-menu-item:hover {
+    background-color: rgba(255, 255, 255, 0.06) !important;
+  }
+}

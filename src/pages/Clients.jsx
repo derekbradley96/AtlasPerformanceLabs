@@ -20,7 +20,7 @@ import { resolveOrgCoachScope } from '@/lib/organisationScope';
 import { safeDate } from '@/lib/format';
 import Row from '@/ui/Row';
 import Button from '@/ui/Button';
-import SwipeRow from '@/components/messages/SwipeRow';
+import HoldMenu from '@/components/ui/HoldMenu';
 import { ClientListSkeleton } from '@/components/ui/LoadingState';
 import EmptyState from '@/components/ui/EmptyState';
 import LoadErrorFallback from '@/components/ui/LoadErrorFallback';
@@ -141,8 +141,6 @@ export default function Clients() {
   const [clientsLoadError, setClientsLoadError] = useState(false);
   const [clientsLoadErrorMessage, setClientsLoadErrorMessage] = useState(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [openRowId, setOpenRowId] = useState(null);
-  const [openSide, setOpenSide] = useState(null);
   const showRiskFilters = hasSupabase && isAuthed && trainerId && trainerId !== 'local-trainer';
   const loadRetriedRef = useRef(false);
   const [addClientOpen, setAddClientOpen] = useState(false);
@@ -615,26 +613,6 @@ export default function Clients() {
   const isEmptyAll = isEmpty && !search.trim();
   const showEmptyState = isEmptyAll && segment === 'all';
 
-  const handleSwipeStart = useCallback(() => {
-    setOpenRowId(null);
-    setOpenSide(null);
-  }, []);
-
-  const handleOpenLeft = useCallback((id) => {
-    setOpenRowId(id);
-    setOpenSide('left');
-  }, []);
-
-  const handleOpenRight = useCallback((id) => {
-    setOpenRowId(id);
-    setOpenSide('right');
-  }, []);
-
-  const handleClose = useCallback(() => {
-    setOpenRowId(null);
-    setOpenSide(null);
-  }, []);
-
   const handleExportClients = useCallback(() => {
     const rows = allClients.map((c) => ({
       id: c.id,
@@ -919,73 +897,29 @@ export default function Clients() {
               } : {};
               const hasRetentionRisk = Boolean(getRetentionItem(client.id));
 
-              const leftActions = (
-                <button
-                  type="button"
-                  onClick={async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await lightHaptic();
-                    navigateToThread(navigate, client.id);
-                  }}
-                  className="flex flex-col items-center justify-center gap-0.5 w-full h-full border-0 cursor-pointer"
-                  style={{
-                    background: colors.primary,
-                    color: '#fff',
-                    padding: 8,
-                    WebkitTapHighlightColor: 'transparent',
-                    minHeight: 44,
-                    fontSize: 11,
-                    textTransform: 'uppercase',
-                    fontWeight: 600,
-                  }}
-                  aria-label="Message client"
-                >
-                  <MessageIcon size={18} />
-                  Message
-                </button>
-              );
-
-              const rightActions = (
-                <button
-                  type="button"
-                  onClick={async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await lightHaptic();
-                    handleRow(client.id);
-                  }}
-                  className="flex flex-col items-center justify-center gap-0.5 w-full h-full border-0 cursor-pointer"
-                  style={{
-                    background: colors.surface2,
-                    color: colors.text,
-                    padding: 8,
-                    WebkitTapHighlightColor: 'transparent',
-                    minHeight: 44,
-                    fontSize: 11,
-                    textTransform: 'uppercase',
-                    fontWeight: 600,
-                  }}
-                  aria-label="Open client"
-                >
-                  <ChevronRight size={18} />
-                  Open
-                </button>
-              );
+              const menuItems = [
+                {
+                  key: 'message',
+                  label: 'Message',
+                  icon: MessageIcon,
+                  onSelect: () => navigateToThread(navigate, client.id),
+                },
+                {
+                  key: 'open',
+                  label: 'Open profile',
+                  icon: ChevronRight,
+                  onSelect: () => handleRow(client.id),
+                },
+              ];
 
               return (
-                <SwipeRow
+                <HoldMenu
                   key={client.id}
-                  id={client.id}
-                  isOpenLeft={openRowId === client.id && openSide === 'left'}
-                  isOpenRight={openRowId === client.id && openSide === 'right'}
-                  onOpenLeft={handleOpenLeft}
-                  onOpenRight={handleOpenRight}
-                  onClose={handleClose}
-                  onSwipeStart={handleSwipeStart}
-                  onRowPress={() => handleRow(client.id)}
-                  leftActions={leftActions}
-                  rightActions={rightActions}
+                  items={menuItems}
+                  label={(client?.full_name ?? client?.name ?? '') || 'client'}
+                  onPress={() => handleRow(client.id)}
+                  radius={14}
+                  liftBackground={colors.surface1}
                 >
                   <Row
                     style={riskStyle}
@@ -1056,9 +990,8 @@ export default function Clients() {
                       </div>
                     }
                     showChevron={false}
-                    onPress={() => handleRow(client.id)}
                   />
-                </SwipeRow>
+                </HoldMenu>
               );
             })}
           </div>
