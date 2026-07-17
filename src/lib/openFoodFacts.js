@@ -1,4 +1,5 @@
-const OFF_CACHE_KEY = 'atlas.off.products.v1';
+// v2: adds is_liquid + ml-aware serving parsing; old cached entries lack them.
+const OFF_CACHE_KEY = 'atlas.off.products.v2';
 const OFF_CACHE_LIMIT = 40;
 const OFF_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const OFF_USER_AGENT = 'AtlasPerformanceLabs/1.0 (support@atlasperformancelabs.app)';
@@ -7,6 +8,9 @@ const OFF_FIELDS = [
   'nutriments',
   'serving_size',
   'product_quantity',
+  'product_quantity_unit',
+  'quantity',
+  'nutrition_data_per',
   'brands',
   'image_front_url',
 ].join(',');
@@ -28,12 +32,42 @@ function firstNumber(source, keys) {
   return null;
 }
 
-function parseServingSizeGrams(servingSize, fallbackQuantity) {
-  const servingText = typeof servingSize === 'string' ? servingSize : '';
-  const quantityText = typeof fallbackQuantity === 'string' ? fallbackQuantity : '';
-  const gramsMatch = servingText.match(/(\d+(?:[.,]\d+)?)\s*g/i) || quantityText.match(/(\d+(?:[.,]\d+)?)\s*g/i);
-  if (!gramsMatch) return null;
-  return toFiniteNumber(String(gramsMatch[1]).replace(',', '.'));
+/**
+ * Serving amount in the product's native per-100 unit (g for solids, ml for
+ * liquids — OFF liquid nutriments are per 100ml, so no density guess is made).
+ * Understands "330 ml", "75cl", "1 l"/"1 litre" (converted to ml) and "Ng".
+ */
+function parseServingAmount(servingSize, fallbackQuantity) {
+  for (const raw of [servingSize, fallbackQuantity]) {
+    const text = typeof raw === 'string' ? raw : '';
+    if (!text) continue;
+    const ml = text.match(/(\d+(?:[.,]\d+)?)\s*ml\b/i);
+    if (ml) return { amount: toFiniteNumber(String(ml[1]).replace(',', '.')), unit: 'ml' };
+    const cl = text.match(/(\d+(?:[.,]\d+)?)\s*cl\b/i);
+    if (cl) {
+      const n = toFiniteNumber(String(cl[1]).replace(',', '.'));
+      return { amount: n != null ? n * 10 : null, unit: 'ml' };
+    }
+    const litres = text.match(/(\d+(?:[.,]\d+)?)\s*(?:l|litres?|liters?)\b/i);
+    if (litres) {
+      const n = toFiniteNumber(String(litres[1]).replace(',', '.'));
+      return { amount: n != null ? n * 1000 : null, unit: 'ml' };
+    }
+    const grams = text.match(/(\d+(?:[.,]\d+)?)\s*g\b/i);
+    if (grams) return { amount: toFiniteNumber(String(grams[1]).replace(',', '.')), unit: 'g' };
+  }
+  return { amount: null, unit: null };
+}
+
+/** Liquid when OFF says nutriments are per 100ml, the pack unit is volumetric, or the serving/pack text reads in ml/cl/l/fl oz. */
+function detectLiquid(product, servingParse) {
+  const per = String(product?.nutrition_data_per || '').toLowerCase();
+  if (per.includes('ml')) return true;
+  const unit = String(product?.product_quantity_unit || '').toLowerCase();
+  if (unit === 'ml' || unit === 'cl' || unit === 'l') return true;
+  if (servingParse?.unit === 'ml') return true;
+  const text = `${product?.serving_size || ''} ${product?.quantity || ''}`.toLowerCase();
+  return /fl\s*oz|fluid/.test(text);
 }
 
 function parseProductFromResponse(barcode, payload) {
@@ -59,6 +93,7 @@ function parseProductFromResponse(barcode, payload) {
   const carbsPerServing = firstNumber(nutriments, ['carbohydrates_serving']);
   const fatsPerServing = firstNumber(nutriments, ['fat_serving']);
 
+  const servingParse = parseServingAmount(product.serving_size, product.quantity ?? product.product_quantity);
   const normalized = {
     barcode: String(barcode || '').trim(),
     name: String(product.product_name || '').trim() || 'Unnamed product',
@@ -71,7 +106,9 @@ function parseProductFromResponse(barcode, payload) {
     carbs_per_serving: carbsPerServing,
     fats_per_serving: fatsPerServing,
     serving_size: String(product.serving_size || '').trim() || null,
-    serving_size_grams: parseServingSizeGrams(product.serving_size, product.product_quantity),
+    // Native per-100 unit amount: grams for solids, ml for liquids.
+    serving_size_grams: servingParse.amount,
+    is_liquid: detectLiquid(product, servingParse),
     image: String(product.image_front_url || '').trim() || null,
     brands: String(product.brands || '').trim() || null,
   };
@@ -90,6 +127,7 @@ function parseOpenGroceryProduct(barcode, payload) {
   if (caloriesPer100g == null && proteinPer100g == null && carbsPer100g == null && fatsPer100g == null) {
     return null;
   }
+  const servingParse = parseServingAmount(product.serving_size, product.quantity);
   return {
     barcode: String(barcode || '').trim(),
     name: String(product.name || '').trim() || 'Unnamed product',
@@ -102,7 +140,8 @@ function parseOpenGroceryProduct(barcode, payload) {
     carbs_per_serving: null,
     fats_per_serving: null,
     serving_size: String(product.serving_size || '').trim() || null,
-    serving_size_grams: parseServingSizeGrams(product.serving_size, product.quantity),
+    serving_size_grams: servingParse.amount,
+    is_liquid: detectLiquid(product, servingParse),
     image: String(product.image || '').trim() || null,
     brands: String(product.brand || '').trim() || null,
   };
@@ -205,7 +244,7 @@ async function fetchOpenGroceryProduct(code) {
 }
 
 const OFF_SEARCH_URL = 'https://search.openfoodfacts.org/search';
-const OFF_SEARCH_FIELDS = ['product_name', 'nutriments', 'serving_size', 'product_quantity', 'brands', 'image_front_url', 'code'].join(',');
+const OFF_SEARCH_FIELDS = ['product_name', 'nutriments', 'serving_size', 'product_quantity', 'product_quantity_unit', 'quantity', 'nutrition_data_per', 'brands', 'image_front_url', 'code'].join(',');
 const searchCache = new Map();
 const pendingSearches = new Map();
 const SEARCH_CACHE_TTL_MS = 1000 * 60 * 30;

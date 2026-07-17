@@ -435,6 +435,10 @@ export default function MealLogForm({
   }, [scannedFood]);
 
   const servingSizeGrams = Number(scannedFood?.serving_size_grams);
+  // Liquids read in ml (OFF liquid nutriments are per 100ml, so the per-100
+  // maths is unchanged — only the unit label and the stored portion differ).
+  const scannedIsLiquid = scannedFood?.is_liquid === true || isLikelyLiquid(scannedFood?.serving_size);
+  const scannedUnit = scannedIsLiquid ? 'ml' : 'g';
   const effectiveGrams = useMemo(() => {
     const customRaw = Number(customBarcodeAmount);
     if (barcodeServingMode === 'custom' && Number.isFinite(customRaw) && customRaw > 0) return customRaw;
@@ -502,6 +506,13 @@ export default function MealLogForm({
     manualProtein,
     nutritionComplete,
   ]);
+
+  // A product with explicit macro data may legitimately total 0 kcal (diet
+  // drinks, water) — only block logging when there's no data at all.
+  const scannedFoodLoggable = Boolean(
+    scannedFood && consumedMacros
+    && (nutritionComplete || servingMacrosComplete || consumedMacros.calories > 0)
+  );
 
   const resetLookupState = () => {
     setLookupLoading(false);
@@ -623,9 +634,9 @@ export default function MealLogForm({
   };
 
   const confirmScannedFood = async () => {
-    if (!scannedFood || !consumedMacros || consumedMacros.calories <= 0) return;
+    if (!scannedFoodLoggable) return;
     const g = storedPortionGramsFromBarcode;
-    const sourceParts = [scannedFood?.name || null, g != null ? `${Math.round(g)}g` : null, lookupBarcode ? `barcode:${lookupBarcode}` : null].filter(Boolean);
+    const sourceParts = [scannedFood?.name || null, g != null ? `${Math.round(g)}${scannedUnit}` : null, lookupBarcode ? `barcode:${lookupBarcode}` : null].filter(Boolean);
     const payload = {
       meal_type: normalizeBarcodeMealType(mealType),
       calories: consumedMacros.calories,
@@ -634,8 +645,8 @@ export default function MealLogForm({
       fats_g: consumedMacros.fats,
       notes: sourceParts.join(' | '),
       food_name: scannedFood?.name?.trim() || null,
-      portion_grams: g,
-      portion_ml: null,
+      portion_grams: scannedIsLiquid ? null : g,
+      portion_ml: scannedIsLiquid ? g : null,
       household_unit: null,
       household_amount: null,
       source: 'barcode',
@@ -786,21 +797,21 @@ export default function MealLogForm({
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" className={`text-[11px] px-2 py-1 rounded border ${barcodeServingMode === '100g' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-300'}`} onClick={() => setBarcodeServingMode('100g')}>100g</button>
+                      <button type="button" className={`text-[11px] px-2 py-1 rounded border ${barcodeServingMode === '100g' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-300'}`} onClick={() => setBarcodeServingMode('100g')}>{`100${scannedUnit}`}</button>
                       {Number.isFinite(servingSizeGrams) && servingSizeGrams > 0 ? (
                         <button type="button" className={`text-[11px] px-2 py-1 rounded border ${barcodeServingMode === 'serving' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-300'}`} onClick={() => { setBarcodeServingMode('serving'); setConsumedServings('1'); }}>
-                          1 serving ({Math.round(servingSizeGrams)}g)
+                          1 serving ({Math.round(servingSizeGrams)}{scannedUnit})
                         </button>
                       ) : null}
                       <button type="button" className={`text-[11px] px-2 py-1 rounded border ${barcodeServingMode === 'custom' ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-600 text-slate-300'}`} onClick={() => setBarcodeServingMode('custom')}>Custom</button>
                     </div>
                     {barcodeServingMode === 'custom' ? (
-                      <Input type="number" value={customBarcodeAmount} onChange={(e) => setCustomBarcodeAmount(e.target.value)} placeholder={isLikelyLiquid(scannedFood?.serving_size) ? 'Custom ml' : 'Custom grams'} className="bg-slate-800 border-slate-700" />
+                      <Input type="number" value={customBarcodeAmount} onChange={(e) => setCustomBarcodeAmount(e.target.value)} placeholder={scannedIsLiquid ? 'Custom ml' : 'Custom grams'} className="bg-slate-800 border-slate-700" />
                     ) : null}
                     <div className="flex flex-wrap gap-2">
-                      {(isLikelyLiquid(scannedFood?.serving_size) ? [150, 250, 500] : [50, 100, 150]).map((amt) => (
+                      {(scannedIsLiquid ? [150, 250, 500] : [50, 100, 150]).map((amt) => (
                         <button key={amt} type="button" className="text-[11px] px-2 py-1 rounded border border-slate-600 text-slate-300" onClick={() => { setBarcodeServingMode('custom'); setCustomBarcodeAmount(String(amt)); }}>
-                          {isLikelyLiquid(scannedFood?.serving_size) ? `${amt}ml` : `${amt}g`}
+                          {`${amt}${scannedUnit}`}
                         </button>
                       ))}
                     </div>
@@ -841,7 +852,7 @@ export default function MealLogForm({
                 ) : null}
               </div>
               <DrawerFooter>
-                <Button type="button" className="bg-blue-500 hover:bg-blue-600 text-white" onClick={confirmScannedFood} disabled={!scannedFood || !consumedMacros || consumedMacros.calories <= 0 || lookupLoading}>Log this food</Button>
+                <Button type="button" className="bg-blue-500 hover:bg-blue-600 text-white" onClick={confirmScannedFood} disabled={!scannedFoodLoggable || lookupLoading}>Log this food</Button>
                 <Button type="button" variant="outline" className="border-slate-700" onClick={startScan}>Search again</Button>
               </DrawerFooter>
             </DrawerContent>
@@ -897,7 +908,7 @@ export default function MealLogForm({
                 <Button type="button" variant="outline" className="w-full sm:w-auto border-slate-700" onClick={() => { setLookupOpen(false); resetLookupState(); }}>
                   Cancel
                 </Button>
-                <Button type="button" className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white" onClick={confirmScannedFood} disabled={!scannedFood || !consumedMacros || consumedMacros.calories <= 0 || lookupLoading}>
+                <Button type="button" className="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white" onClick={confirmScannedFood} disabled={!scannedFoodLoggable || lookupLoading}>
                   Log this food
                 </Button>
               </DialogFooter>
