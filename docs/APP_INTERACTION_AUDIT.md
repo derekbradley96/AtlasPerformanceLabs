@@ -94,10 +94,20 @@ Status key: [ ] open · [~] partially done · [x] done
   Also gave `EditProfile`'s root the `flex-1 min-h-0` the other three already had.
   Note this predates this session's work — the wrapper never had the flex classes.
 
-- [ ] **Swipe actions only on 2 lists.** `SwipeRow` (swipe-to-delete/pin) is
-  used only in `Messages` and `Clients`. Every other list (programs, workouts,
-  meals, exercises, check-ins, notifications) has no swipe affordance →
-  inconsistent. Either add swipe to the main lists or drop the expectation.
+- [x] **Swipe replaced with press-and-hold.** (device report: swipe-to-pin/delete
+  on message rows felt janky and could block the vertical scroll.) Root cause is
+  inherent to swipe on a scrolling list — the gesture has to be classified as
+  scroll vs reveal from the first few pixels, so a misread either moves the row
+  while you scroll or eats the scroll. Replaced `SwipeRow` with an
+  Instagram/iMessage-style hold menu (`components/ui/HoldMenu`): hold lifts the
+  row over a dimmed/blurred backdrop and shows the actions; any movement before
+  the timer cancels the hold, so a scroll can never open it. Messages actions:
+  Pin/Unpin, Mark as read (when unread), Delete. Clients: Message, Open profile.
+  `SwipeRow` is deleted (was used only by these two lists). This also settles the
+  "swipe only on 2 lists" inconsistency — the affordance is now a hold, which
+  reads the same everywhere and can be added to any list cheaply.
+  Verified in a dev harness (`/dev/holdmenu.html`) with synthetic pointer events:
+  hold opens, 30px drag cancels, tap opens the thread, action fires + closes.
 
 - [~] **Long-press barely used.** The dead duplicate (`components/app/useLongPress.js`)
   is deleted (0b7253b), along with a second dead dupe `components/app/useKeyboardInset.js`.
