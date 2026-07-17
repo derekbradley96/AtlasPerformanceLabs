@@ -420,13 +420,15 @@ function DesktopShell({
               />
             )}
             <ErrorBoundary>
+              {/* See the mobile shell: on noOuterScroll routes this wrapper has to
+                  stay a bounded flex column, and minHeight:100% would fight it. */}
               <div
-                className="w-full mx-auto"
+                className={`w-full mx-auto${noOuterScroll ? ' flex-1 min-h-0 flex flex-col' : ''}`}
                 style={{
                   maxWidth: 1200,
                   padding: '24px 32px',
                   paddingBottom: getAppShellOutletScrollPaddingBottom(false),
-                  minHeight: '100%',
+                  minHeight: noOuterScroll ? 0 : '100%',
                 }}
               >
                 <Suspense fallback={<ShellOutletFallback />}>
@@ -998,7 +1000,12 @@ export default function AppShell() {
               />
             )}
             <ErrorBoundary>
+              {/* On noOuterScroll routes this div must keep passing the bounded
+                  height down: it is display:block by default, which makes the
+                  page's own `flex-1 min-h-0` inert, so the page sizes to its
+                  content and the scroll container above just clips it. */}
               <div
+                className={noOuterScroll ? 'flex-1 min-h-0 flex flex-col' : undefined}
                 style={{
                   width: '100%',
                   maxWidth: contentMaxWidth,

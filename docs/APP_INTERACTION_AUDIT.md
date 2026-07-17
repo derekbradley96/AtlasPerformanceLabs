@@ -77,6 +77,23 @@ Status key: [ ] open · [~] partially done · [x] done
   keyboard) and index.css remaps `min-h-screen` inside `.app-shell-scroll` to it.
   `min-h-screen` now means "fill the content area". **Needs a device pass.**
 
+- [x] **`noOuterScroll` pages clipped, not scrollable.** (reported on device: the
+  Messages thread list cut Emma Davies off mid-row with no scroll.) Root cause was
+  in AppShell, not the pages: on a `noOuterScroll` route the scroll container goes
+  `overflow-hidden` and the PTR wrapper correctly carries `flex-1 min-h-0` — but the
+  **outlet wrapper div between `<ErrorBoundary>` and `<Outlet>` is `display:block`**.
+  That severs the chain: the page's own `flex-1 min-h-0` is inert inside a block
+  parent, so the page sizes to its content, and a block's automatic minimum size is
+  its content height, so it can't shrink back either — it just overflows and gets
+  clipped. Measured in headless Chrome with the real chain (800px container, 2400px
+  of rows): the wrapper resolved to **2400px**, giving the inner scroller
+  `clientHeight === scrollHeight === 2400` → nothing to scroll. With
+  `flex-1 min-h-0 flex flex-col` on the wrapper: scroller = 800/2400 → scrolls.
+  Fixed in both shell paths (mobile + `DesktopShell`), so it covers all four
+  `noOuterScroll` routes (messages list, chat thread, community room, editprofile).
+  Also gave `EditProfile`'s root the `flex-1 min-h-0` the other three already had.
+  Note this predates this session's work — the wrapper never had the flex classes.
+
 - [ ] **Swipe actions only on 2 lists.** `SwipeRow` (swipe-to-delete/pin) is
   used only in `Messages` and `Clients`. Every other list (programs, workouts,
   meals, exercises, check-ins, notifications) has no swipe affordance →

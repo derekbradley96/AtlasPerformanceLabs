@@ -84,7 +84,7 @@ export default function EditProfile() {
   const safeBottom = 'env(safe-area-inset-bottom, 0px)';
 
   return (
-    <div className="app-screen min-w-0 max-w-full overflow-x-hidden bg-[#0B1220]">
+    <div className="app-screen min-w-0 max-w-full overflow-x-hidden flex-1 min-h-0 bg-[#0B1220]">
       <div
         className="overflow-y-auto overflow-x-hidden flex-1 min-h-0"
         style={{
