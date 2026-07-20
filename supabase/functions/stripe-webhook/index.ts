@@ -539,18 +539,31 @@ Deno.serve(async (req) => {
       }
       case "charge.refunded": {
         // Without this, refunded payments stay 'paid' in client_payments and
-        // the coach's revenue is overstated forever. charge.refunded is only
-        // true when FULLY refunded — partial refunds keep the row as paid.
+        // the coach's revenue is overstated forever. charge.refunded (the
+        // boolean) is only true when FULLY refunded; the event also fires for
+        // partial refunds, where amount_refunded is the CUMULATIVE total so
+        // netting to (amount - amount_refunded) is naturally idempotent.
         const charge = event.data.object as Stripe.Charge;
         const invoiceId = (charge.invoice as string) ?? null;
-        if (!invoiceId || charge.refunded !== true) {
+        if (!invoiceId) {
           safeLogWebhook("charge.refunded", { objectId: charge.id });
           break;
         }
-        await supabase
-          .from("client_payments")
-          .update({ status: "refunded" })
-          .eq("provider_payment_id", invoiceId);
+        if (charge.refunded === true) {
+          await supabase
+            .from("client_payments")
+            .update({ status: "refunded" })
+            .eq("provider_payment_id", invoiceId);
+        } else if ((charge.amount_refunded ?? 0) > 0) {
+          // Partial refund: the coach kept only the net — earnings must say so.
+          // Only rows still 'paid' are netted; never resurrect refunded/failed.
+          const netMajor = Math.max(0, (charge.amount ?? 0) - (charge.amount_refunded ?? 0)) / 100;
+          await supabase
+            .from("client_payments")
+            .update({ amount: netMajor })
+            .eq("provider_payment_id", invoiceId)
+            .eq("status", "paid");
+        }
         safeLogWebhook("charge.refunded", { objectId: charge.id });
         break;
       }

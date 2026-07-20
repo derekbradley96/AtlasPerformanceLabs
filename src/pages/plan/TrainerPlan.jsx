@@ -20,6 +20,7 @@ import {
   trackUpgradePromptEvent,
 } from '@/utils/upgradeTriggers';
 import { usePresentationMode } from '@/lib/presentationMode';
+import { isNative } from '@/lib/platform';
 
 function getCurrentPlanIdFromStorage() {
   try {
@@ -32,6 +33,11 @@ function getCurrentPlanIdFromStorage() {
 
 export default function TrainerPlan() {
   const { isDesktopWeb } = usePresentationMode();
+  // App Review 3.1.1: the Atlas plan is a software subscription, so it cannot
+  // be SOLD inside the iOS app with an external payment method. The app may
+  // honour a plan purchased on the web ("purchased elsewhere"), so on native
+  // this page shows the current plan read-only and no checkout surface.
+  const nativeApp = isNative();
   const { user, isDemoMode } = useAuth();
   const [searchParams] = useSearchParams();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
@@ -141,22 +147,33 @@ export default function TrainerPlan() {
           </ul>
         </Card>
 
-        <div className="flex flex-col gap-3">
-          <Button onClick={openUpgrade} className="gap-2">
-            <Zap size={18} />
-            Compare plans & upgrade
-          </Button>
-          <Button variant="secondary" className="gap-2" onClick={() => impactLight()}>
-            <CreditCard size={18} />
-            Manage billing (Stripe)
-          </Button>
-          <p className="text-xs" style={{ color: colors.muted }}>
-            Billing is managed securely via Stripe. You can update payment method or cancel anytime.
-          </p>
-        </div>
+        {nativeApp ? (
+          <Card style={{ padding: spacing[20] }}>
+            <p className="text-sm" style={{ color: colors.text }}>
+              Plan changes and billing are managed on the Atlas web app.
+            </p>
+            <p className="text-xs mt-2" style={{ color: colors.muted }}>
+              Your current plan and all its features stay active here.
+            </p>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <Button onClick={openUpgrade} className="gap-2">
+              <Zap size={18} />
+              Compare plans & upgrade
+            </Button>
+            <Button variant="secondary" className="gap-2" onClick={() => impactLight()}>
+              <CreditCard size={18} />
+              Manage billing (Stripe)
+            </Button>
+            <p className="text-xs" style={{ color: colors.muted }}>
+              Billing is managed securely via Stripe. You can update payment method or cancel anytime.
+            </p>
+          </div>
+        )}
       </div>
 
-      <BottomSheet open={upgradeModalOpen} onClose={closeUpgrade} title="Plans" maxWidth={448} padded={false}>
+      <BottomSheet open={upgradeModalOpen && !nativeApp} onClose={closeUpgrade} title="Plans" maxWidth={448} padded={false}>
             <div className="p-4 pt-0 space-y-4">
               {PLANS.map((plan) => (
                 <div
@@ -223,7 +240,7 @@ export default function TrainerPlan() {
               ))}
             </div>
       </BottomSheet>
-      {showPaymentUpgradePrompt && paymentUpgradePrompt && (
+      {!nativeApp && showPaymentUpgradePrompt && paymentUpgradePrompt && (
         <UpgradePrompt
           prompt={paymentUpgradePrompt}
           variant="modal"
