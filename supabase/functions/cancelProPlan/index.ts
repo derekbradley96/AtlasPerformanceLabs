@@ -9,6 +9,7 @@ import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.t
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 const PRO_PRICE_ID = Deno.env.get("STRIPE_PRICE_PRO") ?? "";
+const ELITE_PRICE_ID = Deno.env.get("STRIPE_PRICE_ELITE") ?? "";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: getCorsHeaders(req) });
@@ -34,15 +35,22 @@ Deno.serve(async (req) => {
     let canceled = false;
     for (const sub of subscriptions.data) {
       const priceId = sub.items?.data?.[0]?.price?.id;
-      const isPro = priceId === PRO_PRICE_ID || (sub.metadata?.plan_tier === "pro");
-      if (isPro) {
+      const tier = String(sub.metadata?.plan_tier ?? "").toLowerCase();
+      // Elite coaches hit this same endpoint — matching only Pro left them with
+      // "No active Pro subscription found" and no way to cancel in-app.
+      const isAtlasPlan =
+        priceId === PRO_PRICE_ID
+        || (ELITE_PRICE_ID && priceId === ELITE_PRICE_ID)
+        || tier === "pro"
+        || tier === "elite";
+      if (isAtlasPlan) {
         await stripe.subscriptions.update(sub.id, { cancel_at_period_end: true });
         canceled = true;
         break;
       }
     }
 
-    if (!canceled) return new Response(JSON.stringify({ error: "No active Pro subscription found" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
+    if (!canceled) return new Response(JSON.stringify({ error: "No active Atlas plan subscription found" }), { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
     return new Response(JSON.stringify({ ok: true }), { headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
   } catch (e) {
     console.error("cancelProPlan", e);

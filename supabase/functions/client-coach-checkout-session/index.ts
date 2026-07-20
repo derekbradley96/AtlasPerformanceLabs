@@ -7,7 +7,7 @@ import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
-import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe.ts";
+import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN, appRedirectUrl } from "../_shared/stripe.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 
@@ -89,8 +89,8 @@ Deno.serve(async (req) => {
         : (Number(Deno.env.get("STRIPE_APPLICATION_FEE_PERCENT")) || 10);
 
     const base = getAllowlistedRedirectOrigin(req) ?? FALLBACK_ORIGIN;
-    const successUrl = `${base}/client-onboarding-flow?coach_offer_paid=1&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${base}/client-onboarding-flow?coach_offer_paid=cancel`;
+    const successUrl = appRedirectUrl(base, "/client-onboarding-flow?coach_offer_paid=1&session_id={CHECKOUT_SESSION_ID}");
+    const cancelUrl = appRedirectUrl(base, "/client-onboarding-flow?coach_offer_paid=cancel");
 
     let custEmail: string | undefined;
     try {

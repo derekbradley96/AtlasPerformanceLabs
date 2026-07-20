@@ -4,7 +4,7 @@ import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
-import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe.ts";
+import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN, appRedirectUrl } from "../_shared/stripe.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 
@@ -19,8 +19,8 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const base = getAllowlistedRedirectOrigin(req) ?? FALLBACK_ORIGIN;
-    const returnUrl = `${base}/earnings?stripe=return`;
-    const refreshUrl = `${base}/earnings?stripe=refresh`;
+    const returnUrl = appRedirectUrl(base, "/earnings?stripe=return");
+    const refreshUrl = appRedirectUrl(base, "/earnings?stripe=refresh");
 
     const { data: coachRow } = await supabase.from(TABLE.coaches).select("id, stripe_account_id").eq("user_id", userId).single();
     let coachId = coachRow?.id;

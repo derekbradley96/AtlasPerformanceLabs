@@ -373,7 +373,7 @@ Deno.serve(async (req) => {
             // Stripe lookup failed — continue without the bridge rather than failing the event.
           }
         }
-        let commissionRate = TIER_COMMISSION.basic;
+        let commissionRate: number = TIER_COMMISSION.basic;
         if (pay?.coach_id) {
           const { data: coach } = await supabase.from(TABLE.coaches).select("user_id").eq("id", pay.coach_id).single();
           const profileId = coach?.user_id ?? null;
@@ -604,6 +604,32 @@ Deno.serve(async (req) => {
           current_period_end: periodEnd,
           updated_at: now,
         }).eq("stripe_subscription_id", sub.id);
+        // A cancelled client→coach subscription previously vanished silently:
+        // the client kept billing_status=active and the coach's income just
+        // stopped. Surface it in the Review Center (payment_overdue is the
+        // wired-up type; metadata carries the real reason) — the coach decides
+        // whether to pause the client or re-invoice.
+        if (event.type === "customer.subscription.deleted") {
+          const { data: pay } = await supabase
+            .from(TABLE.payments)
+            .select("coach_id, client_id")
+            .eq("stripe_subscription_id", sub.id)
+            .maybeSingle();
+          if (pay?.coach_id && pay?.client_id) {
+            const dedupeKey = `payment_overdue:${pay.coach_id}:${pay.client_id}`;
+            await supabase.from(TABLE.review_items).upsert({
+              coach_id: pay.coach_id,
+              client_id: pay.client_id,
+              type: "payment_overdue",
+              status: "active",
+              priority: 80,
+              dedupe_key: dedupeKey,
+              metadata_json: { reason: "subscription_canceled", stripe_subscription_id: sub.id },
+              created_at: now,
+              updated_at: now,
+            }, { onConflict: "coach_id,dedupe_key" });
+          }
+        }
         safeLogWebhook(event.type, { objectId: sub.id });
         break;
       }
@@ -611,6 +637,14 @@ Deno.serve(async (req) => {
         safeLogWebhook(event.type, { eventId: event.id });
     }
   } catch (e) {
+    // The idempotency row was written BEFORE processing, so without removing it
+    // a transient mid-handler failure is permanent: Stripe retries, the retry
+    // hits the duplicate key, and we 200 without ever reprocessing the event.
+    try {
+      await supabase.from("stripe_webhook_events").delete().eq("event_id", event.id);
+    } catch (_) {
+      // If even the delete fails the event is stuck — surfaced via logs.
+    }
     safeLogWebhook("handler_error", { eventId: event.id });
     return jsonResp({ error: "Webhook processing failed" }, 500);
   }

@@ -4,7 +4,7 @@ import Stripe from "https://esm.sh/stripe@14.21.0?target=deno";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { TABLE } from "../_shared/supabase.ts";
 import { getAuthUserId, requireAuthResponse, jsonError } from "../_shared/auth.ts";
-import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN } from "../_shared/stripe.ts";
+import { getAllowlistedRedirectOrigin, FALLBACK_ORIGIN, appRedirectUrl } from "../_shared/stripe.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", { apiVersion: "2024-11-20.acacia" });
 
@@ -36,8 +36,8 @@ Deno.serve(async (req) => {
     if (coachErr || !coach) return new Response(JSON.stringify({ error: "Coach not found" }), { status: 404, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } });
 
     const base = getAllowlistedRedirectOrigin(req) ?? FALLBACK_ORIGIN;
-    const successUrl = `${base}/plan?success=1&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${base}/plan?canceled=1`;
+    const successUrl = appRedirectUrl(base, "/plan?success=1&session_id={CHECKOUT_SESSION_ID}");
+    const cancelUrl = appRedirectUrl(base, "/plan?canceled=1");
 
     let customerId = coach.stripe_customer_id ?? null;
     if (!customerId) {

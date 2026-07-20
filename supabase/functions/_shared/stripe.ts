@@ -4,6 +4,11 @@
  */
 
 const DEFAULT_ORIGINS = [
+  // .co.uk is the production domain (Site URL, sitemap, Vercel). Missing it
+  // meant every live web checkout fell through to FALLBACK_ORIGIN and landed
+  // post-payment on the wrong domain.
+  "https://atlasperformancelabs.co.uk",
+  "https://www.atlasperformancelabs.co.uk",
   "https://atlasperformancelabs.com",
   "https://www.atlasperformancelabs.com",
   "http://localhost:5173",
@@ -43,7 +48,19 @@ export function getAllowlistedRedirectOrigin(req: Request): string | null {
 }
 
 /** Default fallback when no allowlisted origin (no redirect to user-controlled URL). */
-export const FALLBACK_ORIGIN = "https://atlasperformancelabs.com";
+export const FALLBACK_ORIGIN = "https://atlasperformancelabs.co.uk";
+
+/**
+ * Build a redirect URL the app can actually route. The native WebView origin
+ * (capacitor://localhost) serves the SPA under HashRouter, where the route
+ * lives in the fragment — a path-form URL there loads the default route and
+ * silently drops its query params (the OAuth deep-link bug, again). Emit
+ * hash-form for the capacitor origin, path-form everywhere else.
+ */
+export function appRedirectUrl(base: string, pathAndQuery: string): string {
+  if (base.startsWith("capacitor://")) return `${base}/#${pathAndQuery}`;
+  return `${base}${pathAndQuery}`;
+}
 
 /**
  * Stripe-Signature format: t=timestamp,v1=signature[,v0=...]
