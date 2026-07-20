@@ -2,7 +2,7 @@
   "name": "atlas-performance-labs-app",
   "private": true,
   "version": "1.0.0",
-  "description": "Atlas Performance Labs — coaching, competition prep, and performance tracking for bodybuilding athletes and coaches.",
+  "description": "Atlas Performance Labs \u2014 coaching, competition prep, and performance tracking for bodybuilding athletes and coaches.",
   "type": "module",
   "engines": {
     "node": ">=18.0.0"
@@ -172,6 +172,7 @@
     "globals": "^15.14.0",
     "husky": "^9.1.7",
     "jimp": "^0.22.12",
+    "lint-staged": "^17.1.0",
     "madge": "^8.0.0",
     "postcss": "^8.5.3",
     "secretlint": "^12.1.0",
@@ -194,5 +195,8 @@
     "protobufjs": "^7.6.5",
     "fast-uri": "^3.1.3",
     "tmp": "^0.2.6"
+  },
+  "lint-staged": {
+    "*.{js,jsx}": "eslint --fix"
   }
 }

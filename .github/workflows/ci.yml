@@ -26,18 +26,20 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
         continue-on-error: false
 
-      - name: npm audit strict (fail on high)
+      # Informative only: this audits devDependencies too, where a new advisory
+      # published upstream fails CI with zero repo changes (the "CI is red and
+      # nobody touched anything" failures). Production deps stay blocking above.
+      - name: npm audit including dev deps (informative)
         run: npm audit --audit-level=high
-        continue-on-error: false
+        continue-on-error: true
 
       - name: Lint
         run: npm run lint
 
+      # test and test:unit are both plain `vitest run` — running once is the
+      # whole suite; the duplicate step doubled CI time for nothing.
       - name: Test
         run: npm run test
-
-      - name: Test unit (Vitest)
-        run: npm run test:unit
 
   osv-scan:
     name: OSV Scanner (lockfile)

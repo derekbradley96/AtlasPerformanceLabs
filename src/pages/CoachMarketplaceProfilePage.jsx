@@ -23,7 +23,6 @@ import {
   User,
   Trophy,
   MessageCircle,
-  X,
   Image as ImageIcon,
   Bookmark,
   MapPin,

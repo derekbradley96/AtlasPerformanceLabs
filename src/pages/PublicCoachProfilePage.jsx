@@ -23,7 +23,7 @@ import { trackCoachConsultationFromPersonal, trackPersonalViewedCoachProfile } f
 import { impactLight } from '@/lib/haptics';
 import LeadApplicationForm from '@/pages/coach/LeadApplicationForm';
 import CoachReviewsSection from '@/components/marketplace/CoachReviewsSection';
-import { User, Trophy, MessageCircle, Send, Image as ImageIcon, X, Check, ArrowRight, Sparkles } from 'lucide-react';
+import { User, Trophy, MessageCircle, Send, Image as ImageIcon, Check, ArrowRight, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import CardShell from '@/ui/Card';
