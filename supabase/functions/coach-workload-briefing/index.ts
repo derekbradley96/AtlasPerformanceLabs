@@ -21,10 +21,10 @@ Deno.serve(async (req) => {
     const callerId = await getAuthUserId(req);
     if (!callerId) return jsonError("Unauthorized", 401);
     const body = await req.json().catch(() => ({}));
-    const prompt = String(
-      body?.systemPrompt ||
-        "You are a coaching assistant. In one sentence, tell the coach what is most notable about their top-priority client's latest check-in. Be specific with numbers. Keep it under 30 words."
-    );
+    // Fixed server-side prompt: accepting body.systemPrompt let any caller
+    // override the model's instructions (prompt injection surface).
+    const prompt =
+      "You are a coaching assistant. In one sentence, tell the coach what is most notable about their top-priority client's latest check-in. Be specific with numbers. Keep it under 30 words.";
     const fallback = fallbackSummary(body || {});
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) {

@@ -7,6 +7,7 @@
 export const DEPLOYED_EDGE_FUNCTIONS = [
   'cancelProPlan',
   'checkin-get',
+  'checkin-reply-draft',
   'checkin-list',
   'checkin-update',
   'client-coach-checkout-session',

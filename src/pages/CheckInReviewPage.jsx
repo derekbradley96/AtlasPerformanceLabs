@@ -463,22 +463,16 @@ export default function CheckInReviewPage() {
         setAiDraftLoading(false);
         return;
       }
-      const currentWeightValue = Number(checkin?.weight_kg ?? checkin?.weight);
-      const draft = await draftCheckinResponse({
-        clientName: clientDisplayName,
-        weightKg: Number.isFinite(currentWeightValue) ? currentWeightValue : null,
-        weightChange: weightDeltaKg ?? 0,
-        adherencePct: adherencePct != null ? Number(adherencePct) : null,
-        energyLevel: checkin?.energy_level ?? null,
-        sleepHours: checkin?.sleep_hours ?? checkin?.sleep_score ?? null,
-        notes: checkin?.notes || checkin?.struggles || checkin?.wins || '',
-        clientGoal: clientRow?.client_goal || reviewContext?.emphasis || 'transformation',
-        weeksIntoProgram: Number(dashboardData?.current_week) || 1,
-      });
-      const draftText = draft || '';
+      // Server-side copilot: the edge function assembles this client's
+      // check-in history itself, so the page only sends the id.
+      const result = await draftCheckinResponse({ checkinId });
+      const draftText = result?.draft || '';
       setAiDraftText(draftText);
       if (draftText) {
         sessionStorage.setItem(cacheKey, draftText);
+      }
+      if (!draftText) {
+        setAiDraftError('Could not generate draft — write your own response below');
       }
     } catch {
       setAiDraftError('Could not generate draft — write your own response below');
@@ -487,7 +481,7 @@ export default function CheckInReviewPage() {
       draftInFlightRef.current.delete(checkinId);
       setAiDraftLoading(false);
     }
-  }, [checkin, clientRow, checkinId, weightDeltaKg, adherencePct, reviewContext?.emphasis, dashboardData?.current_week, clientDisplayName]);
+  }, [checkin, clientRow, checkinId]);
 
   useEffect(() => {
     if (!checkin || !clientRow || !showAiDraftCard || !draftReady) return;
