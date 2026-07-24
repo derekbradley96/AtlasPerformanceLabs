@@ -49,7 +49,9 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Atlas uses your camera to scan food barcodes and capture progress and posing photos.</string>
+	<string>Atlas uses your camera for video calls with your coach, scanning food barcodes, and capturing progress and posing photos.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Atlas uses your microphone for voice and video calls with your coach and for recording voice notes in chat.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Atlas reads photos to let you attach progress photos to your check-ins and pose submissions.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
@@ -63,7 +65,7 @@
 	<key>NSHealthShareUsageDescription</key>
 	<string>Atlas reads your steps, sleep, and weight from Apple Health to pre-fill your daily check-in and readiness data.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Atlas saves your workout data and body weight to Apple Health to keep your health records complete.</string>
+	<string>Atlas can save your body weight to Apple Health when you log it in a check-in.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>CFBundleURLTypes</key>

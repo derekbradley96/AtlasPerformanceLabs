@@ -33,7 +33,10 @@ Deno.serve(async (req) => {
     const { data: highRisk, error: fetchError } = await supabase
       .from(RETENTION_VIEW)
       .select("coach_id, client_id, client_name, risk_score, risk_band, reasons")
-      .eq("risk_band", "high");
+      // The view emits healthy/watch/at_risk/churn_risk — 'high' has not been a
+      // band since the rename, so this filter silently matched nothing and no
+      // retention push has fired since.
+      .in("risk_band", ["at_risk", "churn_risk"]);
 
     if (fetchError) {
       console.error("retention-alerts: fetch high risk", fetchError);

@@ -92,7 +92,9 @@ Deno.serve(async (req) => {
     const { data: riskRows } = await supabase
       .from("v_client_retention_risk")
       .select("coach_id, client_name")
-      .eq("risk_band", "high");
+      // Same band-rename bug as retention-alerts: 'high' never matches, so the
+      // digest's at-risk section has been silently empty.
+      .in("risk_band", ["at_risk", "churn_risk"]);
     for (const row of riskRows ?? []) {
       const c = (row as { coach_id?: string }).coach_id;
       if (!c) continue;

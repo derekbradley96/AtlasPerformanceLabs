@@ -7,23 +7,39 @@ import {
 } from '@/lib/callRequestState';
 import { trackRecoverableError } from '@/services/frictionTracker';
 
-const ICE_SERVERS = [
-  {
-    urls: [
-      'stun:stun.l.google.com:19302',
-      'stun:stun1.l.google.com:19302',
-    ],
-  },
-  {
-    urls: [
-      'turn:openrelay.metered.ca:80',
-      'turn:openrelay.metered.ca:443',
-      'turns:openrelay.metered.ca:443',
-    ],
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-];
+/**
+ * TURN comes from env: the previous hardcoded openrelay.metered.ca relay was
+ * the free Open Relay project, which has been discontinued — with it in the
+ * list, cross-network calls (cellular <-> wifi, symmetric NAT) silently fail
+ * after permissions are granted. Set VITE_TURN_URLS (comma-separated),
+ * VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL from a real provider
+ * (metered.ca paid/free tier, Twilio NTS, Cloudflare Calls, or self-hosted
+ * coturn). Without them, STUN-only still works for same-network and
+ * non-symmetric-NAT calls.
+ */
+function buildIceServers() {
+  const servers = [
+    {
+      urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302',
+      ],
+    },
+  ];
+  const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
+  const turnUrls = String(env?.VITE_TURN_URLS || '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean);
+  const username = String(env?.VITE_TURN_USERNAME || '').trim();
+  const credential = String(env?.VITE_TURN_CREDENTIAL || '').trim();
+  if (turnUrls.length && username && credential) {
+    servers.push({ urls: turnUrls, username, credential });
+  }
+  return servers;
+}
+
+const ICE_SERVERS = buildIceServers();
 export const ACTIVE_SIGNAL_STATUSES = CALL_ACTIVE_STATUSES;
 
 export function canCalleeUseOfferRow(row) {
