@@ -19,7 +19,6 @@ import { trackFirstCheckinOpened } from '@/services/firstSessionTracker';
 import MeasurementUnitSegments, { WEIGHT_SEGMENT_OPTIONS } from '@/components/measurements/MeasurementUnitSegments';
 import { resolveViewerBodyweightUnit, normalizeWeightUnit, parseWeightInputsToKg, weightUnitShortLabel } from '@/lib/bodyMeasurementUnits';
 import { atlasMigrationDataAttributes, deriveClientCheckInLegacyRouteState } from '@/lib/atlasMigrationPhases';
-import { writeWeightToHealth } from '@/lib/appleHealth';
 
 const WEEK_EMOJIS = [
   { value: '🔥', label: 'Crushed it' },
@@ -389,9 +388,6 @@ export default function ClientCheckIn() {
         if (uploadedPhotoUrls.length) {
           trackProgressPhotoUploaded(clientProfile.id, coachId, { checkin_id: savedCheckinId, photo_count: uploadedPhotoUrls.length }).catch(() => {});
         }
-      }
-      if (payload?.weight_kg != null) {
-        void writeWeightToHealth(payload.weight_kg);
       }
       releaseAllPreviewUrls();
       setPendingPhotos([]);
