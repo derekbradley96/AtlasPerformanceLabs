@@ -132,6 +132,7 @@ export default function CoachRoutes({
   ClientIntake,
   CoachAtlasSubscriptionGate,
   TrainerPlan,
+  ClientsAtRisk,
   Team,
   PoseLibrary,
   PoseDetail,
@@ -172,6 +173,7 @@ export default function CoachRoutes({
       <Route path="closeout" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only."><Closeout /></RequireRole>} />
       <Route path="briefing" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Briefing is for coaches only."><Briefing /></RequireRole>} />
       <Route path="clients" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only."><Clients /></RequireRole>} />
+      <Route path="clients/at-risk" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only."><ClientsAtRisk /></RequireRole>} />
       <Route path="clients/:id" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only."><Suspense fallback={<LazyRouteFallback />}><ClientDetail /></Suspense></RequireRole>} />
       <Route path="clients/:clientId/workouts/:sessionId" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="This area is for coaches only."><WorkoutReviewPage /></RequireRole>} />
       <Route path="clients/:id/review-center" element={<RequireRole allow={[Roles.COACH, Roles.ADMIN]} accessDeniedMessage="Review Center is for coaches only."><ReviewCenter /></RequireRole>} />

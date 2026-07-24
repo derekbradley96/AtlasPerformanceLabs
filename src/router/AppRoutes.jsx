@@ -144,6 +144,7 @@ import IntakeTemplateBuilder from '@/pages/intake/IntakeTemplateBuilder';
 import OnboardingByToken from '@/pages/intake/OnboardingByToken';
 import ClientIntake from '@/pages/intake/ClientIntake';
 import TrainerPlan from '@/pages/plan/TrainerPlan';
+import ClientsAtRisk from '@/pages/ClientsAtRisk';
 import PublicCoachProfilePage from '@/pages/PublicCoachProfilePage';
 import CoachResultsStoryBuilderPage from '@/pages/CoachResultsStoryBuilderPage';
 import PublicResultStoryPage from '@/pages/PublicResultStoryPage';
@@ -655,6 +656,7 @@ export default function AppRoutes({ isNative }) {
             ClientIntake,
             CoachAtlasSubscriptionGate,
             TrainerPlan,
+            ClientsAtRisk,
             Team,
             PoseLibrary,
             PoseDetail,

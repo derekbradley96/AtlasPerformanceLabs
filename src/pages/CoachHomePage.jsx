@@ -1532,9 +1532,21 @@ export default function CoachHomePage() {
             {/* SECTION 3 — RosterHealthSection */}
             <section style={{ marginBottom: sectionGap }}>
               <Card style={{ ...standardCard, padding: spacing[12] }}>
-                <p className="text-xs font-semibold uppercase tracking-wide m-0" style={{ color: riskDisplayClients.length === 0 ? colors.success : colors.muted }}>
-                  {riskHeading}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide m-0" style={{ color: riskDisplayClients.length === 0 ? colors.success : colors.muted }}>
+                    {riskHeading}
+                  </p>
+                  {riskDisplayClients.length > 0 ? (
+                    <button
+                      type="button"
+                      className="text-xs font-medium active:opacity-70"
+                      style={{ color: colors.primary, background: 'transparent', border: 'none', padding: '4px 0' }}
+                      onClick={() => { hapticNavigation(); navigate('/clients/at-risk'); }}
+                    >
+                      View all
+                    </button>
+                  ) : null}
+                </div>
                 {coachFocus === 'integrated' ? (
                   <>
                     {!isDesktopWeb ? (

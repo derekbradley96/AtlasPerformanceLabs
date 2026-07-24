@@ -30,6 +30,7 @@ const ROUTE_TITLES = {
   '/beta-health-dashboard': 'Beta health',
   '/home': 'Home',
   '/clients': 'Clients',
+  '/clients/at-risk': 'At-risk clients',
   '/messages': 'Messages',
   '/more': 'More',
   '/profile': 'Profile',
