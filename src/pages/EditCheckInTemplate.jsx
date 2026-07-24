@@ -254,6 +254,7 @@ export default function EditCheckInTemplate() {
             {[
               { value: 'transformation', label: '🏋️ Transformation' },
               { value: 'competition', label: '🏆 Competition prep' },
+              { value: 'glp1', label: '💊 GLP-1 support' },
               { value: 'general', label: '💪 General fitness' },
               { value: 'integrated', label: '⚡ Integrated' },
             ].map((opt) => (
@@ -269,6 +270,30 @@ export default function EditCheckInTemplate() {
                     include_symmetry: opt.value === 'competition',
                     include_peak_week_metrics: opt.value === 'competition',
                     include_cardio: opt.value === 'competition' ? true : formData.include_cardio,
+                    // GLP-1 preset: strength- and lean-mass-first progress, with
+                    // appetite/digestion visibility. Coaching-side only — no
+                    // medication fields anywhere. Toggles are additive (never
+                    // switch a section off the coach turned on) and the seeded
+                    // questions only apply while the template has none yet.
+                    ...(opt.value === 'glp1'
+                      ? {
+                          include_measurements: true,
+                          include_waist: true,
+                          include_hunger: true,
+                          include_digestion: true,
+                          include_water: true,
+                          include_strength_feeling: true,
+                          include_recovery: true,
+                          include_stress: true,
+                          questions: formData.questions.length ? formData.questions : [
+                            { id: `glp1-protein-${Date.now()}`, text: 'Did you hit your protein target most days this week?', type: 'flag', required: true },
+                            { id: `glp1-nausea-${Date.now() + 1}`, text: 'Any nausea or stomach discomfort this week?', type: 'flag', required: true },
+                            { id: `glp1-fatigue-${Date.now() + 2}`, text: 'Any unusual fatigue or dizziness?', type: 'flag', required: true },
+                            { id: `glp1-appetite-${Date.now() + 3}`, text: 'Appetite this week (1 = none, 10 = normal)', type: 'scale', required: false },
+                            { id: `glp1-strength-${Date.now() + 4}`, text: 'How did your key lifts feel compared to last week?', type: 'text', required: false },
+                          ],
+                        }
+                      : {}),
                   })
                 }
                 style={{
@@ -432,6 +457,7 @@ export default function EditCheckInTemplate() {
                       <SelectItem value="text">Text</SelectItem>
                       <SelectItem value="number">Number</SelectItem>
                       <SelectItem value="scale">Scale (1-10)</SelectItem>
+                      <SelectItem value="flag">Yes / No</SelectItem>
                     </SelectContent>
                   </Select>
 

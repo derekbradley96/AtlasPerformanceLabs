@@ -435,6 +435,22 @@ export default function ClientCheckIn() {
           ? parseWeightInputsToKg({ weightUnit: wU, lbText: formData.weight_kg })
           : parseWeightInputsToKg({ weightUnit: wU, kgText: formData.weight_kg });
 
+    // Required custom questions were never enforced — 'required' in the
+    // template builder was decorative until now.
+    const missingRequired = (template?.questions || []).filter(
+      (q) => q.required && !String(formData.answers?.[q.id] || '').trim()
+    );
+    if (missingRequired.length > 0) {
+      toast.error(
+        missingRequired.length === 1
+          ? `Please answer: “${missingRequired[0].text}”`
+          : `Please answer ${missingRequired.length} required coach questions`
+      );
+      // currentStep is 1-based (currentStepKey = steps[currentStep - 1]).
+      setCurrentStep(steps.indexOf('questions') + 1);
+      return;
+    }
+
     const answers = (template?.questions || []).map((q) => ({
       question_id: q.id,
       question_text: q.text,
@@ -780,7 +796,10 @@ export default function ClientCheckIn() {
             <p className="text-sm text-slate-400">{stepMeta.questions.description}</p>
             {(template.questions || []).map((q) => (
               <div key={q.id}>
-                <label className="block text-sm font-medium text-white mb-2">{q.text}</label>
+                <label className="block text-sm font-medium text-white mb-2">
+                  {q.text}
+                  {q.required ? <span className="text-red-400 ml-1" aria-hidden>*</span> : null}
+                </label>
                 {q.type === 'text' ? (
                   <Textarea
                     value={formData.answers?.[q.id] || ''}
@@ -788,6 +807,41 @@ export default function ClientCheckIn() {
                     rows={3}
                     className="bg-slate-900/50 border-slate-700"
                   />
+                ) : q.type === 'flag' ? (
+                  <div className="flex gap-2">
+                    {['Yes', 'No'].map((opt) => {
+                      const selected = formData.answers?.[q.id] === opt;
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, answers: { ...formData.answers, [q.id]: opt } })}
+                          className={`flex-1 rounded-lg py-2.5 text-sm font-medium border ${selected ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-700 bg-slate-900/50 text-slate-300'}`}
+                          style={{ minHeight: 44 }}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : q.type === 'scale' ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {Array.from({ length: 10 }, (_, i) => String(i + 1)).map((n) => {
+                      const selected = formData.answers?.[q.id] === n;
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, answers: { ...formData.answers, [q.id]: n } })}
+                          className={`rounded-lg text-sm font-medium border ${selected ? 'border-blue-500 bg-blue-500/20 text-white' : 'border-slate-700 bg-slate-900/50 text-slate-300'}`}
+                          style={{ width: 44, height: 44 }}
+                          aria-pressed={selected}
+                        >
+                          {n}
+                        </button>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <Input
                     type="text"
