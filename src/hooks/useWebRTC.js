@@ -8,38 +8,42 @@ import {
 import { trackRecoverableError } from '@/services/frictionTracker';
 
 /**
- * TURN comes from env: the previous hardcoded openrelay.metered.ca relay was
- * the free Open Relay project, which has been discontinued — with it in the
- * list, cross-network calls (cellular <-> wifi, symmetric NAT) silently fail
- * after permissions are granted. Set VITE_TURN_URLS (comma-separated),
- * VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL from a real provider
- * (metered.ca paid/free tier, Twilio NTS, Cloudflare Calls, or self-hosted
- * coturn). Without them, STUN-only still works for same-network and
- * non-symmetric-NAT calls.
+ * ICE servers come from the turn-credentials edge function so TURN secrets
+ * never ship in the client bundle (VITE_ vars are inlined into public JS —
+ * anyone could lift long-lived relay credentials and run traffic on Atlas'
+ * bill). The previous hardcoded openrelay.metered.ca relay was the
+ * discontinued free Open Relay project. STUN-only fallback keeps
+ * same-network calls working when the function is unreachable or TURN is
+ * not configured yet.
  */
-function buildIceServers() {
-  const servers = [
-    {
-      urls: [
-        'stun:stun.l.google.com:19302',
-        'stun:stun1.l.google.com:19302',
-      ],
-    },
-  ];
-  const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
-  const turnUrls = String(env?.VITE_TURN_URLS || '')
-    .split(',')
-    .map((u) => u.trim())
-    .filter(Boolean);
-  const username = String(env?.VITE_TURN_USERNAME || '').trim();
-  const credential = String(env?.VITE_TURN_CREDENTIAL || '').trim();
-  if (turnUrls.length && username && credential) {
-    servers.push({ urls: turnUrls, username, credential });
-  }
-  return servers;
-}
+const STUN_ONLY_ICE_SERVERS = [
+  {
+    urls: [
+      'stun:stun.l.google.com:19302',
+      'stun:stun1.l.google.com:19302',
+    ],
+  },
+];
 
-const ICE_SERVERS = buildIceServers();
+const ICE_CACHE_TTL_MS = 30 * 60 * 1000;
+let iceCache = { servers: null, at: 0 };
+
+async function resolveIceServers() {
+  if (iceCache.servers && Date.now() - iceCache.at < ICE_CACHE_TTL_MS) {
+    return iceCache.servers;
+  }
+  try {
+    const { invokeSupabaseFunction } = await import('@/lib/supabaseApi');
+    const { data, error } = await invokeSupabaseFunction('turn-credentials', {});
+    const servers = !error && Array.isArray(data?.iceServers) && data.iceServers.length
+      ? data.iceServers
+      : STUN_ONLY_ICE_SERVERS;
+    iceCache = { servers, at: Date.now() };
+    return servers;
+  } catch {
+    return STUN_ONLY_ICE_SERVERS;
+  }
+}
 export const ACTIVE_SIGNAL_STATUSES = CALL_ACTIVE_STATUSES;
 
 export function canCalleeUseOfferRow(row) {
@@ -213,7 +217,9 @@ export function useWebRTC({
         localStreamRef.current = stream;
         setLocalStream(stream);
 
-        const conn = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        const iceServers = await resolveIceServers();
+        if (cancelled) return;
+        const conn = new RTCPeerConnection({ iceServers });
         pc.current = conn;
         let markedInProgress = false;
 

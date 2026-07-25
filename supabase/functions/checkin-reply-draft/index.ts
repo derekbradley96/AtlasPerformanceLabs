@@ -14,6 +14,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { getAuthUserId, jsonError } from "../_shared/auth.ts";
+import { parseCheckinTemplateAnswers } from "../_shared/checkinTemplateAnswers.ts";
+import { checkEdgeRateLimit } from "../_shared/publicSecurity.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = Deno.env.get("ATLAS_COPILOT_MODEL") || "claude-sonnet-5";
@@ -38,7 +40,7 @@ function num(value: unknown): number | null {
 
 function compactCheckin(row: Record<string, unknown>) {
   return {
-    date: row.checkin_date ?? row.created_at ?? null,
+    date: row.week_start ?? row.created_at ?? null,
     weight_kg: num(row.weight_kg ?? row.weight),
     nutrition_adherence_pct: num(row.nutrition_adherence),
     training_completion_pct: num(row.training_completion),
@@ -51,12 +53,17 @@ function compactCheckin(row: Record<string, unknown>) {
   };
 }
 
-function compactAnswers(answers: unknown): Array<{ q: string; a: string }> {
-  if (!Array.isArray(answers)) return [];
-  return answers.slice(0, 10).map((entry) => {
-    const e = (entry ?? {}) as Record<string, unknown>;
-    return { q: clip(e.text ?? e.question ?? e.id, 140), a: clip(e.answer ?? e.value, 240) };
-  }).filter((x) => x.q || x.a);
+/**
+ * Custom Q&A is stored in checkins.questions (JSON text) with rows shaped
+ * {question_id, question_text, answer} — the `answers` JSONB column is never
+ * populated by any write path (the repo upsert moves answers into questions).
+ * Parse via the same shared helper checkin-get/checkin-list use.
+ */
+function compactAnswers(questions: unknown): Array<{ q: string; a: string }> {
+  return parseCheckinTemplateAnswers(questions)
+    .slice(0, 10)
+    .map((row) => ({ q: clip(row.question_text ?? row.question_id, 140), a: clip(row.answer, 240) }))
+    .filter((x) => x.q && x.a);
 }
 
 function wordLimit(text: string, maxWords: number): string {
@@ -85,6 +92,15 @@ Deno.serve(async (req) => {
     const callerId = await getAuthUserId(req);
     if (!callerId) return jsonError("Unauthorized", 401);
 
+    const rate = await checkEdgeRateLimit({
+      req,
+      scope: "checkin-reply-draft",
+      keyPart: callerId,
+      maxHits: 20,
+      windowSeconds: 60,
+    });
+    if (!rate.allowed) return jsonError("Too many draft requests — try again shortly", 429);
+
     const body = await req.json().catch(() => ({}));
     const checkinId = String(body?.checkin_id || "").trim();
     if (!checkinId) return jsonError("checkin_id required", 400);
@@ -108,13 +124,16 @@ Deno.serve(async (req) => {
       return jsonError("Not your client", 403);
     }
 
-    const { data: history } = await supabase
+    const { data: history, error: hErr } = await supabase
       .from("checkins")
-      .select("checkin_date, created_at, weight_kg, weight, nutrition_adherence, training_completion, energy_level, sleep_hours, sleep_score, steps_avg, notes, wins, struggles")
+      .select("week_start, created_at, weight_kg, weight, nutrition_adherence, training_completion, energy_level, sleep_hours, sleep_score, steps_avg, notes, wins, struggles")
       .eq("client_id", client.id)
       .neq("id", checkinId)
-      .order("checkin_date", { ascending: false })
+      .order("week_start", { ascending: false })
       .limit(HISTORY_LIMIT);
+    // History is the whole point of this function — never fail the draft over
+    // it, but never lose the signal that grounding silently degraded either.
+    if (hErr) console.error("checkin-reply-draft history query failed", hErr);
 
     const weeksIn = client.created_at
       ? Math.max(1, Math.round((Date.now() - new Date(client.created_at as string).getTime()) / (7 * 86400000)))
@@ -128,7 +147,7 @@ Deno.serve(async (req) => {
       },
       current_checkin: {
         ...compactCheckin(checkin as Record<string, unknown>),
-        custom_answers: compactAnswers((checkin as Record<string, unknown>).answers),
+        custom_answers: compactAnswers((checkin as Record<string, unknown>).questions),
       },
       previous_checkins: (history ?? []).map((row) => compactCheckin(row as Record<string, unknown>)),
     };
