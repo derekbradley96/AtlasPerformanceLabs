@@ -33,11 +33,7 @@ import {
   getPersonalProteinProgressPercent,
   personalNutritionTargetsQueryKey,
 } from '@/lib/personalNutritionProfile';
-import {
-  PERSONAL_POST_ONBOARDING_SESSION_KEY,
-  PERSONAL_ONBOARDING_TIER_SESSION_KEY,
-} from '@/lib/postOnboardingRoutes';
-import { fetchTodayReadinessCheckin } from '@/lib/readinessCheckinApi';
+import { fetchTodayReadinessCheckin, fetchHasAnyReadinessCheckin } from '@/lib/readinessCheckinApi';
 import { formatReadinessAsOutOfTen } from '@/lib/progressMetricsValidation';
 import { hasSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
@@ -89,15 +85,22 @@ export default function GeneralDashboard({ user }) {
   const personalTier = resolvePersonalPlanTier(profile, user);
   const isEnhanced = personalTier === 'enhanced' || personalTier === 'free';
 
-  const [showPersonalPostOnboarding, setShowPersonalPostOnboarding] = useState(false);
-
-  useEffect(() => {
+  // Getting-started checklist: driven by real completion state, not a
+  // dismissed-forever session flag — device feedback: after building a plan
+  // the card still said "Create your first plan" with no sense of progress.
+  const [gettingStartedHidden, setGettingStartedHidden] = useState(() => {
     try {
-      setShowPersonalPostOnboarding(sessionStorage.getItem(PERSONAL_POST_ONBOARDING_SESSION_KEY) === '1');
+      return localStorage.getItem('atlas_personal_getting_started_hidden_v1') === '1';
     } catch (_) {
-      setShowPersonalPostOnboarding(false);
+      return false;
     }
-  }, []);
+  });
+  const hideGettingStarted = () => {
+    try {
+      localStorage.setItem('atlas_personal_getting_started_hidden_v1', '1');
+    } catch (_) { /* ignore */ }
+    setGettingStartedHidden(true);
+  };
 
   // First-5-min funnel: personal home was the one dashboard not firing this
   // (coach + client did), leaving a hole in signup→activation analytics.
@@ -106,15 +109,6 @@ export default function GeneralDashboard({ user }) {
     trackFirstDashboardView(user.id, 'personal');
   }, [user?.id]);
 
-  const dismissPersonalPostOnboarding = () => {
-    try {
-      sessionStorage.removeItem(PERSONAL_POST_ONBOARDING_SESSION_KEY);
-      sessionStorage.removeItem(PERSONAL_ONBOARDING_TIER_SESSION_KEY);
-    } catch (_) {
-      /* ignore */
-    }
-    setShowPersonalPostOnboarding(false);
-  };
 
   const { data: recentWorkouts = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['personal-home-recent-workouts', user?.id],
@@ -136,7 +130,7 @@ export default function GeneralDashboard({ user }) {
     enabled: !!user?.id,
   });
 
-  const { data: assignedToday } = useQuery({
+  const { data: assignedToday, isFetched: assignedFetched } = useQuery({
     queryKey: ['personal-home-assigned-today', user?.id],
     queryFn: () => getAssignedWorkoutForToday({ role: 'personal', profileId: user?.id }),
     enabled: !!user?.id,
@@ -153,7 +147,14 @@ export default function GeneralDashboard({ user }) {
     queryFn: () => fetchTodayReadinessCheckin({ profileId: user?.id }),
     enabled: !!user?.id && hasSupabase,
   });
-  const { data: nutritionTarget } = useQuery({
+
+  const { data: hasEverCheckedIn = false, isFetched: checkinEverFetched } = useQuery({
+    queryKey: ['personal-home-has-any-checkin', user?.id],
+    queryFn: () => fetchHasAnyReadinessCheckin({ profileId: user?.id }),
+    enabled: !!user?.id && hasSupabase,
+    staleTime: 60_000,
+  });
+  const { data: nutritionTarget, isFetched: nutritionFetched } = useQuery({
     queryKey: personalNutritionTargetsQueryKey(user?.id),
     queryFn: () => fetchMergedPersonalNutritionTargets(user?.id),
     enabled: !!user?.id,
@@ -486,72 +487,89 @@ export default function GeneralDashboard({ user }) {
           <Settings size={20} />
         </button>
       </div>
-      {showPersonalPostOnboarding ? (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: rhythm.section }}>
-          <Card
-            style={{
-              padding: welcomeHeroPad,
-              paddingBottom: welcomeHeroPad + cardRhythm.hero.bottomBreathing,
-              border: `1px solid ${colors.primary}`,
-              background: colors.primarySubtle,
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 11, color: colors.primary, letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
-              Welcome
-            </p>
-            {/* Personal builds everything manually — no starter plan, no tier split.
-                CTAs point at empty surfaces to fill in. */}
-            <h2 style={{ margin: 0, marginTop: welcomeEyebrowToTitle, fontSize: 20, fontWeight: 700, color: colors.text }}>
-              You&apos;re all set
-            </h2>
-            <p style={{ margin: 0, marginTop: welcomeTitleToBody, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
-              Build your plan, set targets, then log a check-in when you&apos;re ready.
-            </p>
-            <div
+      {(() => {
+        // Show until all three are genuinely done (or manually hidden); wait
+        // for the queries so a fully-set-up user never sees a flash of it.
+        const stepsReady = assignedFetched && nutritionFetched && checkinEverFetched;
+        const setupSteps = [
+          { key: 'plan', label: 'Create your first plan', icon: Dumbbell, done: hasProgram, to: createPageUrl('MyProgram') },
+          { key: 'nutrition', label: 'Set nutrition targets', icon: UtensilsCrossed, done: !needsNutrition, to: '/nutrition' },
+          { key: 'checkin', label: 'Log your first check-in', icon: ClipboardList, done: hasEverCheckedIn || readinessLogged, to: '/readiness-checkin' },
+        ];
+        const doneCount = setupSteps.filter((s2) => s2.done).length;
+        const allDone = doneCount === setupSteps.length;
+        if (!stepsReady || allDone || gettingStartedHidden) return null;
+        const nextKey = setupSteps.find((s2) => !s2.done)?.key;
+        return (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: rhythm.section }}>
+            <Card
               style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: welcomeCtaStackGap,
-                marginTop: welcomeBodyToActions,
+                padding: welcomeHeroPad,
+                paddingBottom: welcomeHeroPad + cardRhythm.hero.bottomBreathing,
+                border: `1px solid ${colors.primary}`,
+                background: colors.primarySubtle,
               }}
             >
+              <p style={{ margin: 0, fontSize: 11, color: colors.primary, letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 700 }}>
+                Getting started · {doneCount} of {setupSteps.length} done
+              </p>
+              <h2 style={{ margin: 0, marginTop: welcomeEyebrowToTitle, fontSize: 20, fontWeight: 700, color: colors.text }}>
+                {doneCount === 0 ? "Let's set you up" : 'Nice — keep going'}
+              </h2>
+              <p style={{ margin: 0, marginTop: welcomeTitleToBody, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>
+                {doneCount === 0
+                  ? 'Build your plan, set targets, then log a check-in when you\u2019re ready.'
+                  : 'Tick off the rest whenever suits — everything stays editable.'}
+              </p>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: welcomeCtaStackGap,
+                  marginTop: welcomeBodyToActions,
+                }}
+              >
+                {setupSteps.map((step) => {
+                  const Icon = step.icon;
+                  const isNext = step.key === nextKey;
+                  if (step.done) {
+                    return (
+                      <button
+                        key={step.key}
+                        type="button"
+                        onClick={() => navigate(step.to)}
+                        style={{ ...welcomeSecondaryBtn, opacity: 0.65 }}
+                        aria-label={`${step.label} — done`}
+                      >
+                        <CheckCircle2 size={18} className="shrink-0" style={{ color: colors.success }} />
+                        <span style={{ textDecoration: 'line-through' }}>{step.label}</span>
+                      </button>
+                    );
+                  }
+                  return (
+                    <button
+                      key={step.key}
+                      type="button"
+                      onClick={() => navigate(step.to)}
+                      style={isNext ? welcomePrimaryBtn : welcomeSecondaryBtn}
+                    >
+                      <Icon size={isNext ? 20 : 18} className="shrink-0" />
+                      {step.label}
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  dismissPersonalPostOnboarding();
-                  navigate(createPageUrl('MyProgram'));
-                }}
-                style={welcomePrimaryBtn}
+                onClick={hideGettingStarted}
+                style={{ marginTop: 10, background: 'transparent', border: 'none', color: colors.muted, fontSize: 12, cursor: 'pointer', padding: '4px 0' }}
               >
-                <Dumbbell size={20} className="shrink-0" />
-                Create your first plan
+                Hide this
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  dismissPersonalPostOnboarding();
-                  navigate('/nutrition');
-                }}
-                style={welcomeSecondaryBtn}
-              >
-                <UtensilsCrossed size={18} className="shrink-0" />
-                Set nutrition targets
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  dismissPersonalPostOnboarding();
-                  navigate('/readiness-checkin');
-                }}
-                style={welcomeSecondaryBtn}
-              >
-                <ClipboardList size={18} className="shrink-0" />
-                Log your first check-in
-              </button>
-            </div>
-          </Card>
-        </motion.div>
-      ) : null}
+            </Card>
+          </motion.div>
+        );
+      })()}
 
       {isWideWeb ? (
         <>

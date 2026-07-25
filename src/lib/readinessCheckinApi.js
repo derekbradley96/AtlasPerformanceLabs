@@ -111,6 +111,30 @@ export async function fetchTodayReadinessCheckin(opts = {}) {
 }
 
 /**
+ * True when this user has ever logged a readiness check-in. Powers the
+ * personal home getting-started checklist. Errors read as false — the
+ * checklist should nudge, never block.
+ * @param {{ profileId?: string | null }} opts
+ */
+export async function fetchHasAnyReadinessCheckin(opts = {}) {
+  const { profileId } = opts;
+  if (!hasSupabase || !profileId) return false;
+  const supabase = getSupabase();
+  try {
+    const { data, error } = await supabase
+      .from('readiness_checkins')
+      .select('id')
+      .eq('profile_id', profileId)
+      .limit(1)
+      .maybeSingle();
+    if (error) return false;
+    return !!data?.id;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Latest personal_checkins row for local day, with raw 1-5 inputs.
  * @param {{ profileId?: string | null }} opts
  * @returns {Promise<Record<string, unknown> | null>}

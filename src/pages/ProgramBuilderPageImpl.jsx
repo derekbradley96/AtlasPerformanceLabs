@@ -10,6 +10,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { getPostOnboardingPath } from '@/lib/postOnboardingRoutes';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useProgramBuilderData } from '@/hooks/useProgramBuilderData';
@@ -835,6 +836,13 @@ export default function ProgramBuilderPage() {
         void trackUsageFromCurrentWeek();
         queryClient.invalidateQueries({ queryKey: ['personal-my-program-supabase'] });
         queryClient.invalidateQueries({ queryKey: ['personal-home-assigned-today'] });
+        // Personal: "Save plan" reads as "I'm done" — land back on Home instead
+        // of stranding the user in the builder (device feedback). Coaches keep
+        // iterating in place, so only personal navigates. Skipped when the save
+        // was triggered indirectly (e.g. week-count changes passing saveOpts).
+        if (isPersonalRole && !fromOpts && !ensureErr) {
+          navigate(getPostOnboardingPath('personal'), { replace: true });
+        }
       } else if (isPersonalRole) {
         const { data: inserted, error } = await supabase
           .from('program_blocks')
