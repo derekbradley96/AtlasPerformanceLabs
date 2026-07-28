@@ -81,7 +81,6 @@ function SectionTitle({ children }) {
 }
 
 function TodayWorkoutHeroSection({
-  title,
   subtitle,
   exercises = [],
   hasWorkoutToday,
@@ -100,7 +99,6 @@ function TodayWorkoutHeroSection({
 }) {
   return (
     <Card style={baseCardStyle(accent)}>
-      <SectionTitle>{title}</SectionTitle>
       <TodayWorkoutHeroCard
         workoutName={subtitle}
         exercises={exercises}
@@ -148,7 +146,7 @@ function ClientTransformToday({ data, isDesktopWeb }) {
     <>
       {data.habits.length > 0 ? (
         <Card style={baseCardStyle()}>
-          <SectionTitle>Habit streak row</SectionTitle>
+          <SectionTitle>Habits</SectionTitle>
           <div style={{ display: 'flex', gap: spacing[8], overflowX: 'auto' }}>
             {data.habits.map((h) => (
               <button
@@ -183,7 +181,7 @@ function ClientTransformToday({ data, isDesktopWeb }) {
         </Card>
       ) : null}
       <Card style={baseCardStyle()}>
-        <SectionTitle>Coach connection</SectionTitle>
+        <SectionTitle>Your coach</SectionTitle>
         <div style={{ display: 'flex', alignItems: 'center', gap: spacing[10] }}>
           <span style={{ width: 36, height: 36, borderRadius: 999, background: colors.surface2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>
             {formatNameInitials(data.coachName)}
@@ -203,7 +201,7 @@ function ClientTransformToday({ data, isDesktopWeb }) {
         </Button>
       </Card>
       <Card style={baseCardStyle()}>
-        <SectionTitle>Weight log tile</SectionTitle>
+        <SectionTitle>Weight</SectionTitle>
         <button
           type="button"
           onClick={data.openWeightSheet}
@@ -232,7 +230,6 @@ function ClientTransformToday({ data, isDesktopWeb }) {
     <div style={{ display: 'grid', gap: spacing[12] }}>
       {firstCheckInCard}
       <TodayWorkoutHeroSection
-        title="Today's workout hero"
         subtitle={data.workoutName}
         exercises={data.exercises}
         hasWorkoutToday={data.hasWorkoutToday}
@@ -251,7 +248,7 @@ function ClientTransformToday({ data, isDesktopWeb }) {
         </Card>
       ) : null}
       <Card style={baseCardStyle()}>
-        <SectionTitle>Nutrition ring</SectionTitle>
+        <SectionTitle>Nutrition</SectionTitle>
         {data.hasNutritionTargets ? (
           <>
             <p style={{ margin: 0, fontSize: 13, color: colors.text }}>{data.nutritionLine}</p>
@@ -336,7 +333,6 @@ function ClientCompToday({ data }) {
         </div>
       ) : null}
       <TodayWorkoutHeroSection
-        title="Today's workout hero"
         subtitle={data.compWorkoutLabel}
         exercises={data.exercises}
         hasWorkoutToday={data.hasWorkoutToday}
@@ -415,7 +411,7 @@ function ClientCompToday({ data }) {
         </Card>
       ) : null}
       <Card style={baseCardStyle()}>
-        <SectionTitle>Pose check submit card</SectionTitle>
+        <SectionTitle>Pose check</SectionTitle>
         <p style={{ margin: 0, fontSize: 13, color: colors.text }}>
           {data.poseCheckDue ? `Submit this week's ${data.poseName}` : 'No pose check due — open posing log.'}
         </p>
@@ -447,7 +443,7 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
   const rightColumn = (
     <>
       <Card style={baseCardStyle()}>
-        <SectionTitle>Macro ring</SectionTitle>
+        <SectionTitle>Macros</SectionTitle>
         {data.hasNutritionTargets ? (
           <>
             <p style={{ margin: 0, fontSize: 13, color: colors.text }}>{data.nutritionLine}</p>
@@ -470,7 +466,7 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
         )}
       </Card>
       <Card style={baseCardStyle()}>
-        <SectionTitle>Weight log tile</SectionTitle>
+        <SectionTitle>Weight</SectionTitle>
         <button
           type="button"
           onClick={data.openWeightSheet}
@@ -494,7 +490,7 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
       </Card>
       {data.plateauOrMotivation ? (
         <Card style={baseCardStyle(data.plateauOrMotivation.type === 'plateau' ? colors.warning : colors.primary)}>
-          <SectionTitle>{data.plateauOrMotivation.type === 'plateau' ? 'Plateau card' : 'Motivation card'}</SectionTitle>
+          <SectionTitle>{data.plateauOrMotivation.type === 'plateau' ? 'Plateau detected' : 'Motivation'}</SectionTitle>
           <p style={{ margin: 0, fontSize: 13, color: colors.text }}>{data.plateauOrMotivation.message}</p>
         </Card>
       ) : null}
@@ -520,7 +516,6 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
         </Card>
       ) : null}
       <TodayWorkoutHeroSection
-        title="Today's session hero"
         subtitle={data.workoutName}
         exercises={data.exercises}
         hasWorkoutToday={data.hasWorkoutToday}
@@ -635,7 +630,7 @@ function PersonalCompToday({ data }) {
   return (
     <div style={{ display: 'grid', gap: spacing[12] }}>
       <Card style={baseCardStyle(colors.warning)}>
-        <SectionTitle>Prep phase hero</SectionTitle>
+        <SectionTitle>Prep phase</SectionTitle>
         <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: colors.text }}>
           Week {data.prepWeek} of {data.prepTotalWeeks} — {data.prepPhase}
         </p>
@@ -648,7 +643,6 @@ function PersonalCompToday({ data }) {
         <p style={{ margin: 0, fontSize: 13, color: colors.text }}>{data.conditioningLine}</p>
       </Card>
       <TodayWorkoutHeroSection
-        title="Today's session hero"
         subtitle={data.workoutName}
         exercises={data.exercises}
         hasWorkoutToday={data.hasWorkoutToday}
@@ -672,7 +666,7 @@ function PersonalCompToday({ data }) {
         </Button>
       </Card>
       <Card style={baseCardStyle()}>
-        <SectionTitle>Macro ring + weight log</SectionTitle>
+        <SectionTitle>Macros &amp; weight</SectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing[10] }}>
           <button type="button" onClick={() => navigate('/nutrition?openScanner=1')} style={{ minHeight: 60, borderRadius: radii.card, border: `1px solid ${colors.border}`, background: colors.surface2 }}>
             {data.nutritionLine}
@@ -684,7 +678,7 @@ function PersonalCompToday({ data }) {
       </Card>
       {data.showCoachDiscovery ? (
         <Card style={baseCardStyle()}>
-          <SectionTitle>Find a coach prompt</SectionTitle>
+          <SectionTitle>Find a coach</SectionTitle>
           <p style={{ margin: 0, fontSize: 13, color: colors.text }}>You are in the 6-10 week window — explore prep coaches for peak support.</p>
           <Button type="button" onClick={() => navigate('/discover?type=competition')} style={{ marginTop: spacing[10] }}>
             Explore coaches →
