@@ -337,6 +337,7 @@ export function getRouteTitle(pathname) {
   const path = pathname?.split('?')[0]?.toLowerCase() || '';
   if (path.includes('/checkins/')) return 'Check-in';
   if (path.match(/^\/clients\/[^/]+\/journey$/)) return 'Journey';
+  if (path === '/clients/at-risk') return 'At-risk clients';
   if (path.startsWith('/clients/') && path.length > '/clients/'.length) return 'Client';
   if (path.startsWith('/messages/') && path.length > '/messages/'.length) return 'Chat';
   if (path === '/comp-prep/pose-library') return 'Pose Library';
