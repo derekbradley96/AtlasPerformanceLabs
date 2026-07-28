@@ -200,7 +200,9 @@ export default function ProgramBuilderPage() {
   const [entryDaysPerWeek, setEntryDaysPerWeek] = useState(3);
   const [entryWeeksPreset, setEntryWeeksPreset] = useState('4');
   const [entryCustomWeeks, setEntryCustomWeeks] = useState('6');
-  const [entryWhoFor, setEntryWhoFor] = useState('');
+  // Arriving from a client's Program tab carries ?clientId= — preselect them
+  // in the FOR dropdown instead of making the coach pick again.
+  const [entryWhoFor, setEntryWhoFor] = useState(clientIdParam || '');
   const [weekStructureType, setWeekStructureType] = useState('full_body');
   const [rankedResultsByQuery, setRankedResultsByQuery] = useState(() => new Map());
   const [libraryByName, setLibraryByName] = useState(() => new Map());
@@ -258,7 +260,10 @@ export default function ProgramBuilderPage() {
   const isUuid = (value) =>
     typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   const actorProfileId = profile?.id ?? supabaseUser?.id ?? user?.id ?? null;
-  const coachId = isUuid(actorProfileId) ? actorProfileId : null;
+  // UUID check guards Supabase queries (non-UUID ids 400). Local mode has no
+  // Supabase to protect and uses ids like 'local-coach' — let them through so
+  // the roster query (local-first fallback) can run in demo/sandbox.
+  const coachId = isUuid(actorProfileId) ? actorProfileId : (!hasSupabase && actorProfileId ? actorProfileId : null);
 
   useEffect(() => {
     if (!isPersonalRole || blockIdParam || !legacyProgramIdParam || !supabase || !coachId) return;
@@ -1351,7 +1356,10 @@ export default function ProgramBuilderPage() {
   };
 
   const handleRemoveExercise = async (exerciseId) => {
-    if (!supabase) return;
+    if (!supabase) {
+      toast.error('Editing this block requires a connection.');
+      return;
+    }
     setSaving(true);
     try {
       const { error } = await supabase.from('program_exercises').delete().eq('id', exerciseId);
@@ -1842,7 +1850,12 @@ export default function ProgramBuilderPage() {
   };
 
   const handleEntryGenerateProgram = useCallback(async () => {
-    if (!supabase || !coachId) return;
+    // Coach blocks live in Supabase (clients consume them cross-device).
+    // Without it the button must say why, not silently do nothing.
+    if (!supabase || !coachId) {
+      toast.error('Building programs requires a connection.');
+      return;
+    }
     const isSelfTarget = isPersonalRole;
     const isTemplateTarget = !isPersonalRole && entryWhoFor === ENTRY_TARGET_TEMPLATE;
     if (!isSelfTarget && !entryWhoFor) {
@@ -2020,7 +2033,10 @@ export default function ProgramBuilderPage() {
   ]);
 
   const handleEntryUseTemplate = useCallback(async (templateId) => {
-    if (!supabase || !coachId) return;
+    if (!supabase || !coachId) {
+      toast.error('Building programs requires a connection.');
+      return;
+    }
     const template = getProgramTemplateById(templateId);
     if (!template) {
       toast.error('Template not found');

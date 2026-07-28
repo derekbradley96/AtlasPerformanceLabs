@@ -122,7 +122,20 @@ export function useProgramBuilderData({
   const coachClientsQuery = useQuery({
     queryKey: ['program-builder-coach-clients', coachId],
     queryFn: async () => {
-      if (!supabase || !coachId) return [];
+      if (!coachId) return [];
+      // Local-first fallback: without Supabase (demo/sandbox) the roster lives
+      // in clientsService — otherwise the FOR dropdown is empty and the
+      // builder can't assign to anyone.
+      if (!supabase) {
+        const { getClients } = await import('@/data/clientsService');
+        const list = await getClients(coachId, {});
+        return (Array.isArray(list) ? list : []).map((row) => ({
+          id: row.id,
+          name: row.full_name || row.name || 'Client',
+          user_id: row.user_id || null,
+          status: row.status || null,
+        }));
+      }
       const { data, error } = await supabase
         .from('clients')
         .select('id, name, user_id, status')
@@ -138,7 +151,7 @@ export function useProgramBuilderData({
         }))
         : [];
     },
-    enabled: !!coachId && !!supabase && !!isCoachMode,
+    enabled: !!coachId && !!isCoachMode,
     staleTime: 5 * 60 * 1000,
   });
 

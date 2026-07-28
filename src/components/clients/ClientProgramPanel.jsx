@@ -105,7 +105,7 @@ export default function ClientProgramPanel({
                   <Button variant="primary" className="w-full" onClick={async () => { await lightHaptic?.(); onAssignProgram?.(); }}>
                     Assign program
                   </Button>
-                  <Button variant="secondary" className="w-full" onClick={async () => { await lightHaptic?.(); navigate('/program-builder'); }}>
+                  <Button variant="secondary" className="w-full" onClick={async () => { await lightHaptic?.(); navigate(clientId ? `/program-builder?clientId=${clientId}` : '/program-builder'); }}>
                     Open Program Builder
                   </Button>
                 </div>
