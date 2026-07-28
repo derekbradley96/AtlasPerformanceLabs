@@ -490,7 +490,9 @@ export default function GeneralDashboard({ user }) {
       {(() => {
         // Show until all three are genuinely done (or manually hidden); wait
         // for the queries so a fully-set-up user never sees a flash of it.
-        const stepsReady = assignedFetched && nutritionFetched && checkinEverFetched;
+        // A disabled query (sandbox: no Supabase) never reports isFetched —
+        // treat it as settled so the checklist still renders there.
+        const stepsReady = assignedFetched && nutritionFetched && (checkinEverFetched || !hasSupabase);
         const setupSteps = [
           { key: 'plan', label: 'Create your first plan', icon: Dumbbell, done: hasProgram, to: createPageUrl('MyProgram') },
           { key: 'nutrition', label: 'Set nutrition targets', icon: UtensilsCrossed, done: !needsNutrition, to: '/nutrition' },
