@@ -61,7 +61,8 @@
     "export": "git archive HEAD --format=zip -o atlas-export.zip",
     "secrets:check": "secretlint \"**/*\"",
     "check:ghosts": "node scripts/check-ghost-functions.js",
-    "prepare": "husky"
+    "prepare": "husky",
+    "dev:sandbox": "vite --mode sandbox --port 5175"
   },
   "dependencies": {
     "@capacitor-community/apple-sign-in": "^6.0.0",

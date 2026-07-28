@@ -16,12 +16,28 @@ function getEnv(key) {
 }
 
 /**
+ * DEV-only QA switch: localStorage.atlas_sandbox = '1' makes the app behave as
+ * if Supabase were unconfigured — AuthContext fake sessions + local data
+ * stores — so every screen can be driven end-to-end without a real account.
+ * Read at module load; set the flag then reload. Inert in production builds.
+ */
+export function isSandboxForced() {
+  try {
+    if (typeof import.meta === 'undefined' || !import.meta.env?.DEV) return false;
+    return typeof localStorage !== 'undefined' && localStorage.getItem('atlas_sandbox') === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Returns the Supabase client when URL and anon key are configured, otherwise null.
  * Callers should check for null and show "not configured" or feature-flag the flow.
  * @returns {import('@supabase/supabase-js').SupabaseClient | null}
  */
 export function getSupabase() {
   try {
+    if (isSandboxForced()) return null;
     if (clientInstance !== null) return clientInstance;
     const url = getEnv('VITE_SUPABASE_URL');
     const anonKey = getEnv('VITE_SUPABASE_ANON_KEY');
@@ -72,6 +88,7 @@ export function getSupabase() {
  */
 export function isSupabaseAuthConfigured() {
   try {
+    if (isSandboxForced()) return false;
     const url = getEnv('VITE_SUPABASE_URL');
     const anonKey = getEnv('VITE_SUPABASE_ANON_KEY');
     return !!(url && anonKey);
