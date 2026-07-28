@@ -34,7 +34,10 @@ export async function registerPushToken() {
       regHandle?.remove?.();
       errHandle?.remove?.();
     };
-    return new Promise((resolve, reject) => {
+    // await (not bare return): a registration rejection must hit THIS
+    // function's catch so the documented "null on error" contract holds —
+    // returning the pending promise lets rejections bypass it.
+    return await new Promise((resolve, reject) => {
       const onReg = (token) => {
         cleanup();
         resolve(token.value ?? null);

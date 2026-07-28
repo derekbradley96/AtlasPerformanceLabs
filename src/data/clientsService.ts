@@ -195,7 +195,7 @@ export async function addClientForTrainer(
     gym_equipment_json: payload.gym_equipment,
     federation: payload.federation as string | undefined,
   };
-  const created = localStore.addClient(partial as Partial<localStore.Client> & { trainer_id: string });
+  const created = await localStore.addClient(partial as Partial<localStore.Client> & { trainer_id: string });
   return created ? toUI(created) : null;
 }
 
@@ -221,7 +221,7 @@ export async function updateClient(
     }
   }
 
-  const updated = localStore.updateClient(id, patch as Partial<localStore.Client>);
+  const updated = await localStore.updateClient(id, patch as Partial<localStore.Client>);
   return updated ? toUI(updated) : null;
 }
 
