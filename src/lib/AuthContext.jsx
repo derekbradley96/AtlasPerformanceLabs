@@ -346,8 +346,20 @@ export const AuthProvider = ({ children }) => {
       const storedRole = getStoredRole();
       const session = getStoredFakeSession();
       if (session) {
+        const fakeUser = buildFakeUser(session.role, session.email);
         setRoleState(session.role);
-        setUser(buildFakeUser(session.role, session.email));
+        setUser(fakeUser);
+        // Sandbox sessions need a profile too: every onboarding-complete guard
+        // reads profile.*, so without one the whole app bounces to setup
+        // wizards and the QA sandbox can only ever test onboarding screens.
+        setProfile({
+          id: fakeUser.id,
+          role: normalizeRole(session.role),
+          display_name: fakeUser.name,
+          full_name: fakeUser.full_name,
+          onboarding_complete: true,
+          plan_tier: normalizeRole(session.role) === 'coach' ? 'basic' : null,
+        });
         setIsAuthenticated(true);
       } else {
         setRoleState(storedRole);

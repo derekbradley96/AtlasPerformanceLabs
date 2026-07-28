@@ -88,8 +88,11 @@ function coachOfferToJoinService(offer: CoachOfferRow): Record<string, unknown> 
   };
 }
 
-function runFallback(supabase: ReturnType<typeof createClient>, normalized: string): Result | null {
-  const { data: rows, error } = supabase
+// async + awaited: the query builder is a thenable — destructuring it without
+// await yields undefined data/error, so the fallback silently reported every
+// invite code invalid whenever the RPC was down (the exact case it exists for).
+async function runFallback(supabase: ReturnType<typeof createClient>, normalized: string): Promise<Result | null> {
+  const { data: rows, error } = await supabase
     .from("profiles")
     .select("id, display_name, role, coach_focus")
     .eq("referral_code", normalized)
@@ -171,7 +174,7 @@ Deno.serve(async (req) => {
       result = rpcData as Result;
     } else {
       if (rpcError) console.error("validateInviteCode RPC error (using fallback):", rpcError.message);
-      result = runFallback(supabase, normalized);
+      result = await runFallback(supabase, normalized);
     }
 
     if (!result) {
