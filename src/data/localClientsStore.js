@@ -14,6 +14,22 @@ const DEV = typeof import.meta !== 'undefined' && import.meta.env && import.meta
 let syncCache = [];
 
 export function getSyncCache() {
+  // Lazy hydration: callers (clientsService.getLocalClientsSync) race
+  // LocalClientsInit's async loadClients() on boot — the first Clients query
+  // used to read an empty cache, and react-query then held "no clients"
+  // until an unrelated refetch. localStorage is synchronous, so fill the
+  // cache on first read instead of returning a false empty.
+  if (!Array.isArray(syncCache) || syncCache.length === 0) {
+    try {
+      const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(KEY) : null;
+      const list = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(list) && list.length > 0) {
+        syncCache = list.map(normalize).filter(Boolean);
+      }
+    } catch (_) {
+      /* keep whatever cache we have */
+    }
+  }
   return Array.isArray(syncCache) ? [...syncCache] : [];
 }
 
