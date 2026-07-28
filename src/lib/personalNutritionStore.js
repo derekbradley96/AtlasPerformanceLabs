@@ -29,7 +29,15 @@ function setMealsMap(next) {
  * Returns a normalized target object compatible with UI progress components:
  * { calories, protein_g, carbs_g, fats_g } or null
  */
-export async function getPersonalNutritionTarget(userId) {
+/**
+ * Local-only read (localStorage per-user key, then the combined map). Sync on
+ * purpose: three callers (targets merge, feedback loop, PersonalMyProgram
+ * render) consumed the async getter WITHOUT await — a Promise is truthy, its
+ * .calories is undefined, so local targets were invisible everywhere and the
+ * feedback loop could run arithmetic on undefined. Sync callers use this;
+ * getPersonalNutritionTarget remains the async local-then-Supabase read.
+ */
+export function getPersonalNutritionTargetLocalSync(userId) {
   if (!userId) return null;
 
   const localKey = `atlas_personal_nutrition_targets_v1_${userId}`;
@@ -59,6 +67,15 @@ export async function getPersonalNutritionTarget(userId) {
       return normalized;
     }
   }
+
+  return null;
+}
+
+export async function getPersonalNutritionTarget(userId) {
+  if (!userId) return null;
+
+  const local = getPersonalNutritionTargetLocalSync(userId);
+  if (local) return local;
 
   if (!hasSupabase) return null;
   const supabase = getSupabase();

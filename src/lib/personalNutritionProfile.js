@@ -1,6 +1,6 @@
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import {
-  getPersonalNutritionTarget,
+  getPersonalNutritionTargetLocalSync,
   listPersonalMealLogs,
   upsertPersonalNutritionTarget,
 } from '@/lib/personalNutritionStore';
@@ -56,7 +56,9 @@ function profileRowToFields(row) {
  * Returns UI shape with both normalized and target_* aliases for Nutrition.jsx, or null if nothing set.
  */
 export function mergeProfileAndLocalNutritionTargets(profileRow, userId) {
-  const local = userId ? getPersonalNutritionTarget(userId) : null;
+  // Sync local read — the async getter here returned a Promise whose
+  // .calories is undefined, so the documented localStorage fallback never fired.
+  const local = userId ? getPersonalNutritionTargetLocalSync(userId) : null;
   const p = profileRowToFields(profileRow);
 
   const calories =

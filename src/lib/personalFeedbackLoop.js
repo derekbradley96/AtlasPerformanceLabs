@@ -1,5 +1,5 @@
 import { getAssignment, getProgramById, updateProgramInPlace } from '@/lib/programsStore';
-import { getPersonalNutritionTarget, upsertPersonalNutritionTarget } from '@/lib/personalNutritionStore';
+import { getPersonalNutritionTargetLocalSync, upsertPersonalNutritionTarget } from '@/lib/personalNutritionStore';
 import { getPersonalAutoAdjustmentsEnabled } from '@/lib/autoAdjustmentClarity';
 import { clampAdherence0to100, clampFatigue0to10, sanitizeFiniteNumber } from '@/lib/progressMetricsValidation';
 
@@ -192,7 +192,7 @@ function applyProgramAdjustment(userId, decision, state) {
 }
 
 function applyNutritionAdjustment(userId, decision, state) {
-  const target = getPersonalNutritionTarget(userId);
+  const target = getPersonalNutritionTargetLocalSync(userId);
   if (!target) return null;
   const prev = { calories: target.calories, protein_g: target.protein_g, carbs_g: target.carbs_g, fats_g: target.fats_g };
   let calories = Number(target.calories || 0);

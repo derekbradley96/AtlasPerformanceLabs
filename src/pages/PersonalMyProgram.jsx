@@ -15,7 +15,7 @@ import { getAssignment, getAssignmentMeta, getProgramById, updateProgramInPlace 
 import Card from '@/ui/Card';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { standardCard } from '@/ui/pageLayout';
-import { getPersonalNutritionTarget, listPersonalMealLogs } from '@/lib/personalNutritionStore';
+import { getPersonalNutritionTargetLocalSync, listPersonalMealLogs } from '@/lib/personalNutritionStore';
 import { getRetentionStreaks } from '@/lib/retentionHabitService';
 import { getLockedUpperLowerTwoHypertrophyTwoStrength } from '@/lib/workoutQuickStart';
 import { createPersonalProgramFromTemplate } from '@/lib/personalProgramSeed';
@@ -47,7 +47,7 @@ export default function PersonalMyProgram() {
   const rhythm = desktopRhythm(isDesktopWeb);
   const isEnhancedPersonal = ['enhanced', 'free'].includes(resolvePersonalPlanTier(profile, user));
   const todayIso = new Date().toISOString().slice(0, 10);
-  const personalTarget = getPersonalNutritionTarget(user?.id);
+  const personalTarget = getPersonalNutritionTargetLocalSync(user?.id);
   const personalMealsToday = listPersonalMealLogs(user?.id, todayIso);
   const totalProteinToday = personalMealsToday.reduce((sum, m) => sum + (Number(m?.protein_g) || 0), 0);
   const proteinTargetToday = Number(personalTarget?.protein_g) || null;

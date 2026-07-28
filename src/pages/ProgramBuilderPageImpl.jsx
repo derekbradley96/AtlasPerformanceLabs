@@ -2212,15 +2212,20 @@ export default function ProgramBuilderPage() {
 
   if (isPersonalRole && !hasSupabase) {
     return (
+      // Header stays at the top; only the message centres in the remaining
+      // space. justify-center on the whole column floated the TopBar to the
+      // middle of the screen.
       <div
-        className="min-h-screen flex flex-col items-center justify-center gap-3 p-6"
+        className="min-h-screen flex flex-col"
         style={{ background: colors.bg, color: colors.text }}
         {...programBuilderMigrationAttrs}
       >
         <TopBar title={isPersonalRole ? 'My program' : 'Program Builder'} onBack={() => navigate(-1)} />
-        <p style={{ color: colors.muted, textAlign: 'center', maxWidth: 320 }}>
-          {personalNoCloudCopy()}
-        </p>
+        <div className="flex-1 flex items-center justify-center p-6">
+          <p style={{ color: colors.muted, textAlign: 'center', maxWidth: 320 }}>
+            {personalNoCloudCopy()}
+          </p>
+        </div>
       </div>
     );
   }
