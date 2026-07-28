@@ -116,15 +116,20 @@ export function formatCoachPlanCardEffectiveLine({ planTierId, clientCount, mont
   if (n > 0) {
     return `At your current ${n} clients: ${CURRENCY}${eff}/month effective`;
   }
-  const basicEff = coachPlanEffectiveMonthly('basic', {
+  const effAt5 = (tier) => coachPlanEffectiveMonthly(tier, {
     clientCount: 5,
     avgMonthlyRevenuePerClient: ILLUSTRATION_AVG_MONTHLY_PER_CLIENT,
   });
-  const proEff = coachPlanEffectiveMonthly('pro', {
-    clientCount: 5,
-    avgMonthlyRevenuePerClient: ILLUSTRATION_AVG_MONTHLY_PER_CLIENT,
-  });
-  const save = Math.max(0, basicEff - proEff);
+  // Per-tier line — the Pro-vs-Basic savings sentence was rendered under
+  // EVERY card, including Elite's.
+  const tier = String(planTierId || '').toLowerCase();
+  if (tier === 'elite') {
+    return `At 5 clients: ${CURRENCY}${effAt5('elite')}/month flat — no commission at any volume`;
+  }
+  if (tier === 'basic') {
+    return `At 5 clients: ${CURRENCY}${effAt5('basic')}/month effective on Basic`;
+  }
+  const save = Math.max(0, effAt5('basic') - effAt5('pro'));
   return `At 5 clients: Pro saves you ${CURRENCY}${save}/month vs Basic`;
 }
 

@@ -38,3 +38,17 @@ export function computeRecommendedPlan(monthlyVolume: number): AtlasPlanTier {
   if (costs.pro <= costs.basic) return "pro";
   return "basic";
 }
+
+/**
+ * The tier a coach is actually ENTITLED to. profiles.plan_tier is written by
+ * onboarding on selection — before any payment — so anything outward-facing
+ * (white-label branding, marketplace badge) must gate on the subscription
+ * actually existing. past_due keeps features through a payment retry window;
+ * everything else falls back to basic.
+ */
+export function entitledPlanTier(planTier: unknown, subscriptionStatus: unknown): AtlasPlanTier {
+  const tier = toAtlasPlanTier(planTier);
+  if (tier === "basic") return "basic";
+  const status = String(subscriptionStatus ?? "").trim().toLowerCase();
+  return status === "active" || status === "trialing" || status === "past_due" ? tier : "basic";
+}

@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "https://esm.sh/zod@3.23.8";
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { entitledPlanTier } from "../_shared/billing.ts";
 import { checkEdgeRateLimit } from "../_shared/publicSecurity.ts";
 
 const payloadSchema = z.object({
@@ -106,6 +107,7 @@ Deno.serve(async (req) => {
         );
       }
       return await buildResponse(
+        req,
         supabase,
         p as {
           id: string;
@@ -119,6 +121,7 @@ Deno.serve(async (req) => {
     }
 
     return await buildResponse(
+      req,
       supabase,
       profile as {
         id: string;
@@ -139,6 +142,7 @@ Deno.serve(async (req) => {
 });
 
 async function buildResponse(
+  req: Request,
   supabase: ReturnType<typeof createClient>,
   profile: {
     id: string;
@@ -160,8 +164,17 @@ async function buildResponse(
     .limit(1);
   const marketplace = Array.isArray(marketplaceRows) && marketplaceRows.length > 0 ? marketplaceRows[0] : null;
 
-  const planTierRaw = String((profile as { plan_tier?: string | null }).plan_tier ?? "").trim().toLowerCase();
-  const planTier = planTierRaw === "elite" || planTierRaw === "pro" || planTierRaw === "basic" ? planTierRaw : "basic";
+  // Selection is not entitlement: profiles.plan_tier is set at onboarding before
+  // any payment. Serve the tier only when the coach's subscription backs it.
+  const { data: paidCoach } = await supabase
+    .from("atlas_coaches")
+    .select("subscription_status")
+    .eq("user_id", coachId)
+    .maybeSingle();
+  const planTier = entitledPlanTier(
+    (profile as { plan_tier?: string | null }).plan_tier,
+    (paidCoach as { subscription_status?: string | null } | null)?.subscription_status,
+  );
 
   const coachName =
     (marketplace as { display_name?: string } | null)?.display_name ||

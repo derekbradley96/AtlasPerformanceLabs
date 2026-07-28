@@ -162,13 +162,15 @@ export function resolveCoachPlanTier(profile, user) {
   const fromAuth = (profile?.plan_tier ?? user?.plan_tier ?? '').toString().toLowerCase().trim();
   if (PLAN_TIER_IDS.includes(fromAuth)) return fromAuth;
   try {
-    if (typeof localStorage === 'undefined') return 'pro';
+    if (typeof localStorage === 'undefined') return 'basic';
     const ls = (localStorage.getItem('atlas_trainer_plan') ?? '').toString().toLowerCase().trim();
     if (PLAN_TIER_IDS.includes(ls)) return ls;
   } catch {
     // ignore
   }
-  return 'pro';
+  // Unknown tier must resolve to the free tier — defaulting to 'pro' handed
+  // paid-tier UI to any coach with no plan_tier anywhere.
+  return 'basic';
 }
 
 /**
