@@ -488,14 +488,21 @@ export default function Messages() {
                   lineHeight: 1.5,
                   maxWidth: 260,
                 }}>
-                  Send a message to your coach. They'll reply here.
+                  {clientLinkedRow?.id
+                    ? "Send a message to your coach. They'll reply here."
+                    : 'No coach linked yet. Enter your coach’s invite code to start messaging.'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={async () => {
                   const rosterId = clientLinkedRow?.id;
-                  if (!rosterId) return;
+                  // Unlinked client: the old code silently returned here, leaving
+                  // a button that did nothing. Route them to invite-code entry.
+                  if (!rosterId) {
+                    navigate('/client-onboarding-flow');
+                    return;
+                  }
                   if (typeof data?.ensureConversation === 'function') {
                     await data.ensureConversation(rosterId);
                   }
@@ -512,7 +519,7 @@ export default function Messages() {
                   cursor: 'pointer',
                 }}
               >
-                Send first message →
+                {clientLinkedRow?.id ? 'Send first message →' : 'Connect with your coach →'}
               </button>
             </div>
           ) : (

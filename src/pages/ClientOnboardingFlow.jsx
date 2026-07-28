@@ -324,6 +324,10 @@ export default function ClientOnboardingFlow() {
   useEffect(() => {
     if (!authReady) return;
     if (bootstrappedRef.current) return;
+    // For an onboarded client the branch below needs to know whether a coach
+    // row exists — wait for the roster lookup BEFORE latching bootstrappedRef,
+    // so the effect re-runs (deps include clientLinkedResolved) once it lands.
+    if (hasSupabase && profile && isProfileOnboardingComplete(profile) && !clientLinkedResolved) return;
     bootstrappedRef.current = true;
     let cancelled = false;
     (async () => {
@@ -338,8 +342,13 @@ export default function ClientOnboardingFlow() {
           return;
         }
         if (profile && isProfileOnboardingComplete(profile)) {
-          navigate(getPostOnboardingPath('client'), { replace: true });
-          return;
+          // Only bounce clients who actually have a coach. An onboarded client
+          // with no roster row is exactly who this flow serves (invite-code
+          // entry) — bouncing them left no surface anywhere to link a coach.
+          if (clientLinkedRow?.id) {
+            navigate(getPostOnboardingPath('client'), { replace: true });
+            return;
+          }
         }
         const incomingCode = searchParams.get('coach_code') || searchParams.get('code') || searchParams.get('invite');
         const pending = getPendingInvite();
