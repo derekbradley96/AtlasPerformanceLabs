@@ -54,7 +54,7 @@ export default function TrainerProfileSettings() {
   const rhythm = desktopRhythm(isDesktopWeb);
   const cardRhythm = cardContentRhythm(isDesktopWeb);
   const cardPadding = isDesktopWeb ? spacing[24] : spacing[20];
-  const { user, isDemoMode } = useAuth();
+  const { user, profile: authProfile, isDemoMode } = useAuth();
   const queryClient = useQueryClient();
   const trainerId = isDemoMode ? 'demo-trainer' : user?.id ?? null;
   const supabase = hasSupabase ? getSupabase() : null;

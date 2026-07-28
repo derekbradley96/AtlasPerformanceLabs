@@ -187,8 +187,7 @@ export default function CompPrepHome() {
               </div>
               {(filteredClients ?? []).map((p) => {
                 if (!p?.clientId) return null;
-                const c = getClientById(p.clientId);
-                const name = c?.full_name || c?.name || p.clientId;
+                const name = clientNameById.get(p.clientId) || p.clientId;
                 const countdown = daysUntil(p?.showDate);
                 return (
                   <button

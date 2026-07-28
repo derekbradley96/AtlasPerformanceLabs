@@ -60,6 +60,30 @@ export default [
         { ignore: ["cmdk-input-wrapper", "toast-close"] },
       ],
       "react-hooks/rules-of-hooks": "error",
+      // The `rules:` literal above REPLACES the rules spread in from
+      // pluginJs.configs.recommended — it does not merge. no-undef silently
+      // vanished that way and 52 phantom identifiers (guaranteed
+      // ReferenceErrors) shipped unseen. Re-added explicitly; keep it here.
+      "no-undef": "error",
+    },
+  },
+  // Everything the block above doesn't cover (src/lib, src/data, src/services,
+  // src/hooks, src/screens, src/ui, src/App.jsx, ...) was previously never
+  // linted at all. At minimum, phantom identifiers must fail the build.
+  {
+    files: ["src/**/*.{js,mjs,cjs,jsx}"],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: "module",
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+    },
+    rules: {
+      "no-undef": "error",
     },
   },
 ];

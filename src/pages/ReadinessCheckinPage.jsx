@@ -192,7 +192,10 @@ export default function ReadinessCheckinPage() {
   const onSubmit = async (e) => {
     e.preventDefault();
     if (!canSubmit || !user?.id || !allowed) return;
-    if (!hasSupabase) {
+    // Client check-ins must reach the coach, so they need Supabase. The
+    // personal loop (runPersonalFeedbackLoop + local adjustment history) is
+    // local-first — every remote write below already sits behind if (supabase).
+    if (!hasSupabase && !isPersonal(effectiveRole)) {
       toast.error('Check-in requires a connection.');
       return;
     }
@@ -207,12 +210,16 @@ export default function ReadinessCheckinPage() {
 
       const scores = mapFeelToReadinessScores(feelValues);
 
-      const { recommendation, recommendationError } = await createReadinessCheckinWithRecommendation({
-        userId: user.id,
-        effectiveRole,
-        scores,
-        notes,
-      });
+      let recommendation = null;
+      let recommendationError = null;
+      if (hasSupabase) {
+        ({ recommendation, recommendationError } = await createReadinessCheckinWithRecommendation({
+          userId: user.id,
+          effectiveRole,
+          scores,
+          notes,
+        }));
+      }
 
       let loop = null;
       if (isPersonal(effectiveRole)) {

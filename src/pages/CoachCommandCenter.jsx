@@ -14,6 +14,7 @@ import {
   ListChecks,
   MessageSquare,
   AlertTriangle,
+  Activity,
   CalendarCheck,
   Calendar,
   ChevronRight,

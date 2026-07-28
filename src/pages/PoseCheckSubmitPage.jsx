@@ -87,6 +87,7 @@ export default function PoseCheckSubmitPage() {
   const [flow, setFlow] = useState('form');
   const [submittedRow, setSubmittedRow] = useState(null);
   const [submittedItems, setSubmittedItems] = useState([]);
+  const [feedbackItemUrls, setFeedbackItemUrls] = useState({});
   const [poseCheckRow, setPoseCheckRow] = useState(null);
   const [structuredItems, setStructuredItems] = useState([]);
   const [clientNotes, setClientNotes] = useState('');

@@ -93,7 +93,8 @@ export function generateCheckinSummary(checkin, trends = null) {
  * @param {Object} trends - e.g. latest_weight, previous_weight, weight_change, avg_compliance_last_4w, checkins_last_4w, active_flags_count
  * @returns {{ title: string, summary: string, level: 'info' | 'positive' | 'warning', details: string[] }}
  */
-export function generateProgressInsight(trends) {
+export function generateProgressInsight(trends, viewerWeightUnit = 'kg') {
+  const wu = normalizeWeightUnit(viewerWeightUnit);
   const details = [];
   let level = 'info';
   let title = 'Progress insight';

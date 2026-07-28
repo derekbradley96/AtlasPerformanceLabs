@@ -82,7 +82,7 @@ function RoleRow({ icon: Icon, title, onSelect, disabled }) {
 
 export default function RoleSelection() {
   const navigate = useNavigate();
-  const { isDemoMode, selectRole, exitDemo } = useAuth();
+  const { user, isDemoMode, selectRole, exitDemo } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const roleSelectionMigration = useMemo(

@@ -115,7 +115,7 @@ export default function PeakWeekTemplateBuilder() {
           <Textarea value={templateNotes} onChange={(e) => setTemplateNotes(e.target.value)} rows={2} className="mt-1" style={{ background: colors.surface2, borderColor: colors.border }} />
         </Card>
 
-        {days.map((d) => (
+        {days.map((d, idx) => (
           <Card key={d.day} style={{ padding: spacing[16], border: `1px solid ${colors.border}` }}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold" style={{ color: colors.text }}>Day {d.day} (T-{7 - Number(d.day)})</p>

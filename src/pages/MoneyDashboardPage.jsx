@@ -10,6 +10,8 @@ import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import { colors, spacing } from '@/ui/tokens';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveCoachPlanTier } from '@/config/plans';
 import {
   CoachProFeeComparisonBanner,
   CoachMonthlyFeeSummaryModal,
@@ -95,16 +97,22 @@ async function getOverdueClients() {
 
 export default function MoneyDashboardPage() {
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
+  const planTier = resolveCoachPlanTier(profile, user);
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState(null);
+  const [revenueSummary, setRevenueSummary] = useState(null);
   const [overdueClients, setOverdueClients] = useState([]);
+  const [feeSummaryOpen, setFeeSummaryOpen] = useState(false);
+  const openFeeSummary = () => setFeeSummaryOpen(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [dash, overdue] = await Promise.all([getCoachMoneyDashboard(), getOverdueClients()]);
+      const [dash, revenue, overdue] = await Promise.all([getCoachMoneyDashboard(), getCoachRevenueSummary(), getOverdueClients()]);
       if (cancelled) return;
       setDashboard(dash);
+      setRevenueSummary(revenue);
       setOverdueClients(overdue);
       setLoading(false);
     })();

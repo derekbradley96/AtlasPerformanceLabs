@@ -83,7 +83,7 @@ export default function ClientEquipment() {
     }
   };
 
-  if (userId && !client) {
+  if (userId && linkedClient === null) {
     return (
       <div className="app-screen min-w-0 max-w-full overflow-x-hidden" style={{ padding: spacing[24] }}>
         <Card style={{ padding: spacing[24], textAlign: 'center' }}>

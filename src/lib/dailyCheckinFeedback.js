@@ -52,8 +52,20 @@ export function buildInputReasonFragment(v = {}) {
 export function buildPersonalTodaysAdjustment(loop) {
   const t = String(loop?.decision?.type || 'on_track');
   const baseReason = loop?.decision?.reason || '';
+  // Only claim "we changed your plan" when applyProgramAdjustment actually
+  // wrote one. With no assigned programme (or auto-adjustments off) the same
+  // decision must read as advice, not a change that never happened.
+  const applied = Boolean(loop?.programAdjustment);
 
   if (t === 'reduce_volume') {
+    if (!applied) {
+      return {
+        volume: 'Suggested: about 1 fewer working set per exercise today',
+        intensity: 'Keep the same target effort (RIR)',
+        rest: 'Take a bit more rest between sets to protect recovery',
+        reason: 'Fatigue and recovery signals suggest easing volume today. Your plan was not changed automatically.',
+      };
+    }
     return {
       volume: 'Slightly reduced (about 1 fewer working set per exercise)',
       intensity: 'Kept the same target effort (RIR)',
@@ -62,6 +74,14 @@ export function buildPersonalTodaysAdjustment(loop) {
     };
   }
   if (t === 'adjust_plan') {
+    if (!applied) {
+      return {
+        volume: 'Suggested: about 1 more working set where appropriate',
+        intensity: 'Keep the same target effort (RIR)',
+        rest: 'Slightly shorter rest to match the progression push',
+        reason: 'Progress signals support a small bump in training stress. Your plan was not changed automatically.',
+      };
+    }
     return {
       volume: 'Slightly increased (about 1 more working set where appropriate)',
       intensity: 'Kept the same target effort (RIR)',

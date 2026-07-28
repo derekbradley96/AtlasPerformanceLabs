@@ -188,6 +188,7 @@ export default function WorkoutPlayerPage() {
   const [completedWarmups, setCompletedWarmups] = useState({});
   const [rpeSaving, setRpeSaving] = useState(false);
   const [showPreviousSession, setShowPreviousSession] = useState(false);
+  const [openPrepWhyExerciseId, setOpenPrepWhyExerciseId] = useState(null);
   const exerciseChipsRef = useRef(null);
   const activeChipRef = useRef(null);
   const sessionStartedAtRef = useRef(null);
@@ -1591,7 +1592,7 @@ export default function WorkoutPlayerPage() {
             navigate(`/workoutsummary?sessionId=${encodeURIComponent(sessionId)}${goalParam}`);
           }}
           sessionSets={dedupedSessionSets}
-          prescribedSets={todayWorkout?.exercises || []}
+          prescribedSets={assignedWorkout?.exercises || []}
           sessionRPE={null}
           readiness={todayReadiness || null}
           exerciseNotes={null}
@@ -1607,7 +1608,7 @@ export default function WorkoutPlayerPage() {
         <WorkoutSessionSummary
           mode="complete"
           sessionSets={dedupedSessionSets}
-          prescribedSets={todayWorkout?.exercises || []}
+          prescribedSets={assignedWorkout?.exercises || []}
           sessionRPE={null}
           readiness={todayReadiness || null}
           exerciseNotes={null}

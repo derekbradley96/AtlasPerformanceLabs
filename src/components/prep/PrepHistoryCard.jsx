@@ -6,11 +6,12 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import Card from '@/ui/Card';
 import { colors, spacing, shell } from '@/ui/tokens';
 import { History } from 'lucide-react';
 import { safeFormatDate } from '@/lib/format';
-import { formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
+import { formatWeightForViewer, resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 
 function formatPeakWeekStrategy(outcome) {
   const parts = [];
@@ -21,6 +22,8 @@ function formatPeakWeekStrategy(outcome) {
 }
 
 export default function PrepHistoryCard({ clientId }) {
+  const { profile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
   const supabase = hasSupabase ? getSupabase() : null;
 
   const { data: outcomes = [], isLoading } = useQuery({

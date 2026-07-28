@@ -24,7 +24,7 @@ const FLAGS_ATTENTION_MIN = 2;
  * @typedef {Object} PrepInsightInput
  * @property {{ weeks_out?: unknown; days_out?: unknown; is_peak_week?: unknown; pose_check_submitted_this_week?: unknown; show_date?: unknown } | null} header - One row from v_client_prep_header
  * @property {{ weight_change?: unknown; avg_compliance_last_4w?: unknown; active_flags_count?: unknown; has_active_prep?: unknown; days_out?: unknown } | null} metrics - One row from v_client_progress_metrics
- * @property {{ poseChecksLast4w?: number; poseSubmittedThisWeek?: boolean }} [options]
+ * @property {{ poseChecksLast4w?: number; poseSubmittedThisWeek?: boolean; viewerWeightUnit?: unknown }} [options]
  */
 
 /**
@@ -44,6 +44,7 @@ export function getPrepInsightSummaries(header, metrics, options = {}) {
   const weeksOut = header?.weeks_out != null ? Math.floor(Number(header.weeks_out)) : (daysOut != null ? Math.floor(daysOut / 7) : null);
   const poseSubmittedThisWeek = header?.pose_check_submitted_this_week === true;
   const poseChecksLast4w = options.poseChecksLast4w ?? 0;
+  const wu = normalizeWeightUnit(options.viewerWeightUnit);
   const weightChange = toNum(metrics?.weight_change);
   const compliance = toNum(metrics?.avg_compliance_last_4w);
   const flagsCount = toNum(metrics?.active_flags_count) ?? 0;

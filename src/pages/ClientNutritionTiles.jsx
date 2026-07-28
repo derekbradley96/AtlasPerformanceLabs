@@ -28,7 +28,7 @@ async function lightHaptic() {
 export default function ClientNutritionTiles() {
   const { id: clientId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, coachFocus } = useAuth();
   const data = useData();
   const trainerId = getEffectiveTrainerId(user?.id);
 

@@ -344,6 +344,7 @@ function ActionRailContent({
   marking,
   replyBusy = false,
   isReviewed,
+  nav,
   stickyWrapStyle,
   macroSuggestionSlot,
   onOpenCallRequest,
@@ -1105,6 +1106,7 @@ export default function CheckInReviewDecisionWorkspace({
       marking={marking}
       replyBusy={replyBusy}
       isReviewed={isReviewed}
+      nav={nav}
       stickyWrapStyle={shell === 'desktop_web' ? railStickyStyle : { display: 'flex', flexDirection: 'column', gap: 0 }}
       macroSuggestionSlot={macroSuggestionSlot}
       onOpenCallRequest={() => setCallRequestOpen(true)}

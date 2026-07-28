@@ -11,7 +11,7 @@ import TopBar from '@/components/ui/TopBar';
 import Card from '@/ui/Card';
 import { Button } from '@/components/ui/button';
 import EmptyState from '@/components/ui/EmptyState';
-import { colors, spacing } from '@/ui/tokens';
+import { colors, spacing, shell } from '@/ui/tokens';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { Inbox, UserPlus, MessageCircle, CheckCircle2, XCircle } from 'lucide-react';
@@ -42,7 +42,7 @@ function messagePreview(msg, maxLen = 80) {
 
 export default function CoachInquiryInboxPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile: authProfile } = useAuth();
   const queryClient = useQueryClient();
   const coachId = user?.id ?? null;
   const supabase = hasSupabase ? getSupabase() : null;

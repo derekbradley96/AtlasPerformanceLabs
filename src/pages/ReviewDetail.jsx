@@ -51,8 +51,8 @@ export default function ReviewDetail() {
 
     if (reviewType === 'checkin') {
       const clientId = clientIdFromQuery || null;
-      const client = clientId ? getClientById(clientId) : null;
-      const checkInsListRaw = clientId ? getClientCheckIns(clientId) : [];
+      const client = clientId ? resolveClientRecord(clientId) : null;
+      const checkInsListRaw = clientId ? listClientCheckInsForInbox(clientId) : [];
       const checkInsList = Array.isArray(checkInsListRaw) ? checkInsListRaw : [];
       const sorted = [...checkInsList].sort((a, b) => (safeDate(b?.submitted_at ?? b?.created_date)?.getTime() ?? 0) - (safeDate(a?.submitted_at ?? a?.created_date)?.getTime() ?? 0));
       const thisWeek = sorted.find((c) => c?.id === id);
@@ -69,7 +69,7 @@ export default function ReviewDetail() {
     if (reviewType === 'posing') {
       const media = getCompMediaById(id);
       const cid = media?.clientId ?? clientIdFromQuery;
-      const client = cid ? getClientById(cid) : null;
+      const client = cid ? resolveClientRecord(cid) : null;
       if (!media || !client) return { reviewItem: null, clientId: cid };
       const posingList = cid ? listMedia(cid, { category: 'posing' }) : [];
       const sorted = [...posingList].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

@@ -154,6 +154,16 @@ function decide(state) {
   return { type: 'on_track', reason: 'On track' };
 }
 
+function programWhyLine(decision, state) {
+  if (decision.type === 'reduce_volume') {
+    return `Fatigue is high (${state.fatigue_score}/10), so sets were reduced and rest increased.`;
+  }
+  if (decision.type === 'adjust_plan') {
+    return 'Strength stalled while weight held flat, so sets were nudged up and rest tightened.';
+  }
+  return decision.reason || '';
+}
+
 function applyProgramAdjustment(userId, decision, state) {
   const assignedProgramId = getAssignment(userId);
   if (!assignedProgramId) return null;

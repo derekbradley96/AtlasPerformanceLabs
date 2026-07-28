@@ -202,6 +202,16 @@ export default function WorkoutReviewPage() {
     navigate(`/program-builder?${params.toString()}`);
   };
 
+  const openProgramBuilderWithSuggestion = (suggestion) => {
+    const params = new URLSearchParams({
+      clientId: String(clientId || ''),
+      blockId: String(blockMeta?.blockId || ''),
+      source: 'workout_review',
+      focusExercise: String(suggestion?.exerciseId || ''),
+    });
+    navigate(`/program-builder?${params.toString()}`);
+  };
+
   const dismissSuggestion = (index) => {
     setDismissedSuggestions((prev) => (prev.includes(index) ? prev : [...prev, index]));
   };

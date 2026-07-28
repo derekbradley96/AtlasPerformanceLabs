@@ -90,6 +90,7 @@ export async function getPersonalNutritionTarget(userId) {
 
   if (!data?.nutrition_calories) return null;
 
+  const localKey = `${TARGETS_KEY}_${userId}`;
   const target = {
     calories: Number(data.nutrition_calories) || 0,
     protein_g: data.nutrition_protein_g != null ? Number(data.nutrition_protein_g) : null,
@@ -120,6 +121,17 @@ export function upsertPersonalNutritionTarget(userId, payload) {
 
   map[userId] = next;
   setTargetsMap(map);
+  // The per-user cache key is read FIRST by getPersonalNutritionTargetLocalSync
+  // (and written by the async Supabase read). Leaving it stale here means every
+  // upsert — including feedback-loop auto-adjustments — is invisible until the
+  // next remote fetch overwrites it.
+  safeSetJson(`${TARGETS_KEY}_${userId}`, {
+    calories: Number(next.calories ?? 0) || 0,
+    protein_g: next.protein_g != null ? Number(next.protein_g) : null,
+    carbs_g: next.carbs_g != null ? Number(next.carbs_g) : null,
+    fats_g: next.fats_g != null ? Number(next.fats_g) : null,
+    updatedAt: next.updatedAt,
+  });
 
   if (hasSupabase) {
     const supabase = getSupabase();

@@ -32,9 +32,11 @@ const WEIGHT_STABLE_TOLERANCE = 0.3;    // kg: consider stable
  * Summarise weight trend from current check-in and optional previous data.
  * @param {Object} checkin - Current check-in: weight, submitted_at
  * @param {Object|Object[]} [previous] - Previous check-in(s): weight, submitted_at; or single row or array (last = most recent)
+ * @param {unknown} [viewerWeightUnit]
  * @returns {InsightSummary}
  */
-export function summariseWeightTrend(checkin, previous = null) {
+export function summariseWeightTrend(checkin, previous = null, viewerWeightUnit = 'kg') {
+  const wu = normalizeWeightUnit(viewerWeightUnit);
   const details = [];
   let level = 'info';
   const weight = toNum(checkin?.weight);

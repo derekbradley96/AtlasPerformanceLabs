@@ -1807,10 +1807,6 @@ export default function ProgramBuilderPage() {
         structureType: weekStructureType,
       });
       await persistGeneratedWeek(generated, targetWeek.id);
-      setAutoBuildExplainability(smart?.explainability || [
-        `Built for ${quickGoal} and ${quickDaysPerWeek} training days`,
-        'Matched to your available equipment',
-      ]);
       setGeneratedReveal({
         goal: quickGoal,
         daysPerWeek: quickDaysPerWeek,
@@ -1982,7 +1978,6 @@ export default function ProgramBuilderPage() {
       setWeeks(wList);
       setBlock(insertedBlock);
       setClientId(isSelfTarget || isTemplateTarget ? '' : (insertedBlock.client_id || entryWhoFor));
-      setStartFromScratchSelected(false);
 
       if (isSelfTarget) {
         queryClient.invalidateQueries({ queryKey: ['personal-my-program-supabase'] });

@@ -12,6 +12,7 @@ export default function SetLogRow({
   gymMode = false,
   onAdd,
   onDuplicate,
+  onDelete,
   isNewRow = false
 }) {
   const [weight, setWeight] = useState(defaultWeight);
