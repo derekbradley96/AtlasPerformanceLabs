@@ -62,7 +62,7 @@ const SECTIONS = [
     icon: User,
     title: 'Neutral pose',
     bullets: [
-      'Relaxed stance unless your coach asks for a specific pose.',
+      'Relaxed stance unless your plan calls for a specific pose.',
       'Arms at sides or one hand on hip if that’s your standard.',
       'No flexing unless you’re logging a posing shot.',
     ],
@@ -159,7 +159,9 @@ export default function PhotoGuide() {
       <Card style={{ padding: spacing[16], marginBottom: spacing[16] }}>
         <h3 className="text-sm font-semibold mb-2">Mark as understood</h3>
         <p className="text-xs mb-3" style={{ color: colors.muted }}>
-          Confirm once per phase so your coach knows you’ve read the guide.
+          {role === 'client'
+            ? 'Confirm once per phase so your coach knows you’ve read the guide.'
+            : 'Confirm once per phase to keep track of what you’ve read.'}
         </p>
         <select
           value={selectedPhase ?? ''}

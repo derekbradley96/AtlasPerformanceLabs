@@ -19,7 +19,11 @@ function safeSet(value) {
   } catch (e) {}
 }
 
-/** Milestone definitions: id, title, description, category (weight | streak | loyalty | time | strength | adherence) */
+/**
+ * Milestone definitions: id, title, description, category (weight | streak | loyalty | time | strength | adherence).
+ * coachLinked marks milestones tied to an active coach relationship — personal (self-coached)
+ * users built their own plan, so consumers hide these from their locked lists.
+ */
 export const MILESTONE_DEFS = [
   { id: 'first_checkin_submitted', title: 'First check-in submitted', description: 'You submitted your first check-in.', category: 'adherence' },
   { id: 'first_workout_logged', title: 'First workout logged', description: 'You completed your first workout in Atlas.', category: 'strength' },
@@ -34,15 +38,15 @@ export const MILESTONE_DEFS = [
   { id: 'streak_7', title: '7-day streak', description: '7 days in a row of check-ins completed.', category: 'streak' },
   { id: 'streak_14', title: '14-day streak', description: '14 days in a row of check-ins completed.', category: 'streak' },
   { id: 'streak_30', title: '30-day streak', description: '30 days in a row of check-ins completed.', category: 'streak' },
-  { id: 'loyalty_1', title: '30 days with coach', description: "You've been with your coach for 30 days.", category: 'loyalty' },
-  { id: 'loyalty_2', title: '60 days with coach', description: "You've been with your coach for 60 days.", category: 'loyalty' },
-  { id: 'loyalty_3', title: '90 days with coach', description: "You've been with your coach for 90 days.", category: 'loyalty' },
-  { id: 'loyalty_6', title: '180 days with coach', description: "You've been with your coach for 180 days.", category: 'loyalty' },
-  { id: 'loyalty_12', title: '12 months with coach', description: "You've been with your coach for 12 months.", category: 'loyalty' },
-  { id: 'time_4', title: '4 weeks with coach', description: "You've been with your coach for 4 weeks.", category: 'time' },
-  { id: 'time_12', title: '12 weeks with coach', description: "You've been with your coach for 12 weeks.", category: 'time' },
-  { id: 'time_24', title: '24 weeks with coach', description: "You've been with your coach for 24 weeks.", category: 'time' },
-  { id: 'time_52', title: '52 weeks with coach', description: "You've been with your coach for a year.", category: 'time' },
+  { id: 'loyalty_1', title: '30 days with coach', description: "You've been with your coach for 30 days.", category: 'loyalty', coachLinked: true },
+  { id: 'loyalty_2', title: '60 days with coach', description: "You've been with your coach for 60 days.", category: 'loyalty', coachLinked: true },
+  { id: 'loyalty_3', title: '90 days with coach', description: "You've been with your coach for 90 days.", category: 'loyalty', coachLinked: true },
+  { id: 'loyalty_6', title: '180 days with coach', description: "You've been with your coach for 180 days.", category: 'loyalty', coachLinked: true },
+  { id: 'loyalty_12', title: '12 months with coach', description: "You've been with your coach for 12 months.", category: 'loyalty', coachLinked: true },
+  { id: 'time_4', title: '4 weeks with coach', description: "You've been with your coach for 4 weeks.", category: 'time', coachLinked: true },
+  { id: 'time_12', title: '12 weeks with coach', description: "You've been with your coach for 12 weeks.", category: 'time', coachLinked: true },
+  { id: 'time_24', title: '24 weeks with coach', description: "You've been with your coach for 24 weeks.", category: 'time', coachLinked: true },
+  { id: 'time_52', title: '52 weeks with coach', description: "You've been with your coach for a year.", category: 'time', coachLinked: true },
   { id: 'adherence_8_80', title: '8-week adherence streak', description: '8 consecutive weeks with 80%+ adherence.', category: 'adherence' },
 ];
 

@@ -344,7 +344,9 @@ export default function CompPrepHome() {
             </div>
             <ChevronRight size={20} style={{ color: colors.muted }} />
           </div>
-          <p className="text-xs mt-1 ml-9" style={{ color: colors.muted }}>Photos & videos, trainer review</p>
+          <p className="text-xs mt-1 ml-9" style={{ color: colors.muted }}>
+            {isPersonal(role) ? 'Photos & videos, self-review' : 'Photos & videos, trainer review'}
+          </p>
         </button>
       </div>
     </div>

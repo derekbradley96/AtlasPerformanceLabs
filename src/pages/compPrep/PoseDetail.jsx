@@ -144,7 +144,7 @@ export default function PoseDetail() {
             </div>
             <div className="min-w-0 flex-1">
               <h3 className="text-[15px] font-semibold mb-1" style={{ color: colors.text }}>
-                {"Coach's Verbal Cues"}
+                {role === 'personal' ? 'Verbal cues' : "Coach's Verbal Cues"}
               </h3>
               {usePresentationScript ? (
                 <p className="text-xs mb-2" style={{ color: colors.muted }}>

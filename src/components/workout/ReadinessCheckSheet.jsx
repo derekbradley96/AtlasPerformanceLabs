@@ -39,7 +39,7 @@ function Row({ label, value, onChange }) {
   );
 }
 
-export default function ReadinessCheckSheet({ open, saving = false, onSubmit, onSkip = null }) {
+export default function ReadinessCheckSheet({ open, saving = false, onSubmit, onSkip = null, coached = true }) {
   const [sleep, setSleep] = useState(null);
   const [energy, setEnergy] = useState(null);
   const [soreness, setSoreness] = useState(null);
@@ -74,10 +74,14 @@ export default function ReadinessCheckSheet({ open, saving = false, onSubmit, on
   const highAny = [sleep, energy, soreness].some((v) => v === 5);
   const note = useMemo(() => {
     if (!allDone) return '';
-    if (lowAll) return 'Your readiness is low today. Your coach can see this. Adjust weights if needed - there is no shame in that.';
+    if (lowAll) {
+      return coached
+        ? 'Your readiness is low today. Your coach can see this. Adjust weights if needed - there is no shame in that.'
+        : 'Your readiness is low today. Adjust weights if needed - there is no shame in that.';
+    }
     if (highAny) return "You're feeling great - go for it!";
     return '';
-  }, [allDone, lowAll, highAny]);
+  }, [allDone, lowAll, highAny, coached]);
 
   if (!open) return null;
 

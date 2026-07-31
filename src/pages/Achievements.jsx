@@ -1,10 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { isPersonal } from '@/lib/roles';
-import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
-import { PERSONAL_MARKETPLACE_SOURCE } from '@/lib/personalMarketplaceEntry';
 import { getAchievementsList, MILESTONE_DEFS } from '@/lib/milestonesStore';
 import { buildMilestoneProgress } from '@/lib/milestoneEngine';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
@@ -18,10 +15,10 @@ function formatDate(iso) {
 }
 
 export default function Achievements() {
-  const navigate = useNavigate();
-  const { user: authUser, effectiveRole, role, isDemoMode, clientLinkedRow, profile } = useAuth();
+  const { user: authUser, effectiveRole, role, clientLinkedRow, profile } = useAuth();
   const userId = authUser?.id;
   const rosterClientId = clientLinkedRow?.id ?? null;
+  const isPersonalRole = isPersonal(effectiveRole ?? role);
 
   // Milestone progress needs the TOTAL submitted count — the old list query was
   // limited to 10 rows, so every check-in milestone above 10 froze at 10/N.
@@ -45,7 +42,6 @@ export default function Achievements() {
 
   const byUser = true;
   const achievements = userId ? getAchievementsList(userId, { byUser }) : [];
-  const showFindCoach = isPersonal(effectiveRole ?? role);
   const streakDays = checkinCount;
 
   const createdSource = clientLinkedRow?.created_at ?? clientLinkedRow?.created_date ?? profile?.created_at;
@@ -77,7 +73,8 @@ export default function Achievements() {
   });
   const unlockedIds = new Set(achievements.map((a) => a.milestoneId));
   const unlocked = achievements;
-  const locked = MILESTONE_DEFS.filter((d) => !unlockedIds.has(d.id));
+  // Personal users built their own plan — "time with coach" goals don't apply to them.
+  const locked = MILESTONE_DEFS.filter((d) => !unlockedIds.has(d.id) && !(isPersonalRole && d.coachLinked));
   const progressByMilestone = useMemo(
     () =>
       buildMilestoneProgress({
@@ -109,24 +106,6 @@ export default function Achievements() {
           <p className="text-sm mt-2" style={{ color: colors.muted }}>
             Complete check-ins and hit goals to unlock achievements.
           </p>
-          {showFindCoach && (
-            <p className="text-sm mt-4" style={{ color: colors.muted }}>
-              Want a program built for you?{' '}
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(
-                    buildPersonalCoachTierSelectionUrl({
-                      source: PERSONAL_MARKETPLACE_SOURCE.FROM_GENERAL_DISCOVERY,
-                    })
-                  )
-                }
-                style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
-              >
-                Find a coach
-              </button>
-            </p>
-          )}
         </Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing[12] }}>
@@ -170,24 +149,6 @@ export default function Achievements() {
               </Card>
             );
           })}
-          {showFindCoach && (
-            <p className="text-sm text-center mt-4" style={{ color: colors.muted }}>
-              Want to level up with a coach?{' '}
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(
-                    buildPersonalCoachTierSelectionUrl({
-                      source: PERSONAL_MARKETPLACE_SOURCE.FROM_GENERAL_DISCOVERY,
-                    })
-                  )
-                }
-                style={{ background: 'none', border: 'none', padding: 0, color: colors.primary, fontWeight: 500, cursor: 'pointer', textDecoration: 'underline' }}
-              >
-                Find a coach
-              </button>
-            </p>
-          )}
         </div>
       )}
     </div>

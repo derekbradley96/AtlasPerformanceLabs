@@ -129,14 +129,17 @@ export default function AchievementUnlockedModal({
   const description = record.description ?? def?.description ?? '';
   const statImprovement = record.statImprovement;
   const coachDisplay = coachName?.trim() || 'Your coach';
+  const hasCoach = Boolean(coachName?.trim() || clientId);
   const milestoneDescription = title;
   const firstName = (clientFirstName || 'You').trim();
   const referral = (coachReferralLink || '').trim();
-  const shareLine = `Just hit a new milestone with Atlas — ${milestoneDescription}! Coached by ${coachDisplay}.${referral ? ` ${referral}` : ''}`;
+  const shareLine = `Just hit a new milestone with Atlas — ${milestoneDescription}!${coachName?.trim() ? ` Coached by ${coachDisplay}.` : ''}${referral ? ` ${referral}` : ''}`;
   const significant = isSignificantShareableMilestone(record.milestoneId);
   const celebrationLine =
     (coachMilestoneNote && String(coachMilestoneNote).trim()) ||
-    `${coachDisplay} will see this achievement in their weekly briefing.`;
+    (hasCoach
+      ? `${coachDisplay} will see this achievement in their weekly briefing.`
+      : 'Logged to your milestones — see your full journey in Progress.');
 
   const onShareAchievement = async () => {
     if (sharing) return;

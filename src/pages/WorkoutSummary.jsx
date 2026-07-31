@@ -413,7 +413,9 @@ export default function WorkoutSummary() {
             </p>
             {(Number(session?.readiness_sleep) <= 3 && Number(session?.readiness_energy) <= 3 && Number(session?.readiness_soreness) <= 3) ? (
               <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.warning }}>
-                Low readiness today - the coach can see this alongside your performance.
+                {session?.client_id
+                  ? 'Low readiness today - the coach can see this alongside your performance.'
+                  : 'Low readiness today — no shame in going lighter.'}
               </p>
             ) : null}
           </div>
@@ -421,7 +423,7 @@ export default function WorkoutSummary() {
 
         {exerciseNotes.length > 0 ? (
           <div style={{ ...cardStyle, marginTop: spacing[12] }}>
-            <p style={{ ...labelStyle, marginBottom: spacing[6] }}>Session note from client</p>
+            <p style={{ ...labelStyle, marginBottom: spacing[6] }}>Your session notes</p>
             {exerciseNotes.map((n) => (
               <blockquote key={n.id} style={{ margin: `${spacing[6]}px 0 0`, paddingLeft: spacing[10], borderLeft: `3px solid ${colors.border}`, color: colors.text }}>
                 {n.note}

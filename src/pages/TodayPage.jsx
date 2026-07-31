@@ -1,15 +1,14 @@
 /**
  * Client / Personal Today: hero, nutrition, habits, weight — data from `useTodayPageData`
  * (batched `fetchTodayPageV2Bundle`). Session logging lives in the Workout Player.
- * Extra `useQuery` here only when data is not in the V2 bundle (e.g. gated coach previews).
  */
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/AuthContext';
 import { isClient } from '@/lib/roles';
 import { scheduleWorkoutReminderIfNeeded } from '@/lib/workoutReminder';
-import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
+import { getSupabase } from '@/lib/supabaseClient';
 import { getLocalDateKey } from '@/lib/readinessCheckinApi';
 import { colors, shell, spacing, radii } from '@/ui/tokens';
 import { standardCard } from '@/ui/pageLayout';
@@ -19,15 +18,12 @@ import Button from '@/ui/Button';
 import { toast } from 'sonner';
 import { PageLoader } from '@/components/ui/LoadingState';
 import TodayWorkoutHeroCard from '@/components/workout/TodayWorkoutHeroCard';
-import { shouldShowCoachDiscovery } from '@/lib/coachDiscoveryPrompt';
-import { fetchCompetitionCoachPreviews } from '@/lib/coachMarketplacePreview';
 import { getContextualGuidance } from '@/lib/contextualGuidance';
 import { interpretWeightProgress, clientGoalFromGoalsField } from '@/lib/progressInterpretation';
 import { calculateWeeklyScore } from '@/lib/weeklyEffortScore';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
 import { calculatePrepProgress } from '@/lib/prepProgressTracking';
-import { shouldShowCoachUpsell } from '@/lib/coachUpsellTiming';
 import { getPersonalGoalBucketFromProfile, personalHomeTrainingCardCopy } from '@/lib/personalGoalCopy';
 import { useTodayPageData } from '@/hooks/useTodayPageData';
 import { listPersonalMealLogs } from '@/lib/personalNutritionStore';
@@ -583,43 +579,6 @@ function PersonalTransformToday({ data, isDesktopWeb }) {
       ) : (
         rightColumn
       )}
-      {data.showCoachUpsellCard ? (
-        <Card style={baseCardStyle(colors.primary)}>
-          <SectionTitle>Find a coach</SectionTitle>
-          <p style={{ margin: 0, fontSize: 13, color: colors.text }}>
-            You have been consistent for 8+ weeks with visible progress — a coach can help you push the next phase.
-          </p>
-          {Array.isArray(data.coachUpsellPreview) && data.coachUpsellPreview.length > 0 ? (
-            <div style={{ display: 'grid', gap: spacing[8], marginTop: spacing[10] }}>
-              {data.coachUpsellPreview.map((row) => (
-                <button
-                  key={row.id || row.coach_id}
-                  type="button"
-                  onClick={() => navigate(row.slug ? `/coach/${encodeURIComponent(row.slug)}` : '/discover')}
-                  style={{
-                    textAlign: 'left',
-                    padding: spacing[12],
-                    borderRadius: radii.card,
-                    border: `1px solid ${colors.border}`,
-                    background: colors.surface2,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>
-                    {row.display_name || row.profile?.full_name || 'Coach'}
-                  </p>
-                  {row.pricing_summary ? (
-                    <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>{row.pricing_summary}</p>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <Button type="button" onClick={() => navigate('/discover')} style={{ marginTop: spacing[10] }}>
-            Browse marketplace →
-          </Button>
-        </Card>
-      ) : null}
     </div>
   );
 }
@@ -676,15 +635,6 @@ function PersonalCompToday({ data }) {
           </button>
         </div>
       </Card>
-      {data.showCoachDiscovery ? (
-        <Card style={baseCardStyle()}>
-          <SectionTitle>Find a coach</SectionTitle>
-          <p style={{ margin: 0, fontSize: 13, color: colors.text }}>You are in the 6-10 week window — explore prep coaches for peak support.</p>
-          <Button type="button" onClick={() => navigate('/discover?type=competition')} style={{ marginTop: spacing[10] }}>
-            Explore coaches →
-          </Button>
-        </Card>
-      ) : null}
     </div>
   );
 }
@@ -726,24 +676,6 @@ export default function TodayPage() {
   const coachMeta = todayBundle?.coachMeta ?? null;
   const mealTotalsToday = todayBundle?.mealTotalsToday ?? null;
   const clientCheckinsCount = todayBundle?.clientCheckinsCount ?? 0;
-  const personalWorkoutsCompleted = todayBundle?.personalWorkoutsCompleted ?? 0;
-
-  const weightChangeLast8Weeks = useMemo(() => {
-    if (!weightRows.length) return 0;
-    const cur = Number(weightRows[0]?.weight);
-    const idx = Math.min(weightRows.length - 1, 7);
-    const older = Number(weightRows[idx]?.weight);
-    if (!Number.isFinite(cur) || !Number.isFinite(older)) return 0;
-    return cur - older;
-  }, [weightRows]);
-
-  const joinedWeeksAgo = useMemo(() => {
-    const c = authProfile?.created_at || profile?.created_at;
-    if (!c) return 0;
-    const t = new Date(c).getTime();
-    if (!Number.isFinite(t)) return 0;
-    return Math.floor((Date.now() - t) / 604800000);
-  }, [authProfile?.created_at, profile?.created_at]);
 
   const prepProgress = useMemo(() => {
     if (isPersonalRole || !activeContestPrep) return null;
@@ -767,42 +699,6 @@ export default function TodayPage() {
       showDate,
     });
   }, [isPersonalRole, activeContestPrep, weightRows]);
-
-  const showCoachUpsellCard = useMemo(
-    () =>
-      isPersonalRole
-      && variant === 'personal_transform'
-      && !hasCompetitionPrep
-      && shouldShowCoachUpsell({
-        joinedWeeksAgo,
-        workoutsCompleted: personalWorkoutsCompleted,
-        weightChangeKg: weightChangeLast8Weeks,
-        hasSeenUpsell: !!authProfile?.coach_upsell_seen_at,
-        hasCoach: Boolean(authProfile?.trainer_id || authProfile?.coach_id),
-        clientGoal: authProfile?.goal || authProfile?.personal_goal,
-      }),
-    [
-      isPersonalRole,
-      variant,
-      hasCompetitionPrep,
-      joinedWeeksAgo,
-      personalWorkoutsCompleted,
-      weightChangeLast8Weeks,
-      authProfile?.coach_upsell_seen_at,
-      authProfile?.trainer_id,
-      authProfile?.coach_id,
-      authProfile?.goal,
-      authProfile?.personal_goal,
-    ],
-  );
-
-  const { data: coachUpsellPreview = [] } = useQuery({
-    // Kept: not in V2 bundle — marketplace coach previews only when upsell card is shown.
-    queryKey: ['today-coach-upsell-preview', userId],
-    queryFn: () => fetchCompetitionCoachPreviews(getSupabase(), authProfile?.division || 'bikini'),
-    enabled: Boolean(hasSupabase && userId && showCoachUpsellCard),
-    staleTime: 300_000,
-  });
 
   const showFirstCheckInPrompt = useMemo(() => {
     if (isPersonalRole) return false;
@@ -1026,7 +922,7 @@ export default function TodayPage() {
       setWeightSheetOpen(false);
       setWeightInput('');
       toast.success('Weight logged');
-    } catch (_) {
+    } catch {
       toast.error('Couldn\'t save — try again');
     }
   }
@@ -1085,11 +981,8 @@ export default function TodayPage() {
     conditioningLine: '~8 weeks of cutting remaining at current pace — on a healthy deficit',
     division: prepContext?.division || activeContestPrep?.division || null,
     lastPoseScore: '6.8/10',
-    showCoachDiscovery: shouldShowCoachDiscovery({ weeksOut: prepContext?.weeksOut || null, hasCoach: Boolean(profile?.trainer_id || profile?.coach_id), hasSeenPrompt: Boolean(profile?.coach_discovery_prompt_seen_at) }),
     prepProgress,
     showFirstCheckInPrompt,
-    showCoachUpsellCard,
-    coachUpsellPreview: Array.isArray(coachUpsellPreview) ? coachUpsellPreview.slice(0, 2) : [],
   };
 
   return (

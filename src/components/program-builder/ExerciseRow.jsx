@@ -638,7 +638,7 @@ function ExerciseRowInner({
                     {prescribedWeight != null ? (
                       prescribedWeight < lastWeight ? (
                         <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: '#b67a2a' }}>
-                          ⚠ Target is below their last logged weight
+                          ⚠ Target is below {isPersonalBasic || isPersonalEnhanced ? 'your' : 'their'} last logged weight
                         </p>
                       ) : prescribedWeight > lastWeight ? (
                         <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: colors.success }}>

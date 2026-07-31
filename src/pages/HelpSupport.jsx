@@ -5,11 +5,11 @@ import { resolveCoachPlanTier, isEliteTier } from '@/config/plans';
 import { ArrowLeft, Mail, Book, MessageSquare, ExternalLink, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { isCoach } from '@/lib/roles';
+import { isCoach, isPersonal } from '@/lib/roles';
 
 export default function HelpSupport() {
   const navigate = useNavigate();
-  const { user: authUser, profile, coachBrand, isDemoMode, isLoadingAuth } = useAuth();
+  const { user: authUser, profile, coachBrand, isDemoMode, isLoadingAuth, effectiveRole, role } = useAuth();
   const [expandedFaq, setExpandedFaq] = useState(null);
   const displayUser = authUser;
 
@@ -63,6 +63,16 @@ export default function HelpSupport() {
     }
   ];
 
+  // Personal (self-coached) users built their own plan — swap the trainer-funnel
+  // FAQ for a self-serve one; the rest of the client answers still apply.
+  const personalFaqs = [
+    {
+      q: 'How do I edit my plan?',
+      a: 'Open My programme from Home, tap any day to edit exercises, sets, and targets.'
+    },
+    ...clientFaqs.slice(1)
+  ];
+
   const trainerFaqs = [
     {
       q: 'How do I share my invite code with clients?',
@@ -90,7 +100,11 @@ export default function HelpSupport() {
     }
   ];
 
-  const faqs = isCoach(displayUser?.user_type ?? displayUser?.role) ? trainerFaqs : clientFaqs;
+  const faqs = isCoach(displayUser?.user_type ?? displayUser?.role)
+    ? trainerFaqs
+    : isPersonal(effectiveRole ?? role)
+      ? personalFaqs
+      : clientFaqs;
   const coachPlanTier = resolveCoachPlanTier(profile, authUser);
   const eliteCoachSupport =
     isCoach(displayUser?.user_type ?? displayUser?.role) && isEliteTier(coachPlanTier);

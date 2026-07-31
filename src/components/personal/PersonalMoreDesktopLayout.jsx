@@ -9,13 +9,10 @@ import {
   Trophy,
   Target,
   Users,
-  KeyRound,
   ChevronRight,
 } from 'lucide-react';
 import Card from '@/ui/Card';
 import { colors, spacing, radii, shell, touchTargetMin } from '@/ui/tokens';
-import { PERSONAL_MARKETPLACE_SOURCE } from '@/lib/personalMarketplaceEntry';
-import { buildPersonalCoachTierSelectionUrl } from '@/lib/marketplaceScreenState';
 
 const SIDEBAR_WIDTH = 240;
 
@@ -100,7 +97,6 @@ export default function PersonalMoreDesktopLayout({
   previewIdentityLine,
   previewModeActive,
   navigate,
-  onOpenConsultation,
   onLogout,
 }) {
   const [activeNav, setActiveNav] = useState('profile');
@@ -257,76 +253,17 @@ export default function PersonalMoreDesktopLayout({
           </Card>
         </section>
 
-        {/* Coaching — priority */}
+        {/* Coaching */}
         <section id="more-desktop-coaching" style={{ scrollMarginTop: spacing[16] }}>
           <SectionTitle>Coaching</SectionTitle>
-          <Card
-            style={{
-              padding: spacing[24],
-              marginBottom: spacing[28],
-              border: `1px solid rgba(37, 99, 235, 0.35)`,
-              background: `linear-gradient(145deg, ${colors.surface1} 0%, rgba(37, 99, 235, 0.08) 100%)`,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-            }}
-          >
-            <h3 className="text-lg font-bold m-0 mb-2" style={{ color: colors.text }}>
-              Work with a coach
-            </h3>
-            <p className="text-sm m-0 mb-5 leading-relaxed max-w-xl" style={{ color: colors.muted }}>
-              Keep training solo or add a coach for more precision, accountability, and faster progress.
-            </p>
-            <div className="flex flex-wrap gap-3 items-center">
-              <button
-                type="button"
-                onClick={() =>
-                  navigate(
-                    buildPersonalCoachTierSelectionUrl({
-                      source: PERSONAL_MARKETPLACE_SOURCE.FROM_GENERAL_DISCOVERY,
-                    })
-                  )
-                }
-                style={{
-                  minHeight: touchTargetMin,
-                  padding: '0 20px',
-                  borderRadius: radii.button,
-                  border: 'none',
-                  background: colors.primary,
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                }}
-              >
-                Browse coaches
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/enterinvitecode')}
-                style={{
-                  minHeight: touchTargetMin,
-                  padding: '0 18px',
-                  borderRadius: radii.button,
-                  border: `1px solid ${shell.cardBorder}`,
-                  background: colors.surface2,
-                  color: colors.text,
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                }}
-              >
-                <KeyRound size={16} className="inline mr-2" style={{ verticalAlign: 'middle' }} />
-                Enter invite code
-              </button>
-              <button
-                type="button"
-                onClick={onOpenConsultation}
-                className="text-sm font-semibold underline-offset-4 hover:underline"
-                style={{ color: colors.muted, background: 'none', border: 'none', cursor: 'pointer', padding: '8px 4px' }}
-              >
-                Request consultation
-              </button>
-            </div>
-          </Card>
+          <div className="grid gap-4 md:gap-6 mb-8" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+            <SettingsCard
+              title="Work with a coach"
+              description="Browse coaches and matching"
+              icon={Users}
+              onClick={() => navigate('/personal/coach-transition')}
+            />
+          </div>
         </section>
 
         {/* Account */}

@@ -4,7 +4,6 @@
  */
 // TODO(refactor): Extract useProgressData hook.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import PillarRating from '@/components/marketplace/PillarRating';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -74,14 +73,9 @@ import {
   getPersonalProgressEmptySurfaceCopy,
 } from '@/lib/personalScreenMatrix';
 import { syncAthleteDevelopmentScore } from '@/lib/athleteDevelopmentScore';
-import { getMyClientProfile } from '@/lib/clientProfiles';
-import { fetchActivePersonalContestPrep } from '@/lib/personalContestPrepApi';
-import { getWeeksOutFromShow } from '@/lib/prepProtocols';
 import { getCoachClientJoinLinkPrimary } from '@/lib/referrals';
 import { sharePlainText } from '@/lib/nativeShare';
 import { inferWeightPhases, buildWeightInterpretation } from '@/lib/progressTrendEngine';
-import { shouldShowCoachUpsell } from '@/lib/coachUpsellTiming';
-import { fetchCoachUpsellPreviewRows } from '@/lib/coachUpsellPreview';
 
 const PAGE_PADDING = { paddingLeft: shell.pagePaddingH, paddingRight: shell.pagePaddingH };
 
@@ -217,7 +211,7 @@ export default function ProgressPage() {
   const { id: clientIdParam } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, profile, effectiveRole, coachFocus, refreshProfile } = useAuth();
+  const { user, profile, effectiveRole, coachFocus } = useAuth();
   const { isWideWeb } = usePresentationMode();
   const rhythm = desktopRhythm(isWideWeb);
   const supabase = hasSupabase ? getSupabase() : null;
@@ -304,69 +298,6 @@ export default function ProgressPage() {
     enabled: Boolean(supabase && user?.id && isPersonalView),
   });
   const personalDashResolved = personalDash ?? EMPTY_PERSONAL_PROGRESS_DASHBOARD;
-
-  const { data: activePersonalPrep } = useQuery({
-    queryKey: ['personal-contest-prep-active', user?.id],
-    queryFn: () => fetchActivePersonalContestPrep(user.id),
-    enabled: Boolean(supabase && user?.id && isPersonalView),
-  });
-
-  const { data: personalLinkedClient } = useQuery({
-    queryKey: ['personal-linked-client-progress', user?.id],
-    queryFn: () => getMyClientProfile(user.id),
-    enabled: Boolean(supabase && user?.id && isPersonalView),
-  });
-
-  const showPeakCoachUpsell = useMemo(() => {
-    if (!isPersonalView || !personalDash || !profile) return false;
-    const joinedWeeksAgo = profile.created_at
-      ? Math.floor((Date.now() - new Date(profile.created_at).getTime()) / (7 * 24 * 60 * 60 * 1000))
-      : 0;
-    const ws = personalDash.weightSeries;
-    let weightChangeKg = 0;
-    if (Array.isArray(ws) && ws.length >= 2) {
-      const sorted = [...ws].sort((a, b) => new Date(a.iso || a.at) - new Date(b.iso || b.at));
-      weightChangeKg = Number(sorted[sorted.length - 1]?.weight) - Number(sorted[0]?.weight);
-    }
-    return shouldShowCoachUpsell({
-      joinedWeeksAgo,
-      workoutsCompleted: Number(personalDash.completedAllTime ?? personalDash.completedLast28d ?? 0),
-      weightChangeKg,
-      hasSeenUpsell: Boolean(profile.coach_upsell_seen_at),
-      hasCoach: Boolean(personalLinkedClient?.coach_id || personalLinkedClient?.trainer_id),
-      clientGoal: profile.goal || profile.personal_goal || '',
-    });
-  }, [isPersonalView, personalDash, profile, personalLinkedClient]);
-
-  const { data: coachUpsellPreview = [] } = useQuery({
-    queryKey: ['coach-upsell-preview-rows', user?.id, profile?.goal, profile?.personal_goal],
-    queryFn: () => fetchCoachUpsellPreviewRows(supabase, profile?.goal || profile?.personal_goal || ''),
-    enabled: Boolean(supabase && user?.id && isPersonalView && showPeakCoachUpsell),
-  });
-
-  const todayYmdProgress = useMemo(() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }, []);
-
-  const personalPrepWeeksOut = useMemo(() => {
-    if (!activePersonalPrep?.show_date) return null;
-    return getWeeksOutFromShow(activePersonalPrep, todayYmdProgress);
-  }, [activePersonalPrep, todayYmdProgress]);
-
-  const showSoloDismissedCoachCta = Boolean(
-    isPersonalView
-    && activePersonalPrep?.id
-    && profile?.coach_discovery_prompt_seen_at
-    && !personalLinkedClient?.coach_id
-    && !personalLinkedClient?.trainer_id
-    && personalPrepWeeksOut != null
-    && personalPrepWeeksOut >= 6
-    && personalPrepWeeksOut <= 10,
-  );
 
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ['v_client_progress_metrics', clientId],
@@ -1262,185 +1193,6 @@ export default function ProgressPage() {
               </div>
             </Card>
           </section>
-
-          {showPeakCoachUpsell ? (
-            <section style={{ marginBottom: rhythm.section }}>
-              <Card
-                style={{
-                  padding: rhythm.cardPadding,
-                  boxShadow: supportCardShadow,
-                  border: `1px solid ${colors.primary}44`,
-                  background: `linear-gradient(160deg, rgba(59,130,246,0.2) 0%, ${colors.surface1} 50%, ${colors.card} 100%)`,
-                }}
-              >
-                <p style={{ margin: 0, fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                  Ready to go further?
-                </p>
-                {(() => {
-                  const g = String(profile?.goal || profile?.personal_goal || '').toLowerCase();
-                  const isLose = g.includes('lose') || g.includes('fat') || g.includes('cut');
-                  const ws = dash.weightSeries || [];
-                  let weightChangeKg = 0;
-                  if (ws.length >= 2) {
-                    const sorted = [...ws].sort((a, b) => new Date(a.iso || a.at) - new Date(b.iso || b.at));
-                    weightChangeKg = Number(sorted[sorted.length - 1]?.weight) - Number(sorted[0]?.weight);
-                  }
-                  const absKg = Math.abs(weightChangeKg);
-                  const joinedWeeksAgo = profile?.created_at
-                    ? Math.floor((Date.now() - new Date(profile.created_at).getTime()) / (7 * 24 * 60 * 60 * 1000))
-                    : 0;
-                  const goalParam =
-                    isLose ? 'lose_fat' : g.includes('build') || g.includes('muscle') ? 'build_muscle' : 'lose_fat';
-                  const markSeen = async () => {
-                    if (!supabase || !user?.id) return;
-                    await supabase.from('profiles').update({ coach_upsell_seen_at: new Date().toISOString() }).eq('id', user.id);
-                    await refreshProfile?.();
-                  };
-                  return (
-                    <>
-                      <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 16, fontWeight: 800, color: colors.text, lineHeight: 1.35 }}>
-                        You&apos;ve {isLose ? `lost ${absKg.toFixed(1)} kg` : `gained ${absKg.toFixed(1)} kg`} in{' '}
-                        {joinedWeeksAgo || 'several'} weeks on your own. That&apos;s real progress.
-                      </p>
-                      <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.55 }}>
-                        Coaches using Atlas typically help clients move faster with less guesswork — accountability, form
-                        feedback, and a programme built around you.
-                      </p>
-                      <p style={{ margin: `${spacing[12]}px 0 0`, fontSize: 12, fontWeight: 700, color: colors.text }}>
-                        Coaches matched to your goal
-                      </p>
-                      <div style={{ marginTop: spacing[10], display: 'grid', gap: spacing[10] }}>
-                        {coachUpsellPreview.map((row) => (
-                          <button
-                            key={row.id}
-                            type="button"
-                            onClick={() => {
-                              void markSeen();
-                              if (row.slug?.trim()) navigate(`/marketplace/coach/${encodeURIComponent(row.slug.trim())}`);
-                              else navigate(`/discover?goal=${encodeURIComponent(goalParam)}`);
-                            }}
-                            style={{
-                              display: 'flex',
-                              gap: spacing[10],
-                              alignItems: 'center',
-                              textAlign: 'left',
-                              border: `1px solid ${shell.cardBorder}`,
-                              borderRadius: radii.card,
-                              padding: spacing[10],
-                              background: colors.surface1,
-                              color: colors.text,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            {row.avatar_url ? (
-                              <img src={row.avatar_url} alt="" style={{ width: 44, height: 44, borderRadius: 12, objectFit: 'cover' }} />
-                            ) : (
-                              <div style={{ width: 44, height: 44, borderRadius: 12, background: colors.surface2 }} />
-                            )}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
-                                {row.display_name || row.full_name || 'Coach'}
-                              </p>
-                              <div style={{ marginTop: 4 }}>
-                                <PillarRating
-                                  pillars={row.avg_pillars}
-                                  reviewCount={row.avg_pillars != null ? Math.max(Number(row.review_count) || 0, 1) : 0}
-                                  size="sm"
-                                  showNumber
-                                />
-                              </div>
-                              {row.pricing_summary ? (
-                                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>{row.pricing_summary}</p>
-                              ) : null}
-                              {row.headline ? (
-                                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.textSecondary, lineHeight: 1.4 }}>
-                                  {row.headline}
-                                </p>
-                              ) : null}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await markSeen();
-                          navigate(`/discover?goal=${encodeURIComponent(goalParam)}`);
-                        }}
-                        style={{
-                          marginTop: spacing[14],
-                          width: '100%',
-                          minHeight: touchTargetMin,
-                          borderRadius: radii.button,
-                          border: 'none',
-                          background: colors.primary,
-                          color: '#fff',
-                          fontSize: 15,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Explore coaches
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void markSeen()}
-                        style={{
-                          marginTop: spacing[8],
-                          width: '100%',
-                          border: 'none',
-                          background: 'transparent',
-                          color: colors.muted,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Not now
-                      </button>
-                      <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 11, color: colors.muted, lineHeight: 1.45 }}>
-                        Your data and history stay with you whether or not you work with a coach. Your progress is yours.
-                      </p>
-                    </>
-                  );
-                })()}
-              </Card>
-            </section>
-          ) : null}
-
-          {showSoloDismissedCoachCta ? (
-            <section style={{ marginBottom: rhythm.section }}>
-              <Card style={{ padding: rhythm.cardPadding, border: `1px dashed ${colors.border}`, background: colors.surface1 }}>
-                <p style={{ margin: 0, fontSize: 14, color: colors.text, fontWeight: 600 }}>
-                  Want expert guidance for your show?
-                </p>
-                <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
-                  Browse competition prep coaches matched to your division.
-                </p>
-                <button
-                  type="button"
-                  onClick={() =>
-                    navigate(
-                      `/discover?type=competition&division=${encodeURIComponent(activePersonalPrep?.division || 'bikini')}`,
-                    )
-                  }
-                  style={{
-                    marginTop: spacing[12],
-                    border: 'none',
-                    background: colors.primary,
-                    color: '#fff',
-                    borderRadius: radii.button,
-                    padding: '10px 16px',
-                    fontSize: 14,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    minHeight: touchTargetMin,
-                  }}
-                >
-                  Browse competition prep coaches
-                </button>
-              </Card>
-            </section>
-          ) : null}
           </PersonalColumn>
         </div>
       </PersonalCanvas>

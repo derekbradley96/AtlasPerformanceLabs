@@ -1099,18 +1099,6 @@ export default function WorkoutPlayerPage() {
           onAction={() => navigate('/today')}
         />
       </div>
-      <ReadinessCheckSheet
-        open={readinessSheetOpen}
-        saving={readinessSaving}
-        onSubmit={handleReadinessSubmit}
-        onSkip={() => {
-          setReadinessSheetOpen(false);
-          if (pendingReadinessSessionId) {
-            setPendingReadinessSessionId(null);
-            setPhase('playing');
-          }
-        }}
-      />
       </>
     );
   }
@@ -2220,6 +2208,23 @@ export default function WorkoutPlayerPage() {
           </Card>
         </div>
       ) : null}
+      {/* Mounted in the MAIN render on purpose: "Open readiness check" and the
+          pre-start gate set readinessSheetOpen from here — the sheet's old home
+          inside the clientMode && !clientId error return was unreachable for
+          every normal client and personal user (dead button + Start hang). */}
+      <ReadinessCheckSheet
+        open={readinessSheetOpen}
+        saving={readinessSaving}
+        coached={Boolean(clientId)}
+        onSubmit={handleReadinessSubmit}
+        onSkip={() => {
+          setReadinessSheetOpen(false);
+          if (pendingReadinessSessionId) {
+            setPendingReadinessSessionId(null);
+            setPhase('playing');
+          }
+        }}
+      />
     </div>
   );
 }

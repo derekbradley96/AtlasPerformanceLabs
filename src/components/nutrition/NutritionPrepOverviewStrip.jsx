@@ -120,7 +120,7 @@ export default function NutritionPrepOverviewStrip({
         </span>
         <p style={{ margin: 0, fontSize: 13, color: colors.muted, lineHeight: 1.45 }}>
           <strong style={{ color: colors.text }}>Hydration:</strong> keep fluids steady through the day. Sodium targets stay in standard nutrition unless
-          you&apos;re on a prep-precision plan with your coach.
+          you&apos;re {isPersonal ? 'running a prep-precision plan' : 'on a prep-precision plan with your coach'}.
         </p>
       </div>
     </Card>

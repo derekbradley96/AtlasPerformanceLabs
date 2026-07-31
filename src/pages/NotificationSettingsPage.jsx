@@ -107,7 +107,7 @@ export default function NotificationSettingsPage() {
       <div style={{ marginBottom: spacing[8] }}>
         <p className="text-[13px]" style={{ color: colors.muted }}>
           {isPersonalUser
-            ? 'Reminders for your solo training. Connecting with a coach unlocks check-in, messaging, and payment alerts.'
+            ? 'Reminders for your solo training.'
             : 'Choose which notification types you want to receive.'}
         </p>
       </div>
