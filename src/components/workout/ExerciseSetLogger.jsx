@@ -283,14 +283,22 @@ export default function ExerciseSetLogger({
                 ) : active ? (
                   <div style={{ marginTop: spacing[6], display: 'grid', gap: spacing[8] }}>
                     <div style={{ display: 'grid', gridTemplateColumns: showPreviousSession ? '1fr 1fr 72px' : '1fr 1fr', gap: spacing[6] }}>
-                      <div style={{ display: 'flex', alignItems: 'stretch', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, overflow: 'hidden', minHeight: touchTargetMin }}>
-                        <button type="button" onPointerDown={(e) => { e.preventDefault(); const cur = parseFloat(draft.weight ?? suggestedWeight) || 0; syncDraft(setNumber, { weight: String(Math.max(0, Math.round((cur - 2.5) * 100) / 100) ) }); }} style={{ width: 34, background: 'transparent', border: 'none', borderRight: `1px solid ${colors.border}`, color: colors.muted, fontWeight: 700, fontSize: 18, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>−</button>
-                        <input value={draft.weight ?? suggestedWeight} onChange={(e) => syncDraft(setNumber, { weight: e.target.value })} placeholder={String(suggestedWeight || '')} style={{ scrollMarginBottom: 120, flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: colors.text, textAlign: 'center' }} />
-                        <button type="button" onPointerDown={(e) => { e.preventDefault(); const cur = parseFloat(draft.weight ?? suggestedWeight) || 0; syncDraft(setNumber, { weight: String(Math.round((cur + 2.5) * 100) / 100) }); }} style={{ width: 34, background: 'transparent', border: 'none', borderLeft: `1px solid ${colors.border}`, color: colors.muted, fontWeight: 700, fontSize: 18, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>+</button>
+                      <div>
+                        <p style={{ margin: `0 0 ${spacing[4]}px`, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.muted }}>Weight ({loadUnitShortLabel(viewerLoadUnit)})</p>
+                        <div style={{ display: 'flex', alignItems: 'stretch', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, overflow: 'hidden', minHeight: touchTargetMin }}>
+                          <button type="button" onPointerDown={(e) => { e.preventDefault(); const cur = parseFloat(draft.weight ?? suggestedWeight) || 0; syncDraft(setNumber, { weight: String(Math.max(0, Math.round((cur - 2.5) * 100) / 100) ) }); }} style={{ width: 34, background: 'transparent', border: 'none', borderRight: `1px solid ${colors.border}`, color: colors.muted, fontWeight: 700, fontSize: 18, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>−</button>
+                          <input inputMode="decimal" value={draft.weight ?? suggestedWeight} onChange={(e) => syncDraft(setNumber, { weight: e.target.value })} placeholder="0" style={{ scrollMarginBottom: 120, flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: colors.text, textAlign: 'center' }} />
+                          <button type="button" onPointerDown={(e) => { e.preventDefault(); const cur = parseFloat(draft.weight ?? suggestedWeight) || 0; syncDraft(setNumber, { weight: String(Math.round((cur + 2.5) * 100) / 100) }); }} style={{ width: 34, background: 'transparent', border: 'none', borderLeft: `1px solid ${colors.border}`, color: colors.muted, fontWeight: 700, fontSize: 18, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>+</button>
+                        </div>
                       </div>
-                      <input value={draft.reps ?? suggestedReps} onChange={(e) => syncDraft(setNumber, { reps: e.target.value.replace(/[^0-9]/g, '') })} placeholder={String(suggestedReps || '')} style={{ scrollMarginBottom: 120, minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, textAlign: 'center' }} />
+                      <div>
+                        <p style={{ margin: `0 0 ${spacing[4]}px`, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.muted }}>Reps</p>
+                        <input inputMode="numeric" value={draft.reps ?? suggestedReps} onChange={(e) => syncDraft(setNumber, { reps: e.target.value.replace(/[^0-9]/g, '') })} placeholder={String(suggestedReps || '')} style={{ scrollMarginBottom: 120, width: '100%', boxSizing: 'border-box', minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, textAlign: 'center' }} />
+                      </div>
                       {showPreviousSession ? (
-                        <div style={{ display: 'grid', alignItems: 'center', justifyItems: 'center', borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.muted, fontSize: 10 }}>
+                        <div>
+                        <p style={{ margin: `0 0 ${spacing[4]}px`, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.muted }}>Last time</p>
+                        <div style={{ display: 'grid', alignItems: 'center', justifyItems: 'center', minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.muted, fontSize: 10 }}>
                           {prevDisplay}
                           {deltaWeight > 0 ? (
                             <span style={{ color: colors.success, fontSize: 11 }}>
@@ -303,8 +311,10 @@ export default function ExerciseSetLogger({
                             </span>
                           ) : null}
                         </div>
+                        </div>
                       ) : null}
                     </div>
+                    <p style={{ margin: `${spacing[2]}px 0 0`, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.muted }}>RIR — reps left in the tank</p>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: spacing[6] }}>
                       {RIR_OPTIONS.map((r) => (
                         <button
@@ -368,40 +378,49 @@ export default function ExerciseSetLogger({
           </div>
         );
       })}
-      <div style={{ marginTop: spacing[6] }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[4] }}>
-          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 600 }}>{coached ? 'Note for your coach' : 'Session note'}</p>
-          <div style={{ display: 'flex', gap: spacing[4], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            {FLAG_QUICK_OPTIONS.map((opt) => (
+      <div style={{ marginTop: spacing[10], padding: spacing[10], borderRadius: radii.card, border: `1px solid ${colors.border}`, background: colors.surface1 }}>
+        <p style={{ margin: 0, fontSize: 12, color: colors.text, fontWeight: 700 }}>{coached ? 'Note for your coach' : 'Session note'}</p>
+        <div style={{ display: 'flex', gap: spacing[6], flexWrap: 'wrap', marginTop: spacing[8] }}>
+          {FLAG_QUICK_OPTIONS.map((opt) => {
+            const chipActive = exerciseNote.includes(opt.note);
+            return (
               <button
                 key={opt.label}
                 type="button"
                 onClick={() => {
-                  setExerciseNote(opt.note);
-                  saveExerciseNote(opt.note);
+                  // Chips prepend a flag — they must never wipe a note the
+                  // user typed themselves.
+                  const own = exerciseNote && !FLAG_QUICK_OPTIONS.some((o) => exerciseNote === o.note || exerciseNote.startsWith(`${o.note} — `))
+                    ? exerciseNote
+                    : exerciseNote.split(' — ').slice(1).join(' — ');
+                  const next = chipActive ? own : own ? `${opt.note} — ${own}` : opt.note;
+                  setExerciseNote(next);
+                  saveExerciseNote(next);
                 }}
                 style={{
-                  fontSize: 10,
-                  padding: `3px ${spacing[6]}px`,
+                  fontSize: 11,
+                  minHeight: 32,
+                  padding: `4px ${spacing[10]}px`,
                   borderRadius: 20,
-                  border: `1px solid ${exerciseNote === opt.note ? colors.warning : colors.border}`,
-                  background: exerciseNote === opt.note ? 'rgba(245,158,11,0.12)' : colors.surface2,
-                  color: exerciseNote === opt.note ? colors.warning : colors.muted,
+                  border: `1px solid ${chipActive ? colors.warning : colors.border}`,
+                  background: chipActive ? 'rgba(245,158,11,0.12)' : colors.surface2,
+                  color: chipActive ? colors.warning : colors.muted,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
               >
                 {opt.label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
+        <p style={{ margin: `${spacing[10]}px 0 ${spacing[4]}px`, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', color: colors.muted }}>Your own note</p>
         <input
           type="text"
           value={exerciseNote}
           onChange={(e) => setExerciseNote(e.target.value)}
           onBlur={saveExerciseNote}
-          placeholder="e.g. felt too heavy, left shoulder tight, easy today..."
+          placeholder="Type anything — how it felt, tweaks for next time…"
           style={{
             width: '100%',
             minHeight: touchTargetMin,

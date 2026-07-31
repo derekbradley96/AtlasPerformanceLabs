@@ -388,10 +388,29 @@ export default function WorkoutPlayerPage() {
     return Array.from(byKey.values());
   }, [sessionSets]);
 
-  const position = useMemo(
+  const autoPosition = useMemo(
     () => getNextPosition(exercisesForSession, dedupedSessionSets),
     [exercisesForSession, dedupedSessionSets]
   );
+
+  // Tapping an exercise chip jumps there (equipment taken, gym busy) — the
+  // override clears itself once that exercise's sets are done so the normal
+  // next-incomplete order resumes.
+  const [manualExerciseId, setManualExerciseId] = useState(null);
+  const position = useMemo(() => {
+    if (!autoPosition || !manualExerciseId) return autoPosition;
+    const idx = exercisesForSession.findIndex((e) => e.id === manualExerciseId);
+    if (idx < 0 || idx === autoPosition.exerciseIndex) return autoPosition;
+    const single = getNextPosition([exercisesForSession[idx]], dedupedSessionSets);
+    if (!single) return autoPosition;
+    return { ...single, exerciseIndex: idx };
+  }, [autoPosition, manualExerciseId, exercisesForSession, dedupedSessionSets]);
+
+  useEffect(() => {
+    if (!manualExerciseId) return;
+    const ex = exercisesForSession.find((e) => e.id === manualExerciseId);
+    if (!ex || !getNextPosition([ex], dedupedSessionSets)) setManualExerciseId(null);
+  }, [manualExerciseId, exercisesForSession, dedupedSessionSets]);
 
   const currentExercise = position != null ? exercisesForSession[position.exerciseIndex] : null;
   const currentSetNumber = position?.setNumber ?? 1;
@@ -1800,9 +1819,11 @@ export default function WorkoutPlayerPage() {
         {exercisesForSession.map((ex, i) => {
           const active = i === position.exerciseIndex;
           return (
-            <div
+            <button
               key={ex.id}
+              type="button"
               ref={active ? activeChipRef : undefined}
+              onClick={() => setManualExerciseId(ex.id)}
               style={{
                 flexShrink: 0,
                 maxWidth: 160,
@@ -1816,10 +1837,11 @@ export default function WorkoutPlayerPage() {
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
+                cursor: 'pointer',
               }}
             >
               {i + 1}. {ex.name || 'Exercise'}
-            </div>
+            </button>
           );
         })}
       </div>
