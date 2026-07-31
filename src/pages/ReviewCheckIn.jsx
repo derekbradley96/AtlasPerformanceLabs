@@ -202,7 +202,9 @@ export default function ReviewCheckIn() {
   // (name display) and must NOT gate — a failed client fetch left this on a
   // perpetual spinner, which the checkin_reviewed notification links clients into.
   if (!user || (checkInId && checkinLoading && !checkin)) return <PageLoader />;
-  if (checkInId && (checkinError || !checkin)) {
+  // No checkInId (bare /reviewcheckin — stale notification, hand-typed URL)
+  // must land here too: everything below dereferences `checkin` directly.
+  if (checkinError || !checkin) {
     return (
       <div className="min-h-[50vh] flex flex-col items-center justify-center px-6 text-center">
         <p className="text-[16px] font-semibold mb-2" style={{ color: 'var(--app-text, #fff)' }}>
