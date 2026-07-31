@@ -99,7 +99,12 @@ export async function getInProgressSession(opts = {}) {
   const key = getStorageSessionKey(opts.profileId || opts.clientId);
   try {
     const raw = sessionStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    // Mirror the server query's status filter: completeSession marks this
+    // stored record 'completed', and returning it anyway made the next day's
+    // workout reuse the finished session (sets piled up — "21 / 20 sets").
+    return session?.status === 'in_progress' ? session : null;
   } catch {
     return null;
   }

@@ -92,6 +92,9 @@ export default function ExerciseSetLogger({
   onCompleteWarmup,
   showPreviousSession = false,
   viewerLoadUnit = 'kg',
+  // Personal users built their own plan — coach vocabulary must not leak
+  // into their session (targets are just "targets", notes are their own).
+  coached = true,
 }) {
   const [exerciseNote, setExerciseNote] = useState('');
   const [savingSet, setSavingSet] = useState(false);
@@ -265,19 +268,17 @@ export default function ExerciseSetLogger({
         const selectedRir = draft.rir != null ? Number(draft.rir) : null;
         const caution = (selectedRir === 0 || selectedRir === 1) && idx < 2;
         return (
-          <div key={`set-log-${setNumber}`} style={{ border: `1px solid ${colors.border}`, borderRadius: radii.card, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-              <div style={{ padding: spacing[10], background: colors.surface2, borderRight: `1px solid ${colors.border}` }}>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: colors.muted }}>Set {setNumber} - Coach target</p>
-                <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, color: colors.text }}>
-                  {row?.weight_kg != null ? `${row.weight_kg}kg` : 'bodyweight'} · {row?.reps || exercise?.reps || '—'} reps · RIR {prescribedRir ?? '—'}
-                </p>
-              </div>
+          <div key={`set-log-${setNumber}`} style={{ border: `1px solid ${active ? colors.primary : colors.border}`, borderRadius: radii.card, overflow: 'hidden' }}>
               <div style={{ padding: spacing[10], background: colors.surface1 }}>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: colors.muted }}>Your log</p>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing[8] }}>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: active || completed ? colors.text : colors.muted }}>Set {setNumber}</p>
+                  <p style={{ margin: 0, fontSize: 12, color: colors.muted }}>
+                    {row?.weight_kg != null ? `${row.weight_kg}kg` : 'BW'} · {row?.reps || exercise?.reps || '—'} reps{prescribedRir != null ? ` · RIR ${prescribedRir}` : ''}
+                  </p>
+                </div>
                 {completed ? (
-                  <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 14, color: colors.text }}>
-                    {completedMap.get(setNumber)?.weight_done ?? '—'}kg · {completedMap.get(setNumber)?.reps_done ?? '—'} reps · RIR {completedMap.get(setNumber)?.rir_done ?? '—'}
+                  <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, fontWeight: 600, color: colors.success }}>
+                    ✓ {completedMap.get(setNumber)?.weight_done ?? '—'}kg × {completedMap.get(setNumber)?.reps_done ?? '—'} · RIR {completedMap.get(setNumber)?.rir_done ?? '—'}
                   </p>
                 ) : active ? (
                   <div style={{ marginTop: spacing[6], display: 'grid', gap: spacing[8] }}>
@@ -304,7 +305,6 @@ export default function ExerciseSetLogger({
                         </div>
                       ) : null}
                     </div>
-                    <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>Coach target: RIR {prescribedRir ?? '—'}</p>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: spacing[6] }}>
                       {RIR_OPTIONS.map((r) => (
                         <button
@@ -325,7 +325,7 @@ export default function ExerciseSetLogger({
                       ))}
                     </div>
                     {selectedRir != null ? <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>{rirLabel(selectedRir)}</p> : null}
-                    {caution ? <p style={{ margin: 0, fontSize: 11, color: colors.warning }}>This felt close to max - coach may adjust next session</p> : null}
+                    {caution ? <p style={{ margin: 0, fontSize: 11, color: colors.warning }}>{coached ? 'This felt close to max - coach may adjust next session' : 'Close to max this early - consider easing the next set'}</p> : null}
                     {(() => {
                       const currentWeightKg = parseFloat(draft.weight ?? suggestedWeight) || 0;
                       const platesOpen = platesOpenForSet === setNumber;
@@ -360,18 +360,17 @@ export default function ExerciseSetLogger({
                     </button>
                   </div>
                 ) : (
-                  <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>
-                    {warmupBlocking ? 'Complete warm-up sets first' : 'Complete previous sets first'}
+                  <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                    {warmupBlocking ? 'After warm-up sets' : 'After the set above'}
                   </p>
                 )}
               </div>
-            </div>
           </div>
         );
       })}
       <div style={{ marginTop: spacing[6] }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[4] }}>
-          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 600 }}>Note for your coach</p>
+          <p style={{ margin: 0, fontSize: 12, color: colors.muted, fontWeight: 600 }}>{coached ? 'Note for your coach' : 'Session note'}</p>
           <div style={{ display: 'flex', gap: spacing[4], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {FLAG_QUICK_OPTIONS.map((opt) => (
               <button
@@ -413,7 +412,7 @@ export default function ExerciseSetLogger({
             padding: `0 ${spacing[10]}px`,
           }}
         />
-        {exerciseNote.startsWith('[FLAG]') && (
+        {exerciseNote.startsWith('[FLAG]') && coached && (
           <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 11, color: colors.warning }}>
             Your coach will see this flag when they review your session.
           </p>

@@ -2047,9 +2047,10 @@ export default function WorkoutPlayerPage() {
                 />
               ) : null}
               <p style={{ fontSize: 12, color: colors.muted, fontWeight: 700, margin: `0 0 ${spacing[8]}px` }}>
-                {clientMode ? 'Coach target on the left, your log on the right.' : personalPlaySetHint(personalBasicWorkout)}
+                {clientMode ? 'Each set shows its target — log what you actually did.' : personalPlaySetHint(personalBasicWorkout)}
               </p>
               <ExerciseSetLogger
+                coached={clientMode}
                 exercise={currentExercise}
                 sessionId={sessionId}
                 sets={dedupedSessionSets}
