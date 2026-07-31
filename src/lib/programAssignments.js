@@ -223,12 +223,12 @@ export async function getTodaysProgramDay(supabase, week, date = new Date(), ass
  */
 export async function getAssignedWorkoutForToday(opts, asOf = new Date()) {
   const supabase = hasSupabase ? getSupabase() : null;
-  if (!supabase) return null;
-
   const { role, clientId, profileId } = opts || {};
   const isClient = role === 'client';
 
   if (isClient && clientId) {
+    // Client assignments live server-side only.
+    if (!supabase) return null;
     const active = await getActiveProgramAssignmentForClient(supabase, clientId);
     if (!active) return null;
     const { assignment, block } = active;
@@ -236,7 +236,10 @@ export async function getAssignedWorkoutForToday(opts, asOf = new Date()) {
   }
 
   if (role === 'personal' && profileId) {
-    const supaPersonal = await getActivePersonalProgramAssignment(supabase, profileId);
+    // The local programsStore fallback below must stay reachable without
+    // Supabase — an early `if (!supabase) return null` made locally
+    // assigned personal plans invisible to Today/home.
+    const supaPersonal = supabase ? await getActivePersonalProgramAssignment(supabase, profileId) : null;
     if (supaPersonal) {
       const { assignment, block } = supaPersonal;
       const resolved = await resolveWorkoutFromAssignment(supabase, assignment, block, asOf);
