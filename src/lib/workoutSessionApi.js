@@ -469,6 +469,70 @@ export async function getPreviousExercisePerformance(opts) {
 }
 
 /**
+ * Batched variant of getPreviousExercisePerformance for a whole day's exercises.
+ * Two requests total: one for recent session ids, one for all completed sets of the
+ * requested exercises across those sessions (grouped client-side to the same
+ * per-exercise shape getPreviousExercisePerformance returns — most recent session
+ * with completed sets per exercise).
+ * @param {{ clientId?: string | null, profileId?: string | null, exerciseIds?: string[], excludeSessionId?: string | null, limitSessions?: number }} opts
+ * @returns {Promise<Record<string, Record<number, { reps_done: number | null, weight_done: number | null, session_date: string | null }>>>}
+ */
+export async function getPreviousExercisePerformanceBatch(opts = {}) {
+  const supabase = getSupabase();
+  const { clientId, profileId, excludeSessionId, limitSessions = 40 } = opts;
+  const exerciseIds = Array.from(new Set((Array.isArray(opts.exerciseIds) ? opts.exerciseIds : []).filter(Boolean)));
+  if (!supabase || !exerciseIds.length) return {};
+  if (!clientId && !profileId) return {};
+
+  let q = supabase
+    .from('workout_sessions')
+    .select('id, completed_at')
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(Math.max(1, Number(limitSessions) || 40));
+  if (excludeSessionId) q = q.neq('id', excludeSessionId);
+  if (clientId) q = q.eq('client_id', clientId);
+  else q = q.eq('profile_id', profileId);
+
+  const { data: sessions, error: sErr } = await q;
+  if (sErr || !sessions?.length) return {};
+
+  const sessionIds = sessions.map((s) => s.id);
+  const completedAtById = new Map(sessions.map((s) => [s.id, s.completed_at || null]));
+  const orderById = new Map(sessionIds.map((id, i) => [id, i]));
+
+  const { data: rows, error } = await supabase
+    .from('workout_session_sets')
+    .select('session_id, exercise_id, set_number, reps_done, weight_done')
+    .in('session_id', sessionIds)
+    .in('exercise_id', exerciseIds)
+    .eq('completed', true);
+  if (error || !rows?.length) return {};
+
+  // Per exercise: pick the most recent session (lowest fetch order) that has completed sets.
+  const bestOrderByExercise = new Map();
+  for (const r of rows) {
+    const order = orderById.get(r.session_id);
+    if (order == null) continue;
+    const cur = bestOrderByExercise.get(r.exercise_id);
+    if (cur == null || order < cur) bestOrderByExercise.set(r.exercise_id, order);
+  }
+
+  const out = {};
+  for (const r of rows) {
+    const bestOrder = bestOrderByExercise.get(r.exercise_id);
+    if (bestOrder == null || orderById.get(r.session_id) !== bestOrder) continue;
+    const map = out[r.exercise_id] || (out[r.exercise_id] = {});
+    map[Number(r.set_number)] = {
+      reps_done: r.reps_done != null ? Number(r.reps_done) : null,
+      weight_done: r.weight_done != null ? Number(r.weight_done) : null,
+      session_date: completedAtById.get(r.session_id) || null,
+    };
+  }
+  return out;
+}
+
+/**
  * Latest logged performance by exercise name from a user's/ client's completed sessions.
  * Returns a normalized-name map:
  * { [exercise_name_lower_trim]: { weight: number|null, reps: number|null, date: string|null } }

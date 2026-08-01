@@ -75,6 +75,7 @@ import {
   fetchNextDayNumberForWeek,
 } from '@/lib/programBuilderApi';
 import { insertNotificationForRecipient } from '@/lib/notifications';
+import { friendlySupabaseError } from '@/lib/supabaseErrors';
 
 /** Loose UUID check — avoids toasting for junk `blockId=` query values. */
 function isLikelyProgramBlockUuid(id) {
@@ -589,7 +590,17 @@ export default function ProgramBuilderPage() {
     setQuickDaysPerWeekInput(String(quickDaysPerWeek));
   }, [quickDaysPerWeek]);
 
-  const refreshExerciseRankings = useCallback(async () => {
+  // Current exercises, readable without closing over the state. Keeping the
+  // ranking sweep's callback identity independent of `exercises` stops the
+  // effect below from re-running a full library sweep on every add; explicit
+  // invocations (picker open, deferred post-add) still see fresh names via
+  // this ref or by passing names in.
+  const exercisesRef = useRef(exercises);
+  useEffect(() => {
+    exercisesRef.current = exercises;
+  }, [exercises]);
+
+  const refreshExerciseRankings = useCallback(async (names) => {
     if (!coachId) return;
     await ensureAtlasExerciseLibrarySeeded();
     const filters = {
@@ -597,13 +608,28 @@ export default function ProgramBuilderPage() {
       primaryMuscle: libraryFilterMuscle || undefined,
       equipmentPrimary: libraryFilterEquipment || undefined,
     };
+    const sourceNames = Array.isArray(names)
+      ? names
+      : (exercisesRef.current || []).map((e) => e.exercise_name);
     const queries = [...new Set(
-      ['', ...exercises.map((e) => String(e.exercise_name || '').trim().toLowerCase()).filter(Boolean)]
+      ['', ...sourceNames.map((n) => String(n || '').trim().toLowerCase()).filter(Boolean)]
     )];
     const map = new Map();
     const byName = new Map();
-    for (const q of queries) {
-      const ranked = await searchAtlasExercises({ userId: coachId, query: q, limit: 20, filters });
+    // One search per distinct exercise name — run them CONCURRENTLY. The old
+    // serial loop meant 1 + N round trips (20+ lifts → 21 sequential queries)
+    // on every load and after every add; on a phone connection that took ages
+    // and individual statements hit the DB timeout.
+    const results = await Promise.all(
+      queries.map(async (q) => {
+        try {
+          return [q, await searchAtlasExercises({ userId: coachId, query: q, limit: 20, filters })];
+        } catch (_) {
+          return [q, []];
+        }
+      })
+    );
+    for (const [q, ranked] of results) {
       map.set(q, ranked);
       for (const item of ranked) {
         byName.set(String(item.name || '').toLowerCase(), item);
@@ -611,8 +637,11 @@ export default function ProgramBuilderPage() {
     }
     setRankedResultsByQuery(map);
     setLibraryByName(byName);
-  }, [coachId, exercises, libraryFilterMovement, libraryFilterMuscle, libraryFilterEquipment]);
+  }, [coachId, libraryFilterMovement, libraryFilterMuscle, libraryFilterEquipment]);
 
+  // Sweep only on mount, coach/block change, and filter changes (the filters
+  // are baked into refreshExerciseRankings' identity) — NOT on every
+  // `exercises` change.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -757,7 +786,7 @@ export default function ProgramBuilderPage() {
           })
           .filter((row) => !!row.exerciseId),
       });
-      await refreshExerciseRankings();
+      await refreshExerciseRankings(exercises.map((ex) => ex.exercise_name));
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[ProgramBuilder] trackUsageFromCurrentWeek (non-fatal)', e?.message || e);
     }
@@ -946,7 +975,7 @@ export default function ProgramBuilderPage() {
         }, 120);
       }
     } catch (e) {
-      toast.error(e?.message || 'Failed to save');
+      toast.error(friendlySupabaseError(e, 'Failed to save'));
     } finally {
       setSaving(false);
     }
@@ -980,7 +1009,7 @@ export default function ProgramBuilderPage() {
       setSelectedDayIndex(idx >= 0 ? idx : dList.length - 1);
       toast.success('Day added');
     } catch (e) {
-      toast.error(e?.message || 'Failed to add day');
+      toast.error(friendlySupabaseError(e, 'Failed to add day'));
     } finally {
       setSaving(false);
     }
@@ -1027,18 +1056,32 @@ export default function ProgramBuilderPage() {
       setExercises((ex) => [...ex, inserted]);
       rememberProgramBuilderExerciseDefaults({ sets: inserted?.sets, reps: inserted?.reps });
       pushRecentExerciseName(exerciseName);
-      await trackExerciseUsage({
-        userId: coachId,
-        exerciseId: matchedLibraryExercise?.id || inserted?.exercise_library_id || null,
-        sets: inserted?.sets ?? null,
-        reps: inserted?.reps ?? null,
-        restSeconds: inserted?.rest_seconds ?? null,
-      });
-      await refreshExerciseRankings();
       if (!silent) toast.success('Exercise added');
+      // Non-critical, AFTER the success toast — same rule as the save path:
+      // usage tracking + the ranking refresh (N searchAtlasExercises calls) can
+      // hit the DB statement timeout; awaiting them here made every add slow
+      // and surfaced "canceling statement due to statement timeout" as if the
+      // add failed, when the insert had already succeeded.
+      void (async () => {
+        try {
+          await trackExerciseUsage({
+            userId: coachId,
+            exerciseId: matchedLibraryExercise?.id || inserted?.exercise_library_id || null,
+            sets: inserted?.sets ?? null,
+            reps: inserted?.reps ?? null,
+            restSeconds: inserted?.rest_seconds ?? null,
+          });
+          // Pass the names explicitly — the state update above hasn't
+          // re-rendered yet, so the ref would miss the just-added exercise.
+          await refreshExerciseRankings([
+            ...exercises.map((e) => e.exercise_name),
+            inserted?.exercise_name,
+          ]);
+        } catch (_) {}
+      })();
       return inserted;
     } catch (e) {
-      toast.error(e?.message || 'Failed to add exercise');
+      toast.error(friendlySupabaseError(e, 'Failed to add exercise'));
       return null;
     } finally {
       setSaving(false);
@@ -1367,7 +1410,7 @@ export default function ProgramBuilderPage() {
       setExercises((ex) => ex.filter((e) => e.id !== exerciseId));
       toast.success('Removed');
     } catch (e) {
-      toast.error(e?.message || 'Failed to remove');
+      toast.error(friendlySupabaseError(e, 'Failed to remove'));
     } finally {
       setSaving(false);
     }
@@ -1422,7 +1465,7 @@ export default function ProgramBuilderPage() {
       setExercises(exList);
       toast.success('Exercise duplicated');
     } catch (e) {
-      toast.error(e?.message || 'Duplicate failed');
+      toast.error(friendlySupabaseError(e, 'Duplicate failed'));
     } finally {
       setSaving(false);
     }
@@ -1474,7 +1517,7 @@ export default function ProgramBuilderPage() {
       );
       toast.success('Day duplicated');
     } catch (e) {
-      toast.error(e?.message || 'Duplicate day failed');
+      toast.error(friendlySupabaseError(e, 'Duplicate day failed'));
     } finally {
       setSaving(false);
     }
@@ -1560,7 +1603,7 @@ export default function ProgramBuilderPage() {
       });
       if (ok) toast.success(`Week 1 copied to Week ${targetWeekNumber}`);
     } catch (e) {
-      toast.error(e?.message || 'Copy week failed');
+      toast.error(friendlySupabaseError(e, 'Copy week failed'));
     } finally {
       setSaving(false);
     }
@@ -1577,7 +1620,7 @@ export default function ProgramBuilderPage() {
       });
       if (ok) toast.success(`Week ${selectedWeek.week_number - 1} copied to Week ${selectedWeek.week_number}`);
     } catch (e) {
-      toast.error(e?.message || 'Copy previous week failed');
+      toast.error(friendlySupabaseError(e, 'Copy previous week failed'));
     } finally {
       setSaving(false);
     }
@@ -1603,7 +1646,7 @@ export default function ProgramBuilderPage() {
       headerEffectiveWeeksRef.current = Math.max(Number(headerEffectiveWeeksRef.current) || 1, nextWeekNumber);
       toast.success(`Week ${sourceWeekNumber} copied to Week ${nextWeekNumber}`);
     } catch (e) {
-      toast.error(e?.message || 'Copy week failed');
+      toast.error(friendlySupabaseError(e, 'Copy week failed'));
     } finally {
       setSaving(false);
     }
@@ -1623,7 +1666,7 @@ export default function ProgramBuilderPage() {
       });
       if (ok) toast.success('Copied matching week from source block');
     } catch (e) {
-      toast.error(e?.message || 'Copy from source block failed');
+      toast.error(friendlySupabaseError(e, 'Copy from source block failed'));
     } finally {
       setSaving(false);
     }
@@ -1640,7 +1683,7 @@ export default function ProgramBuilderPage() {
       toast.success('Block duplicated');
       navigate(`/program-builder?clientId=${encodeURIComponent(duplicateTargetClientId)}&blockId=${encodeURIComponent(blockId)}`);
     } catch (e) {
-      toast.error(e?.message || 'Could not duplicate block');
+      toast.error(friendlySupabaseError(e, 'Could not duplicate block'));
     } finally {
       setSaving(false);
     }
@@ -1692,7 +1735,7 @@ export default function ProgramBuilderPage() {
         recipientProfileId: client?.user_id || null,
       });
     } catch (e) {
-      toast.error(e?.message || 'Could not assign programme');
+      toast.error(friendlySupabaseError(e, 'Could not assign programme'));
     } finally {
       setSaving(false);
     }
@@ -1705,31 +1748,43 @@ export default function ProgramBuilderPage() {
     if (existingDays.length > 0) {
       await supabase.from('program_days').delete().eq('week_id', weekId);
     }
-    for (let i = 0; i < (generated?.days || []).length; i++) {
-      const dayPlan = generated.days[i];
-      const { data: createdDay, error: dayErr } = await supabase
+    // Batched writes — one days insert + one exercises insert per week. The
+    // old row-at-a-time loops meant dozens of round trips per week, and a
+    // failure mid-loop left a partially written (or empty) plan behind.
+    const dayPlans = generated?.days || [];
+    if (dayPlans.length > 0) {
+      const { data: createdDays, error: dayErr } = await supabase
         .from('program_days')
-        .insert({
+        .insert(dayPlans.map((dayPlan, i) => ({
           week_id: weekId,
           day_number: i + 1,
           title: dayPlan.title,
-        })
-        .select('*')
-        .single();
+        })))
+        .select('*');
       if (dayErr) throw dayErr;
-      for (let j = 0; j < (dayPlan.exercises || []).length; j++) {
-        const ex = dayPlan.exercises[j];
-        await supabase.from('program_exercises').insert({
-          day_id: createdDay.id,
-          exercise_name: ex.name,
-          exercise_library_id: ex.exerciseId || null,
-          sets: ex.sets,
-          reps: ex.reps,
-          rest_seconds: ex.restSeconds,
-          tempo: ex.tempo || null,
-          notes: ex.reason || ex.notes || null,
-          sort_order: j,
+      const dayIdByNumber = new Map((createdDays || []).map((d) => [d.day_number, d.id]));
+      const exerciseRows = [];
+      for (let i = 0; i < dayPlans.length; i++) {
+        const dayPlan = dayPlans[i];
+        const dayId = dayIdByNumber.get(i + 1);
+        if (!dayId) throw new Error('Could not create program days');
+        (dayPlan.exercises || []).forEach((ex, j) => {
+          exerciseRows.push({
+            day_id: dayId,
+            exercise_name: ex.name,
+            exercise_library_id: ex.exerciseId || null,
+            sets: ex.sets,
+            reps: ex.reps,
+            rest_seconds: ex.restSeconds,
+            tempo: ex.tempo || null,
+            notes: ex.reason || ex.notes || null,
+            sort_order: j,
+          });
         });
+      }
+      if (exerciseRows.length > 0) {
+        const { error: exErr } = await supabase.from('program_exercises').insert(exerciseRows);
+        if (exErr) throw exErr;
       }
     }
     const dList = await fetchDays(supabase, weekId);
@@ -1825,7 +1880,7 @@ export default function ProgramBuilderPage() {
       queryClient.invalidateQueries({ queryKey: ['personal-my-program-supabase'] });
       queryClient.invalidateQueries({ queryKey: ['personal-home-assigned-today'] });
     } catch (e) {
-      toast.error(e?.message || 'Quick Start failed');
+      toast.error(friendlySupabaseError(e, 'Quick Start failed'));
     } finally {
       setSaving(false);
     }
@@ -1928,10 +1983,6 @@ export default function ProgramBuilderPage() {
       const { error: weekErr } = await ensureProgramWeekRowsForBlock(supabase, insertedBlock.id, totalWeeksFromEntry);
       if (weekErr) throw weekErr;
 
-      if (isSelfTarget) {
-        await activatePersonalProgramAssignment(supabase, coachId, insertedBlock.id);
-      }
-
       const wList = await fetchWeeks(supabase, insertedBlock.id);
       if (!wList.length) throw new Error('No weeks available after generation setup.');
 
@@ -1972,6 +2023,12 @@ export default function ProgramBuilderPage() {
         await persistGeneratedWeek(generated, week.id);
       }
 
+      // Activate only AFTER every week's content persisted — activating up
+      // front left an active-but-empty plan when a later insert failed.
+      if (isSelfTarget) {
+        await activatePersonalProgramAssignment(supabase, coachId, insertedBlock.id);
+      }
+
       const firstWeekIndex = wList.findIndex((w) => Number(w.week_number) === 1);
       const weekIdx = firstWeekIndex >= 0 ? firstWeekIndex : 0;
       const firstWeek = wList[weekIdx];
@@ -2004,7 +2061,7 @@ export default function ProgramBuilderPage() {
       }
       toast.success('Program generated');
     } catch (e) {
-      toast.error(e?.message || 'Could not generate program');
+      toast.error(friendlySupabaseError(e, 'Could not generate program'));
     } finally {
       setSaving(false);
     }
@@ -2108,10 +2165,6 @@ export default function ProgramBuilderPage() {
       const { error: weekErr } = await ensureProgramWeekRowsForBlock(supabase, insertedBlock.id, totalWeeksFromEntry);
       if (weekErr) throw weekErr;
 
-      if (isSelfTarget) {
-        await activatePersonalProgramAssignment(supabase, coachId, insertedBlock.id);
-      }
-
       const wList = await fetchWeeks(supabase, insertedBlock.id);
       if (!wList.length) throw new Error('No weeks available after template setup.');
 
@@ -2130,6 +2183,12 @@ export default function ProgramBuilderPage() {
 
       for (const week of wList) {
         await persistGeneratedWeek(templateProgram, week.id);
+      }
+
+      // Activate only AFTER every week's content persisted — activating up
+      // front left an active-but-empty plan when a later insert failed.
+      if (isSelfTarget) {
+        await activatePersonalProgramAssignment(supabase, coachId, insertedBlock.id);
       }
 
       const firstWeekIndex = wList.findIndex((w) => Number(w.week_number) === 1);
@@ -2164,7 +2223,7 @@ export default function ProgramBuilderPage() {
       }
       toast.success(`${template.name} loaded`);
     } catch (e) {
-      toast.error(e?.message || 'Could not load template');
+      toast.error(friendlySupabaseError(e, 'Could not load template'));
     } finally {
       setSaving(false);
     }

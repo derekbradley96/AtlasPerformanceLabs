@@ -17,7 +17,7 @@ export default function TopBar({ title, onBack, rightAction, showBack = true }) 
 
   return (
     <header
-      className="flex items-center justify-center relative flex-shrink-0"
+      className="flex items-center justify-center sticky top-0 z-50 flex-shrink-0"
       style={{
         height: `calc(${shell.headerHeight}px + env(safe-area-inset-top, 0px))`,
         minHeight: shell.headerHeight,
@@ -48,7 +48,7 @@ export default function TopBar({ title, onBack, rightAction, showBack = true }) 
         <h1 className="atlas-header-title flex-1 min-w-0 flex items-center justify-center text-[17px] font-semibold px-1" style={{ color: colors.text }}>
           <span className="truncate min-w-0">{title}</span>
         </h1>
-        <div className="flex items-center justify-end flex-shrink-0" style={{ minHeight: 44 }}>
+        <div className="flex items-center justify-end flex-shrink-0" style={{ minWidth: 88, minHeight: 44 }}>
           {rightAction != null ? rightAction : <span className="w-10" aria-hidden />}
         </div>
       </div>

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery } from '@tanstack/react-query';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { friendlySupabaseError } from '@/lib/supabaseErrors';
 import { PageLoader } from '@/components/ui/LoadingState';
 import TopBar from '@/components/ui/TopBar';
 import BottomSheet from '@/components/ui/BottomSheet';
@@ -93,18 +94,20 @@ export default function PersonalMyProgram() {
         .eq('is_active', true)
         .maybeSingle();
       if (aErr || !asn?.program_block_id) return null;
-      const { data: block, error: bErr } = await supabase
-        .from('program_blocks')
-        .select('id, title, total_weeks')
-        .eq('id', asn.program_block_id)
-        .maybeSingle();
+      const [{ data: block, error: bErr }, { data: weeks }] = await Promise.all([
+        supabase
+          .from('program_blocks')
+          .select('id, title, total_weeks')
+          .eq('id', asn.program_block_id)
+          .maybeSingle(),
+        supabase
+          .from('program_weeks')
+          .select('id, week_number')
+          .eq('block_id', asn.program_block_id)
+          .order('week_number', { ascending: true })
+          .limit(1),
+      ]);
       if (bErr || !block) return null;
-      const { data: weeks } = await supabase
-        .from('program_weeks')
-        .select('id, week_number')
-        .eq('block_id', block.id)
-        .order('week_number', { ascending: true })
-        .limit(1);
       const w1 = weeks?.[0];
       if (!w1?.id) return { block, start_date: asn.start_date, days: [] };
       const { data: days } = await supabase
@@ -119,12 +122,13 @@ export default function PersonalMyProgram() {
             .from('program_exercises')
             .select('id', { count: 'exact', head: true })
             .eq('day_id', d.id);
-          return { ...d, exerciseCount: cErr ? 0 : count || 0 };
+          return { ...d, exerciseCount: cErr ? null : count || 0 };
         })
       );
       return { block, start_date: asn.start_date, days: daysWithCounts };
     },
     enabled: !!supabase && !!user?.id,
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -251,7 +255,7 @@ export default function PersonalMyProgram() {
       setCreateModalOpen(false);
       navigate(`${PERSONAL_PROGRAM_BUILDER}&blockId=${encodeURIComponent(blockId)}`);
     } catch (e) {
-      toast.error(e?.message || 'Could not create program');
+      toast.error(friendlySupabaseError(e, 'Could not create program'));
     } finally {
       setTemplateBusy(false);
     }
@@ -477,7 +481,9 @@ export default function PersonalMyProgram() {
                           <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 8px', borderRadius: 999, background: colors.primarySubtle, color: colors.primary }}>Today</span>
                         ) : null}
                       </div>
-                      <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>{d?.exerciseCount ?? 0} exercises</p>
+                      <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>
+                        {d?.exerciseCount == null ? '—' : `${d.exerciseCount} exercises`}
+                      </p>
                     </div>
                   );
                 })

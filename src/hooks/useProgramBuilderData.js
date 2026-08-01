@@ -1,6 +1,7 @@
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
-import { getLatestExercisePerformanceByName, getPreviousExercisePerformance } from '@/lib/workoutSessionApi';
+import { getLatestExercisePerformanceByName, getPreviousExercisePerformanceBatch } from '@/lib/workoutSessionApi';
 
 // Stable fallbacks: `?? []` / `?? {}` create a NEW reference every render when a
 // query is disabled/undefined (e.g. a block with no days yet). Those values are
@@ -32,9 +33,10 @@ const EMPTY_OBJECT = Object.freeze({});
  *   variable: latestCoachPerformanceByName
  *   UI: coach-side previous performance hints per exercise row
  *
- * - ['builder-prev-exercise-performance', personalProfileIdForHistory, selectedDayId, exercise.id] (useQueries fan-out)
- *   source: workoutSessionApi.getPreviousExercisePerformance
- *   variable: previousExercisePerformanceQueries
+ * - ['builder-prev-exercise-performance-batch', personalProfileIdForHistory, selectedDayId, exerciseIds]
+ *   source: workoutSessionApi.getPreviousExercisePerformanceBatch (2 requests for the whole day,
+ *   replacing the old per-exercise useQueries fan-out that probed up to 40 sessions each)
+ *   variable: previousExercisePerformanceQueries (index-aligned per-exercise adapter, same shape)
  *   UI: personal-side previous performance hints and autofill assistance per exercise row
  */
 export function useProgramBuilderData({
@@ -182,22 +184,45 @@ export function useProgramBuilderData({
     staleTime: 5 * 60 * 1000,
   });
 
-  const previousExercisePerformanceQueries = useQueries({
-    queries:
-      isPersonalRole && personalProfileIdForHistory && selectedDayId
-        ? exercises.map((exercise) => ({
-            queryKey: ['builder-prev-exercise-performance', personalProfileIdForHistory, selectedDayId, exercise.id],
-            queryFn: () =>
-              getPreviousExercisePerformance({
-                profileId: personalProfileIdForHistory,
-                exerciseId: exercise.id,
-                excludeSessionId: selectedDayId,
-              }),
-            enabled: !!exercise?.id,
-            staleTime: 5 * 60 * 1000,
-          }))
-        : [],
+  const previousPerformanceEnabled = !!(isPersonalRole && personalProfileIdForHistory && selectedDayId);
+  const previousPerformanceExerciseIds = useMemo(
+    () => (exercises || []).map((exercise) => exercise?.id).filter(Boolean),
+    [exercises],
+  );
+  const previousExercisePerformanceBatchQuery = useQuery({
+    queryKey: [
+      'builder-prev-exercise-performance-batch',
+      personalProfileIdForHistory,
+      selectedDayId,
+      previousPerformanceExerciseIds.join('|'),
+    ],
+    queryFn: () =>
+      getPreviousExercisePerformanceBatch({
+        profileId: personalProfileIdForHistory,
+        exerciseIds: previousPerformanceExerciseIds,
+        excludeSessionId: selectedDayId,
+      }),
+    enabled: previousPerformanceEnabled && previousPerformanceExerciseIds.length > 0,
+    staleTime: 5 * 60 * 1000,
   });
+
+  // Adapter preserving the old useQueries contract: one result per exercise,
+  // index-aligned with `exercises`, each exposing `.data` as the per-set map.
+  const previousExercisePerformanceQueries = useMemo(() => {
+    if (!previousPerformanceEnabled) return EMPTY_ARRAY;
+    const batch = previousExercisePerformanceBatchQuery.data ?? EMPTY_OBJECT;
+    return (exercises || []).map((exercise) => ({
+      data: exercise?.id ? batch[exercise.id] ?? null : null,
+      isLoading: previousExercisePerformanceBatchQuery.isLoading,
+      error: previousExercisePerformanceBatchQuery.error ?? null,
+    }));
+  }, [
+    previousPerformanceEnabled,
+    exercises,
+    previousExercisePerformanceBatchQuery.data,
+    previousExercisePerformanceBatchQuery.isLoading,
+    previousExercisePerformanceBatchQuery.error,
+  ]);
 
   return {
     block: blockQuery.data ?? null,

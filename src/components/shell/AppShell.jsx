@@ -985,12 +985,15 @@ export default function AppShell() {
         ref={contentRef}
         className="flex-1 min-w-0 flex flex-col overflow-hidden"
         style={{
-          paddingTop: isChatThread ? 0 : shell.topSpacing,
+          // Pages that own a <TopBar> (chromeHeaderHidden) manage their own top
+          // spacing and gutters — shell padding here gave them a dead band above
+          // the bar and doubled the 16px horizontal gutters.
+          paddingTop: isChatThread || chromeHeaderHidden ? 0 : shell.topSpacing,
           paddingBottom: showTabBar
             ? BOTTOM_NAV_HEIGHT
             : 'env(safe-area-inset-bottom, 0px)',
-          paddingLeft: isChatThread ? 0 : shellPaddingH,
-          paddingRight: isChatThread ? 0 : shellPaddingH,
+          paddingLeft: isChatThread || chromeHeaderHidden ? 0 : shellPaddingH,
+          paddingRight: isChatThread || chromeHeaderHidden ? 0 : shellPaddingH,
           background: BG,
         }}
       >

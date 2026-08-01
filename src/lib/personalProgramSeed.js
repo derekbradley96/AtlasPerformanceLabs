@@ -60,22 +60,26 @@ export async function createPersonalProgramFromTemplate(supabase, profileId, day
     throw wErr || new Error('Could not create week');
   }
 
+  // Batched writes — one days insert + one exercises insert. Row-at-a-time
+  // loops meant a failure mid-loop left a partially written plan behind.
+  const { data: createdDays, error: dayErr } = await supabase
+    .from('program_days')
+    .insert(generated.days.map((dayPlan, i) => ({
+      week_id: weekRow.id,
+      day_number: i + 1,
+      title: dayPlan.title,
+    })))
+    .select('id, day_number');
+  if (dayErr) throw dayErr;
+  const dayIdByNumber = new Map((createdDays || []).map((d) => [d.day_number, d.id]));
+  const exerciseRows = [];
   for (let i = 0; i < generated.days.length; i++) {
     const dayPlan = generated.days[i];
-    const { data: createdDay, error: dayErr } = await supabase
-      .from('program_days')
-      .insert({
-        week_id: weekRow.id,
-        day_number: i + 1,
-        title: dayPlan.title,
-      })
-      .select('id')
-      .single();
-    if (dayErr) throw dayErr;
-    for (let j = 0; j < dayPlan.exercises.length; j++) {
-      const ex = dayPlan.exercises[j];
-      const { error: exErr } = await supabase.from('program_exercises').insert({
-        day_id: createdDay.id,
+    const dayId = dayIdByNumber.get(i + 1);
+    if (!dayId) throw new Error('Could not create program days');
+    dayPlan.exercises.forEach((ex, j) => {
+      exerciseRows.push({
+        day_id: dayId,
         exercise_name: ex.name,
         sets: ex.sets,
         reps: ex.reps,
@@ -83,10 +87,15 @@ export async function createPersonalProgramFromTemplate(supabase, profileId, day
         notes: ex.notes || null,
         sort_order: j,
       });
-      if (exErr) throw exErr;
-    }
+    });
+  }
+  if (exerciseRows.length > 0) {
+    const { error: exErr } = await supabase.from('program_exercises').insert(exerciseRows);
+    if (exErr) throw exErr;
   }
 
+  // Activation stays last: never leave an active assignment pointing at a
+  // plan whose content didn't fully persist.
   await activatePersonalProgramAssignment(supabase, profileId, block.id);
 
   return block.id;
