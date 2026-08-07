@@ -29,15 +29,26 @@ export default function WorkoutRestTimer({
     <AnimatePresence>
       {active && (
         <motion.div
-          initial={{ opacity: 0, y: 16 }}
+          initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 16 }}
+          exit={{ opacity: 0, y: 24 }}
           style={{
-            marginTop: spacing[16],
+            // Fixed overlay, not an in-flow card: it used to render at the
+            // BOTTOM of the page content, below the fold mid-workout — QA
+            // (and users) never saw it and reported "no rest timer exists".
+            position: 'fixed',
+            left: spacing[12],
+            right: spacing[12],
+            bottom: `calc(${spacing[12]}px + env(safe-area-inset-bottom, 0px))`,
+            zIndex: 60,
+            maxWidth: 560,
+            marginLeft: 'auto',
+            marginRight: 'auto',
             padding: spacing[16],
             borderRadius: radii.card,
-            border: `1px solid ${colors.border}`,
+            border: `1px solid ${colors.primary}66`,
             background: colors.surface1,
+            boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[10] }}>

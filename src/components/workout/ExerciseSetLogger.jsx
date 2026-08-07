@@ -256,8 +256,12 @@ export default function ExerciseSetLogger({
         const draft = draftBySet[setNumber] || {};
         const prevWeight = prevSet?.weight_done ?? prevSet?.weightDone ?? null;
         const prevReps = prevSet?.reps_done ?? prevSet?.repsDone ?? null;
-        const suggestedWeight = prevWeight ?? row?.weight_kg ?? '';
-        const suggestedReps = row?.reps ?? exercise?.reps ?? '';
+        // Carry weight/reps forward from the set just logged in THIS session —
+        // most sets repeat the same load, and re-entering it every set was the
+        // top friction item in QA. Falls back to last session, then the plan.
+        const sessionPrior = completedMap.get(setNumber - 1);
+        const suggestedWeight = sessionPrior?.weight_done ?? prevWeight ?? row?.weight_kg ?? '';
+        const suggestedReps = sessionPrior?.reps_done != null ? String(sessionPrior.reps_done) : (row?.reps ?? exercise?.reps ?? '');
         const prevDisplay = prevWeight != null
           ? `${prevWeight}${loadUnitShortLabel(viewerLoadUnit)} × ${prevReps ?? '—'}`
           : '—';
