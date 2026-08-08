@@ -70,6 +70,7 @@ import { getCoachReferralLink } from '@/lib/referrals';
 import AchievementUnlockedModal from '@/components/achievements/AchievementUnlockedModal';
 import { evaluateUserMilestones } from '@/lib/milestoneEngine';
 import {
+  formatTrainingLoadKg,
   parseTrainingLoadInputToKg,
   resolveViewerLoadUnit,
   trainingLoadKgToInputValue,
@@ -866,6 +867,7 @@ export default function WorkoutPlayerPage() {
         weight_done: wClamped,
         prescribed_reps: prescribedReps,
         prescribed_rest_seconds: prescribedRest,
+        viewer_load_unit: viewerLoadUnit,
       });
 
       if (saved?.queued) {
@@ -2109,14 +2111,14 @@ export default function WorkoutPlayerPage() {
               />
               {setRowsForExercise.map((set) => (
                 <React.Fragment key={`set-load-suggestion-${currentExercise?.id || 'ex'}-${set.setNumber}`}>
-                  {isPersonal(effectiveRole) && getPersonalAutoAdjustmentsEnabled(user?.id) && set.completed && set.loadSuggestion?.suggested_weight != null && (
+                  {isPersonal(effectiveRole) && getPersonalAutoAdjustmentsEnabled(user?.id) && set.completed && set.loadSuggestion?.nextWeightKg != null && (
                     <p style={{ margin: '2px 0 8px', fontSize: 11, color: 'rgba(148,163,184,0.8)', paddingLeft: 4 }}>
-                      Next session: try {set.loadSuggestion.suggested_weight}{viewerLoadUnit === 'lb' ? 'lb' : 'kg'} — {getTrainingAdjustmentWhySentence(set.loadSuggestion) || AUTO_ADJUSTMENT_EXPLANATION}
+                      Next session: try {formatTrainingLoadKg(set.loadSuggestion.nextWeightKg, viewerLoadUnit)} — {getTrainingAdjustmentWhySentence(set.loadSuggestion) || AUTO_ADJUSTMENT_EXPLANATION}
                     </p>
                   )}
-                  {isPersonal(effectiveRole) && getPersonalAutoAdjustmentsEnabled(user?.id) && set.completed && !set.loadSuggestion?.suggested_weight && set.loadSuggestion?.description && (
+                  {isPersonal(effectiveRole) && getPersonalAutoAdjustmentsEnabled(user?.id) && set.completed && set.loadSuggestion?.nextWeightKg == null && set.loadSuggestion?.detail && (
                     <p style={{ margin: '2px 0 8px', fontSize: 11, color: 'rgba(148,163,184,0.8)', paddingLeft: 4 }}>
-                      {set.loadSuggestion.description}
+                      {set.loadSuggestion.detail}
                     </p>
                   )}
                 </React.Fragment>

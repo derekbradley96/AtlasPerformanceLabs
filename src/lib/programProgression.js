@@ -1,7 +1,10 @@
 /**
  * Program progression helpers: suggest load increases, detect plateau and fatigue.
  * Works with exercise_performance / v_exercise_progress data; returns human-readable suggestions.
+ * All math stays in canonical kg; pass loadUnit so user-facing strings match the viewer.
  */
+
+import { formatTrainingLoadKg } from '@/lib/trainingLoadUnits';
 
 /** Default weight increment in kg for load suggestions */
 const DEFAULT_LOAD_INCREMENT_KG = 2.5;
@@ -144,6 +147,7 @@ function formatKg(value) {
  *   currentReps: number | null;
  *   rir?: number | null;
  *   prescribedReps?: number | null;
+ *   loadUnit?: 'kg'|'lb';
  * }} args
  * @returns {Promise<{ type: 'increase'|'maintain'|'reduce'; nextWeightKg: number | null; displayKg: number | null; headline: string; detail?: string } | null>}
  */
@@ -157,6 +161,7 @@ export async function suggestNextLoad(args = {}) {
     currentReps,
     rir = null,
     prescribedReps = null,
+    loadUnit = 'kg',
   } = args;
   if (!exerciseId || (profileId == null && clientId == null)) return null;
   const w = Number(currentWeight);
@@ -175,7 +180,7 @@ export async function suggestNextLoad(args = {}) {
         type: 'reduce',
         nextWeightKg: nw,
         displayKg: nw,
-        headline: `↓ Consider ${nw}kg`,
+        headline: `↓ Consider ${formatTrainingLoadKg(nw, loadUnit)}`,
         detail: 'RPE was very high — ease back slightly next set.',
       };
     }
@@ -197,7 +202,7 @@ export async function suggestNextLoad(args = {}) {
       type: 'increase',
       nextWeightKg: nw,
       displayKg: nw,
-      headline: `↑ Try ${nw}kg next set`,
+      headline: `↑ Try ${formatTrainingLoadKg(nw, loadUnit)} next set`,
       detail: easyByRir ? 'You left reps in the tank — add a small bump.' : 'You hit all reps easily — nudge load up.',
     };
   }
@@ -219,7 +224,7 @@ export async function suggestNextLoad(args = {}) {
         type: 'reduce',
         nextWeightKg: nw,
         displayKg: nw,
-        headline: `↓ Consider ${nw}kg`,
+        headline: `↓ Consider ${formatTrainingLoadKg(nw, loadUnit)}`,
         detail: 'Reps were below target — keep quality up.',
       };
     }
@@ -241,10 +246,11 @@ export async function suggestNextLoad(args = {}) {
  *   session: { profile_id?: string|null; client_id?: string|null };
  *   sets: Array<{ exercise_id?: string; set_number?: number; completed?: boolean; weight_done?: number|null; reps_done?: number|null; rir_done?: number|null; prescribed_reps?: number|null }>;
  *   exerciseNameById: Map<string, string>;
+ *   loadUnit?: 'kg'|'lb';
  * }} args
  * @returns {Promise<string[]>}
  */
-export async function buildNextSessionLoadPreviewLines({ supabase, session, sets, exerciseNameById }) {
+export async function buildNextSessionLoadPreviewLines({ supabase, session, sets, exerciseNameById, loadUnit = 'kg' }) {
   const profileId = session?.profile_id ?? null;
   const clientId = session?.client_id ?? null;
   if (!supabase || (!profileId && !clientId) || !Array.isArray(sets) || sets.length === 0) return [];
@@ -277,15 +283,17 @@ export async function buildNextSessionLoadPreviewLines({ supabase, session, sets
       currentReps: perf.reps != null ? Number(perf.reps) : null,
       rir: perf.rir,
       prescribedReps: perf.prescribed,
+      loadUnit,
     });
     if (!sug) continue;
     const prevW = Number(perf.weight);
+    const prevWStr = Number.isFinite(prevW) ? formatTrainingLoadKg(prevW, loadUnit) : '—';
     if (sug.type === 'increase' && sug.displayKg != null) {
-      lines.push(`${name}: try ${sug.displayKg}kg next session (up from ${Number.isFinite(prevW) ? prevW : '—'}kg)`);
+      lines.push(`${name}: try ${formatTrainingLoadKg(sug.displayKg, loadUnit)} next session (up from ${prevWStr})`);
     } else if (sug.type === 'reduce' && sug.displayKg != null) {
-      lines.push(`${name}: try ${sug.displayKg}kg next session — quality dipped today`);
+      lines.push(`${name}: try ${formatTrainingLoadKg(sug.displayKg, loadUnit)} next session — quality dipped today`);
     } else {
-      lines.push(`${name}: maintain ${Number.isFinite(prevW) ? `${prevW}kg` : 'load'} — execution was right at the edge today`);
+      lines.push(`${name}: maintain ${Number.isFinite(prevW) ? prevWStr : 'load'} — execution was right at the edge today`);
     }
   }
   return lines.slice(0, 8);

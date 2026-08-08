@@ -1,7 +1,13 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { getSupabase } from '@/lib/supabaseClient';
 import { parsePrescribedRepsForStorage, upsertSet } from '@/lib/workoutSessionApi';
-import { loadUnitShortLabel } from '@/lib/trainingLoadUnits';
+import {
+  formatTrainingLoadKg,
+  loadUnitShortLabel,
+  normalizeLoadUnit,
+  parseTrainingLoadInputToKg,
+  trainingLoadKgToInputValue,
+} from '@/lib/trainingLoadUnits';
 import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
 
 function parseSetsConfig(raw) {
@@ -179,14 +185,23 @@ export default function ExerciseSetLogger({
     const prescribedReps = parsePrescribedRepsForStorage(prescribedRepsRaw);
     const prescribedRir = row?.rir != null ? Number(row.rir) : null;
     const prev = previousSetMap.get(setNumber) ?? null;
+    // Untouched inputs must save exactly what they display: this session's
+    // prior set, then last session, then the plan — all canonical kg.
+    // Typed input is in the viewer's load unit and must be converted.
+    const sessionPrior = completedMap.get(setNumber - 1);
+    const fallbackWeightKg = sessionPrior?.weight_done
+      ?? prev?.weight_done ?? prev?.weightDone
+      ?? prescribedWeight;
     const weightDone = draft.weight !== '' && draft.weight != null
-      ? Number(draft.weight)
-      : (prev?.weight_done ?? prev?.weightDone) != null
-        ? Number(prev?.weight_done ?? prev?.weightDone)
-        : prescribedWeight;
+      ? parseTrainingLoadInputToKg(draft.weight, viewerLoadUnit)
+      : fallbackWeightKg != null
+        ? Number(fallbackWeightKg)
+        : null;
     const repsDone = draft.reps !== '' && draft.reps != null
       ? Number(draft.reps)
-      : prescribedReps;
+      : sessionPrior?.reps_done != null
+        ? Number(sessionPrior.reps_done)
+        : prescribedReps;
     const rirDone = draft.rir != null ? Number(draft.rir) : null;
     if (!Number.isFinite(repsDone)) return;
     setSavingSet(true);
@@ -202,6 +217,7 @@ export default function ExerciseSetLogger({
       reps_done: Number.isFinite(repsDone) ? repsDone : null,
       rir_done: Number.isFinite(rirDone) ? rirDone : null,
       client_notes: null,
+      viewer_load_unit: viewerLoadUnit,
     });
     await saveExerciseNote();
     setSavingSet(false);
@@ -229,7 +245,7 @@ export default function ExerciseSetLogger({
                 <div key={set.setNumber} style={{ display: 'flex', alignItems: 'center', gap: spacing[12], padding: `${spacing[8]}px 0`, borderBottom: `0.5px solid ${colors.border}`, background: colors.surface1 }}>
                   <span style={{ fontSize: 12, color: colors.muted, minWidth: 32 }}>{set.setNumber}</span>
                   <span style={{ fontSize: 13, color: colors.muted, flex: 1 }}>
-                    {set.weight_kg}kg × {set.reps}
+                    {formatTrainingLoadKg(set.weight_kg, viewerLoadUnit)} × {set.reps}
                     <span style={{ fontSize: 11, color: colors.muted, marginLeft: 6 }}>({set.label})</span>
                   </span>
                   <button
@@ -260,14 +276,15 @@ export default function ExerciseSetLogger({
         // most sets repeat the same load, and re-entering it every set was the
         // top friction item in QA. Falls back to last session, then the plan.
         const sessionPrior = completedMap.get(setNumber - 1);
-        const suggestedWeight = sessionPrior?.weight_done ?? prevWeight ?? row?.weight_kg ?? '';
+        const suggestedWeightKg = sessionPrior?.weight_done ?? prevWeight ?? row?.weight_kg ?? null;
+        const suggestedWeight = trainingLoadKgToInputValue(suggestedWeightKg, viewerLoadUnit);
         const suggestedReps = sessionPrior?.reps_done != null ? String(sessionPrior.reps_done) : (row?.reps ?? exercise?.reps ?? '');
         const prevDisplay = prevWeight != null
-          ? `${prevWeight}${loadUnitShortLabel(viewerLoadUnit)} × ${prevReps ?? '—'}`
+          ? `${trainingLoadKgToInputValue(prevWeight, viewerLoadUnit)}${loadUnitShortLabel(viewerLoadUnit)} × ${prevReps ?? '—'}`
           : '—';
         const currentDraft = draftBySet[setNumber];
         const deltaWeight = currentDraft?.weight != null && prevWeight != null
-          ? Number(currentDraft.weight) - Number(prevWeight) : null;
+          ? (parseTrainingLoadInputToKg(currentDraft.weight, viewerLoadUnit) ?? 0) - Number(prevWeight) : null;
         const prescribedRir = row?.rir != null ? Number(row.rir) : null;
         const selectedRir = draft.rir != null ? Number(draft.rir) : null;
         const caution = (selectedRir === 0 || selectedRir === 1) && idx < 2;
@@ -277,12 +294,12 @@ export default function ExerciseSetLogger({
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing[8] }}>
                   <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: active || completed ? colors.text : colors.muted }}>Set {setNumber}</p>
                   <p style={{ margin: 0, fontSize: 12, color: colors.muted }}>
-                    {row?.weight_kg != null ? `${row.weight_kg}kg` : 'BW'} · {row?.reps || exercise?.reps || '—'} reps{prescribedRir != null ? ` · RIR ${prescribedRir}` : ''}
+                    {row?.weight_kg != null ? formatTrainingLoadKg(row.weight_kg, viewerLoadUnit) : 'BW'} · {row?.reps || exercise?.reps || '—'} reps{prescribedRir != null ? ` · RIR ${prescribedRir}` : ''}
                   </p>
                 </div>
                 {completed ? (
                   <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, fontWeight: 600, color: colors.success }}>
-                    ✓ {completedMap.get(setNumber)?.weight_done ?? '—'}kg × {completedMap.get(setNumber)?.reps_done ?? '—'} · RIR {completedMap.get(setNumber)?.rir_done ?? '—'}
+                    ✓ {formatTrainingLoadKg(completedMap.get(setNumber)?.weight_done, viewerLoadUnit)} × {completedMap.get(setNumber)?.reps_done ?? '—'} · RIR {completedMap.get(setNumber)?.rir_done ?? '—'}
                   </p>
                 ) : active ? (
                   <div style={{ marginTop: spacing[6], display: 'grid', gap: spacing[8] }}>
@@ -341,7 +358,10 @@ export default function ExerciseSetLogger({
                     {selectedRir != null ? <p style={{ margin: 0, fontSize: 11, color: colors.muted }}>{rirLabel(selectedRir)}</p> : null}
                     {caution ? <p style={{ margin: 0, fontSize: 11, color: colors.warning }}>{coached ? 'This felt close to max - coach may adjust next session' : 'Close to max this early - consider easing the next set'}</p> : null}
                     {(() => {
-                      const currentWeightKg = parseFloat(draft.weight ?? suggestedWeight) || 0;
+                      // Plate math assumes kg plates and a 20kg bar — hide it
+                      // for lb viewers rather than show a wrong breakdown.
+                      if (normalizeLoadUnit(viewerLoadUnit) !== 'kg') return null;
+                      const currentWeightKg = parseTrainingLoadInputToKg(draft.weight ?? suggestedWeight, viewerLoadUnit) ?? 0;
                       const platesOpen = platesOpenForSet === setNumber;
                       if (currentWeightKg <= 0) return null;
                       return (

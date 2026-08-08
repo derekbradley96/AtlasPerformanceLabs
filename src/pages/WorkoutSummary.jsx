@@ -4,8 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { Trophy, Clock3, Dumbbell, TrendingUp, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSupabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { getSetsForSession, getPreviousExercisePerformance } from '@/lib/workoutSessionApi';
 import { buildNextSessionLoadPreviewLines } from '@/lib/programProgression';
+import { formatTrainingLoadKg, resolveViewerLoadUnit } from '@/lib/trainingLoadUnits';
+import { kgToLb } from '@/lib/bodyMeasurementUnits';
 import { getCoachClientJoinLinkPrimary } from '@/lib/referrals';
 import { sharePlainText } from '@/lib/nativeShare';
 import { fetchMergedPersonalNutritionTargets } from '@/lib/personalNutritionProfile';
@@ -25,6 +28,8 @@ export default function WorkoutSummary() {
   const [search] = useSearchParams();
   const sessionId = search.get('sessionId') || search.get('id');
   const goal = search.get('goal') || '';
+  const { profile: authProfile } = useAuth();
+  const viewerLoadUnit = resolveViewerLoadUnit(authProfile);
 
   const { data: session, isLoading: sessionLoading } = useQuery({
     queryKey: ['workout-summary-session', sessionId],
@@ -152,7 +157,7 @@ export default function WorkoutSummary() {
   );
 
   const { data: nextSessionLoadLines = [] } = useQuery({
-    queryKey: ['workout-summary-next-session-loads', sessionId, setsProgressKey, exerciseIdsKey],
+    queryKey: ['workout-summary-next-session-loads', sessionId, setsProgressKey, exerciseIdsKey, viewerLoadUnit],
     queryFn: async () => {
       const sb = getSupabase();
       if (!sb || !sessionId || !session) return [];
@@ -162,6 +167,7 @@ export default function WorkoutSummary() {
         session,
         sets: completedSets,
         exerciseNameById,
+        loadUnit: viewerLoadUnit,
       });
     },
     enabled: Boolean(sessionId && session && completedSets.length > 0),
@@ -243,7 +249,7 @@ export default function WorkoutSummary() {
         }
       }
       if (maxW > 0 && maxW > prevBestW) {
-        return `${Math.round(maxW)}kg on ${top.name}`;
+        return `${formatTrainingLoadKg(maxW, viewerLoadUnit)} on ${top.name}`;
       }
       return `${Math.round(top.score).toLocaleString()} training volume on ${top.name}`;
     },
@@ -296,7 +302,7 @@ export default function WorkoutSummary() {
           </div>
           <div style={cardStyle}>
             <TrendingUp size={16} color={colors.primary} />
-            <p style={valueStyle}>{Math.round(totalVolume).toLocaleString()} kg</p>
+            <p style={valueStyle}>{viewerLoadUnit === 'lb' ? `${Math.round(kgToLb(totalVolume)).toLocaleString()} lb` : `${Math.round(totalVolume).toLocaleString()} kg`}</p>
             <p style={labelStyle}>Total volume lifted</p>
           </div>
           <div style={cardStyle}>
@@ -398,7 +404,7 @@ export default function WorkoutSummary() {
                 <div key={`sum-${r.exerciseId}`} style={{ padding: `${spacing[8]}px 0`, borderTop: `1px solid ${colors.border}` }}>
                   <p style={{ margin: 0, color: colors.text, fontSize: 14, fontWeight: 700 }}>{r.name}</p>
                   <p style={{ margin: `${spacing[4]}px 0 0`, color: colors.muted, fontSize: 12 }}>
-                    Prescribed {r.sets}x{Math.round(avgPrescribedReps)}@{Math.round(avgPrescribedW * 10) / 10}kg · Actual {r.sets}x{Math.round(avgActualReps)}@{Math.round(avgActualW * 10) / 10}kg · Delta {deltaWeight >= 0 ? '+' : ''}{Math.round(deltaWeight * 10) / 10}kg / {deltaReps >= 0 ? '+' : ''}{Math.round(deltaReps)}
+                    Prescribed {r.sets}x{Math.round(avgPrescribedReps)}@{formatTrainingLoadKg(avgPrescribedW, viewerLoadUnit)} · Actual {r.sets}x{Math.round(avgActualReps)}@{formatTrainingLoadKg(avgActualW, viewerLoadUnit)} · Delta {deltaWeight >= 0 ? '+' : ''}{formatTrainingLoadKg(deltaWeight, viewerLoadUnit)} / {deltaReps >= 0 ? '+' : ''}{Math.round(deltaReps)}
                   </p>
                 </div>
               );

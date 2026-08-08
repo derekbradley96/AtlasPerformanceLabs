@@ -46,6 +46,9 @@ async function loadSuggestionAfterCompletedSet(sessionId, row, payload) {
       currentReps: row.reps_done,
       rir: row.rir_done,
       prescribedReps: payload.prescribed_reps ?? row.prescribed_reps ?? null,
+      // Not a DB column — carried on the payload so hint text matches the
+      // viewer's load unit. upsertSet whitelists columns, so it never persists.
+      loadUnit: payload.viewer_load_unit ?? 'kg',
     });
   } catch {
     return null;

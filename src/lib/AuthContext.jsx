@@ -359,6 +359,9 @@ export const AuthProvider = ({ children }) => {
           full_name: fakeUser.full_name,
           onboarding_complete: true,
           plan_tier: normalizeRole(session.role) === 'coach' ? 'basic' : null,
+          // QA: lets the sandbox exercise lb/st_lb display paths.
+          load_unit: window.localStorage.getItem('atlas_sandbox_load_unit') || null,
+          bodyweight_unit: window.localStorage.getItem('atlas_sandbox_bodyweight_unit') || null,
         });
         setIsAuthenticated(true);
       } else {
