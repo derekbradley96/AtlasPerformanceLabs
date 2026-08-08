@@ -159,7 +159,13 @@ const TAB_ROUTES_BY_ROLE = {
   // Home is the personal daily hub (landing); More holds settings, find-a-coach,
   // My Program, and the builder. Both were missing before, so the landing had no
   // tab bar and settings/marketplace were unreachable from the nav.
-  personal: ['/home', '/nutrition', '/progress', '/more'],
+  // '/today' has no tab item of its own, but personal flows land there directly
+  // (onboarding + workout completion navigate with replace:true, so there is no
+  // history to go back to). As a pushed route it rendered with no tab bar and a
+  // back chevron with nowhere to go — mobile-web users were stranded. Treating
+  // it as a root shows the tab bar and drops the chevron; the Home item renders
+  // as active there (see isShellTabItemActive).
+  personal: ['/home', '/today', '/nutrition', '/progress', '/more'],
 };
 /** Union of all tab paths (any role) — only for legacy callers that omit role; prefer `isTabRootForRole`. */
 const TAB_ROUTES = [
@@ -212,6 +218,13 @@ export function isShellTabItemActive(itemKey, pathname, roleOrProfile) {
     if (isCoach(r)) return key === '/inbox';
     if (r === Roles.CLIENT) return key === '/more';
     return false;
+  }
+  // Personal has no Today tab item ('/today' is a tab ROOT so the bar shows and
+  // there's no back chevron, but the bar itself is Home/Log/Progress/More) —
+  // light the Home item there so the bar never renders with nothing active.
+  if (p === '/today') {
+    const r = normalizeRole(roleOrProfile);
+    if (r === Roles.PERSONAL) return key === '/home';
   }
   return false;
 }

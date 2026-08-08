@@ -45,8 +45,11 @@ describe('routeMeta shell navigation', () => {
     expect(isTabRootForRole('/more', 'personal')).toBe(true);
     expect(isTabRootForRole('/nutrition', 'personal')).toBe(true);
     expect(isTabRootForRole('/progress', 'personal')).toBe(true);
-    // Retired personal tabs — reachable, but pushed (back button, not roots).
-    expect(isTabRootForRole('/today', 'personal')).toBe(false);
+    // '/today' is landed on directly (onboarding / workout completion use
+    // replace:true) — as a pushed route it had no tab bar and a dead back
+    // chevron, stranding mobile-web users. It must stay a root.
+    expect(isTabRootForRole('/today', 'personal')).toBe(true);
+    // Retired personal tab — reachable, but pushed (back button, not root).
     expect(isTabRootForRole('/workout', 'personal')).toBe(false);
   });
 
@@ -91,5 +94,18 @@ describe('routeMeta shell navigation', () => {
     expect(isShellTabItemActive('/home', '/community', 'coach')).toBe(false);
     expect(isShellTabItemActive('/more', '/community', 'client')).toBe(true);
     expect(isShellTabItemActive('/today', '/community', 'client')).toBe(false);
+  });
+
+  it('personal on /today shows the tab bar with Home active', () => {
+    const s = getShellNavState('/today', 'personal');
+    expect(s.isTabRoot).toBe(true);
+    expect(s.isPushed).toBe(false);
+    // The personal bar has no Today item — Home lights up instead of nothing.
+    expect(isShellTabItemActive('/home', '/today', 'personal')).toBe(true);
+    expect(isShellTabItemActive('/nutrition', '/today', 'personal')).toBe(false);
+    expect(isShellTabItemActive('/more', '/today', 'personal')).toBe(false);
+    // Client keeps its own Today tab semantics.
+    expect(isShellTabItemActive('/today', '/today', 'client')).toBe(true);
+    expect(isShellTabItemActive('/home', '/today', 'client')).toBe(false);
   });
 });
