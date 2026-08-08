@@ -7,12 +7,15 @@
 import { safeGetJson, safeSetJson } from '@/lib/storageSafe';
 import { formatWeightForViewer, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 
-if (!import.meta.env.DEV) {
-  console.error(
-    '[AtlasSandbox] FATAL: Dev-only sandbox persistence was loaded in '
-    + 'production. It should only run in DEV. '
-    + 'Check for a static import of the sandbox module on a production code path.',
-  );
+// This module is statically imported by the local-fallback layer (repo,
+// exports, messaging, health score…), so it legitimately ships in production
+// bundles. The tripwire below fires only if sandbox STATE is actually read
+// there — importing it is fine, exercising it is not.
+let warnedProdUse = false;
+function warnIfProdUse() {
+  if (import.meta.env.DEV || warnedProdUse) return;
+  warnedProdUse = true;
+  console.warn('[AtlasSandbox] Sandbox local store accessed in a production build — this path should only run in DEV/offline fallback.');
 }
 
 const SANDBOX_KEY = 'atlas_sandbox_v2';
@@ -76,6 +79,7 @@ function ensureClientsWiped(state) {
 
 /** Load from localStorage; return valid state or seed and persist. */
 export function getState() {
+  warnIfProdUse();
   const fallback = seedState();
   const raw = safeGetJson(SANDBOX_KEY, null);
   if (!raw || !isValidState(raw)) {

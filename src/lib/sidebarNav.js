@@ -33,7 +33,6 @@ import {
   BookOpen,
   Activity,
 } from 'lucide-react';
-import { PERSONAL_PROGRAM_BUILDER } from '@/lib/personalBuilderNav';
 
 const COMP_ACCENT = '#9d6ef0'; // competition purple
 const PREP_ACCENT = '#ba7517'; // prep amber
@@ -198,7 +197,8 @@ export function getSidebarSections(
       label: 'Build',
       items: [
         { path: '/myprogram', label: 'My programme', icon: FileText },
-        { path: PERSONAL_PROGRAM_BUILDER, label: 'Exercise library', icon: Dumbbell },
+        // "Exercise library" removed: it pointed at the plan-CREATE form and
+        // no standalone library page exists (QA read it as data loss).
       ],
     },
     ...(isCompPersonal ? [{

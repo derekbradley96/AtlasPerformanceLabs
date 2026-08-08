@@ -46,6 +46,7 @@ import { standardCard } from '@/ui/pageLayout';
 import Card from '@/ui/Card';
 import { PageLoader } from '@/components/ui/LoadingState';
 import EmptyState from '@/components/ui/EmptyState';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { canUsePersonalFeature, PERSONAL_FEATURES } from '@/lib/personalPlanAccess';
@@ -189,6 +190,7 @@ export default function WorkoutPlayerPage() {
   const [completedWarmups, setCompletedWarmups] = useState({});
   const [rpeSaving, setRpeSaving] = useState(false);
   const [showPreviousSession, setShowPreviousSession] = useState(false);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
   const [openPrepWhyExerciseId, setOpenPrepWhyExerciseId] = useState(null);
   const exerciseChipsRef = useRef(null);
   const activeChipRef = useRef(null);
@@ -397,21 +399,28 @@ export default function WorkoutPlayerPage() {
   // Tapping an exercise chip jumps there (equipment taken, gym busy) — the
   // override clears itself once that exercise's sets are done so the normal
   // next-incomplete order resumes.
-  const [manualExerciseId, setManualExerciseId] = useState(null);
+  const [manualJump, setManualJump] = useState(null); // { id, review } — review = tapped when already fully logged
+  const manualExerciseId = manualJump?.id ?? null;
   const position = useMemo(() => {
     if (!autoPosition || !manualExerciseId) return autoPosition;
     const idx = exercisesForSession.findIndex((e) => e.id === manualExerciseId);
     if (idx < 0 || idx === autoPosition.exerciseIndex) return autoPosition;
     const single = getNextPosition([exercisesForSession[idx]], dedupedSessionSets);
-    if (!single) return autoPosition;
-    return { ...single, exerciseIndex: idx };
-  }, [autoPosition, manualExerciseId, exercisesForSession, dedupedSessionSets]);
+    if (single) return { ...single, exerciseIndex: idx };
+    // Fully-logged exercise tapped for review/edits: park on its last set
+    // instead of bouncing back (completed tabs used to be dead ends).
+    if (manualJump?.review) {
+      const setCount = Math.max(1, Number(exercisesForSession[idx]?.sets) || 1);
+      return { exerciseIndex: idx, setNumber: setCount };
+    }
+    return autoPosition;
+  }, [autoPosition, manualExerciseId, manualJump?.review, exercisesForSession, dedupedSessionSets]);
 
   useEffect(() => {
-    if (!manualExerciseId) return;
+    if (!manualExerciseId || manualJump?.review) return;
     const ex = exercisesForSession.find((e) => e.id === manualExerciseId);
-    if (!ex || !getNextPosition([ex], dedupedSessionSets)) setManualExerciseId(null);
-  }, [manualExerciseId, exercisesForSession, dedupedSessionSets]);
+    if (!ex || !getNextPosition([ex], dedupedSessionSets)) setManualJump(null);
+  }, [manualExerciseId, manualJump?.review, exercisesForSession, dedupedSessionSets]);
 
   const currentExercise = position != null ? exercisesForSession[position.exerciseIndex] : null;
   const currentSetNumber = position?.setNumber ?? 1;
@@ -581,7 +590,8 @@ export default function WorkoutPlayerPage() {
     () =>
       deriveSessionModeState({
         role: clientMode ? 'client' : 'personal',
-        readinessLogged: todayReadiness?.readiness_score != null && todayReadiness?.readiness_score !== '',
+        readinessLogged: (todayReadiness?.readiness_score != null && todayReadiness?.readiness_score !== '')
+          || Boolean(workoutSession?.readiness_sleep != null && workoutSession?.readiness_energy != null && workoutSession?.readiness_soreness != null),
         checkinInputs: {
           energy: todayCheckinInputs?.energy,
           recovery: todayCheckinInputs?.recovery,
@@ -595,6 +605,9 @@ export default function WorkoutPlayerPage() {
     [
       clientMode,
       todayReadiness?.readiness_score,
+      workoutSession?.readiness_sleep,
+      workoutSession?.readiness_energy,
+      workoutSession?.readiness_soreness,
       todayCheckinInputs?.energy,
       todayCheckinInputs?.recovery,
       todayCheckinInputs?.sleep,
@@ -1049,16 +1062,22 @@ export default function WorkoutPlayerPage() {
 
   const hasProgram = exercisesForSession.length > 0;
 
+  const sessionHasReadiness = Boolean(
+    workoutSession
+      && workoutSession.readiness_sleep != null
+      && workoutSession.readiness_energy != null
+      && workoutSession.readiness_soreness != null,
+  );
+  const todayReadinessLogged = todayReadiness?.readiness_score != null && todayReadiness?.readiness_score !== '';
   const requiresReadinessBeforeStart = useMemo(() => {
     if (searchParams.get('resume') === '1') return false;
     if (!hasProgram) return false;
     if (!(clientMode || isPersonalWorkout)) return false;
-    const hasSessionReadiness = workoutSession
-      && workoutSession.readiness_sleep != null
-      && workoutSession.readiness_energy != null
-      && workoutSession.readiness_soreness != null;
-    return !hasSessionReadiness;
-  }, [searchParams, hasProgram, clientMode, isPersonalWorkout, workoutSession]);
+    // Asked once per flow: today's check-in on /today counts, and so does an
+    // explicit "skip for today" — QA got asked four times in one session.
+    if (todayReadinessLogged || readinessSkipped) return false;
+    return !sessionHasReadiness;
+  }, [searchParams, hasProgram, clientMode, isPersonalWorkout, sessionHasReadiness, todayReadinessLogged, readinessSkipped]);
 
   const handleEntryStart = useCallback(async () => {
     const session = await startSessionMutation.mutateAsync();
@@ -1799,11 +1818,28 @@ export default function WorkoutPlayerPage() {
         coachUpdateNote={prepHeaderLine || weekProgressLabel || null}
         onExit={() => navigate('/today')}
         onEndWorkout={() => {
-          if (sessionId) finishSessionMutation.mutate(sessionId);
+          if (!sessionId) return;
+          if (completedSets < totalSets) {
+            setEndConfirmOpen(true);
+            return;
+          }
+          finishSessionMutation.mutate(sessionId);
         }}
         sessionDisplayName={sessionDisplayName}
         completedSets={completedSets}
         totalSets={totalSets}
+      />
+      <ConfirmDialog
+        open={endConfirmOpen}
+        title="End workout early?"
+        message={`You've logged ${completedSets} of ${totalSets} sets. Unlogged sets won't be saved — you can also keep going and finish the session.`}
+        confirmLabel="End workout"
+        cancelLabel="Keep training"
+        onConfirm={() => {
+          setEndConfirmOpen(false);
+          if (sessionId) finishSessionMutation.mutate(sessionId);
+        }}
+        onCancel={() => setEndConfirmOpen(false)}
       />
 
       <div
@@ -1825,7 +1861,7 @@ export default function WorkoutPlayerPage() {
               key={ex.id}
               type="button"
               ref={active ? activeChipRef : undefined}
-              onClick={() => setManualExerciseId(ex.id)}
+              onClick={() => setManualJump({ id: ex.id, review: !getNextPosition([ex], dedupedSessionSets) })}
               style={{
                 flexShrink: 0,
                 maxWidth: 160,
@@ -1853,6 +1889,9 @@ export default function WorkoutPlayerPage() {
           ? `SUPERSET ${currentSupersetLabel} · Round ${currentSetNumber} of ${targetSets}`
           : `Exercise ${position.exerciseIndex + 1} of ${exercisesForSession.length} · Set ${currentSetNumber} of ${targetSets}`}
       </p>
+      {/* User chose "skip for today" and never logged: nagging every screen
+          was QA's top annoyance — drop the banner for this session. */}
+      {!sessionModeState?.badge && readinessSkipped ? null : (
       <div
         style={{
           marginBottom: spacing[10],
@@ -1872,6 +1911,7 @@ export default function WorkoutPlayerPage() {
           What changed: {modeWhatChanged}
         </p>
       </div>
+      )}
 
       {effectiveRuntimeRecommendation?.recommendation_type === 'deload_recommendation' && (
         <div
@@ -2085,8 +2125,10 @@ export default function WorkoutPlayerPage() {
                   }));
                 }}
                 previousExercisePerf={previousExercisePerf || {}}
-                onSetComplete={() => {
+                onSetComplete={(info) => {
                   queryClient.invalidateQueries({ queryKey: ['workout-session-sets', sessionId] });
+                  // Editing an already-logged set must not restart rest.
+                  if (info?.isEdit) return;
                   if (!isInSuperset(currentExercise)) {
                     startRest(currentSetRow?.prescribed_rest_seconds ?? defaultRestSeconds);
                     return;
@@ -2242,6 +2284,8 @@ export default function WorkoutPlayerPage() {
         coached={Boolean(clientId)}
         onSubmit={handleReadinessSubmit}
         onSkip={() => {
+          // Persist the skip — every later gate this session must respect it.
+          skipReadinessForToday();
           setReadinessSheetOpen(false);
           if (pendingReadinessSessionId) {
             setPendingReadinessSessionId(null);

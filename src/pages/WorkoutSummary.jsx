@@ -49,19 +49,26 @@ export default function WorkoutSummary() {
     enabled: !!sessionId,
   });
 
+  // Look names up by the exercise ids actually logged on the sets, not by
+  // program_day_id — sessions without a day id (generated weeks, ad-hoc) and
+  // exercises swapped in from another day otherwise all render as "Exercise".
+  const setExerciseIdsKey = useMemo(
+    () => [...new Set(sets.map((s) => s?.exercise_id).filter(Boolean))].sort().join(','),
+    [sets],
+  );
   const { data: sessionExercises = [] } = useQuery({
-    queryKey: ['workout-summary-exercises', session?.program_day_id],
+    queryKey: ['workout-summary-exercises', setExerciseIdsKey],
     queryFn: async () => {
       const supabase = getSupabase();
-      if (!supabase || !session?.program_day_id) return [];
+      const ids = setExerciseIdsKey ? setExerciseIdsKey.split(',') : [];
+      if (!supabase || ids.length === 0) return [];
       const { data } = await supabase
         .from('program_exercises')
         .select('id, name, exercise_name')
-        .eq('day_id', session.program_day_id)
-        .order('sort_order', { ascending: true });
+        .in('id', ids);
       return Array.isArray(data) ? data : [];
     },
-    enabled: !!session?.program_day_id,
+    enabled: setExerciseIdsKey.length > 0,
   });
   const { data: exerciseNotes = [] } = useQuery({
     queryKey: ['workout-summary-exercise-notes', sessionId],

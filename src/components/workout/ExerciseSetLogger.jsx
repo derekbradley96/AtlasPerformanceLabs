@@ -104,6 +104,7 @@ export default function ExerciseSetLogger({
 }) {
   const [exerciseNote, setExerciseNote] = useState('');
   const [savingSet, setSavingSet] = useState(false);
+  const [editingSetNumber, setEditingSetNumber] = useState(null);
   const [platesOpenForSet, setPlatesOpenForSet] = useState(null);
   const notesSavedRef = useRef('');
 
@@ -176,7 +177,7 @@ export default function ExerciseSetLogger({
     if (!error) notesSavedRef.current = note;
   };
 
-  const completeSet = async (row, rowIdx) => {
+  const completeSet = async (row, rowIdx, { isEdit = false } = {}) => {
     if (!sessionId || !exercise?.id || savingSet) return;
     const setNumber = Number(row.set_number) || rowIdx + 1;
     const draft = draftBySet[setNumber] || {};
@@ -221,8 +222,12 @@ export default function ExerciseSetLogger({
     });
     await saveExerciseNote();
     setSavingSet(false);
-    onSetCompleted?.({ setNumber, exerciseId: exercise.id });
-    onSetComplete?.({ setNumber, exerciseId: exercise.id });
+    if (isEdit) setEditingSetNumber(null);
+    onSetCompleted?.({ setNumber, exerciseId: exercise.id, isEdit });
+    onSetComplete?.({ setNumber, exerciseId: exercise.id, isEdit });
+    // An edit re-saves an already-counted set — firing completion again
+    // would restart rest / re-run the finish flow.
+    if (isEdit) return;
     const remaining = configuredSets.filter((s, idx) => idx > rowIdx).length;
     if (remaining === 0) onAllSetsComplete?.();
   };
@@ -297,11 +302,28 @@ export default function ExerciseSetLogger({
                     {row?.weight_kg != null ? formatTrainingLoadKg(row.weight_kg, viewerLoadUnit) : 'BW'} · {row?.reps || exercise?.reps || '—'} reps{prescribedRir != null ? ` · RIR ${prescribedRir}` : ''}
                   </p>
                 </div>
-                {completed ? (
-                  <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, fontWeight: 600, color: colors.success }}>
-                    ✓ {formatTrainingLoadKg(completedMap.get(setNumber)?.weight_done, viewerLoadUnit)} × {completedMap.get(setNumber)?.reps_done ?? '—'} · RIR {completedMap.get(setNumber)?.rir_done ?? '—'}
-                  </p>
-                ) : active ? (
+                {completed && editingSetNumber !== setNumber ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: spacing[8] }}>
+                    <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, fontWeight: 600, color: colors.success }}>
+                      ✓ {formatTrainingLoadKg(completedMap.get(setNumber)?.weight_done, viewerLoadUnit)} × {completedMap.get(setNumber)?.reps_done ?? '—'} · RIR {completedMap.get(setNumber)?.rir_done ?? '—'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const done = completedMap.get(setNumber);
+                        syncDraft(setNumber, {
+                          weight: done?.weight_done != null ? trainingLoadKgToInputValue(done.weight_done, viewerLoadUnit) : '',
+                          reps: done?.reps_done != null ? String(done.reps_done) : '',
+                          rir: done?.rir_done ?? null,
+                        });
+                        setEditingSetNumber(setNumber);
+                      }}
+                      style={{ fontSize: 12, fontWeight: 700, color: colors.primary, background: 'none', border: 'none', cursor: 'pointer', minHeight: 44, padding: spacing[8] }}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                ) : active || editingSetNumber === setNumber ? (
                   <div style={{ marginTop: spacing[6], display: 'grid', gap: spacing[8] }}>
                     <div style={{ display: 'grid', gridTemplateColumns: showPreviousSession ? '1fr 1fr 72px' : '1fr 1fr', gap: spacing[6] }}>
                       <div>
@@ -379,7 +401,7 @@ export default function ExerciseSetLogger({
                     })()}
                     <button
                       type="button"
-                      onClick={() => completeSet(row, idx)}
+                      onClick={() => completeSet(row, idx, { isEdit: editingSetNumber === setNumber })}
                       disabled={savingSet}
                       style={{
                         minHeight: touchTargetMin,
@@ -390,8 +412,17 @@ export default function ExerciseSetLogger({
                         fontWeight: 700,
                       }}
                     >
-                      {savingSet ? 'Saving…' : 'Log set ✓'}
+                      {savingSet ? 'Saving…' : editingSetNumber === setNumber ? 'Save changes ✓' : 'Log set ✓'}
                     </button>
+                    {editingSetNumber === setNumber ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingSetNumber(null)}
+                        style={{ minHeight: touchTargetMin, borderRadius: radii.button, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.muted, fontWeight: 700 }}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
                   </div>
                 ) : (
                   <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 12, color: colors.muted }}>

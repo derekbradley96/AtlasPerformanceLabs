@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { hasSupabase } from '@/lib/supabaseClient';
+import { getSupabase } from '@/lib/supabaseClient';
 import { getInProgressSession } from '@/lib/workoutSessionApi';
-import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
+import { getAssignedWorkoutForToday, getActivePersonalProgramAssignment } from '@/lib/programAssignments';
 import { PageLoader } from '@/components/ui/LoadingState';
 
 /**
@@ -38,7 +39,11 @@ export default function WorkoutPlayerRedirect() {
         setTarget('/workout-player');
         return;
       }
-      setTarget('/program-builder?personal=1');
+      // No session and nothing assigned TODAY (rest day, schedule gap) — a
+      // user with a plan must land on their plan, not the create form.
+      const existing = await getActivePersonalProgramAssignment(getSupabase(), uid);
+      if (cancelled) return;
+      setTarget(existing ? '/myprogram' : '/program-builder?personal=1');
     })();
     return () => {
       cancelled = true;

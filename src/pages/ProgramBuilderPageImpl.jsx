@@ -1618,7 +1618,13 @@ export default function ProgramBuilderPage() {
         sourceWeekNumber: selectedWeek.week_number - 1,
         targetWeekNumber: selectedWeek.week_number,
       });
-      if (ok) toast.success(`Week ${selectedWeek.week_number - 1} copied to Week ${selectedWeek.week_number}`);
+      if (ok) {
+        // Copy targets the week already on screen — the days effect keys on
+        // selectedWeek.id, so it won't refetch on its own.
+        const dList = await fetchDays(supabase, selectedWeek.id);
+        setDays(dList);
+        toast.success(`Week ${selectedWeek.week_number - 1} copied to Week ${selectedWeek.week_number}`);
+      }
     } catch (e) {
       toast.error(friendlySupabaseError(e, 'Copy previous week failed'));
     } finally {
@@ -1630,21 +1636,34 @@ export default function ProgramBuilderPage() {
     if (!selectedWeek?.week_number || !block?.id) return;
     const sourceWeekNumber = Number(selectedWeek.week_number);
     if (!Number.isFinite(sourceWeekNumber) || sourceWeekNumber < 1) return;
+    // "Copy this week to end" fills the REMAINING weeks of the block — it
+    // used to append one brand-new week past the end, which read as a
+    // silent no-op ("Weeks 3 and 4 remain empty").
+    const lastWeekNumber = Math.max(
+      Number(totalWeeks) || 1,
+      ...weeks.map((w) => Number(w.week_number)).filter((n) => Number.isFinite(n) && n >= 1),
+    );
+    const targets = [];
+    for (let n = sourceWeekNumber + 1; n <= lastWeekNumber; n++) targets.push(n);
+    if (targets.length === 0) {
+      toast.message('This is already the last week — nothing after it to fill.');
+      return;
+    }
     setSaving(true);
     try {
-      const nextWeekNumber = Math.max(
-        1,
-        ...weeks.map((w) => Number(w.week_number)).filter((n) => Number.isFinite(n) && n >= 1),
-      ) + 1;
-      const ok = await copyWeekBetweenBlocks({
-        sourceBlockId: block.id,
-        sourceWeekNumber,
-        targetWeekNumber: nextWeekNumber,
-      });
-      if (!ok) return;
-      setTotalWeeks((prev) => Math.max(Number(prev) || 1, nextWeekNumber));
-      headerEffectiveWeeksRef.current = Math.max(Number(headerEffectiveWeeksRef.current) || 1, nextWeekNumber);
-      toast.success(`Week ${sourceWeekNumber} copied to Week ${nextWeekNumber}`);
+      for (const targetWeekNumber of targets) {
+        const ok = await copyWeekBetweenBlocks({
+          sourceBlockId: block.id,
+          sourceWeekNumber,
+          targetWeekNumber,
+        });
+        if (!ok) return;
+      }
+      toast.success(
+        targets.length === 1
+          ? `Week ${sourceWeekNumber} copied to Week ${targets[0]}`
+          : `Week ${sourceWeekNumber} copied to Weeks ${targets[0]}–${targets[targets.length - 1]}`,
+      );
     } catch (e) {
       toast.error(friendlySupabaseError(e, 'Copy week failed'));
     } finally {
@@ -1664,7 +1683,11 @@ export default function ProgramBuilderPage() {
         sourceWeekNumber: selectedWeek.week_number,
         targetWeekNumber: selectedWeek.week_number,
       });
-      if (ok) toast.success('Copied matching week from source block');
+      if (ok) {
+        const dList = await fetchDays(supabase, selectedWeek.id);
+        setDays(dList);
+        toast.success('Copied matching week from source block');
+      }
     } catch (e) {
       toast.error(friendlySupabaseError(e, 'Copy from source block failed'));
     } finally {
