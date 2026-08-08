@@ -6,6 +6,7 @@ import {
   gramsToOuncesMass,
   mlToUsFluidOunces,
   portionFromLoggerInputs,
+  scaleMacrosForPortion,
   usFluidOuncesToMl,
 } from '@/lib/nutritionUnits';
 
@@ -53,5 +54,28 @@ describe('nutritionUnits', () => {
     expect(formatWaterVolumeMlForViewer(500, 'ml')).toMatch(/500/);
     expect(formatWaterVolumeMlForViewer(1000, 'litres')).toMatch(/1\.00 L/);
     expect(formatWaterVolumeMlForViewer(295.735, 'fl_oz')).toMatch(/fl oz/);
+  });
+});
+
+describe('scaleMacrosForPortion', () => {
+  const chicken = { calories: 165, protein_g: 31, carbs_g: 0, fats_g: 3.6, refAmount: 100 };
+
+  it('scales 100g reference macros to a 200g portion (Test 1 BUG-035)', () => {
+    expect(scaleMacrosForPortion(chicken, 200)).toEqual({ calories: 330, protein_g: 62, carbs_g: 0, fats_g: 7.2 });
+  });
+
+  it('scales down and rounds sensibly', () => {
+    expect(scaleMacrosForPortion(chicken, 50)).toEqual({ calories: 83, protein_g: 15.5, carbs_g: 0, fats_g: 1.8 });
+  });
+
+  it('handles non-100g references (large egg = 50g)', () => {
+    const egg = { calories: 78, protein_g: 6, carbs_g: 0.6, fats_g: 5.3, refAmount: 50 };
+    expect(scaleMacrosForPortion(egg, 100)).toEqual({ calories: 156, protein_g: 12, carbs_g: 1.2, fats_g: 10.6 });
+  });
+
+  it('returns null when there is nothing valid to scale', () => {
+    expect(scaleMacrosForPortion(null, 200)).toBeNull();
+    expect(scaleMacrosForPortion(chicken, 0)).toBeNull();
+    expect(scaleMacrosForPortion({ ...chicken, refAmount: 0 }, 200)).toBeNull();
   });
 });

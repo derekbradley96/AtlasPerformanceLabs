@@ -65,7 +65,10 @@ export default function ExerciseEditor({
   const [debouncedQuery, setDebouncedQuery] = useState('');
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedQuery(inlineSearchQuery), 2000);
+    // 250ms, not 2000ms: at two full seconds the list still showed the default
+    // first-8 (bench variants) long after the user typed "squat" — QA logged
+    // it as "text search is ignored" (Test 1 BUG-018), and users would too.
+    const t = window.setTimeout(() => setDebouncedQuery(inlineSearchQuery), 250);
     return () => window.clearTimeout(t);
   }, [inlineSearchQuery]);
 

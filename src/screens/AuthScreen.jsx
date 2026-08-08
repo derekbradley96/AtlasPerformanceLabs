@@ -85,13 +85,21 @@ function getAuthErrorMessage(authError) {
   return 'Invalid email or password';
 }
 
+function isEmailRateLimitError(authError) {
+  const msg = (authError?.message ?? '').toString();
+  return authError?.status === 429 || /only request this after|rate limit/i.test(msg);
+}
+
 function getSignupErrorMessage(authError) {
   if (!authError) return 'Could not create account';
   if (import.meta.env.DEV) {
     console.warn('[SIGNUP ERROR]', { message: authError?.message, status: authError?.status });
   }
   const msg = (authError?.message ?? '').toString().trim();
-  return msg || 'Could not create account';
+  if (/already registered|already exists/i.test(msg)) return 'That email already has an account — log in instead.';
+  if (isEmailRateLimitError(authError)) return 'Too many attempts — wait a minute and try again.';
+  // Never dump raw backend text on the first screen a user ever sees.
+  return msg && msg.length < 100 && !/database|sql|pg|jwt/i.test(msg) ? msg : 'Could not create account — please try again.';
 }
 
 async function lightHaptic() {
@@ -111,6 +119,11 @@ const SIGNUP_STAGE = /** @type {const} */ ({
   PICK_ROLE: 'pick_role',
   CLIENT_CODE: 'client_code',
   ACCOUNT: 'account',
+  // Persistent post-signup success state. Signup used to only fire a toast —
+  // and a Supabase email rate-limit surfaced RAW on the form even though the
+  // account was created and the email sent (Test 1 BUG-009: "your very first
+  // interaction lies to the user").
+  CHECK_EMAIL: 'check_email',
 });
 
 const oauthButtonStyle = {
@@ -222,6 +235,8 @@ export default function AuthScreen() {
   const [biometricType, setBiometricType] = useState(null);
   const publicEntryResetAttemptedRef = useRef(false);
   const authSubmitStartedRef = useRef(false);
+  const submitBusyRef = useRef(false);
+  const [signupEmailSentTo, setSignupEmailSentTo] = useState('');
 
   const isLogin = mode === 'login';
   const isNativePlatform = Capacitor?.isNativePlatform?.() ?? false;
@@ -527,6 +542,7 @@ export default function AuthScreen() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitBusyRef.current) return;
     authSubmitStartedRef.current = true;
     if (!isLogin && signupStage !== SIGNUP_STAGE.ACCOUNT) return;
 
@@ -560,6 +576,7 @@ export default function AuthScreen() {
     await lightHaptic();
     document.activeElement?.blur?.();
     setLoading(true);
+    submitBusyRef.current = true;
     if (import.meta.env.DEV) {
       if (isLogin) console.log('[AUTH] login', { email: eTrim });
       else console.log('[AUTH] signup', { role: signupRole, email: eTrim });
@@ -572,6 +589,14 @@ export default function AuthScreen() {
             ...(signupRole === 'coach' && referralCodeFromUrl ? { referral_code: referralCodeFromUrl } : {}),
           });
       if (result?.error) {
+        // Signup email rate-limit: the account is typically CREATED and a
+        // confirmation email already sent/queued — reporting failure here is
+        // a lie that makes people retry or abandon. Show the inbox state.
+        if (!isLogin && isEmailRateLimitError(result.error)) {
+          setSignupEmailSentTo(eTrim);
+          setSignupStage(SIGNUP_STAGE.CHECK_EMAIL);
+          return;
+        }
         const message = isLogin ? getAuthErrorMessage(result.error) : getSignupErrorMessage(result.error);
         setError(message);
         return;
@@ -592,7 +617,9 @@ export default function AuthScreen() {
         return;
       }
       if (result?.data?.user) {
-        toast.success('Account created. Please confirm your email to continue.');
+        setSignupEmailSentTo(eTrim);
+        setSignupStage(SIGNUP_STAGE.CHECK_EMAIL);
+        toast.success('Account created');
       }
     } catch (err) {
       const msg = (err?.message ?? '').toString().trim();
@@ -602,6 +629,7 @@ export default function AuthScreen() {
         setError(msg || 'Could not create account');
       }
     } finally {
+      submitBusyRef.current = false;
       setLoading(false);
     }
   };
@@ -1290,6 +1318,53 @@ export default function AuthScreen() {
                 )}
               </button>
             </form>
+          )}
+
+          {!isLogin && signupStage === SIGNUP_STAGE.CHECK_EMAIL && (
+            <div style={{ textAlign: 'center', padding: `${spacing[16]}px 0` }}>
+              <div
+                aria-hidden
+                style={{
+                  width: 56,
+                  height: 56,
+                  margin: '0 auto',
+                  borderRadius: '50%',
+                  background: colors.primarySubtle,
+                  color: colors.primary,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 26,
+                }}
+              >
+                ✉️
+              </div>
+              <h2 style={{ margin: `${spacing[14]}px 0 0`, fontSize: 20, fontWeight: 700, color: colors.text }}>Check your inbox</h2>
+              <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 14, color: colors.muted, lineHeight: 1.5 }}>
+                We&apos;ve sent a confirmation link to <span style={{ color: colors.text, fontWeight: 600 }}>{signupEmailSentTo}</span>.
+                Tap it, then come back and log in.
+              </p>
+              <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted }}>
+                Nothing after a couple of minutes? Check spam — or try signing up again in a minute.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setError(''); setSignupStage(SIGNUP_STAGE.PICK_ROLE); }}
+                className="w-full mt-5"
+                style={{
+                  minHeight: touchTargetMin,
+                  background: colors.accent,
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: radii.sm,
+                  fontWeight: 600,
+                  fontSize: 15,
+                  cursor: 'pointer',
+                }}
+              >
+                Go to log in
+              </button>
+            </div>
           )}
         </Card>
 

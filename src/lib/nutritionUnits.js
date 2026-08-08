@@ -334,3 +334,25 @@ export const SODIUM_UNIT_SEGMENT_OPTIONS = [
   { id: 'mg', label: 'mg' },
   { id: 'g', label: 'g' },
 ];
+
+/**
+ * Scale a set of reference-portion macros to an actual consumed amount.
+ * base: { calories, protein_g, carbs_g, fats_g, refAmount } where refAmount is
+ * the grams (or ml) the macros describe — e.g. common-food chips are per 100g.
+ * Returns null when there is nothing valid to scale (caller keeps fields as-is).
+ * Exists because quick-add picks used to fill the form with per-100g values
+ * that never rescaled when the portion changed: 200g of chicken saved as the
+ * 100g calories (Test 1 BUG-035, a data-integrity bug).
+ */
+export function scaleMacrosForPortion(base, amount) {
+  const ref = Number(base?.refAmount);
+  const amt = Number(amount);
+  if (!base || !Number.isFinite(ref) || ref <= 0 || !Number.isFinite(amt) || amt <= 0) return null;
+  const f = amt / ref;
+  return {
+    calories: Math.max(0, Math.round((Number(base.calories) || 0) * f)),
+    protein_g: Math.max(0, Math.round((Number(base.protein_g) || 0) * f * 10) / 10),
+    carbs_g: Math.max(0, Math.round((Number(base.carbs_g) || 0) * f * 10) / 10),
+    fats_g: Math.max(0, Math.round((Number(base.fats_g) || 0) * f * 10) / 10),
+  };
+}

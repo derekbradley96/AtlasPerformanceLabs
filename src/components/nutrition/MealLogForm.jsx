@@ -31,9 +31,12 @@ import {
   HOUSEHOLD_UNIT_OPTIONS,
   gramsToOuncesMass,
   mlToUsFluidOunces,
+  ouncesMassToGrams,
   portionFromLoggerInputs,
   resolveViewerFoodQuantityUnit,
   resolveViewerNutritionLabelDisplay,
+  scaleMacrosForPortion,
+  usFluidOuncesToMl,
 } from '@/lib/nutritionUnits';
 import { getSupabase } from '@/lib/supabaseClient';
 import { getRecentFoods } from '@/lib/mealLogsService';
@@ -141,6 +144,11 @@ export default function MealLogForm({
   }, []);
 
   const [calories, setCalories] = useState('');
+  // Reference-portion macros behind the fields (e.g. chip picks are per 100g).
+  // While set, changing the portion rescales the macro fields live; any manual
+  // macro edit clears it so the user's own numbers always win. Without this,
+  // 200g of chicken saved with the 100g calories (Test 1 BUG-035).
+  const [macroScaleBase, setMacroScaleBase] = useState(null);
   const [protein, setProtein] = useState('');
   const [carbs, setCarbs] = useState('');
   const [fats, setFats] = useState('');
@@ -285,6 +293,21 @@ export default function MealLogForm({
       } else {
         setPortionAmount('');
       }
+      const rowRefG = Number(row.portion_grams);
+      const rowRefMl = Number(row.portion_ml);
+      const rowMacros = {
+        calories: row.calories,
+        protein_g: row.protein_g,
+        carbs_g: row.carbs_g,
+        fats_g: row.fats_g,
+      };
+      if (Number.isFinite(rowRefG) && rowRefG > 0) {
+        setMacroScaleBase({ ...rowMacros, refAmount: rowRefG, liquid: false });
+      } else if (Number.isFinite(rowRefMl) && rowRefMl > 0) {
+        setMacroScaleBase({ ...rowMacros, refAmount: rowRefMl, liquid: true });
+      } else {
+        setMacroScaleBase(null);
+      }
     },
     [foodQtyPref],
   );
@@ -320,6 +343,21 @@ export default function MealLogForm({
       } else {
         setPortionAmount('');
       }
+      const refG = Number(item.portion_grams);
+      const refMl = Number(item.portion_ml);
+      const baseMacros = {
+        calories: item.calories,
+        protein_g: item.protein_g,
+        carbs_g: item.carbs_g,
+        fats_g: item.fats_g,
+      };
+      if (Number.isFinite(refG) && refG > 0) {
+        setMacroScaleBase({ ...baseMacros, refAmount: refG, liquid: false });
+      } else if (Number.isFinite(refMl) && refMl > 0) {
+        setMacroScaleBase({ ...baseMacros, refAmount: refMl, liquid: true });
+      } else {
+        setMacroScaleBase(null);
+      }
     },
     [foodQtyPref, mealType, setMealTypeWithPref],
   );
@@ -329,6 +367,27 @@ export default function MealLogForm({
     if (foodQtyPref === 'oz_fl_oz') return quickSolidLiquid === 'liquid' ? 'Fluid ounces' : 'Ounces (oz)';
     return quickSolidLiquid === 'liquid' ? 'Millilitres' : 'Grams';
   }, [foodQtyPref, quickSolidLiquid]);
+
+  useEffect(() => {
+    if (!macroScaleBase) return;
+    if (foodQtyPref === 'household') return;
+    const n = parseFloat(portionAmount);
+    if (!Number.isFinite(n) || n <= 0) return;
+    let amount = null;
+    if (macroScaleBase.liquid) {
+      if (quickSolidLiquid !== 'liquid') return;
+      amount = foodQtyPref === 'oz_fl_oz' ? usFluidOuncesToMl(n) : n;
+    } else {
+      if (quickSolidLiquid === 'liquid') return;
+      amount = foodQtyPref === 'oz_fl_oz' ? ouncesMassToGrams(n) : n;
+    }
+    const scaled = scaleMacrosForPortion(macroScaleBase, amount);
+    if (!scaled) return;
+    setCalories(String(scaled.calories));
+    setProtein(String(scaled.protein_g));
+    setCarbs(String(scaled.carbs_g));
+    setFats(String(scaled.fats_g));
+  }, [macroScaleBase, portionAmount, quickSolidLiquid, foodQtyPref]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -406,6 +465,7 @@ export default function MealLogForm({
     setPendingSaveBarcode('');
 
     setMealTypeWithPref('breakfast');
+    setMacroScaleBase(null);
     setCalories('');
     setProtein('');
     setCarbs('');
@@ -980,7 +1040,7 @@ export default function MealLogForm({
                 <Input
                   value={webBarcodeInput}
                   onChange={(e) => setWebBarcodeInput(e.target.value)}
-                  placeholder="e.g. 5000169105718"
+                  placeholder="e.g. 5449000000996"
                   className="bg-slate-800 border-slate-700"
                 />
                 <Button
@@ -1205,7 +1265,7 @@ export default function MealLogForm({
           id="atlas-meal-calories"
           type="number"
           value={calories}
-          onChange={(e) => setCalories(e.target.value)}
+          onChange={(e) => { setMacroScaleBase(null); setCalories(e.target.value); }}
           onFocus={(e) => e.target.select()}
           placeholder="e.g., 450"
           className="bg-slate-700 border-slate-600"
@@ -1222,7 +1282,7 @@ export default function MealLogForm({
             id="atlas-meal-protein"
             type="number"
             value={protein}
-            onChange={(e) => setProtein(e.target.value)}
+            onChange={(e) => { setMacroScaleBase(null); setProtein(e.target.value); }}
             onFocus={(e) => e.target.select()}
             placeholder="Optional"
             className="bg-slate-700 border-slate-600"
@@ -1236,7 +1296,7 @@ export default function MealLogForm({
             id="atlas-meal-carbs"
             type="number"
             value={carbs}
-            onChange={(e) => setCarbs(e.target.value)}
+            onChange={(e) => { setMacroScaleBase(null); setCarbs(e.target.value); }}
             onFocus={(e) => e.target.select()}
             placeholder="Optional"
             className="bg-slate-700 border-slate-600"
@@ -1250,7 +1310,7 @@ export default function MealLogForm({
             id="atlas-meal-fats"
             type="number"
             value={fats}
-            onChange={(e) => setFats(e.target.value)}
+            onChange={(e) => { setMacroScaleBase(null); setFats(e.target.value); }}
             onFocus={(e) => e.target.select()}
             placeholder="Optional"
             className="bg-slate-700 border-slate-600"

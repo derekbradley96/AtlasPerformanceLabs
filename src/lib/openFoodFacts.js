@@ -267,14 +267,30 @@ export async function searchFoodProducts(query, { pageSize = 12 } = {}) {
 
   const request = (async () => {
     try {
-      const url = `${OFF_SEARCH_URL}?q=${encodeURIComponent(q)}&page_size=${pageSize}&fields=${encodeURIComponent(OFF_SEARCH_FIELDS)}`;
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json', 'User-Agent': OFF_USER_AGENT },
-      });
-      if (!response.ok) return { ok: false, reason: 'http_error', products: [] };
-      const payload = await response.json();
-      const hits = Array.isArray(payload?.hits) ? payload.hits : [];
+      // OFF's search endpoints reject cross-origin browser requests (the
+      // product-by-barcode API allows them — which is why only search was
+      // dead on web, Test 1 BUG-033). Route through our edge-function proxy
+      // when Supabase is configured; fall back to the direct call, which
+      // works in the native app where CORS does not apply.
+      let hits = null;
+      try {
+        const { getSupabase } = await import('@/lib/supabaseClient');
+        const sb = getSupabase();
+        if (sb) {
+          const { data, error } = await sb.functions.invoke('food-search', { body: { q, pageSize } });
+          if (!error && Array.isArray(data?.hits)) hits = data.hits;
+        }
+      } catch {}
+      if (!hits) {
+        const url = `${OFF_SEARCH_URL}?q=${encodeURIComponent(q)}&page_size=${pageSize}&fields=${encodeURIComponent(OFF_SEARCH_FIELDS)}`;
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) return { ok: false, reason: 'http_error', products: [] };
+        const payload = await response.json();
+        hits = Array.isArray(payload?.hits) ? payload.hits : [];
+      }
       const products = hits
         .map((hit) => parseProductFromResponse(hit?.code || '', { product: hit }))
         .filter((p) => p && Number.isFinite(Number(p.calories_per_100g)));
