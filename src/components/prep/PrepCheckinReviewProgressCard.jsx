@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { useAuth } from '@/lib/AuthContext';
 import { calculatePrepProgress } from '@/lib/prepProgressTracking';
+import { resolveViewerBodyweightUnit } from '@/lib/bodyMeasurementUnits';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 
 function pickWeightKg(row) {
@@ -11,6 +13,8 @@ function pickWeightKg(row) {
 
 export default function PrepCheckinReviewProgressCard({ checkin, contestPrep, clientRow }) {
   const ackSentRef = useRef(false);
+  const { profile } = useAuth();
+  const viewerWeightUnit = resolveViewerBodyweightUnit(profile);
 
   const currentWeight = useMemo(() => pickWeightKg(checkin), [checkin]);
 
@@ -33,8 +37,9 @@ export default function PrepCheckinReviewProgressCard({ checkin, contestPrep, cl
       currentWeight,
       startDate,
       showDate: contestPrep.show_date,
+      viewerWeightUnit,
     });
-  }, [checkin, clientRow, contestPrep, currentWeight]);
+  }, [checkin, clientRow, contestPrep, currentWeight, viewerWeightUnit]);
 
   useEffect(() => {
     if (!progress || progress.status !== 'behind' || !checkin?.id || ackSentRef.current) return;

@@ -46,6 +46,8 @@ import { usePresentationMode } from '@/lib/presentationMode';
 import TodayWorkoutHeroCard from '@/components/workout/TodayWorkoutHeroCard';
 import { scheduleWorkoutReminderIfNeeded } from '@/lib/workoutReminder';
 import { interpretWeightProgress, clientGoalFromGoalsField } from '@/lib/progressInterpretation';
+import { resolveViewerBodyweightUnit, formatWeightForViewer, formatAbsWeightDeltaFromKg } from '@/lib/bodyMeasurementUnits';
+import { useAuth } from '@/lib/AuthContext';
 
 const MOMENTUM_CATEGORIES = [
   { key: 'training_score', label: 'Training', icon: Dumbbell },
@@ -67,6 +69,8 @@ const MOMENTUM_CATEGORIES = [
 export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
   const navigate = useNavigate();
   const { isDesktopWeb } = usePresentationMode();
+  const { profile: viewerProfile } = useAuth();
+  const viewerWU = resolveViewerBodyweightUnit(viewerProfile);
   const appOpenedTracked = useRef(false);
   const supabase = hasSupabase ? getSupabase() : null;
 
@@ -310,14 +314,15 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
       : profile?.baseline_weight != null
         ? Number(profile.baseline_weight)
         : currentWeight;
-    const targetWeight = weightLogsRecentDash[0]?.target_weight_kg != null ? Number(weightLogsRecentDash[0].target_weight_kg) : null;
+    // client_weight_logs has no target column (select is weight/log_date only).
+    const targetWeight = null;
     const interp = interpretWeightProgress({
       currentWeight,
       startWeight: Number.isFinite(startWeight) ? startWeight : currentWeight,
       targetWeight,
       recentWeights: series,
       clientGoal: clientGoalFromGoalsField(profile?.goals),
-    });
+    }, viewerWU);
     return { currentWeight, interp };
   }, [
     dashTransformationWeightSurface,
@@ -326,6 +331,7 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
     profile?.goals,
     weightLogsRecentDash,
     progressMetrics?.latest_weight,
+    viewerWU,
   ]);
 
   const { data: athleteDevelopment } = useQuery({
@@ -1425,13 +1431,13 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
               <Scale size={20} strokeWidth={2} style={{ color: colors.primary, flexShrink: 0 }} aria-hidden />
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing[12], marginTop: spacing[8], flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 34, fontWeight: 800, color: colors.text }}>{dashboardWeightCardModel.currentWeight.toFixed(1)} kg</span>
+              <span style={{ fontSize: 34, fontWeight: 800, color: colors.text }}>{formatWeightForViewer(dashboardWeightCardModel.currentWeight, viewerWU)}</span>
               <span style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
                 {Math.abs(dashboardWeightCardModel.interp.thisWeekChange) < 0.05
                   ? 'This week: steady'
                   : dashboardWeightCardModel.interp.thisWeekChange < 0
-                    ? `This week: ↓ ${Math.abs(dashboardWeightCardModel.interp.thisWeekChange).toFixed(1)} kg`
-                    : `This week: ↑ ${dashboardWeightCardModel.interp.thisWeekChange.toFixed(1)} kg`}
+                    ? `This week: ↓ ${formatAbsWeightDeltaFromKg(dashboardWeightCardModel.interp.thisWeekChange, viewerWU)}`
+                    : `This week: ↑ ${formatAbsWeightDeltaFromKg(dashboardWeightCardModel.interp.thisWeekChange, viewerWU)}`}
               </span>
             </div>
             <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>

@@ -15,7 +15,7 @@ import Button from '@/ui/Button';
 import { colors, spacing, radii } from '@/ui/tokens';
 import { safeDate } from '@/lib/format';
 import { useAuth } from '@/lib/AuthContext';
-import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
+import { resolveViewerBodyweightUnit, formatWeightForViewer, formatWeightDeltaKg } from '@/lib/bodyMeasurementUnits';
 
 const BADGE_STYLE = {
   green: { bg: colors.successSubtle, color: colors.success },
@@ -131,10 +131,8 @@ export default function HealthBreakdownSheet({
   );
   const deltaVsLastWeek = useMemo(() => {
     if (weightCurrent == null || weightPrevious == null) return null;
-    const d = weightCurrent - weightPrevious;
-    const sign = d > 0 ? '+' : '';
-    return `${sign}${d.toFixed(1)} kg`;
-  }, [weightCurrent, weightPrevious]);
+    return formatWeightDeltaKg(weightCurrent - weightPrevious, viewerWU);
+  }, [weightCurrent, weightPrevious, viewerWU]);
 
   const submitted = Array.isArray(checkIns) ? checkIns.filter((c) => (c?.status ?? '').toLowerCase() === 'submitted') : [];
   const latestCheckIn = submitted.sort((a, b) => {

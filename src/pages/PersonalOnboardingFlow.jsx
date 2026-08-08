@@ -328,6 +328,10 @@ export default function PersonalOnboardingFlow() {
           height_unit: normalizeHeightUnit(heightUnit),
           bodyweight_unit: normalizeWeightUnit(weightUnit),
           load_unit: normalizeLoadUnit(defaultLoadUnitForLocale()),
+          // Canonical bodyweight columns (kg) — without these Settings shows an
+          // empty weight after onboarding even though metadata was saved.
+          ...(w != null && w > 0 ? { current_weight: w } : {}),
+          ...(twKg != null && twKg > 0 ? { target_weight: twKg } : {}),
         });
         if (result?.error) {
           setError(result.error?.message || 'Could not finish');

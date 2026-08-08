@@ -1,6 +1,7 @@
 /**
  * Compare actual weight change vs linear pace from prep start to stage target.
  */
+import { formatAbsWeightDeltaFromKg } from '@/lib/bodyMeasurementUnits';
 
 export function calculatePrepProgress({
   startWeight,
@@ -8,6 +9,7 @@ export function calculatePrepProgress({
   currentWeight,
   startDate,
   showDate,
+  viewerWeightUnit = 'kg',
 }) {
   const sw = Number(startWeight);
   const tw = Number(targetWeight);
@@ -43,8 +45,8 @@ export function calculatePrepProgress({
   const statusLabel =
     status === 'on_track' ? 'On track for your show' :
       status === 'ahead'
-        ? `${Math.abs(onTrackDelta).toFixed(1)}kg ahead of target pace`
-        : `${Math.abs(onTrackDelta).toFixed(1)}kg behind target pace`;
+        ? `${formatAbsWeightDeltaFromKg(onTrackDelta, viewerWeightUnit)} ahead of target pace`
+        : `${formatAbsWeightDeltaFromKg(onTrackDelta, viewerWeightUnit)} behind target pace`;
 
   return {
     pctComplete,

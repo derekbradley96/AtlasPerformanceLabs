@@ -10,6 +10,13 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getMyClientProfile } from '@/lib/clientProfiles';
 import { listProgressPhotos, uploadProgressPhoto } from '@/lib/progressPhotosService';
 import { usePresentationMode } from '@/lib/presentationMode';
+import {
+  resolveViewerBodyweightUnit,
+  parseWeightInputsToKg,
+  formatWeightForViewer,
+  formatAbsWeightDeltaFromKg,
+  weightUnitShortLabel,
+} from '@/lib/bodyMeasurementUnits';
 import { trackProgressPhotoUploaded } from '@/services/engagementTracker';
 import { colors, spacing, shell } from '@/ui/tokens';
 import Card from '@/ui/Card';
@@ -48,7 +55,7 @@ function badgeStyle(tag) {
 }
 
 /** Prefer last 4 weeks of dated weight entries; fall back to full span. */
-function interpretWeightTrendLine(photos, { isCompetition = false } = {}) {
+function interpretWeightTrendLine(photos, { isCompetition = false, weightUnit = 'kg' } = {}) {
   const dated = (photos || [])
     .filter((p) => p?.weight_kg != null && p?.date_taken)
     .map((p) => ({
@@ -70,16 +77,17 @@ function interpretWeightTrendLine(photos, { isCompetition = false } = {}) {
   if (abs < 0.2) {
     return `Weight looks stable over about ${weeks} week${weeks === 1 ? '' : 's'} — visuals and training quality matter most here.`;
   }
+  const magnitude = formatAbsWeightDeltaFromKg(kgDiff, weightUnit);
   if (kgDiff < 0) {
     if (isCompetition) {
-      return `Down ${abs.toFixed(1)}kg in ${weeks} week${weeks === 1 ? '' : 's'} — on track if conditioning and performance are holding.`;
+      return `Down ${magnitude} in ${weeks} week${weeks === 1 ? '' : 's'} — on track if conditioning and performance are holding.`;
     }
-    return `Down ${abs.toFixed(1)}kg in ${weeks} week${weeks === 1 ? '' : 's'} — steady progress if energy and training quality stay good.`;
+    return `Down ${magnitude} in ${weeks} week${weeks === 1 ? '' : 's'} — steady progress if energy and training quality stay good.`;
   }
   if (isCompetition) {
-    return `Up ${abs.toFixed(1)}kg in ${weeks} week${weeks === 1 ? '' : 's'} — review peak prep timeline and weekly targets.`;
+    return `Up ${magnitude} in ${weeks} week${weeks === 1 ? '' : 's'} — review peak prep timeline and weekly targets.`;
   }
-  return `Up ${abs.toFixed(1)}kg in ${weeks} week${weeks === 1 ? '' : 's'} — useful in a build phase if performance is also improving.`;
+  return `Up ${magnitude} in ${weeks} week${weeks === 1 ? '' : 's'} — useful in a build phase if performance is also improving.`;
 }
 
 function UploadFormFields({
@@ -90,6 +98,7 @@ function UploadFormFields({
   onSubmit,
   isPending,
   disabled,
+  weightUnit = 'kg',
 }) {
   return (
     <div style={{ display: 'grid', gap: spacing[16] }}>
@@ -128,17 +137,46 @@ function UploadFormFields({
         </select>
       </div>
       <div>
-        <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>Weight that day (kg, optional)</label>
-        <input
-          type="number"
-          step="0.1"
-          value={uploadForm.weight_kg}
-          onChange={(e) => setUploadForm((f) => ({ ...f, weight_kg: e.target.value }))}
-          placeholder="e.g. 75.5"
-          disabled={disabled || isPending}
-          className="w-full rounded-md px-3 py-2 text-sm"
-          style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}` }}
-        />
+        <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>
+          Weight that day ({weightUnitShortLabel(weightUnit)}, optional)
+        </label>
+        {weightUnit === 'st_lb' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing[8] }}>
+            <input
+              type="number"
+              step="1"
+              min="0"
+              value={uploadForm.weight_st}
+              onChange={(e) => setUploadForm((f) => ({ ...f, weight_st: e.target.value }))}
+              placeholder="Stone"
+              disabled={disabled || isPending}
+              className="w-full rounded-md px-3 py-2 text-sm"
+              style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}` }}
+            />
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              value={uploadForm.weight_lb}
+              onChange={(e) => setUploadForm((f) => ({ ...f, weight_lb: e.target.value }))}
+              placeholder="Pounds"
+              disabled={disabled || isPending}
+              className="w-full rounded-md px-3 py-2 text-sm"
+              style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}` }}
+            />
+          </div>
+        ) : (
+          <input
+            type="number"
+            step="0.1"
+            value={uploadForm.weight_kg}
+            onChange={(e) => setUploadForm((f) => ({ ...f, weight_kg: e.target.value }))}
+            placeholder={weightUnit === 'lb' ? 'e.g. 166.5' : 'e.g. 75.5'}
+            disabled={disabled || isPending}
+            className="w-full rounded-md px-3 py-2 text-sm"
+            style={{ background: colors.surface2, color: colors.text, border: `1px solid ${colors.border}` }}
+          />
+        )}
       </div>
       <div>
         <label className="block text-xs font-semibold mb-1" style={{ color: colors.muted }}>Notes (optional)</label>
@@ -162,8 +200,9 @@ export default function ProgressPhotos() {
   const navigate = useNavigate();
   const { id: rosterClientId } = useParams();
   const queryClient = useQueryClient();
-  const { user, effectiveRole } = useAuth();
+  const { user, effectiveRole, profile } = useAuth();
   const { isDesktopWeb } = usePresentationMode();
+  const viewerWU = resolveViewerBodyweightUnit(profile);
 
   const coachRosterMode = isCoach(effectiveRole) && !!rosterClientId;
   const isPersonalSelf = !coachRosterMode && isPersonal(effectiveRole);
@@ -173,6 +212,8 @@ export default function ProgressPhotos() {
     tag: 'front',
     notes: '',
     weight_kg: '',
+    weight_st: '',
+    weight_lb: '',
   });
   const [pendingFile, setPendingFile] = useState(null);
   const [mobileUploadOpen, setMobileUploadOpen] = useState(false);
@@ -225,8 +266,8 @@ export default function ProgressPhotos() {
   });
 
   const resolvedWeightTrend = useMemo(
-    () => interpretWeightTrendLine(photos, { isCompetition: isCompetitionContext }),
-    [photos, isCompetitionContext]
+    () => interpretWeightTrendLine(photos, { isCompetition: isCompetitionContext, weightUnit: viewerWU }),
+    [photos, isCompetitionContext, viewerWU]
   );
 
   const grouped = useMemo(() => {
@@ -246,8 +287,12 @@ export default function ProgressPhotos() {
       if (!supabase || !file || !canUploadPhotos) throw new Error('Missing upload context');
       const profileId = coachRosterMode ? rosterClient?.user_id : user?.id;
       if (!profileId) throw new Error('Missing profile for upload');
-      const w = form.weight_kg.trim();
-      const weightKg = w === '' ? null : Number(w);
+      const weightKg =
+        viewerWU === 'st_lb'
+          ? parseWeightInputsToKg({ weightUnit: viewerWU, stoneText: form.weight_st, poundText: form.weight_lb })
+          : viewerWU === 'lb'
+            ? parseWeightInputsToKg({ weightUnit: viewerWU, lbText: form.weight_kg })
+            : parseWeightInputsToKg({ weightUnit: viewerWU, kgText: form.weight_kg });
       return uploadProgressPhoto({
         supabase,
         clientId: effectiveClientId || null,
@@ -270,6 +315,8 @@ export default function ProgressPhotos() {
         tag: 'front',
         notes: '',
         weight_kg: '',
+        weight_st: '',
+        weight_lb: '',
       });
       if (effectiveClientId) {
         trackProgressPhotoUploaded(effectiveClientId, coachForTracking ?? undefined, { tag: variables.tag }).catch(() => {});
@@ -358,6 +405,7 @@ export default function ProgressPhotos() {
         onSubmit={submitUpload}
         isPending={uploadMutation.isPending}
         disabled={uploadDisabled}
+        weightUnit={viewerWU}
       />
     </Card>
   );
@@ -411,7 +459,7 @@ export default function ProgressPhotos() {
             <p className="text-sm mt-2 max-w-xl" style={{ color: colors.text }}>{resolvedWeightTrend}</p>
           ) : photos.length >= 2 ? (
             <p className="text-sm mt-2 max-w-xl" style={{ color: colors.muted }}>
-              Add weight on two or more uploads to see an interpreted trend (for example, down 2.1kg in four weeks).
+              Add weight on two or more uploads to see an interpreted trend (for example, down {formatAbsWeightDeltaFromKg(2.1, viewerWU)} in four weeks).
             </p>
           ) : null}
         </div>
@@ -504,7 +552,7 @@ export default function ProgressPhotos() {
                               : '—'}
                           </p>
                           {photo.weight_kg != null ? (
-                            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.85)' }}>{Number(photo.weight_kg).toFixed(1)} kg</p>
+                            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.85)' }}>{formatWeightForViewer(Number(photo.weight_kg), viewerWU)}</p>
                           ) : null}
                         </div>
                       </button>
@@ -534,6 +582,7 @@ export default function ProgressPhotos() {
           onSubmit={submitUpload}
           isPending={uploadMutation.isPending}
           disabled={uploadDisabled}
+          weightUnit={viewerWU}
         />
       </BottomSheet>
     </div>

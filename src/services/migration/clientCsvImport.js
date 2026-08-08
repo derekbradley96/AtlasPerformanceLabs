@@ -22,6 +22,7 @@
  */
 
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { normalizeWeightUnit, lbToKg } from '@/lib/bodyMeasurementUnits';
 import { createClient as insertCanonicalClient } from '@/data/supabaseClientsRepo';
 
 function normaliseHeader(h) {
@@ -124,14 +125,18 @@ export function validateClientData(rows) {
  * Create client records from validated rows.
  * Uses the same canonical insert as manual add and CSV import (`supabaseClientsRepo.createClient`).
  * Attempts to link user_id when a profile exists for the email (RLS may hide it).
+ * CSV bodyweight is declared in bodyweightUnit ('kg' | 'lb'; default 'kg') and converted to
+ * canonical kg before storage in clients.baseline_weight.
  *
- * @param {{ rows: ReturnType<typeof parseCSV>['rows'], supabase?: import('@supabase/supabase-js').SupabaseClient | null }} params
+ * @param {{ rows: ReturnType<typeof parseCSV>['rows'], supabase?: import('@supabase/supabase-js').SupabaseClient | null, bodyweightUnit?: 'kg' | 'lb' }} params
  * @returns {Promise<{ created: Array<{ clientId: string, name: string | null, email: string | null }>, errors: Array<{ rowIndex: number, message: string }> }>}
  */
-export async function createClientRecords({ rows, supabase }) {
+export async function createClientRecords({ rows, supabase, bodyweightUnit = 'kg' }) {
   const created = [];
   const errors = [];
   if (!rows || rows.length === 0) return { created, errors };
+
+  const unit = normalizeWeightUnit(bodyweightUnit);
 
   const client = supabase ?? (hasSupabase ? getSupabase() : null);
   if (!client) throw new Error('Supabase client is required to create clients');
@@ -174,7 +179,12 @@ export async function createClientRecords({ rows, supabase }) {
         client_journey: 'transformation',
         start_date: row.startDate ? String(row.startDate).trim().slice(0, 10) : undefined,
         onboarding_notes: noteParts.length > 0 ? noteParts.join('\n') : undefined,
-        baseline_weight: row.bodyweight != null ? Number(row.bodyweight) : undefined,
+        baseline_weight:
+          row.bodyweight != null
+            ? unit === 'lb'
+              ? lbToKg(Number(row.bodyweight))
+              : Number(row.bodyweight)
+            : undefined,
         phase_started_at: row.startDate ? String(row.startDate).trim().slice(0, 10) : undefined,
         user_id: profileId || undefined,
       };

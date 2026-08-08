@@ -78,6 +78,12 @@ import { PrepHierarchyLevel } from '@/lib/prepHierarchy';
 import { listUserBarcodeCacheEntries } from '@/lib/mealBarcodeUserCache';
 import { getPrepEducationEntry } from '@/lib/prepEducationContent';
 import { getLocalDateKey } from '@/lib/localDate';
+import {
+  resolveViewerBodyweightUnit,
+  parseWeightInputsToKg,
+  formatWeightForViewer,
+  weightUnitShortLabel,
+} from '@/lib/bodyMeasurementUnits';
 
 function mapMealLogDbRowToUi(row) {
   if (!row) return row;
@@ -225,6 +231,8 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   const weightSectionRef = useRef(null);
   const bodySectionRef = useRef(null);
   const [weightEntry, setWeightEntry] = useState('');
+  const [weightStoneEntry, setWeightStoneEntry] = useState('');
+  const [weightPoundEntry, setWeightPoundEntry] = useState('');
   const [bodyOpen, setBodyOpen] = useState(false);
   const [bodyMeasures, setBodyMeasures] = useState(() => ({ chest: '', waist: '', hips: '', arms: '' }));
   const [mealNextPrompt, setMealNextPrompt] = useState(null);
@@ -235,6 +243,8 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   const [nutritionRevealVersion, setNutritionRevealVersion] = useState(0);
   const [openMacroWhy, setOpenMacroWhy] = useState(false);
   const isClientRole = isClientRoleFn(effectiveRole);
+  // Weight is stored canonically in kg; entry and display use the viewer's preference.
+  const viewerWeightUnit = useMemo(() => resolveViewerBodyweightUnit(profile), [profile]);
 
   useEffect(() => {
     document.title = 'Nutrition — Atlas';
@@ -480,12 +490,19 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
   });
   const logPersonalWeight = async () => {
     if (!isPersonal || !user?.id || !hasSupabase) return;
-    const parsed = Number(weightEntry);
-    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    // Entry is in the viewer's unit; personal_checkins.weight stays canonical kg.
+    const parsedKg = viewerWeightUnit === 'st_lb'
+      ? parseWeightInputsToKg({ weightUnit: viewerWeightUnit, stoneText: weightStoneEntry, poundText: weightPoundEntry })
+      : viewerWeightUnit === 'lb'
+        ? parseWeightInputsToKg({ weightUnit: viewerWeightUnit, lbText: weightEntry })
+        : parseWeightInputsToKg({ weightUnit: viewerWeightUnit, kgText: weightEntry });
+    if (!parsedKg || parsedKg <= 0) return;
     const sb = getSupabase();
     if (!sb) return;
-    await sb.from('personal_checkins').insert({ user_id: user.id, weight: parsed, created_at: new Date().toISOString() });
+    await sb.from('personal_checkins').insert({ user_id: user.id, weight: parsedKg, created_at: new Date().toISOString() });
     setWeightEntry('');
+    setWeightStoneEntry('');
+    setWeightPoundEntry('');
     queryClient.invalidateQueries({ queryKey: nutritionPlanAndTargetsQueryKey(user.id) });
   };
 
@@ -1795,10 +1812,17 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
             <Card style={{ padding: spacing[14], border: `1px solid ${shell.cardBorder}` }}>
               <h3 style={{ margin: 0, marginBottom: spacing[8], fontSize: 15, color: colors.text, fontWeight: 600 }}>Weight</h3>
               <p style={{ margin: 0, fontSize: 12, color: colors.muted, marginBottom: spacing[8] }}>
-                30-day trend: {personalWeight30.length > 1 ? `${personalWeight30[0].weight.toFixed(1)} -> ${personalWeight30[personalWeight30.length - 1].weight.toFixed(1)} kg` : 'log more entries to show trend'}
+                30-day trend: {personalWeight30.length > 1 ? `${formatWeightForViewer(personalWeight30[0].weight, viewerWeightUnit)} -> ${formatWeightForViewer(personalWeight30[personalWeight30.length - 1].weight, viewerWeightUnit)}` : 'log more entries to show trend'}
               </p>
               <div style={{ display: 'flex', gap: spacing[8] }}>
-                <Input value={weightEntry} onChange={(e) => setWeightEntry(e.target.value)} placeholder="Weight (kg)" type="number" />
+                {viewerWeightUnit === 'st_lb' ? (
+                  <>
+                    <Input value={weightStoneEntry} onChange={(e) => setWeightStoneEntry(e.target.value)} placeholder="Stone" type="number" />
+                    <Input value={weightPoundEntry} onChange={(e) => setWeightPoundEntry(e.target.value)} placeholder="Pounds" type="number" />
+                  </>
+                ) : (
+                  <Input value={weightEntry} onChange={(e) => setWeightEntry(e.target.value)} placeholder={`Weight (${weightUnitShortLabel(viewerWeightUnit)})`} type="number" />
+                )}
                 <Button type="button" onClick={logPersonalWeight}>Save</Button>
               </div>
             </Card>

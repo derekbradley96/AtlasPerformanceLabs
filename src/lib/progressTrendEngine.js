@@ -10,6 +10,7 @@
  */
 
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { formatWeightForViewer, formatAbsWeightDeltaFromKg } from '@/lib/bodyMeasurementUnits';
 
 function getClient() {
   if (!hasSupabase) return null;
@@ -207,7 +208,8 @@ export function inferWeightPhases(weightLogs = [], prepRows = []) {
   return phases;
 }
 
-export function buildWeightInterpretation({ startKg, currentKg, weeks, targetKg }) {
+/** Inputs stay canonical kg; `viewerUnit` ('kg'|'lb'|'st_lb', default 'kg') only affects how the copy is formatted. */
+export function buildWeightInterpretation({ startKg, currentKg, weeks, targetKg, viewerUnit = 'kg' }) {
   if (!Number.isFinite(startKg) || !Number.isFinite(currentKg)) {
     return 'Log bodyweight consistently to unlock your long-term trend interpretation.';
   }
@@ -215,16 +217,19 @@ export function buildWeightInterpretation({ startKg, currentKg, weeks, targetKg 
   const abs = Math.abs(delta);
   const direction = delta < 0 ? 'down' : delta > 0 ? 'up' : 'flat';
   const weekSpan = Math.max(1, Number(weeks) || 1);
-  const rate = abs / weekSpan;
+  const startText = formatWeightForViewer(startKg, viewerUnit);
+  const currentText = formatWeightForViewer(currentKg, viewerUnit);
+  const absText = formatAbsWeightDeltaFromKg(abs, viewerUnit);
+  const rateText = formatAbsWeightDeltaFromKg(abs / weekSpan, viewerUnit);
   const targetLine = Number.isFinite(targetKg)
-    ? ` Target is ${targetKg.toFixed(1)}kg.`
+    ? ` Target is ${formatWeightForViewer(targetKg, viewerUnit)}.`
     : '';
   if (direction === 'down') {
-    return `You started at ${startKg.toFixed(1)}kg and are now ${currentKg.toFixed(1)}kg — down ${abs.toFixed(1)}kg over ${weekSpan} weeks (${rate.toFixed(2)}kg/week). This is within a healthy cut pace.${targetLine}`;
+    return `You started at ${startText} and are now ${currentText} — down ${absText} over ${weekSpan} weeks (${rateText}/week). This is within a healthy cut pace.${targetLine}`;
   }
   if (direction === 'up') {
-    return `You started at ${startKg.toFixed(1)}kg and are now ${currentKg.toFixed(1)}kg — up ${abs.toFixed(1)}kg over ${weekSpan} weeks (${rate.toFixed(2)}kg/week). This aligns with a build phase when performance is climbing.${targetLine}`;
+    return `You started at ${startText} and are now ${currentText} — up ${absText} over ${weekSpan} weeks (${rateText}/week). This aligns with a build phase when performance is climbing.${targetLine}`;
   }
-  return `You started at ${startKg.toFixed(1)}kg and are now ${currentKg.toFixed(1)}kg. Weight is stable over ${weekSpan} weeks.${targetLine}`;
+  return `You started at ${startText} and are now ${currentText}. Weight is stable over ${weekSpan} weeks.${targetLine}`;
 }
 

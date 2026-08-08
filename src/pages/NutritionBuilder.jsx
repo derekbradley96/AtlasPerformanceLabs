@@ -16,12 +16,18 @@ import { getActiveNutritionPlan, upsertNutritionPlan } from '@/data/nutritionPla
 import { trackFirstNutritionPlanCreated } from '@/services/firstSessionTracker';
 import { PREP_EDUCATION_OPTIONS } from '@/lib/prepEducationContent';
 import CoachFreeTextInput from '@/components/ui/CoachFreeTextInput';
+import {
+  resolveViewerBodyweightUnit,
+  parseWeightInputsToKg,
+  weightKgToFormParts,
+  weightUnitShortLabel,
+} from '@/lib/bodyMeasurementUnits';
 import { colors } from '@/ui/tokens';
 
 export default function NutritionBuilder() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, effectiveRole } = useAuth();
+  const { user, profile, effectiveRole } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const clientId = searchParams.get('clientId');
   const trainerId = user?.id ?? null;
@@ -47,9 +53,31 @@ export default function NutritionBuilder() {
   });
 
   const planHydratedRef = useRef(false);
+  // Guards the profile-arrives-late race: weight text hydrated under the
+  // locale-default unit must re-derive when the real preference loads,
+  // unless the coach already typed over it.
+  const hydratedWeightKgRef = useRef(null);
+  const hydratedUnitRef = useRef(null);
+  const weightTouchedRef = useRef(false);
   const suggestFromCheckinRef = useRef(false);
   const [supplementRecommendations, setSupplementRecommendations] = useState([]);
   const [nutritionWeekInstructions, setNutritionWeekInstructions] = useState([]);
+  // Viewer preference drives entry/display; formData.weight_kg holds the primary
+  // input text in that unit (kg or lb), st_lb uses the two fields below.
+  const viewerWeightUnit = resolveViewerBodyweightUnit(profile);
+  const [weightSt, setWeightSt] = useState('');
+  const [weightLbRem, setWeightLbRem] = useState('');
+
+  /** Resolve the weight inputs to canonical kg (null when empty/invalid) — all math and persistence run on kg. */
+  const resolveWeightKgInput = () => {
+    if (viewerWeightUnit === 'st_lb') {
+      return parseWeightInputsToKg({ weightUnit: viewerWeightUnit, stoneText: weightSt, poundText: weightLbRem });
+    }
+    if (viewerWeightUnit === 'lb') {
+      return parseWeightInputsToKg({ weightUnit: viewerWeightUnit, lbText: formData.weight_kg });
+    }
+    return parseWeightInputsToKg({ weightUnit: viewerWeightUnit, kgText: formData.weight_kg });
+  };
 
   useEffect(() => {
     planHydratedRef.current = false;
@@ -99,6 +127,15 @@ export default function NutritionBuilder() {
       activePlan.intake_metrics && typeof activePlan.intake_metrics === 'object'
         ? activePlan.intake_metrics
         : {};
+    // Saved weight_kg is canonical kg — split into the viewer's entry fields.
+    const savedKg = im.weight_kg != null && im.weight_kg !== '' ? Number(im.weight_kg) : null;
+    hydratedWeightKgRef.current = savedKg;
+    hydratedUnitRef.current = viewerWeightUnit;
+    const weightParts = Number.isFinite(savedKg) && savedKg > 0 ? weightKgToFormParts(savedKg, viewerWeightUnit) : null;
+    if (weightParts && viewerWeightUnit === 'st_lb') {
+      setWeightSt(weightParts.primary);
+      setWeightLbRem(weightParts.secondary ?? '');
+    }
     setFormData((prev) => ({
       ...prev,
       target_calories: activePlan.calories != null ? activePlan.calories : prev.target_calories,
@@ -113,7 +150,7 @@ export default function NutritionBuilder() {
       sex: typeof im.sex === 'string' ? im.sex : prev.sex,
       age: im.age != null && im.age !== '' ? String(im.age) : prev.age,
       height_cm: im.height_cm != null && im.height_cm !== '' ? String(im.height_cm) : prev.height_cm,
-      weight_kg: im.weight_kg != null && im.weight_kg !== '' ? String(im.weight_kg) : prev.weight_kg,
+      weight_kg: weightParts && viewerWeightUnit !== 'st_lb' ? weightParts.primary : prev.weight_kg,
       activity_level: typeof im.activity_level === 'string' ? im.activity_level : prev.activity_level,
       protein_percent: typeof im.protein_percent === 'number' ? im.protein_percent : prev.protein_percent,
       carbs_percent: typeof im.carbs_percent === 'number' ? im.carbs_percent : prev.carbs_percent,
@@ -129,7 +166,25 @@ export default function NutritionBuilder() {
       : [];
     setSupplementRecommendations(supps);
     setNutritionWeekInstructions(weekInst);
-  }, [activePlan, searchParams]);
+  }, [activePlan, searchParams, viewerWeightUnit]);
+
+  useEffect(() => {
+    if (!planHydratedRef.current || hydratedUnitRef.current === viewerWeightUnit) return;
+    const kg = hydratedWeightKgRef.current;
+    hydratedUnitRef.current = viewerWeightUnit;
+    if (weightTouchedRef.current) return;
+    if (!Number.isFinite(kg) || kg <= 0) return;
+    const parts = weightKgToFormParts(kg, viewerWeightUnit);
+    if (viewerWeightUnit === 'st_lb') {
+      setWeightSt(parts.primary);
+      setWeightLbRem(parts.secondary ?? '');
+      setFormData((prev) => ({ ...prev, weight_kg: '' }));
+    } else {
+      setWeightSt('');
+      setWeightLbRem('');
+      setFormData((prev) => ({ ...prev, weight_kg: parts.primary }));
+    }
+  }, [viewerWeightUnit]);
 
   useEffect(() => {
     const sc = searchParams.get('suggestCalories');
@@ -159,18 +214,20 @@ export default function NutritionBuilder() {
     clientRow?.full_name?.trim() || clientRow?.name?.trim() || (clientId ? 'Client' : '');
 
   const calculateNutrition = () => {
-    const { sex, height_cm, weight_kg, age, activity_level, goal } = formData;
+    const { sex, height_cm, age, activity_level, goal } = formData;
 
-    if (!height_cm || !weight_kg || !age) {
+    // Mifflin-St Jeor expects kg — convert the viewer-unit inputs before the math.
+    const weightKg = resolveWeightKgInput();
+    if (!height_cm || weightKg == null || !age) {
       toast.error('Please fill in all body metrics');
       return;
     }
 
     let bmr;
     if (sex === 'male') {
-      bmr = 10 * parseFloat(weight_kg) + 6.25 * parseFloat(height_cm) - 5 * parseInt(age, 10) + 5;
+      bmr = 10 * weightKg + 6.25 * parseFloat(height_cm) - 5 * parseInt(age, 10) + 5;
     } else {
-      bmr = 10 * parseFloat(weight_kg) + 6.25 * parseFloat(height_cm) - 5 * parseInt(age, 10) - 161;
+      bmr = 10 * weightKg + 6.25 * parseFloat(height_cm) - 5 * parseInt(age, 10) - 161;
     }
 
     const activityMultipliers = {
@@ -208,7 +265,8 @@ export default function NutritionBuilder() {
   };
 
   const autoCalculateQuickSetup = () => {
-    const weight = Number(formData.weight_kg);
+    // kcal/kg and g/kg multipliers below expect kg — convert the viewer-unit inputs first.
+    const weight = resolveWeightKgInput();
     if (!Number.isFinite(weight) || weight <= 0) {
       toast.error('Enter bodyweight first for quick auto-calc.');
       return;
@@ -260,7 +318,8 @@ export default function NutritionBuilder() {
         sex: formData.sex,
         age: formData.age === '' ? null : Number(formData.age),
         height_cm: formData.height_cm === '' ? null : Number(formData.height_cm),
-        weight_kg: formData.weight_kg === '' ? null : Number(formData.weight_kg),
+        // Persist canonical kg regardless of the viewer's entry unit.
+        weight_kg: resolveWeightKgInput(),
         activity_level: formData.activity_level,
         goal: formData.goal,
         protein_percent: formData.protein_percent,
@@ -454,15 +513,38 @@ export default function NutritionBuilder() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-white mb-2">Weight (kg)</label>
-              <Input
-                type="number"
-                step="0.1"
-                value={formData.weight_kg}
-                onChange={(e) => setFormData({ ...formData, weight_kg: e.target.value })}
-                placeholder="75.5"
-                className="bg-slate-900/50 border-slate-700 min-h-11"
-              />
+              <label className="block text-sm font-medium text-white mb-2">
+                Weight ({weightUnitShortLabel(viewerWeightUnit)})
+              </label>
+              {viewerWeightUnit === 'st_lb' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    type="number"
+                    step="1"
+                    value={weightSt}
+                    onChange={(e) => { weightTouchedRef.current = true; setWeightSt(e.target.value); }}
+                    placeholder="Stone"
+                    className="bg-slate-900/50 border-slate-700 min-h-11"
+                  />
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={weightLbRem}
+                    onChange={(e) => { weightTouchedRef.current = true; setWeightLbRem(e.target.value); }}
+                    placeholder="Pounds"
+                    className="bg-slate-900/50 border-slate-700 min-h-11"
+                  />
+                </div>
+              ) : (
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={formData.weight_kg}
+                  onChange={(e) => { weightTouchedRef.current = true; setFormData({ ...formData, weight_kg: e.target.value }); }}
+                  placeholder={viewerWeightUnit === 'lb' ? '175' : '75.5'}
+                  className="bg-slate-900/50 border-slate-700 min-h-11"
+                />
+              )}
             </div>
 
             <div>

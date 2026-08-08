@@ -517,6 +517,50 @@ export default function ProfileAccountPage() {
     return JSON.stringify({ form, notifications, callSoundEnabled, callRingbackVolume }) !== initialSnapshot;
   }, [form, notifications, callSoundEnabled, callRingbackVolume, initialSnapshot]);
 
+  // Switching bodyweight unit must re-derive the weight fields from canonical kg.
+  // Otherwise the old unit's digits stay in the inputs and saveAll re-parses them
+  // as the NEW unit (stored 80 kg → switch to lb → field still shows "80" → save
+  // writes current_weight = 36.29 kg), and kg→st/lb leaves the stone/pound fields
+  // empty which blocks the whole settings save.
+  const handleBodyweightUnitChange = (id) => {
+    markEdited();
+    const nextU = normalizeWeightUnit(id);
+    const prevU = normalizeWeightUnit(form.bodyweight_unit);
+    if (nextU === prevU) return;
+    // Parse the CURRENT field text with the OLD unit; if it doesn't parse, fall
+    // back to the canonical kg on the profile row (else the fields clear).
+    const cwKg =
+      parseWeightInputsToKg({
+        weightUnit: prevU,
+        kgText: prevU === 'kg' ? form.current_weight : '',
+        lbText: prevU === 'lb' ? form.current_weight : '',
+        stoneText: prevU === 'st_lb' ? form.current_weight_st : '',
+        poundText: prevU === 'st_lb' ? form.current_weight_lbrem : '',
+      }) ?? profileCurrentWeightKg(profile);
+    const twKg =
+      parseWeightInputsToKg({
+        weightUnit: prevU,
+        kgText: prevU === 'kg' ? form.target_weight : '',
+        lbText: prevU === 'lb' ? form.target_weight : '',
+        stoneText: prevU === 'st_lb' ? form.target_weight_st : '',
+        poundText: prevU === 'st_lb' ? form.target_weight_lbrem : '',
+      }) ?? profileTargetWeightKg(profile);
+    const cwParts = weightKgToFormParts(cwKg, nextU);
+    const twParts = weightKgToFormParts(twKg, nextU);
+    setForm((s) => ({
+      ...s,
+      bodyweight_unit: nextU,
+      units: nextU === 'lb' ? 'lb' : 'kg',
+      current_weight: nextU === 'st_lb' ? '' : (cwParts.primary || ''),
+      target_weight: nextU === 'st_lb' ? '' : (twParts.primary || ''),
+      current_weight_st: nextU === 'st_lb' ? (cwParts.primary || '') : '',
+      current_weight_lbrem: nextU === 'st_lb' ? (cwParts.secondary || '') : '',
+      target_weight_st: nextU === 'st_lb' ? (twParts.primary || '') : '',
+      target_weight_lbrem: nextU === 'st_lb' ? (twParts.secondary || '') : '',
+    }));
+    void setNativePref(WEIGHT_UNIT_PREF_KEY, nextU);
+  };
+
   const saveAll = async () => {
     if (!user?.id || !hasChanges) return;
 
@@ -972,13 +1016,7 @@ export default function ProfileAccountPage() {
             label="Bodyweight unit"
             options={BODYWEIGHT_SEGMENT_OPTIONS}
             value={normalizeWeightUnit(form.bodyweight_unit)}
-            onChange={(id) => {
-              markEdited();
-              const w = normalizeWeightUnit(id);
-              patch('bodyweight_unit', w);
-              patch('units', w === 'lb' ? 'lb' : 'kg');
-              void setNativePref(WEIGHT_UNIT_PREF_KEY, w);
-            }}
+            onChange={handleBodyweightUnitChange}
           />
         </div>
       </Card>

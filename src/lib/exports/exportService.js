@@ -177,7 +177,7 @@ export async function generateProgressReport(clientId, trainerId, opts = {}) {
   y = bodyLine(doc, y, 'Weeks with coach:', snapshot?.weeksWithTrainer != null ? String(snapshot.weeksWithTrainer) : '—');
   y = bodyLine(doc, y, 'Adherence:', snapshot?.adherencePct != null ? `${snapshot.adherencePct}%` : '—');
   const wDelta = snapshot?.weightDelta;
-  y = bodyLine(doc, y, 'Weight trend:', wDelta != null ? `${wDelta > 0 ? '+' : ''}${wDelta} kg` : '—');
+  y = bodyLine(doc, y, 'Weight trend:', wDelta != null ? formatWeightDeltaKg(Number(wDelta), wu) : '—');
   y += 4;
 
   if (achievements.length > 0) {

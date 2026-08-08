@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { colors, spacing, shell, shadows } from '@/ui/tokens';
 import { getSupabase } from '@/lib/supabaseClient';
-import { formatWeightDeltaKg } from '@/lib/bodyMeasurementUnits';
+import { formatWeightDeltaKg, formatWeightForViewer, formatAbsWeightDeltaFromKg } from '@/lib/bodyMeasurementUnits';
 import {
   RESPONSE_TEMPLATES,
   ADJUSTMENT_SNIPPETS,
@@ -884,11 +884,11 @@ export default function CheckInReviewDecisionWorkspace({
       <DataCard title="Body & progress">
         <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>Weight</p>
         <p style={{ margin: `${spacing[4]}px 0 ${spacing[8]}px`, fontSize: 24, fontWeight: 800, color: colors.text }}>
-          {checkin?.weight_kg ?? checkin?.weight ?? '—'} kg
+          {formatWeightForViewer(checkin?.weight_kg ?? checkin?.weight, viewerWU)}
         </p>
         {weightDeltaKg != null ? (
           <p style={{ margin: `0 0 ${spacing[10]}px`, fontSize: 13, color: weightDeltaKg < 0 ? colors.success : colors.warning, fontWeight: 600 }}>
-            {weightDeltaKg < 0 ? '↓' : '↑'} {Math.abs(Number(weightDeltaKg)).toFixed(1)}kg from last week
+            {weightDeltaKg < 0 ? '↓' : '↑'} {formatAbsWeightDeltaFromKg(weightDeltaKg, viewerWU)} from last week
           </p>
         ) : null}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: spacing[8] }}>

@@ -210,8 +210,8 @@ export default function PeakWeekCheckinReviewPage() {
             <Card style={{ ...standardCard, padding: spacing[16] }}>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>
-                  <p className="text-xs mb-0.5" style={{ color: colors.muted }}>Weight (kg)</p>
-                  <p className="font-medium" style={{ color: colors.text }}>{checkin.weight != null ? Number(checkin.weight) : '—'}</p>
+                  <p className="text-xs mb-0.5" style={{ color: colors.muted }}>Weight</p>
+                  <p className="font-medium" style={{ color: colors.text }}>{checkin.weight != null ? formatWeightForViewer(Number(checkin.weight), viewerWU) : '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs mb-0.5" style={{ color: colors.muted }}>Period</p>

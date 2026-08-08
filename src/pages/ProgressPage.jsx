@@ -91,7 +91,8 @@ const PROGRESS_SURFACE_FALLBACK = {
 
 function buildPersonalCoreInsightLines(dash, weightChartPersonal) {
   const lines = [];
-  const w = weightChartPersonal.map((d) => d.weight).filter((x) => Number.isFinite(Number(x)));
+  // Thresholds below (±0.35, range < 0.6) are kg — compare on the canonical kg series, not the viewer-unit chart values.
+  const w = weightChartPersonal.map((d) => d.weightKg).filter((x) => Number.isFinite(Number(x)));
   if (w.length >= 2) {
     const first = Number(w[0]);
     const last = Number(w[w.length - 1]);
@@ -550,8 +551,9 @@ export default function ProgressPage() {
       currentKg: weightMilestones.current.weightKg,
       weeks,
       targetKg: weightMilestones.target,
+      viewerUnit: viewerWeightUnit,
     });
-  }, [weightMilestones]);
+  }, [weightMilestones, viewerWeightUnit]);
 
   const complianceChartData = useMemo(
     () =>
@@ -584,7 +586,8 @@ export default function ProgressPage() {
   const insights = useMemo(() => {
     const out = [];
     if (filteredTrends.length >= 3 && weightChartData.length >= 2) {
-      const w = weightChartData.map((d) => d.weight);
+      // ±0.5 thresholds below are kg — compare on the canonical kg series, not the viewer-unit chart values.
+      const w = weightChartData.map((d) => d.weightKg);
       const first = w.slice(0, Math.ceil(w.length / 2)).reduce((a, b) => a + b, 0) / (w.length / 2 || 1);
       const last = w.slice(-Math.ceil(w.length / 2)).reduce((a, b) => a + b, 0) / (Math.ceil(w.length / 2) || 1);
       const diff = last - first;

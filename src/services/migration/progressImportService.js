@@ -9,10 +9,15 @@
  * - parseProgressCSV(text) -> { rows }
  * - validateProgressRows(rows) -> { validRows, errors }
  * - resolveClientIdsByEmail(supabase, emails) -> Promise<Map<email, client_id>>
- * - insertWeightLogs({ rows, supabase, clientIdByEmail }) -> Promise<{ inserted, errors }>
+ * - insertWeightLogs({ rows, supabase, clientIdByEmail, weightUnit }) -> Promise<{ inserted, errors }>
  * - getProgressQueryKeysToInvalidate(clientIds) -> query keys array
  * - invalidateProgressCache(queryClient, clientIds) -> void
+ *
+ * CSV weights are declared in a unit ('kg' | 'lb'; default 'kg') and converted to
+ * canonical kg before storage in client_weight_logs.weight.
  */
+
+import { normalizeWeightUnit, lbToKg } from '@/lib/bodyMeasurementUnits';
 
 function normaliseHeader(h) {
   return (h || '')
@@ -165,21 +170,25 @@ export async function resolveClientIdsByEmail(supabase, emails, coachId) {
 /**
  * Insert validated rows into client_weight_logs. Uses clientIdByEmail to resolve client_id.
  * Dedupes by (client_id, log_date): later row wins (or use ON CONFLICT if we add unique constraint).
+ * Row weights are declared in weightUnit ('kg' | 'lb'; default 'kg') and stored as canonical kg.
  *
  * @param {{
  *   rows: Array<{ client_email: string, log_date: string | null, weight: number | null, bodyfat: number | null, notes: string | null }>;
  *   supabase: import('@supabase/supabase-js').SupabaseClient;
  *   clientIdByEmail: Map<string, string>;
+ *   weightUnit?: 'kg' | 'lb';
  * }} params
  * @returns {Promise<{ inserted: number, errors: Array<{ rowIndex: number, message: string }> }>}
  */
-export async function insertWeightLogs({ rows, supabase, clientIdByEmail }) {
+export async function insertWeightLogs({ rows, supabase, clientIdByEmail, weightUnit = 'kg' }) {
   const errors = [];
   let inserted = 0;
 
   if (!rows?.length || !supabase) {
     return { inserted: 0, errors: [{ rowIndex: 0, message: 'No rows or supabase client' }] };
   }
+
+  const unit = normalizeWeightUnit(weightUnit);
 
   for (const row of rows) {
     const email = (row.client_email || '').trim().toLowerCase();
@@ -194,11 +203,13 @@ export async function insertWeightLogs({ rows, supabase, clientIdByEmail }) {
       continue;
     }
 
+    const weightKg = row.weight != null && unit === 'lb' ? lbToKg(row.weight) : row.weight ?? null;
+
     const { error } = await supabase.from('client_weight_logs').upsert(
       {
         client_id: clientId,
         log_date: logDate,
-        weight: row.weight ?? null,
+        weight: weightKg,
         bodyfat: row.bodyfat ?? null,
         notes: row.notes ?? null,
       },
@@ -271,10 +282,11 @@ export function invalidateProgressCache(queryClient, clientIds = []) {
  *   supabase: import('@supabase/supabase-js').SupabaseClient;
  *   queryClient: import('@tanstack/react-query').QueryClient;
  *   coachId: string;
+ *   weightUnit?: 'kg' | 'lb'; // unit the CSV weights are declared in; converted to kg on insert
  * }} params
  * @returns {Promise<{ inserted: number, errors: Array<{ rowIndex: number, message: string }> }>}
  */
-export async function importBodyweightHistory({ csvText, supabase, queryClient, coachId }) {
+export async function importBodyweightHistory({ csvText, supabase, queryClient, coachId, weightUnit = 'kg' }) {
   const { rows } = parseProgressCSV(csvText);
   const { validRows, errors: validationErrors } = validateProgressRows(rows);
 
@@ -288,6 +300,7 @@ export async function importBodyweightHistory({ csvText, supabase, queryClient, 
     rows: validRows,
     supabase,
     clientIdByEmail,
+    weightUnit,
   });
 
   if (inserted > 0 && queryClient) {

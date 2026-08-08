@@ -8,6 +8,7 @@ import { getSupabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Edit2, LogOut, Mail, Shield } from 'lucide-react';
 import { getUserRole, displayRoleLabel } from '@/lib/roles';
+import { resolveViewerBodyweightUnit, weightUnitShortLabel } from '@/lib/bodyMeasurementUnits';
 import { toast } from 'sonner';
 
 export default function Profile() {
@@ -109,10 +110,10 @@ export default function Profile() {
 
           {/* Info Grid */}
           <div className="grid grid-cols-2 gap-3 mb-6">
-            {displayUser.units && (
+            {(profile?.bodyweight_unit || profile?.weight_unit || profile?.units || displayUser.units) && (
               <div className="bg-slate-900/50 rounded-lg p-3">
                 <p className="text-xs text-slate-400 mb-1">Units</p>
-                <p className="font-semibold text-white">{displayUser.units === 'lb' ? 'lbs' : 'kg'}</p>
+                <p className="font-semibold text-white">{weightUnitShortLabel(resolveViewerBodyweightUnit(profile ?? displayUser))}</p>
               </div>
             )}
             {displayUser.fitness_goal && currentRole === 'client' && (

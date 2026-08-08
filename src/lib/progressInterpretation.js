@@ -1,6 +1,19 @@
 /**
  * Full-sentence weight progress copy for transformation clients (never numbers without context).
+ * All inputs are canonical kg; sentences are rendered in the viewer's bodyweight unit.
  */
+import { normalizeWeightUnit, kgToLb, formatAbsWeightDeltaFromKg } from '@/lib/bodyMeasurementUnits';
+
+/**
+ * Weekly rate like "0.45kg/week" / "0.99lb/week" in the viewer unit (st_lb rates read in lb).
+ * @param {number} kgPerWeek
+ * @param {unknown} weightUnit
+ */
+function formatWeeklyRate(kgPerWeek, weightUnit) {
+  const u = normalizeWeightUnit(weightUnit);
+  if (u === 'lb' || u === 'st_lb') return `${kgToLb(kgPerWeek).toFixed(2)}lb/week`;
+  return `${Number(kgPerWeek).toFixed(2)}kg/week`;
+}
 
 /** @param {string | null | undefined} goals */
 export function clientGoalFromGoalsField(goals) {
@@ -17,7 +30,8 @@ export function clientGoalFromGoalsField(goals) {
  *   targetWeight?: number | null,
  *   recentWeights: Array<{ weight: number, date?: string }>,
  *   clientGoal: 'lose_fat' | 'build_muscle' | 'maintain',
- * }} p
+ * }} p all weights in canonical kg
+ * @param {'kg'|'st_lb'|'lb'} [viewerUnit] display unit for the interpretation copy (default 'kg')
  */
 export function interpretWeightProgress({
   currentWeight,
@@ -25,7 +39,8 @@ export function interpretWeightProgress({
   targetWeight: _targetWeight,
   recentWeights = [],
   clientGoal,
-}) {
+}, viewerUnit = 'kg') {
+  const unit = normalizeWeightUnit(viewerUnit);
   const cw = Number(currentWeight);
   const sw = Number(startWeight);
   const series = Array.isArray(recentWeights) ? recentWeights.map((r) => ({ weight: Number(r.weight), date: r.date })) : [];
@@ -57,20 +72,20 @@ export function interpretWeightProgress({
     interpretation = `Your logged weight is ${dir} since you started with your coach. Keep logging each week so Atlas can describe week-to-week pace, not just the headline direction.`;
   } else if (isLosing) {
     if (thisWeekChange < -0.1) {
-      interpretation = `Down ${Math.abs(thisWeekChange).toFixed(1)}kg this week — ${rateLabel} loss. Your 4-week average is ${Math.abs(avgWeeklyChange).toFixed(2)}kg/week which is ${Math.abs(avgWeeklyChange) > 0.7 ? 'slightly fast — consider a small refeed day' : Math.abs(avgWeeklyChange) < 0.2 ? 'slower than expected — your coach may adjust' : 'within the healthy range for sustainable fat loss'}.`;
+      interpretation = `Down ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week — ${rateLabel} loss. Your 4-week average is ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} which is ${Math.abs(avgWeeklyChange) > 0.7 ? 'slightly fast — consider a small refeed day' : Math.abs(avgWeeklyChange) < 0.2 ? 'slower than expected — your coach may adjust' : 'within the healthy range for sustainable fat loss'}.`;
     } else if (Math.abs(thisWeekChange) <= 0.1) {
-      interpretation = `Weight held steady this week. Fluctuation is normal — your 4-week trend of ${Math.abs(avgWeeklyChange).toFixed(2)}kg/week is what matters. ${Math.abs(avgWeeklyChange) > 0.15 ? 'The trend is still working.' : 'Check in with your coach about a potential adjustment.'}`;
+      interpretation = `Weight held steady this week. Fluctuation is normal — your 4-week trend of ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} is what matters. ${Math.abs(avgWeeklyChange) > 0.15 ? 'The trend is still working.' : 'Check in with your coach about a potential adjustment.'}`;
     } else {
-      interpretation = `Up ${thisWeekChange.toFixed(1)}kg this week. This is almost certainly water retention or glycogen from training — not real fat gain. Your 4-week average of ${Math.abs(avgWeeklyChange).toFixed(2)}kg/week loss suggests the plan is working.`;
+      interpretation = `Up ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week. This is almost certainly water retention or glycogen from training — not real fat gain. Your 4-week average of ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} loss suggests the plan is working.`;
     }
   } else if (isGaining) {
     if (thisWeekChange > 0.1) {
-      interpretation = `Up ${thisWeekChange.toFixed(1)}kg this week — ${rateLabel} muscle-building phase. Your 4-week average is ${avgWeeklyChange.toFixed(2)}kg/week. ${avgWeeklyChange > 0.5 ? 'Gaining a touch fast — some will be fat. Check in with your coach.' : 'Solid pace for muscle gain with minimal fat.'}`;
+      interpretation = `Up ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week — ${rateLabel} muscle-building phase. Your 4-week average is ${formatWeeklyRate(avgWeeklyChange, unit)}. ${avgWeeklyChange > 0.5 ? 'Gaining a touch fast — some will be fat. Check in with your coach.' : 'Solid pace for muscle gain with minimal fat.'}`;
     } else {
       interpretation = `Weight held or dropped slightly this week during your build phase. This is normal and doesn't mean the programme isn't working — muscle gain is slow and the scale doesn't tell the full story.`;
     }
   } else {
-    interpretation = `Your weight moved about ${Math.abs(thisWeekChange).toFixed(1)}kg week over week while you're in a maintenance-style block — the 4-week average (${Math.abs(avgWeeklyChange).toFixed(2)}kg/week) matters more than any single jump.`;
+    interpretation = `Your weight moved about ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} week over week while you're in a maintenance-style block — the 4-week average (${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)}) matters more than any single jump.`;
   }
 
   return {

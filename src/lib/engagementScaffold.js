@@ -1,6 +1,7 @@
 /**
  * Week ~4–6 motivation scaffolding for transformation clients (research-backed dip window).
  */
+import { formatWeightDeltaKg } from '@/lib/bodyMeasurementUnits';
 
 /** @param {{ created_at?: string | null }} client */
 export function shouldShowMotivationBoost(client) {
@@ -18,6 +19,7 @@ export function shouldShowMotivationBoost(client) {
  * @param {string | null | undefined} firstWorkoutDate
  * @param {number} workoutsCompleted
  * @param {unknown} firstProgressPhoto
+ * @param {'kg'|'lb'|'st_lb'} [viewerWeightUnit] viewer display unit (weights stay canonical kg)
  */
 export function buildMotivationBoostContent(
   clientName,
@@ -26,19 +28,18 @@ export function buildMotivationBoostContent(
   firstWorkoutDate,
   workoutsCompleted,
   firstProgressPhoto,
+  viewerWeightUnit = 'kg',
 ) {
   const firstName = clientName?.split(' ')[0] || clientName || 'there';
   const sw = Number(startWeight);
   const cw = Number(currentWeight);
   const delta = Number.isFinite(sw) && Number.isFinite(cw) ? cw - sw : 0;
-  const weightChangeStr = Number.isFinite(delta) ? delta.toFixed(1) : '0.0';
-  const isLoss = delta < 0;
 
   return {
     headline: `${firstName}, look how far you've come`,
     stat1: {
       label: 'Weight change',
-      value: `${isLoss ? '' : '+'}${weightChangeStr}kg`,
+      value: formatWeightDeltaKg(delta, viewerWeightUnit),
       context: 'since you started',
     },
     stat2: {

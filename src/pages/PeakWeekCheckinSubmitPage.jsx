@@ -20,6 +20,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { Calendar, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { hapticLight } from '@/lib/haptics';
+import { resolveViewerBodyweightUnit, parseWeightInputsToKg, weightUnitShortLabel } from '@/lib/bodyMeasurementUnits';
 
 function resolveClientAndCoachFocus(supabase, userId) {
   if (!supabase || !userId) return Promise.resolve({ clientId: null, coachFocus: null });
@@ -55,10 +56,13 @@ const RATING_MAX = 10;
 export default function PeakWeekCheckinSubmitPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const viewerWeightUnit = resolveViewerBodyweightUnit(profile);
   const supabase = hasSupabase ? getSupabase() : null;
 
   const [weight, setWeight] = useState('');
+  const [weightSt, setWeightSt] = useState('');
+  const [weightLbRem, setWeightLbRem] = useState('');
   const [photoPaths, setPhotoPaths] = useState([]);
   const [pumpRating, setPumpRating] = useState('');
   const [flatFullRating, setFlatFullRating] = useState('');
@@ -152,10 +156,23 @@ export default function PeakWeekCheckinSubmitPage() {
       if ((checkinPeriod === 'morning' && morningSubmitted) || (checkinPeriod === 'evening' && eveningSubmitted)) {
         throw new Error(`You already submitted the ${checkinPeriod} check-in today.`);
       }
+      const hasWeightInput =
+        viewerWeightUnit === 'st_lb'
+          ? weightSt.trim() !== '' || weightLbRem.trim() !== ''
+          : weight.trim() !== '';
+      const weightKg =
+        viewerWeightUnit === 'st_lb'
+          ? parseWeightInputsToKg({ weightUnit: viewerWeightUnit, stoneText: weightSt, poundText: weightLbRem })
+          : viewerWeightUnit === 'lb'
+            ? parseWeightInputsToKg({ weightUnit: viewerWeightUnit, lbText: weight })
+            : parseWeightInputsToKg({ weightUnit: viewerWeightUnit, kgText: weight });
+      if (hasWeightInput && weightKg == null) {
+        throw new Error('Enter a valid weight.');
+      }
       const { error } = await supabase.from('peak_week_checkins').insert({
         peak_week_id: peakWeek.id,
         client_id: clientId,
-        weight: weight !== '' ? Number(weight) : null,
+        weight: weightKg,
         photos: Array.isArray(photoPaths) ? photoPaths : [],
         pump_rating: pumpRating !== '' ? Math.min(RATING_MAX, Math.max(RATING_MIN, Number(pumpRating))) : null,
         flat_full_rating: flatFullRating !== '' ? Math.min(RATING_MAX, Math.max(RATING_MIN, Number(flatFullRating))) : null,
@@ -339,15 +356,38 @@ export default function PeakWeekCheckinSubmitPage() {
                 )}
               </div>
               <div>
-                <Label className="text-xs" style={{ color: colors.muted }}>Weight (kg)</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={weight}
-                  onChange={(e) => setWeight(e.target.value)}
-                  placeholder="e.g. 82.5"
-                  className="mt-1 bg-black/20 border border-white/10 text-white"
-                />
+                <Label className="text-xs" style={{ color: colors.muted }}>Weight ({weightUnitShortLabel(viewerWeightUnit)})</Label>
+                {viewerWeightUnit === 'st_lb' ? (
+                  <div className="grid grid-cols-2 gap-3 mt-1">
+                    <Input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={weightSt}
+                      onChange={(e) => setWeightSt(e.target.value)}
+                      placeholder="Stone"
+                      className="bg-black/20 border border-white/10 text-white"
+                    />
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={weightLbRem}
+                      onChange={(e) => setWeightLbRem(e.target.value)}
+                      placeholder="Pounds"
+                      className="bg-black/20 border border-white/10 text-white"
+                    />
+                  </div>
+                ) : (
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={weight}
+                    onChange={(e) => setWeight(e.target.value)}
+                    placeholder={viewerWeightUnit === 'lb' ? 'e.g. 181.5' : 'e.g. 82.5'}
+                    className="mt-1 bg-black/20 border border-white/10 text-white"
+                  />
+                )}
               </div>
 
               <div>

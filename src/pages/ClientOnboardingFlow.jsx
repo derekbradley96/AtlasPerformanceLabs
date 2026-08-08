@@ -19,6 +19,7 @@ import { colors, spacing, touchTargetMin } from '@/ui/tokens';
 import { impactLight } from '@/lib/haptics';
 import { deriveClientOnboardingSurfaceState, atlasMigrationDataAttributes } from '@/lib/atlasMigrationPhases';
 import { coachOfferServiceRequiresStripeCheckout } from '@/lib/clientPendingPaymentAccess';
+import { lbToKg, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
 import PillarRating from '@/components/marketplace/PillarRating';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { sendClientWelcomeEmail } from '@/lib/sendWelcomeEmail';
@@ -509,12 +510,17 @@ export default function ClientOnboardingFlow() {
     setError('');
     try {
       const weightKg = weightUnit === 'lb'
-        ? Number((weightNum * 0.45359237).toFixed(2))
+        ? Number(lbToKg(weightNum).toFixed(2))
         : weightNum;
       const patch = {
         full_name: String(fullName || '').trim(),
         age: ageNum,
+        // weight_kg kept for legacy readers (Nutrition.jsx / ProgressPage.jsx);
+        // current_weight is the canonical bodyweight column (always kg).
         weight_kg: weightKg,
+        current_weight: weightKg,
+        bodyweight_unit: normalizeWeightUnit(weightUnit),
+        units: weightUnit === 'lb' ? 'lb' : 'kg',
         client_goal: goal,
         experience_level: experienceLevel,
         injuries_notes: String(injuriesNotes || '').trim() || null,

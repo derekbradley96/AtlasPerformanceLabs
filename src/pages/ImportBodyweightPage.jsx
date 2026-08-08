@@ -11,11 +11,15 @@ import { Button } from '@/components/ui/button';
 import { colors, spacing } from '@/ui/tokens';
 import { hasSupabase, getSupabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
-import { resolveViewerBodyweightUnit, formatWeightForViewer } from '@/lib/bodyMeasurementUnits';
+import { resolveViewerBodyweightUnit, weightUnitShortLabel } from '@/lib/bodyMeasurementUnits';
+import MeasurementUnitSegments, { BODYWEIGHT_SEGMENT_OPTIONS } from '@/components/measurements/MeasurementUnitSegments';
 import { parseProgressCSV, validateProgressRows, importBodyweightHistory } from '@/services/migration/progressImportService';
 import { toast } from 'sonner';
 import { trackFriction } from '@/services/frictionTracker';
 import { FileSpreadsheet } from 'lucide-react';
+
+// A single CSV number can't express stones, so the CSV unit choice is kg / lb only.
+const CSV_UNIT_OPTIONS = BODYWEIGHT_SEGMENT_OPTIONS.filter((o) => o.id !== 'st_lb');
 
 export default function ImportBodyweightPage() {
   const navigate = useNavigate();
@@ -29,6 +33,9 @@ export default function ImportBodyweightPage() {
   const [validation, setValidation] = useState(null);
   const [loading, setLoading] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [csvUnitChoice, setCsvUnitChoice] = useState(null);
+  // Default the CSV unit from the viewer's preference (st_lb viewers weigh CSVs in lb).
+  const csvUnit = csvUnitChoice ?? (viewerWU === 'st_lb' ? 'lb' : viewerWU);
 
   const handleParse = useCallback(() => {
     setImportResult(null);
@@ -85,6 +92,7 @@ export default function ImportBodyweightPage() {
         supabase: getSupabase(),
         queryClient,
         coachId,
+        weightUnit: csvUnit,
       });
       setImportResult(result);
       if (result.inserted > 0) {
@@ -102,7 +110,7 @@ export default function ImportBodyweightPage() {
     } finally {
       setLoading(false);
     }
-  }, [csvText, coachId, queryClient]);
+  }, [csvText, coachId, queryClient, csvUnit]);
 
   const validCount = validation?.validRows?.length ?? 0;
   const errorCount = validation?.errors?.length ?? 0;
@@ -139,6 +147,15 @@ export default function ImportBodyweightPage() {
               resize: 'vertical',
             }}
           />
+          <div style={{ marginTop: spacing[12] }}>
+            <MeasurementUnitSegments
+              label="CSV weight unit"
+              options={CSV_UNIT_OPTIONS}
+              value={csvUnit}
+              onChange={setCsvUnitChoice}
+              disabled={loading}
+            />
+          </div>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <label className="inline-flex items-center gap-2 text-sm cursor-pointer" style={{ color: colors.primary }}>
               <FileSpreadsheet size={18} />
@@ -176,7 +193,7 @@ export default function ImportBodyweightPage() {
                   >
                     <span className="text-sm" style={{ color: colors.text }}>{row.client_email}</span>
                     <span className="text-xs ml-2" style={{ color: colors.muted }}>
-                      {row.log_date ?? row.date} · {row.weight != null ? formatWeightForViewer(Number(row.weight), viewerWU) : '—'}
+                      {row.log_date ?? row.date} · {row.weight != null ? `${row.weight} ${weightUnitShortLabel(csvUnit)}` : '—'}
                       {row.bodyfat != null ? ` · ${row.bodyfat}% BF` : ''}
                     </span>
                   </div>

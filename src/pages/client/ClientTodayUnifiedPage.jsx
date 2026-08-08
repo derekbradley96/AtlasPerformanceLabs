@@ -18,6 +18,7 @@ import { getTodayPosingMinutes, getWeeklyPosingMinutes, weekStartMondayIso } fro
 import { maybeNudgePosingWeeklyShortfall } from '@/lib/workoutReminder';
 import { getPrepContext } from '@/lib/prepContext';
 import { interpretWeightProgress, clientGoalFromGoalsField } from '@/lib/progressInterpretation';
+import { resolveViewerBodyweightUnit, formatWeightForViewer, formatAbsWeightDeltaFromKg } from '@/lib/bodyMeasurementUnits';
 import { shouldShowMotivationBoost, buildMotivationBoostContent } from '@/lib/engagementScaffold';
 import { getContextualGuidance } from '@/lib/contextualGuidance';
 import { derivePhaseBandCopy } from '@/lib/programTimelineClient';
@@ -87,8 +88,9 @@ function NutritionRing({ pct = 0, caloriesRemaining, proteinRemaining, onOpen, h
 export default function ClientTodayUnifiedPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, isCompPrepClient, activeContestPrep, prepContext, isFirstTimeContestPrepClient } = useAuth();
+  const { user, profile: viewerProfile, isCompPrepClient, activeContestPrep, prepContext, isFirstTimeContestPrepClient } = useAuth();
   const supabase = hasSupabase ? getSupabase() : null;
+  const viewerWU = resolveViewerBodyweightUnit(viewerProfile);
   const dayKey = todayIso();
   const [posingSheetOpen, setPosingSheetOpen] = useState(false);
   const [programmeOpen, setProgrammeOpen] = useState(false);
@@ -229,12 +231,14 @@ export default function ClientTodayUnifiedPage() {
       if (!supabase || !profile?.id) return [];
       const since = new Date();
       since.setDate(since.getDate() - 35);
+      // Actual columns: weight/log_date (weight_kg/logged_at never existed —
+      // this query errored and the card fell back to stale progress_metrics).
       const { data, error } = await supabase
         .from('client_weight_logs')
-        .select('weight_kg, logged_at, target_weight_kg')
+        .select('weight, log_date, created_at')
         .eq('client_id', profile.id)
-        .gte('logged_at', since.toISOString())
-        .order('logged_at', { ascending: false })
+        .gte('log_date', since.toISOString().slice(0, 10))
+        .order('log_date', { ascending: false })
         .limit(24);
       if (error) return [];
       return Array.isArray(data) ? data : [];
@@ -477,7 +481,7 @@ export default function ClientTodayUnifiedPage() {
   const recentWeightSeries = useMemo(
     () =>
       weightLogsRecent
-        .map((r) => ({ weight: Number(r.weight_kg), date: r.logged_at }))
+        .map((r) => ({ weight: Number(r.weight), date: r.log_date || r.created_at }))
         .filter((r) => Number.isFinite(r.weight)),
     [weightLogsRecent],
   );
@@ -493,22 +497,23 @@ export default function ClientTodayUnifiedPage() {
       : profile?.baseline_weight != null
         ? Number(profile.baseline_weight)
         : currentWeight;
-    const targetWeight = weightLogsRecent[0]?.target_weight_kg != null ? Number(weightLogsRecent[0].target_weight_kg) : null;
+    // client_weight_logs has no target column; interpretWeightProgress accepts null.
+    const targetWeight = null;
     const interp = interpretWeightProgress({
       currentWeight,
       startWeight: Number.isFinite(startWeight) ? startWeight : currentWeight,
       targetWeight,
       recentWeights: recentWeightSeries,
       clientGoal,
-    });
+    }, viewerWU);
     return { currentWeight, interp };
   }, [
     isTransformationSurface,
     recentWeightSeries,
     progressMetrics?.latest_weight,
     profile?.baseline_weight,
-    weightLogsRecent,
     clientGoal,
+    viewerWU,
   ]);
 
   const guidanceList = useMemo(
@@ -569,8 +574,9 @@ export default function ClientTodayUnifiedPage() {
       workoutStats?.lastCompletedAt,
       workoutStats?.completed ?? 0,
       progressPhotosPair?.first,
+      viewerWU,
     );
-  }, [profile, recentWeightSeries, progressMetrics?.latest_weight, workoutStats, progressPhotosPair]);
+  }, [profile, recentWeightSeries, progressMetrics?.latest_weight, workoutStats, progressPhotosPair, viewerWU]);
 
   useEffect(() => {
     try {
@@ -684,13 +690,13 @@ export default function ClientTodayUnifiedPage() {
             <Scale size={18} style={{ color: colors.primary, flexShrink: 0 }} aria-hidden />
           </div>
           <div className="flex items-baseline justify-between gap-3 mt-1 flex-wrap">
-            <span style={{ fontSize: 34, fontWeight: 800, color: colors.text }}>{weightCardModel.currentWeight.toFixed(1)} kg</span>
+            <span style={{ fontSize: 34, fontWeight: 800, color: colors.text }}>{formatWeightForViewer(weightCardModel.currentWeight, viewerWU)}</span>
             <span style={{ fontSize: 14, fontWeight: 600, color: colors.text }}>
               {Math.abs(weightCardModel.interp.thisWeekChange) < 0.05
                 ? 'This week: steady'
                 : weightCardModel.interp.thisWeekChange < 0
-                  ? `This week: ↓ ${Math.abs(weightCardModel.interp.thisWeekChange).toFixed(1)} kg`
-                  : `This week: ↑ ${weightCardModel.interp.thisWeekChange.toFixed(1)} kg`}
+                  ? `This week: ↓ ${formatAbsWeightDeltaFromKg(weightCardModel.interp.thisWeekChange, viewerWU)}`
+                  : `This week: ↑ ${formatAbsWeightDeltaFromKg(weightCardModel.interp.thisWeekChange, viewerWU)}`}
             </span>
           </div>
           <p className="mt-2 m-0" style={{ fontSize: 13, color: colors.muted, lineHeight: 1.5 }}>

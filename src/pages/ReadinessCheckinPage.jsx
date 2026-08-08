@@ -9,6 +9,7 @@ import { calculateReadinessScore } from '@/lib/readinessEngine';
 import { createReadinessCheckinWithRecommendation, getLocalDateKey, normalizeReadinessScoresForPersistence } from '@/lib/readinessCheckinApi';
 import { clampAdherence0to100, clampReadinessAggregate0to100, formatReadinessAsOutOfTen } from '@/lib/progressMetricsValidation';
 import { runPersonalFeedbackLoop } from '@/lib/personalFeedbackLoop';
+import { resolveViewerBodyweightUnit, parseWeightInputsToKg, weightUnitShortLabel } from '@/lib/bodyMeasurementUnits';
 import { getPersonalAutoAdjustmentsEnabled } from '@/lib/autoAdjustmentClarity';
 import { fetchWeeklyAutoAdherencePersonal } from '@/lib/weeklyAutoAdherence';
 import {
@@ -127,8 +128,9 @@ export default function ReadinessCheckinPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { user, effectiveRole } = useAuth();
+  const { user, profile, effectiveRole } = useAuth();
   const returnTo = searchParams.get('return') || '';
+  const viewerWeightUnit = resolveViewerBodyweightUnit(profile);
 
   const [energy, setEnergy] = useState(0);
   const [recovery, setRecovery] = useState(0);
@@ -136,6 +138,8 @@ export default function ReadinessCheckinPage() {
   const [stress, setStress] = useState(0);
   const [appetite, setAppetite] = useState(0);
   const [weight, setWeight] = useState('');
+  const [weightSt, setWeightSt] = useState('');
+  const [weightLbRem, setWeightLbRem] = useState('');
   const [notes, setNotes] = useState('');
   const [stepIndex, setStepIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -223,9 +227,13 @@ export default function ReadinessCheckinPage() {
 
       let loop = null;
       if (isPersonal(effectiveRole)) {
-        const wRaw = (weight || '').trim() ? Number(weight) : null;
-        const weightKg =
-          wRaw != null && Number.isFinite(wRaw) && wRaw > 0 ? Math.min(400, Math.max(25, wRaw)) : null;
+        const parsedKg =
+          viewerWeightUnit === 'st_lb'
+            ? parseWeightInputsToKg({ weightUnit: viewerWeightUnit, stoneText: weightSt, poundText: weightLbRem })
+            : viewerWeightUnit === 'lb'
+              ? parseWeightInputsToKg({ weightUnit: viewerWeightUnit, lbText: weight })
+              : parseWeightInputsToKg({ weightUnit: viewerWeightUnit, kgText: weight });
+        const weightKg = parsedKg != null ? Math.min(400, Math.max(25, parsedKg)) : null;
         loop = runPersonalFeedbackLoop(user.id, {
           weight: weightKg,
           energy,
@@ -421,21 +429,56 @@ export default function ReadinessCheckinPage() {
 
         {activeStep === 'weight' && (
           <Card style={{ padding: spacing[12] }}>
-            <label style={{ display: 'block', fontSize: 13, marginBottom: spacing[8], color: colors.muted }}>Weight (optional)</label>
-            <input
-              value={weight}
-              onChange={(e) => setWeight(e.target.value)}
-              inputMode="decimal"
-              placeholder="e.g. 82.4"
-              style={{
-                width: '100%',
-                borderRadius: radii.md,
-                border: `1px solid ${colors.border}`,
-                background: colors.surface2,
-                color: colors.text,
-                padding: spacing[10],
-              }}
-            />
+            <label style={{ display: 'block', fontSize: 13, marginBottom: spacing[8], color: colors.muted }}>
+              Weight ({weightUnitShortLabel(viewerWeightUnit)}, optional)
+            </label>
+            {viewerWeightUnit === 'st_lb' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: spacing[8] }}>
+                <input
+                  value={weightSt}
+                  onChange={(e) => setWeightSt(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="Stone"
+                  style={{
+                    width: '100%',
+                    borderRadius: radii.md,
+                    border: `1px solid ${colors.border}`,
+                    background: colors.surface2,
+                    color: colors.text,
+                    padding: spacing[10],
+                  }}
+                />
+                <input
+                  value={weightLbRem}
+                  onChange={(e) => setWeightLbRem(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="Pounds"
+                  style={{
+                    width: '100%',
+                    borderRadius: radii.md,
+                    border: `1px solid ${colors.border}`,
+                    background: colors.surface2,
+                    color: colors.text,
+                    padding: spacing[10],
+                  }}
+                />
+              </div>
+            ) : (
+              <input
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                inputMode="decimal"
+                placeholder={viewerWeightUnit === 'lb' ? 'e.g. 181.5' : 'e.g. 82.4'}
+                style={{
+                  width: '100%',
+                  borderRadius: radii.md,
+                  border: `1px solid ${colors.border}`,
+                  background: colors.surface2,
+                  color: colors.text,
+                  padding: spacing[10],
+                }}
+              />
+            )}
             <p style={{ margin: `${spacing[8]}px 0 0`, fontSize: 12, color: colors.muted }}>Used to track trend over time.</p>
           </Card>
         )}

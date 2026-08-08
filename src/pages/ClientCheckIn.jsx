@@ -91,12 +91,13 @@ function NumericScale({ value, onChange, min = 1, max = 10 }) {
 export default function ClientCheckIn() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, updateProfile } = useAuth();
+  const { user, profile, updateProfile } = useAuth();
   const supabase = getSupabase();
   const [uploading, setUploading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [draftRestored, setDraftRestored] = useState(false);
-  const [weightUnitLocal, setWeightUnitLocal] = useState(() => resolveViewerBodyweightUnit(null));
+  const [weightUnitLocal, setWeightUnitLocal] = useState(() => resolveViewerBodyweightUnit(profile));
+  const weightUnitTouchedRef = useRef(false);
   const [weightSt, setWeightSt] = useState('');
   const [weightLbRem, setWeightLbRem] = useState('');
   const [pendingPhotos, setPendingPhotos] = useState([]);
@@ -249,6 +250,16 @@ export default function ClientCheckIn() {
     if (!user?.id) return;
     trackFirstCheckinOpened(user.id, {});
   }, [user?.id]);
+
+  // Re-sync the unit segment once the profile row arrives (or changes),
+  // unless the user already picked a unit manually OR already typed a
+  // weight — digits entered under the old segment must not be silently
+  // reinterpreted in the new unit at submit.
+  useEffect(() => {
+    if (!profile || weightUnitTouchedRef.current) return;
+    if (String(formData.weight_kg || '').trim() !== '' || String(weightSt || '').trim() !== '' || String(weightLbRem || '').trim() !== '') return;
+    setWeightUnitLocal(resolveViewerBodyweightUnit(profile));
+  }, [profile, formData.weight_kg, weightSt, weightLbRem]);
 
   useEffect(
     () => () => {
@@ -645,6 +656,7 @@ export default function ClientCheckIn() {
               value={normalizeWeightUnit(weightUnitLocal)}
               onChange={async (id) => {
                 const w = normalizeWeightUnit(id);
+                weightUnitTouchedRef.current = true;
                 setWeightUnitLocal(w);
                 if (user?.id && typeof updateProfile === 'function') {
                   await updateProfile({ bodyweight_unit: w, units: w === 'lb' ? 'lb' : 'kg' });

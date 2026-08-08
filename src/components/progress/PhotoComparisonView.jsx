@@ -4,6 +4,8 @@ import { Download, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { colors, spacing, radii } from '@/ui/tokens';
 import { usePresentationMode } from '@/lib/presentationMode';
+import { useAuth } from '@/lib/AuthContext';
+import { resolveViewerBodyweightUnit, formatAbsWeightDeltaFromKg } from '@/lib/bodyMeasurementUnits';
 import { safeDate } from '@/lib/format';
 
 function daysBetween(aIso, bIso) {
@@ -29,16 +31,17 @@ function formatPhotoLabel(photo, showDate, isCompetition, index) {
   return `${Math.round(outDays / 7)} weeks out · ${dateLabel}`;
 }
 
-function interpretedWeightChange({ kgDiff, weeksBetween, isCompetition }) {
+function interpretedWeightChange({ kgDiff, weeksBetween, isCompetition, weightUnit = 'kg' }) {
   if (kgDiff == null || weeksBetween == null || weeksBetween <= 0) return 'Add weight entries on photos to track prep trend interpretation.';
   const abs = Math.abs(kgDiff);
   if (abs < 0.2) return `Weight is stable over ${weeksBetween} weeks. Small adjustments can be enough if visuals are improving.`;
+  const magnitude = formatAbsWeightDeltaFromKg(kgDiff, weightUnit);
   if (kgDiff < 0) {
-    if (isCompetition) return `Lost ${abs.toFixed(1)}kg in ${weeksBetween} weeks — on track if conditioning and performance are both holding.`;
-    return `Down ${abs.toFixed(1)}kg in ${weeksBetween} weeks — steady progress if energy and training quality stay good.`;
+    if (isCompetition) return `Lost ${magnitude} in ${weeksBetween} weeks — on track if conditioning and performance are both holding.`;
+    return `Down ${magnitude} in ${weeksBetween} weeks — steady progress if energy and training quality stay good.`;
   }
-  if (isCompetition) return `Up ${abs.toFixed(1)}kg in ${weeksBetween} weeks — review peak prep timeline and weekly targets.`;
-  return `Up ${abs.toFixed(1)}kg in ${weeksBetween} weeks — useful in a build phase if performance is also improving.`;
+  if (isCompetition) return `Up ${magnitude} in ${weeksBetween} weeks — review peak prep timeline and weekly targets.`;
+  return `Up ${magnitude} in ${weeksBetween} weeks — useful in a build phase if performance is also improving.`;
 }
 
 export default function PhotoComparisonView({
@@ -46,8 +49,11 @@ export default function PhotoComparisonView({
   showDate = null,
   isCompetition = false,
   canShare = false,
+  weightUnit = null,
 }) {
   const { isDesktopWeb } = usePresentationMode();
+  const { profile } = useAuth();
+  const viewerWU = weightUnit ?? resolveViewerBodyweightUnit(profile);
   const sortedPhotos = useMemo(
     () => [...photos].sort((a, b) => new Date(a.date_taken || 0).getTime() - new Date(b.date_taken || 0).getTime()),
     [photos]
@@ -220,10 +226,10 @@ export default function PhotoComparisonView({
         <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 14, color: colors.text, fontWeight: 600 }}>
           {weightDiff == null
             ? 'Weight data missing on one or both photos.'
-            : `${weightDiff < 0 ? 'Lost' : 'Gained'} ${Math.abs(weightDiff).toFixed(1)}kg${weeksBetween ? ` in ${weeksBetween} weeks` : ''}`}
+            : `${weightDiff < 0 ? 'Lost' : 'Gained'} ${formatAbsWeightDeltaFromKg(weightDiff, viewerWU)}${weeksBetween ? ` in ${weeksBetween} weeks` : ''}`}
         </p>
         <p style={{ margin: `${spacing[6]}px 0 0`, fontSize: 13, color: colors.muted }}>
-          {interpretedWeightChange({ kgDiff: weightDiff, weeksBetween, isCompetition })}
+          {interpretedWeightChange({ kgDiff: weightDiff, weeksBetween, isCompetition, weightUnit: viewerWU })}
         </p>
       </div>
     </div>

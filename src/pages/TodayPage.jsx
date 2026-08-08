@@ -24,6 +24,14 @@ import { calculateWeeklyScore } from '@/lib/weeklyEffortScore';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import PullToRefreshIndicator from '@/components/ui/PullToRefreshIndicator';
 import { calculatePrepProgress } from '@/lib/prepProgressTracking';
+import {
+  resolveViewerBodyweightUnit,
+  normalizeWeightUnit,
+  parseWeightInputsToKg,
+  formatWeightForViewer,
+  formatAbsWeightDeltaFromKg,
+} from '@/lib/bodyMeasurementUnits';
+import MeasurementUnitSegments, { BODYWEIGHT_SEGMENT_OPTIONS } from '@/components/measurements/MeasurementUnitSegments';
 import { getPersonalGoalBucketFromProfile, personalHomeTrainingCardCopy } from '@/lib/personalGoalCopy';
 import { useTodayPageData } from '@/hooks/useTodayPageData';
 import { listPersonalMealLogs } from '@/lib/personalNutritionStore';
@@ -669,6 +677,14 @@ export default function TodayPage() {
 
   const clientProfile = isPersonalRole ? null : todayBundle?.clientProfile;
   const profile = isPersonalRole ? authProfile : clientProfile;
+  // Weight is stored canonically in kg; this is the viewer's display/entry
+  // preference. Always resolve from the PROFILES row — for coached clients
+  // `profile` is the clients-table row, which has no unit columns, and it
+  // being truthy used to shadow the saved preference with the locale default.
+  const viewerWeightUnit = useMemo(
+    () => resolveViewerBodyweightUnit(authProfile),
+    [authProfile]
+  );
   const assignedWorkout = todayBundle?.assignedWorkout ?? null;
   const nutritionPlan = todayBundle?.nutritionPlan ?? null;
   const weightRows = todayBundle?.weightRows ?? [];
@@ -697,8 +713,9 @@ export default function TodayPage() {
       currentWeight: curW,
       startDate,
       showDate,
+      viewerWeightUnit,
     });
-  }, [isPersonalRole, activeContestPrep, weightRows]);
+  }, [isPersonalRole, activeContestPrep, weightRows, viewerWeightUnit]);
 
   const showFirstCheckInPrompt = useMemo(() => {
     if (isPersonalRole) return false;
@@ -722,9 +739,9 @@ export default function TodayPage() {
       targetWeight: weightRows[0]?.targetWeight || null,
       recentWeights: weightRows.map((w) => ({ weight: w.weight, date: w.date })),
       clientGoal: clientGoalFromGoalsField(profile?.goals || profile?.goal || profile?.personal_goal),
-    });
+    }, viewerWeightUnit);
     return interp?.interpretation || null;
-  }, [weightRows, profile?.goals, profile?.goal, profile?.personal_goal]);
+  }, [weightRows, profile?.goals, profile?.goal, profile?.personal_goal, viewerWeightUnit]);
 
   const readinessKey = useMemo(() => `atlas_readiness_${getLocalDateKey()}`, []);
   const [readiness, setReadiness] = useState({ sleep: null, energy: null, soreness: null });
@@ -806,9 +823,19 @@ export default function TodayPage() {
   const [weeklyScoreDismissedState, setWeeklyScoreDismissed] = useState(weeklyScoreDismissed);
   const [weightSheetOpen, setWeightSheetOpen] = useState(false);
   const [weightInput, setWeightInput] = useState('');
-  const [weightUnit, setWeightUnit] = useState(
-    () => localStorage.getItem('atlas_weight_unit') || 'kg'
+  const [weightStoneInput, setWeightStoneInput] = useState('');
+  const [weightPoundInput, setWeightPoundInput] = useState('');
+  // Profile bodyweight_unit wins on a fresh device; a manual in-sheet override
+  // (remembered in localStorage) wins after the user has picked one here.
+  const [weightUnitOverride, setWeightUnitOverride] = useState(
+    () => localStorage.getItem('atlas_weight_unit') || null
   );
+  const weightUnit = normalizeWeightUnit(weightUnitOverride || viewerWeightUnit);
+  const weightSheetKg = weightUnit === 'st_lb'
+    ? parseWeightInputsToKg({ weightUnit, stoneText: weightStoneInput, poundText: weightPoundInput })
+    : weightUnit === 'lb'
+      ? parseWeightInputsToKg({ weightUnit, lbText: weightInput })
+      : parseWeightInputsToKg({ weightUnit, kgText: weightInput });
   const guidance = useMemo(() => {
     const list = getContextualGuidance({
       isTrainingDay: hasWorkoutToday,
@@ -865,8 +892,8 @@ export default function TodayPage() {
     const trend = Math.abs(weeklyChange) < 0.2
       ? 'holding steady'
       : weeklyChange < 0
-        ? `losing ${Math.abs(weeklyChange).toFixed(1)}kg/week`
-        : `gaining ${weeklyChange.toFixed(1)}kg/week`;
+        ? `losing ${formatAbsWeightDeltaFromKg(weeklyChange, viewerWeightUnit)}/week`
+        : `gaining ${formatAbsWeightDeltaFromKg(weeklyChange, viewerWeightUnit)}/week`;
     const goalRaw = String(profile?.goal || profile?.personal_goal || '').toLowerCase();
     const isLoseFatGoal = goalRaw.includes('lose') || goalRaw.includes('fat') || goalRaw.includes('cut');
     const isBuildGoal = goalRaw.includes('build') || goalRaw.includes('muscle') || goalRaw.includes('bulk');
@@ -896,8 +923,8 @@ export default function TodayPage() {
   }
 
   async function handleLogWeight() {
-    const rawValue = Number(weightInput);
-    const valueKg = weightUnit === 'lb' ? rawValue * 0.453592 : rawValue;
+    // parseWeightInputsToKg returns canonical kg (or null) for kg / lb / st_lb entry.
+    const valueKg = weightSheetKg;
     if (!valueKg || valueKg <= 0) return;
     try {
       const supabase = getSupabase();
@@ -921,6 +948,8 @@ export default function TodayPage() {
       await queryClient.invalidateQueries({ queryKey: ['today-page-v2-bundle'] });
       setWeightSheetOpen(false);
       setWeightInput('');
+      setWeightStoneInput('');
+      setWeightPoundInput('');
       toast.success('Weight logged');
     } catch {
       toast.error('Couldn\'t save — try again');
@@ -969,7 +998,7 @@ export default function TodayPage() {
     weeklyScore,
     weeklyScoreDismissed: weeklyScoreDismissedState,
     setWeeklyScoreDismissed,
-    weightLine: weightRows[0]?.weight ? `${Number(weightRows[0].weight).toFixed(1)}kg — latest` : 'Log today →',
+    weightLine: weightRows[0]?.weight ? `${formatWeightForViewer(Number(weightRows[0].weight), viewerWeightUnit)} — latest` : 'Log today →',
     todayWeight: weightRows[0]?.weight ? Number(weightRows[0].weight) : null,
     weightTrendLine: weeklyWeightTrendLine,
     openWeightSheet: () => setWeightSheetOpen(true),
@@ -1031,6 +1060,16 @@ export default function TodayPage() {
             >
               Log weight
             </p>
+            <MeasurementUnitSegments
+              label="Weight unit"
+              options={BODYWEIGHT_SEGMENT_OPTIONS}
+              value={weightUnit}
+              onChange={(id) => {
+                const unit = normalizeWeightUnit(id);
+                setWeightUnitOverride(unit);
+                localStorage.setItem('atlas_weight_unit', unit);
+              }}
+            />
             <div
               style={{
                 display: 'flex',
@@ -1039,65 +1078,79 @@ export default function TodayPage() {
                 marginBottom: spacing[16],
               }}
             >
-              <input
-                type="number"
-                inputMode="decimal"
-                autoFocus
-                value={weightInput}
-                onChange={(event) => setWeightInput(event.target.value)}
-                placeholder="84.2"
-                style={{
-                  flex: 1,
-                  fontSize: 24,
-                  fontWeight: 500,
-                  color: colors.text,
-                  background: colors.surface1,
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: radii.lg,
-                  padding: spacing[12],
-                  outline: 'none',
-                }}
-              />
-              <div
-                style={{
-                  display: 'flex',
-                  border: `1px solid ${colors.border}`,
-                  borderRadius: radii.md,
-                  overflow: 'hidden',
-                }}
-              >
-                {['kg', 'lb'].map((unit) => (
-                  <button
-                    key={unit}
-                    type="button"
-                    onClick={() => {
-                      setWeightUnit(unit);
-                      localStorage.setItem('atlas_weight_unit', unit);
-                    }}
+              {weightUnit === 'st_lb' ? (
+                <>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    autoFocus
+                    value={weightStoneInput}
+                    onChange={(event) => setWeightStoneInput(event.target.value)}
+                    placeholder="Stone"
                     style={{
-                      padding: `${spacing[8]}px ${spacing[12]}px`,
-                      background: weightUnit === unit ? colors.primary : 'transparent',
-                      color: weightUnit === unit ? '#fff' : colors.muted,
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontSize: 13,
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 24,
                       fontWeight: 500,
+                      color: colors.text,
+                      background: colors.surface1,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: radii.lg,
+                      padding: spacing[12],
+                      outline: 'none',
                     }}
-                  >
-                    {unit}
-                  </button>
-                ))}
-              </div>
+                  />
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={weightPoundInput}
+                    onChange={(event) => setWeightPoundInput(event.target.value)}
+                    placeholder="Pounds"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 24,
+                      fontWeight: 500,
+                      color: colors.text,
+                      background: colors.surface1,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: radii.lg,
+                      padding: spacing[12],
+                      outline: 'none',
+                    }}
+                  />
+                </>
+              ) : (
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  autoFocus
+                  value={weightInput}
+                  onChange={(event) => setWeightInput(event.target.value)}
+                  placeholder={weightUnit === 'lb' ? '185.6' : '84.2'}
+                  style={{
+                    flex: 1,
+                    fontSize: 24,
+                    fontWeight: 500,
+                    color: colors.text,
+                    background: colors.surface1,
+                    border: `1px solid ${colors.border}`,
+                    borderRadius: radii.lg,
+                    padding: spacing[12],
+                    outline: 'none',
+                  }}
+                />
+              )}
             </div>
             <button
               type="button"
               onClick={handleLogWeight}
-              disabled={!weightInput || Number(weightInput) <= 0}
+              disabled={!weightSheetKg}
               style={{
                 width: '100%',
                 height: 48,
-                background: Number(weightInput) > 0 ? colors.primary : colors.border,
-                color: Number(weightInput) > 0 ? '#fff' : colors.muted,
+                background: weightSheetKg ? colors.primary : colors.border,
+                color: weightSheetKg ? '#fff' : colors.muted,
                 border: 'none',
                 borderRadius: radii.lg,
                 fontSize: 15,
