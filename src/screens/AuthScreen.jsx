@@ -1317,6 +1317,12 @@ export default function AuthScreen() {
                   <span>Create account</span>
                 )}
               </button>
+              <p style={{ margin: `${spacing[10]}px 0 0`, fontSize: 12, color: colors.muted, textAlign: 'center', lineHeight: 1.5 }}>
+                By creating an account you agree to our{' '}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, textDecoration: 'underline' }}>Terms of Service</a>
+                {' '}and{' '}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: colors.accent, textDecoration: 'underline' }}>Privacy Policy</a>.
+              </p>
             </form>
           )}
 
