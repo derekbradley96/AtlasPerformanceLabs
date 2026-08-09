@@ -1514,6 +1514,47 @@ export default function ProgramBuilderPage() {
     }
   };
 
+  const handleRenameDay = async (newTitle) => {
+    if (!supabase || !selectedDay?.id) return;
+    const title = String(newTitle || '').trim();
+    if (!title || title === selectedDay.title) return;
+    try {
+      const { error } = await supabase.from('program_days').update({ title }).eq('id', selectedDay.id);
+      if (error) throw error;
+      setDays((ds) => ds.map((d) => (d.id === selectedDay.id ? { ...d, title } : d)));
+      toast.success('Day renamed');
+    } catch (e) {
+      toast.error(friendlySupabaseError(e, 'Could not rename day'));
+    }
+  };
+
+  const handleDeleteDay = async () => {
+    if (!supabase || !selectedDay?.id || !selectedWeek) return;
+    setSaving(true);
+    try {
+      await supabase.from('program_exercises').delete().eq('day_id', selectedDay.id);
+      const { error } = await supabase.from('program_days').delete().eq('id', selectedDay.id);
+      if (error) throw error;
+      // Compact day numbers so ordering and the assignment's day-of-week
+      // mapping stay contiguous (delete Day 2 of 3 → old Day 3 becomes Day 2).
+      const remaining = (await fetchDays(supabase, selectedWeek.id))
+        .sort((a, b) => Number(a.day_number) - Number(b.day_number));
+      for (let i = 0; i < remaining.length; i++) {
+        if (Number(remaining[i].day_number) !== i + 1) {
+          await supabase.from('program_days').update({ day_number: i + 1 }).eq('id', remaining[i].id);
+        }
+      }
+      const dList = await fetchDays(supabase, selectedWeek.id);
+      setDays(dList);
+      setSelectedDayIndex(0);
+      toast.success('Day deleted');
+    } catch (e) {
+      toast.error(friendlySupabaseError(e, 'Could not delete day'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDuplicateDay = async () => {
     if (!supabase || !selectedWeek || !selectedDay) return;
     setSaving(true);
@@ -2356,7 +2397,7 @@ export default function ProgramBuilderPage() {
         style={{ background: colors.bg, color: colors.text }}
         {...programBuilderMigrationAttrs}
       >
-        <TopBar title={isPersonalRole ? 'My program' : 'Program Builder'} onBack={() => navigate(-1)} />
+        <TopBar title={isPersonalRole ? 'My programme' : 'Program Builder'} onBack={() => navigate(-1)} />
         <div className="flex-1 flex items-center justify-center p-6">
           <p style={{ color: colors.muted, textAlign: 'center', maxWidth: 320 }}>
             {personalNoCloudCopy()}
@@ -2369,7 +2410,7 @@ export default function ProgramBuilderPage() {
   if (loading) {
     return (
       <div className="min-h-screen" style={{ background: colors.bg }} {...programBuilderMigrationAttrs}>
-        <TopBar title={isPersonalRole ? 'My program' : 'Program Builder'} onBack={() => navigate(-1)} />
+        <TopBar title={isPersonalRole ? 'My programme' : 'Program Builder'} onBack={() => navigate(-1)} />
         <PageLoader
           message={isPersonalRole ? personalBuilderLoadingMessage() : 'Loading builder…'}
           hint={isPersonalRole ? personalBuilderLoadingHint() : 'Fetching clients and program block.'}
@@ -2397,7 +2438,7 @@ export default function ProgramBuilderPage() {
       style={{ background: isPersonalRole ? 'transparent' : colors.bg, color: colors.text }}
       {...programBuilderMigrationAttrs}
     >
-      <TopBar title={isPersonalRole ? 'My program' : 'Program Builder'} onBack={() => navigate(-1)} />
+      <TopBar title={isPersonalRole ? 'My programme' : 'Program Builder'} onBack={() => navigate(-1)} />
       <PersonalColumn variant={isPersonalRole ? 'wide' : 'default'}>
       <div
         style={
@@ -2656,6 +2697,8 @@ export default function ProgramBuilderPage() {
           selectedDayIndex={selectedDayIndex}
           setSelectedDayIndex={setSelectedDayIndex}
           handleDuplicateDay={handleDuplicateDay}
+          handleRenameDay={handleRenameDay}
+          handleDeleteDay={handleDeleteDay}
           selectedDay={selectedDay}
           libraryFilterMovement={libraryFilterMovement}
           setLibraryFilterMovement={setLibraryFilterMovement}

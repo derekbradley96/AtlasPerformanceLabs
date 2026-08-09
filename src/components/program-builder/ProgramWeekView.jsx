@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import WeekTabs from '@/components/program-builder/WeekTabs';
 import DayTabs from '@/components/program-builder/DayTabs';
 import ProgramDayColumn from '@/components/program-builder/ProgramDayColumn';
 import BuilderActionMenu from '@/components/program-builder/BuilderActionMenu';
 import EmptyState from '@/components/ui/EmptyState';
-import { Calendar, Copy, CopyPlus, ArrowDownToLine, Library } from 'lucide-react';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { Calendar, Copy, CopyPlus, ArrowDownToLine, Library, Pencil, Trash2 } from 'lucide-react';
 import { colors, spacing, radii, touchTargetMin } from '@/ui/tokens';
 
 export default function ProgramWeekView(props) {
@@ -31,6 +32,8 @@ export default function ProgramWeekView(props) {
     selectedDayIndex,
     setSelectedDayIndex,
     handleDuplicateDay,
+    handleRenameDay,
+    handleDeleteDay,
     selectedDay,
     libraryFilterMovement,
     setLibraryFilterMovement,
@@ -45,7 +48,17 @@ export default function ProgramWeekView(props) {
     openExercisePicker,
   } = props;
 
+  // Rename/delete state is view-local; persistence lives in the page handlers.
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
   if (!block?.id) return null;
+
+  const submitRename = () => {
+    setRenameOpen(false);
+    void handleRenameDay?.(renameValue);
+  };
 
   // Week tools — hidden for Personal Basic (single-week focus, no copy tools).
   const weekMenuItems = personalBasicExperience
@@ -84,6 +97,24 @@ export default function ProgramWeekView(props) {
       onClick: handleDuplicateDay,
       disabled: saving,
       hidden: personalBasicExperience,
+    },
+    {
+      key: 'rename-day',
+      label: 'Rename day',
+      icon: Pencil,
+      onClick: () => {
+        setRenameValue(selectedDay?.title || `Day ${selectedDay?.day_number ?? ''}`.trim());
+        setRenameOpen(true);
+      },
+      disabled: saving,
+    },
+    {
+      key: 'delete-day',
+      label: 'Delete day',
+      icon: Trash2,
+      onClick: () => setDeleteConfirmOpen(true),
+      disabled: saving || days.length <= 1,
+      danger: true,
     },
   ];
 
@@ -183,6 +214,49 @@ export default function ProgramWeekView(props) {
                   <BuilderActionMenu ariaLabel="Day actions" items={dayMenuItems} disabled={saving} />
                 ) : null}
               </div>
+              {renameOpen && selectedDay ? (
+                <div className="flex items-center gap-2" style={{ marginBottom: spacing[12] }}>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') submitRename();
+                      if (e.key === 'Escape') setRenameOpen(false);
+                    }}
+                    placeholder='e.g. "Upper A", "Push", "Legs"'
+                    maxLength={40}
+                    style={{ flex: 1, minWidth: 0, minHeight: touchTargetMin, borderRadius: radii.button, border: `1px solid ${colors.primary}`, background: colors.surface1, color: colors.text, padding: `0 ${spacing[12]}px`, fontSize: 14 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={submitRename}
+                    style={{ minHeight: touchTargetMin, borderRadius: radii.button, border: 'none', background: colors.primary, color: '#fff', fontWeight: 700, padding: `0 ${spacing[14]}px` }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRenameOpen(false)}
+                    style={{ minHeight: touchTargetMin, borderRadius: radii.button, border: `1px solid ${colors.border}`, background: 'transparent', color: colors.muted, fontWeight: 700, padding: `0 ${spacing[12]}px` }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : null}
+              <ConfirmDialog
+                open={deleteConfirmOpen}
+                title="Delete this day?"
+                message={`"${selectedDay?.title || `Day ${selectedDay?.day_number ?? ''}`}" and its exercises will be removed from this week. Other weeks are not affected.`}
+                confirmLabel="Delete day"
+                cancelLabel="Keep it"
+                onConfirm={() => {
+                  setDeleteConfirmOpen(false);
+                  void handleDeleteDay?.();
+                }}
+                onCancel={() => setDeleteConfirmOpen(false)}
+              />
               <ProgramDayColumn
                 selectedDay={selectedDay}
                 personalBasicExperience={personalBasicExperience}
