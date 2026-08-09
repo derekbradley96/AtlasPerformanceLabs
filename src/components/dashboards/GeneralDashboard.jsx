@@ -26,10 +26,12 @@ import { desktopRhythm } from '@/ui/pageLayout';
 import PersonalSurface from '@/components/personal/PersonalSurface';
 import { getRetentionStreaks } from '@/lib/retentionHabitService';
 import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
-import { listPersonalMealLogs } from '@/lib/personalNutritionStore';
+import { fetchNutritionTodayBundle, nutritionTodayQueryKey } from '@/lib/nutritionPageBundle';
+import { getLocalDateKey } from '@/lib/localDate';
 import HomePrimaryActionCard from '@/components/dashboards/HomePrimaryActionCard';
 import {
   fetchMergedPersonalNutritionTargets,
+  getPersonalCalorieProgressPercent,
   getPersonalProteinProgressPercent,
   personalNutritionTargetsQueryKey,
 } from '@/lib/personalNutritionProfile';
@@ -41,7 +43,6 @@ import { usePresentationMode } from '@/lib/presentationMode';
 import { resolvePersonalPlanTier } from '@/config/plans';
 import {
   derivePersonalTodayStatus,
-  getPersonalCalorieProgressPercent,
   nutritionTrainingLinkLine,
 } from '@/lib/personalAdaptationLayer';
 import { deriveCoachBridgeMoment } from '@/lib/coachBridge';
@@ -160,11 +161,38 @@ export default function GeneralDashboard({ user }) {
     enabled: !!user?.id,
   });
 
-  const todayKey = new Date().toISOString().slice(0, 10);
+  // Local wall-clock day, matching Nutrition's getLocalDateKey() — the old UTC
+  // key (toISOString) put Home on a different day than Nutrition for hours
+  // around midnight for anyone off UTC.
+  const todayKey = getLocalDateKey();
+  const yesterdayKey = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return getLocalDateKey(d);
+  })();
+
+  // Same query key + fetcher as Nutrition's today bundle (useNutritionData), so
+  // Home shows the exact meals Nutrition logged and Nutrition's existing
+  // ['nutrition-today', userId] invalidations refresh Home for free. The old
+  // localStorage read always showed 0 kcal in production — with Supabase
+  // configured, meals are only ever written to meal_logs.
+  const { data: nutritionTodayBundle } = useQuery({
+    queryKey: nutritionTodayQueryKey(user?.id, todayKey),
+    queryFn: () =>
+      fetchNutritionTodayBundle({
+        userId: user?.id,
+        todayStr: todayKey,
+        yesterdayStr: yesterdayKey,
+        isClientRole: false,
+        isPersonalRole: true,
+        clientId: null,
+      }),
+    enabled: !!user?.id,
+  });
 
   const nutritionSnapshot = useMemo(() => {
     if (!user?.id) return { totals: { calories: 0, protein: 0 }, proteinPct: null, caloriePct: null, calTarget: 0 };
-    const meals = listPersonalMealLogs(user.id, todayKey);
+    const meals = Array.isArray(nutritionTodayBundle?.mealsToday) ? nutritionTodayBundle.mealsToday : [];
     const totals = meals.reduce(
       (acc, m) => ({
         calories: acc.calories + (Number(m?.calories) || 0),
@@ -173,11 +201,11 @@ export default function GeneralDashboard({ user }) {
       { calories: 0, protein: 0 }
     );
     const merged = nutritionTarget || {};
-    const proteinPct = getPersonalProteinProgressPercent(user.id, todayKey, merged);
-    const caloriePct = getPersonalCalorieProgressPercent(user.id, todayKey, merged);
+    const proteinPct = getPersonalProteinProgressPercent(user.id, todayKey, merged, meals);
+    const caloriePct = getPersonalCalorieProgressPercent(user.id, todayKey, merged, meals);
     const calTarget = Number(merged?.calories ?? merged?.target_calories) || 0;
     return { totals, proteinPct, caloriePct, calTarget };
-  }, [user?.id, todayKey, nutritionTarget]);
+  }, [user?.id, todayKey, nutritionTarget, nutritionTodayBundle]);
   const { totals, proteinPct, caloriePct, calTarget } = nutritionSnapshot;
 
   const personalUx = useMemo(() => resolvePersonalUXContext({ profile, user }), [profile, user]);

@@ -1237,6 +1237,85 @@ export default function ProgramBuilderPage() {
     };
   }, [loading, block?.id, selectedDay?.id, searchParams, navigate]);
 
+  // Autosave used to AWAIT a Supabase UPDATE per keystroke and only then
+  // update local state — an earlier keystroke's response re-rendered the
+  // controlled inputs with a stale value mid-typing ("120" became "10").
+  // Now: state updates optimistically, persistence debounces per exercise
+  // (last write wins), errors toast once and roll the fields back.
+  const pendingExerciseSavesRef = useRef(new Map());
+
+  const flushExerciseSave = async (exerciseId) => {
+    const pending = pendingExerciseSavesRef.current.get(exerciseId);
+    if (!pending) return;
+    pendingExerciseSavesRef.current.delete(exerciseId);
+    clearTimeout(pending.timer);
+    const { updates: nextUpdates, baseline } = pending;
+    const { error } = await supabase.from('program_exercises').update(nextUpdates).eq('id', exerciseId);
+    if (error) {
+      toast.error(friendlySupabaseError(error, 'Update failed — change not saved'));
+      if (baseline) {
+        setExercises((ex) => ex.map((e) => {
+          if (e.id !== exerciseId) return e;
+          const reverted = { ...e };
+          for (const k of Object.keys(nextUpdates)) {
+            if (k in baseline) reverted[k] = baseline[k];
+          }
+          return reverted;
+        }));
+      }
+      return;
+    }
+    if (typeof nextUpdates.exercise_name === 'string' && nextUpdates.exercise_name.trim()) {
+      pushRecentExerciseName(nextUpdates.exercise_name);
+    }
+    if (liveProgramContext?.recipientProfileId) {
+      const currentExercise = baseline;
+      const exerciseName = String(nextUpdates.exercise_name || currentExercise?.exercise_name || 'an exercise');
+      const diffParts = [];
+      if (nextUpdates.exercise_name && currentExercise?.exercise_name && nextUpdates.exercise_name !== currentExercise.exercise_name) {
+        diffParts.push(`renamed to ${nextUpdates.exercise_name}`);
+      }
+      const numericFields = [
+        { key: 'sets', label: 'sets', fmt: (v) => String(v) },
+        { key: 'weight_kg', label: 'weight', fmt: (v) => `${v}kg` },
+        { key: 'rest_seconds', label: 'rest', fmt: (v) => `${v}s` },
+      ];
+      for (const { key, label, fmt } of numericFields) {
+        if (key in nextUpdates && currentExercise) {
+          const before = currentExercise[key];
+          const after = nextUpdates[key];
+          if (after != null && String(before) !== String(after)) {
+            diffParts.push(`${label}: ${before != null ? fmt(before) : '–'}→${fmt(after)}`);
+          }
+        }
+      }
+      if ('reps' in nextUpdates && currentExercise) {
+        const before = currentExercise.reps;
+        const after = nextUpdates.reps;
+        if (after != null && String(before) !== String(after)) {
+          diffParts.push(`reps: ${before ?? '–'}→${after}`);
+        }
+      }
+      if ('tempo' in nextUpdates && currentExercise) {
+        const before = currentExercise.tempo;
+        const after = nextUpdates.tempo;
+        if (after && String(before) !== String(after)) {
+          diffParts.push(`tempo: ${before ?? '–'}→${after}`);
+        }
+      }
+      const diffText = diffParts.length > 0 ? ` (${diffParts.join(', ')})` : '';
+      await insertNotificationForRecipient(
+        liveProgramContext.recipientProfileId,
+        'program_update',
+        'Your programme has been updated',
+        `${profile?.full_name || 'Your coach'} updated ${exerciseName}${diffText}`,
+        { action_url: '/today', subtype: 'programme_updated', coach_update_note: nextUpdates.coach_update_note || null },
+        block?.id || null,
+        { dedupeKey: `programme_updated:${block?.id || 'block'}:${exerciseId}` },
+      );
+    }
+  };
+
   const handleUpdateExercise = async (exerciseId, updates) => {
     if (!supabase || !exerciseId) return;
     const nextUpdates = { ...updates };
@@ -1247,59 +1326,23 @@ export default function ProgramBuilderPage() {
     if (liveProgramContext?.clientId) {
       nextUpdates.coach_updated_at = new Date().toISOString();
     }
-    const currentExercise = exercises.find((e) => e.id === exerciseId);
-    const { error } = await supabase.from('program_exercises').update(nextUpdates).eq('id', exerciseId);
-    if (error) toast.error('Update failed');
-    else {
-      if (typeof updates.exercise_name === 'string') pushRecentExerciseName(updates.exercise_name);
-      setExercises((ex) => ex.map((e) => (e.id === exerciseId ? { ...e, ...nextUpdates } : e)));
-      if (liveProgramContext?.recipientProfileId) {
-        const exerciseName = String(nextUpdates.exercise_name || currentExercise?.exercise_name || 'an exercise');
-        const diffParts = [];
-        if (updates.exercise_name && currentExercise?.exercise_name && updates.exercise_name !== currentExercise.exercise_name) {
-          diffParts.push(`renamed to ${updates.exercise_name}`);
-        }
-        const numericFields = [
-          { key: 'sets', label: 'sets', fmt: (v) => String(v) },
-          { key: 'weight_kg', label: 'weight', fmt: (v) => `${v}kg` },
-          { key: 'rest_seconds', label: 'rest', fmt: (v) => `${v}s` },
-        ];
-        for (const { key, label, fmt } of numericFields) {
-          if (key in updates && currentExercise) {
-            const before = currentExercise[key];
-            const after = updates[key];
-            if (after != null && String(before) !== String(after)) {
-              diffParts.push(`${label}: ${before != null ? fmt(before) : '–'}→${fmt(after)}`);
-            }
-          }
-        }
-        if ('reps' in updates && currentExercise) {
-          const before = currentExercise.reps;
-          const after = updates.reps;
-          if (after != null && String(before) !== String(after)) {
-            diffParts.push(`reps: ${before ?? '–'}→${after}`);
-          }
-        }
-        if ('tempo' in updates && currentExercise) {
-          const before = currentExercise.tempo;
-          const after = updates.tempo;
-          if (after && String(before) !== String(after)) {
-            diffParts.push(`tempo: ${before ?? '–'}→${after}`);
-          }
-        }
-        const diffText = diffParts.length > 0 ? ` (${diffParts.join(', ')})` : '';
-        await insertNotificationForRecipient(
-          liveProgramContext.recipientProfileId,
-          'program_update',
-          'Your programme has been updated',
-          `${profile?.full_name || 'Your coach'} updated ${exerciseName}${diffText}`,
-          { action_url: '/today', subtype: 'programme_updated', coach_update_note: nextUpdates.coach_update_note || null },
-          block?.id || null,
-          { dedupeKey: `programme_updated:${block?.id || 'block'}:${exerciseId}` },
-        );
-      }
-    }
+    const baselineSource = exercises.find((e) => e.id === exerciseId);
+    setExercises((ex) => ex.map((e) => (e.id === exerciseId ? { ...e, ...nextUpdates } : e)));
+    const prev = pendingExerciseSavesRef.current.get(exerciseId);
+    if (prev?.timer) clearTimeout(prev.timer);
+    pendingExerciseSavesRef.current.set(exerciseId, {
+      updates: { ...(prev?.updates || {}), ...nextUpdates },
+      // Baseline = row state before the FIRST edit of this batch, for revert + diff.
+      baseline: prev?.baseline ?? (baselineSource ? { ...baselineSource } : null),
+      timer: setTimeout(() => { void flushExerciseSave(exerciseId); }, 600),
+    });
   };
+
+  useEffect(() => () => {
+    // Unmount / navigate away: push pending edits through immediately.
+    for (const id of [...pendingExerciseSavesRef.current.keys()]) void flushExerciseSave(id);
+     
+  }, []);
 
   useEffect(() => {
     const focusExerciseId = searchParams.get('focusExercise');

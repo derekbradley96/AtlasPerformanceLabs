@@ -1,6 +1,8 @@
 /**
  * Personal onboarding — single 4-step flow (goal → about you → training → done).
- * Finish path saves profile + suggested macro targets only (`applyPersonalOnboardingFinish`); no auto-assigned programme.
+ * Finish path saves profile + suggested macro targets (`applyPersonalOnboardingFinish`),
+ * then seeds a real starter programme from the answers (createPersonalProgramFromTemplate)
+ * — QA's #2 finding was four good questions ending in an empty builder.
  * `profiles.personal_plan_tier` is persisted as `free`.
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -15,6 +17,7 @@ import {
   PERSONAL_ONBOARDING_TIER_SESSION_KEY,
 } from '@/lib/postOnboardingRoutes';
 import { applyPersonalOnboardingFinish, computePersonalMacroTargets } from '@/lib/personalOnboardingDefaults';
+import { createPersonalProgramFromTemplate } from '@/lib/personalProgramSeed';
 import { mapConfidenceToExperienceId } from '@/lib/personalPlanAccess';
 import { usePresentationMode } from '@/lib/presentationMode';
 import { impactLight } from '@/lib/haptics';
@@ -109,6 +112,8 @@ export default function PersonalOnboardingFlow() {
 
   const [stepIndex, setStepIndex] = useState(0);
   const [atDone, setAtDone] = useState(false);
+  const [starterPlanReady, setStarterPlanReady] = useState(false);
+  const [buildingPlan, setBuildingPlan] = useState(false);
   // Set true synchronously before the completion write so the "already complete →
   // redirect home" effect below doesn't race past the Step 4 done screen the flow
   // is about to show. Without this the profile refresh fired the redirect first
@@ -537,8 +542,35 @@ export default function PersonalOnboardingFlow() {
       toast.message('Pick your training setup');
       return;
     }
-    const ok = await persistPersonalOnboardingFinish({ destination: null });
-    if (ok) setAtDone(true);
+    setBuildingPlan(true);
+    try {
+      const ok = await persistPersonalOnboardingFinish({ destination: null });
+      if (!ok) return;
+      // The answers just collected are exactly what the starter-plan template
+      // needs — handing users an empty builder after four good questions was
+      // production QA's #2 headline finding.
+      if (hasSupabase && userId) {
+        try {
+          const goalForTemplate =
+            goalId === 'muscle_gain' ? 'muscle'
+              : goalId === 'competition_prep' ? 'competition'
+                : goalId === 'fat_loss' ? 'fat_loss'
+                  : 'muscle';
+          const freq = Math.max(2, Math.min(6, Number(daysPerWeek) || 3));
+          const blockId = await createPersonalProgramFromTemplate(getSupabase(), userId, freq, {
+            title: 'My starter plan',
+            goal: goalForTemplate,
+          });
+          if (blockId) setStarterPlanReady(true);
+        } catch (e) {
+          if (import.meta.env.DEV) console.warn('[onboarding] starter plan create failed', e);
+          // Done screen falls back to the build-it-yourself CTA.
+        }
+      }
+      setAtDone(true);
+    } finally {
+      setBuildingPlan(false);
+    }
   };
 
   const goBack = () => {
@@ -919,8 +951,13 @@ export default function PersonalOnboardingFlow() {
           })}
         </div>
       </div>
-      <Button variant="primary" onClick={runBuildMyPlan} disabled={saving} className="w-full" style={{ minHeight: touchTargetMin + 4 }}>
-        {saving ? <Loader2 className="animate-spin" size={20} /> : 'Finish setup →'}
+      <Button variant="primary" onClick={runBuildMyPlan} disabled={saving || buildingPlan} className="w-full" style={{ minHeight: touchTargetMin + 4 }}>
+        {saving || buildingPlan ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <Loader2 className="animate-spin" size={20} />
+            {buildingPlan && !saving ? 'Building your starter plan…' : null}
+          </span>
+        ) : 'Finish setup →'}
       </Button>
     </>
   );
@@ -1013,33 +1050,62 @@ export default function PersonalOnboardingFlow() {
           </p>
         ) : null}
 
-        <Button
-          type="button"
-          variant="primary"
-          className="w-full"
-          style={{ minHeight: 52, maxWidth: 420 }}
-          onClick={() => navigate('/program-builder?personal=1&source=onboarding')}
-        >
-          Build my programme →
-        </Button>
+        {starterPlanReady ? (
+          <>
+            <p style={{ margin: 0, fontSize: 13, color: colors.text, maxWidth: 420, lineHeight: 1.5 }}>
+              ✅ We built you a starter plan from your answers — real exercises,
+              {' '}matched to your days and goal. Review it, swap anything, or start today.
+            </p>
+            <Button
+              type="button"
+              variant="primary"
+              className="w-full"
+              style={{ minHeight: 52, maxWidth: 420 }}
+              onClick={() => navigate('/today', { replace: true })}
+            >
+              See today&apos;s session →
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              className="w-full"
+              style={{ maxWidth: 420 }}
+              onClick={() => navigate('/myprogram')}
+            >
+              Review my starter plan
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            variant="primary"
+            className="w-full"
+            style={{ minHeight: 52, maxWidth: 420 }}
+            onClick={() => navigate('/program-builder?personal=1&source=onboarding')}
+          >
+            Build my programme →
+          </Button>
+        )}
 
-        <button
-          type="button"
-          onClick={() => navigate('/today', { replace: true })}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: colors.muted,
-            fontSize: 15,
-            fontWeight: 500,
-            cursor: 'pointer',
-            padding: `${spacing[8]}px`,
-            textDecoration: 'underline',
-            textUnderlineOffset: 3,
-          }}
-        >
-          I&apos;ll explore first
-        </button>
+        {!starterPlanReady ? (
+          <button
+            type="button"
+            onClick={() => navigate('/today', { replace: true })}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: colors.muted,
+              fontSize: 15,
+              fontWeight: 500,
+              cursor: 'pointer',
+              padding: `${spacing[8]}px`,
+              textDecoration: 'underline',
+              textUnderlineOffset: 3,
+            }}
+          >
+            I&apos;ll explore first
+          </button>
+        ) : null}
 
         {!coachNudgeDismissed ? (
           <div

@@ -117,22 +117,30 @@ export function formatPersonalNutritionTargetsSummary(merged) {
   return parts.length ? parts.join(' · ') : null;
 }
 
-/** Logged protein vs merged target for `mealDateISO` (YYYY-MM-DD), or null if no target. */
-export function getPersonalProteinProgressPercent(userId, mealDateISO, mergedTargets) {
+/**
+ * Logged protein vs merged target for `mealDateISO` (YYYY-MM-DD), or null if no target.
+ * Pass `meals` (e.g. today's bundle from fetchNutritionTodayBundle) to score the
+ * same rows the caller renders — in production meals live in Supabase, so the
+ * localStorage fallback (kept for callers that omit the arg) reads empty there.
+ */
+export function getPersonalProteinProgressPercent(userId, mealDateISO, mergedTargets, meals) {
   if (!userId || !mealDateISO) return null;
-  const meals = listPersonalMealLogs(userId, mealDateISO);
-  const totalProteinToday = meals.reduce((sum, m) => sum + (Number(m?.protein_g) || 0), 0);
+  const rows = Array.isArray(meals) ? meals : listPersonalMealLogs(userId, mealDateISO);
+  const totalProteinToday = rows.reduce((sum, m) => sum + (Number(m?.protein_g) || 0), 0);
   const proteinTargetToday =
     Number(mergedTargets?.protein_g ?? mergedTargets?.target_protein_g) || null;
   if (!proteinTargetToday || proteinTargetToday <= 0) return null;
   return Math.round((totalProteinToday / proteinTargetToday) * 100);
 }
 
-/** Logged calories vs merged target for `mealDateISO` (YYYY-MM-DD), or null if no target. */
-export function getPersonalCalorieProgressPercent(userId, mealDateISO, mergedTargets) {
+/**
+ * Logged calories vs merged target for `mealDateISO` (YYYY-MM-DD), or null if no target.
+ * `meals` behaves as in getPersonalProteinProgressPercent.
+ */
+export function getPersonalCalorieProgressPercent(userId, mealDateISO, mergedTargets, meals) {
   if (!userId || !mealDateISO) return null;
-  const meals = listPersonalMealLogs(userId, mealDateISO);
-  const totalKcal = meals.reduce((sum, m) => sum + (Number(m?.calories) || 0), 0);
+  const rows = Array.isArray(meals) ? meals : listPersonalMealLogs(userId, mealDateISO);
+  const totalKcal = rows.reduce((sum, m) => sum + (Number(m?.calories) || 0), 0);
   const calTarget = Number(mergedTargets?.calories ?? mergedTargets?.target_calories) || null;
   if (!calTarget || calTarget <= 0) return null;
   return Math.round((totalKcal / calTarget) * 100);

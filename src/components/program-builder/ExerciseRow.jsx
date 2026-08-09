@@ -104,6 +104,11 @@ function formatWeeksAgo(dateIso) {
 
 function StepperField({ value, placeholder, onChange, min = 0, ariaLabel, invalid = false }) {
   const dupGuard = useRef({ raw: null, open: false });
+  // While the user is typing, the DOM text is owned by this draft — parent
+  // re-renders (per-keystroke autosave responses landing out of order) used
+  // to force the controlled value back mid-word: typing "120" produced "10".
+  const [draft, setDraft] = useState(null);
+  const focused = draft !== null;
   const numFromValue = value != null && value !== '' ? Number(value) : NaN;
   const current = Number.isFinite(numFromValue) ? numFromValue : null;
   const nextDown = current == null ? min : Math.max(min, current - 1);
@@ -126,6 +131,7 @@ function StepperField({ value, placeholder, onChange, min = 0, ariaLabel, invali
       <button
         type="button"
         onClick={() => {
+          setDraft(null);
           onChange(nextDown);
           void impactLight();
         }}
@@ -139,10 +145,14 @@ function StepperField({ value, placeholder, onChange, min = 0, ariaLabel, invali
         step={1}
         placeholder={placeholder}
         min={min}
-        value={value ?? ''}
-        onFocus={(e) => e.target.select()}
-        onChange={(e) => applyRaw(e.target.value)}
-        onInput={(e) => applyRaw(e.currentTarget.value)}
+        value={focused ? draft : (value ?? '')}
+        onFocus={(e) => {
+          setDraft(e.target.value ?? '');
+          e.target.select();
+        }}
+        onBlur={() => setDraft(null)}
+        onChange={(e) => { setDraft(e.target.value); applyRaw(e.target.value); }}
+        onInput={(e) => { setDraft(e.currentTarget.value); applyRaw(e.currentTarget.value); }}
         style={{ ...getInputStyle(invalid ? colors.danger : shell.cardBorder), width: '100%', textAlign: 'center', padding: `${spacing[8]}px ${spacing[8]}px` }}
         aria-label={ariaLabel}
         aria-invalid={invalid}
@@ -150,6 +160,7 @@ function StepperField({ value, placeholder, onChange, min = 0, ariaLabel, invali
       <button
         type="button"
         onClick={() => {
+          setDraft(null);
           onChange(nextUp);
           void impactLight();
         }}

@@ -5,7 +5,8 @@
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { getMyClientProfile } from '@/lib/clientProfiles';
 import { getClientNutritionSnapshot } from '@/lib/clientNutritionPlan';
-import { getPersonalNutritionTarget, listPersonalMealLogs } from '@/lib/personalNutritionStore';
+import { listPersonalMealLogs } from '@/lib/personalNutritionStore';
+import { fetchMergedPersonalNutritionTargets } from '@/lib/personalNutritionProfile';
 import { listMealLogs, getRecentFoods } from '@/lib/mealLogsService';
 import { getAssignedWorkoutForToday } from '@/lib/programAssignments';
 import { getRetentionStreaks } from '@/lib/retentionHabitService';
@@ -117,7 +118,10 @@ export async function fetchNutritionPlanAndTargetsBundle({ userId, isClientRole,
               })
               .catch(() => null)
           : Promise.resolve(null),
-        getPersonalNutritionTarget(userId),
+        // Same resolver as Home (profiles.calories_target-first) — reading a
+        // different column set local-first here is how the two pages showed
+        // different daily targets on one account.
+        fetchMergedPersonalNutritionTargets(userId),
         hasSupabase ? getAssignedWorkoutForToday({ role: 'personal', profileId: userId }) : Promise.resolve(null),
         hasSupabase ? getRetentionStreaks({ profileId: userId }) : Promise.resolve(null),
         sb

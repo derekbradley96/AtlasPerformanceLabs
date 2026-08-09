@@ -78,6 +78,7 @@ import { PrepHierarchyLevel } from '@/lib/prepHierarchy';
 import { listUserBarcodeCacheEntries } from '@/lib/mealBarcodeUserCache';
 import { getPrepEducationEntry } from '@/lib/prepEducationContent';
 import { getLocalDateKey } from '@/lib/localDate';
+import { friendlySupabaseError } from '@/lib/supabaseErrors';
 import {
   resolveViewerBodyweightUnit,
   parseWeightInputsToKg,
@@ -496,13 +497,23 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
       : viewerWeightUnit === 'lb'
         ? parseWeightInputsToKg({ weightUnit: viewerWeightUnit, lbText: weightEntry })
         : parseWeightInputsToKg({ weightUnit: viewerWeightUnit, kgText: weightEntry });
-    if (!parsedKg || parsedKg <= 0) return;
+    if (!parsedKg || parsedKg <= 0) {
+      toast.error('Enter a valid weight first.');
+      return;
+    }
     const sb = getSupabase();
     if (!sb) return;
-    await sb.from('personal_checkins').insert({ user_id: user.id, weight: parsedKg, created_at: new Date().toISOString() });
+    // QA logged weight and the field just cleared — success and failure were
+    // indistinguishable. Check the insert and say what happened.
+    const { error } = await sb.from('personal_checkins').insert({ user_id: user.id, weight: parsedKg, created_at: new Date().toISOString() });
+    if (error) {
+      toast.error(friendlySupabaseError(error, 'Could not save weight — please try again'));
+      return;
+    }
     setWeightEntry('');
     setWeightStoneEntry('');
     setWeightPoundEntry('');
+    toast.success(`Weight logged — ${formatWeightForViewer(parsedKg, viewerWeightUnit)}`);
     queryClient.invalidateQueries({ queryKey: nutritionPlanAndTargetsQueryKey(user.id) });
   };
 

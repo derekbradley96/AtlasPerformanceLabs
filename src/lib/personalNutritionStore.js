@@ -142,6 +142,14 @@ export function upsertPersonalNutritionTarget(userId, payload) {
         nutrition_carbs_g: payload?.carbs_g ?? payload?.target_carbs_g ?? null,
         nutrition_fats_g: payload?.fats_g ?? payload?.target_fats_g ?? null,
         nutrition_targets_updated_at: new Date().toISOString(),
+        // Mirror into the *_target columns too. The feedback loop and
+        // onboarding write through here; when they updated only nutrition_*,
+        // Home (calories_target-first) and Nutrition drifted apart —
+        // production QA saw 3154 vs 3034 kcal on the same account.
+        calories_target: payload?.calories ?? payload?.target_calories ?? null,
+        protein_target: payload?.protein_g ?? payload?.target_protein_g ?? null,
+        carbs_target: payload?.carbs_g ?? payload?.target_carbs_g ?? null,
+        fats_target: payload?.fats_g ?? payload?.target_fats_g ?? null,
       };
       void (async () => {
         const { error } = await supabase.from('profiles').update(updatePayload).eq('id', userId);
