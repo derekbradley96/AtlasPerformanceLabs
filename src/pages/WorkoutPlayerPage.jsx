@@ -27,6 +27,8 @@ import {
   getTrainingAdjustmentWhySentence,
 } from '@/lib/autoAdjustmentClarity';
 import { getSupabase, hasSupabase as hasSupabaseConfigured } from '@/lib/supabaseClient';
+import { friendlySupabaseError } from '@/lib/supabaseErrors';
+import { EXERCISES as LIB_EXERCISES } from '@/data/exercises/exerciseLibrary';
 import {
   completeSession,
   ensureSetsForExercises,
@@ -191,6 +193,9 @@ export default function WorkoutPlayerPage() {
   const [rpeSaving, setRpeSaving] = useState(false);
   const [showPreviousSession, setShowPreviousSession] = useState(false);
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [swapSheetOpen, setSwapSheetOpen] = useState(false);
+  const [swapQuery, setSwapQuery] = useState('');
+  const [swapSaving, setSwapSaving] = useState(false);
   const [openPrepWhyExerciseId, setOpenPrepWhyExerciseId] = useState(null);
   const exerciseChipsRef = useRef(null);
   const activeChipRef = useRef(null);
@@ -424,6 +429,53 @@ export default function WorkoutPlayerPage() {
 
   const currentExercise = position != null ? exercisesForSession[position.exerciseIndex] : null;
   const currentSetNumber = position?.setNumber ?? 1;
+
+  // Swap the CURRENT exercise for a different one (bench taken, machine
+  // broken). Personal sessions only — a client's plan belongs to their coach.
+  // Persists onto this week's program_exercises row, so logged sets stay
+  // attached and next week's copy keeps the original exercise.
+  const canSwapExercise = !clientMode && hasSupabaseConfigured && Boolean(currentExercise?.id);
+  const swapOptions = useMemo(() => {
+    if (!swapSheetOpen || !currentExercise) return [];
+    const currentName = String(currentExercise.name || '').toLowerCase();
+    const q = swapQuery.trim().toLowerCase();
+    if (q) {
+      return LIB_EXERCISES
+        .filter((e) => String(e.name).toLowerCase().includes(q) && String(e.name).toLowerCase() !== currentName)
+        .slice(0, 8);
+    }
+    const current = LIB_EXERCISES.find((e) => String(e.name).toLowerCase() === currentName) || null;
+    const subs = (current?.substitutions || [])
+      .map((id) => LIB_EXERCISES.find((e) => e.id === id))
+      .filter(Boolean);
+    const subIds = new Set(subs.map((e) => e.id));
+    const sameMuscle = current
+      ? LIB_EXERCISES.filter((e) => e.primaryMuscle === current.primaryMuscle && e.id !== current.id && !subIds.has(e.id))
+      : [];
+    return [...subs, ...sameMuscle].slice(0, 8);
+  }, [swapSheetOpen, swapQuery, currentExercise]);
+
+  const handleSwapExercise = async (newName) => {
+    if (!currentExercise?.id || swapSaving) return;
+    const sb = getSupabase();
+    if (!sb) return;
+    setSwapSaving(true);
+    try {
+      const { error } = await sb
+        .from('program_exercises')
+        .update({ exercise_name: newName, exercise_library_id: null })
+        .eq('id', currentExercise.id);
+      if (error) throw error;
+      setSwapSheetOpen(false);
+      setSwapQuery('');
+      toast.success(`Swapped to ${newName}`);
+      queryClient.invalidateQueries({ queryKey: ['workout-player-assigned'] });
+    } catch (e) {
+      toast.error(friendlySupabaseError(e, 'Could not swap exercise'));
+    } finally {
+      setSwapSaving(false);
+    }
+  };
 
   useEffect(() => {
     setQueryExerciseId(currentExercise?.id ?? null);
@@ -1829,6 +1881,49 @@ export default function WorkoutPlayerPage() {
         completedSets={completedSets}
         totalSets={totalSets}
       />
+      {swapSheetOpen && currentExercise ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Swap exercise"
+          onClick={() => { setSwapSheetOpen(false); setSwapQuery(''); }}
+          style={{ position: 'fixed', inset: 0, zIndex: 200, background: colors.overlay, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 560, maxHeight: '70vh', overflowY: 'auto', background: colors.surface1, border: `1px solid ${colors.border}`, borderRadius: `${radii.card}px ${radii.card}px 0 0`, padding: spacing[16], paddingBottom: `calc(${spacing[16]}px + env(safe-area-inset-bottom, 0px))` }}
+          >
+            <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.text }}>Swap {currentExercise.name}</p>
+            <p style={{ margin: `${spacing[4]}px 0 ${spacing[10]}px`, fontSize: 12, color: colors.muted }}>
+              Same targets, different exercise — sets you already logged stay as they are.
+            </p>
+            <input
+              type="text"
+              value={swapQuery}
+              onChange={(e) => setSwapQuery(e.target.value)}
+              placeholder="Search any exercise…"
+              style={{ width: '100%', boxSizing: 'border-box', minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, padding: `0 ${spacing[12]}px`, marginBottom: spacing[10] }}
+            />
+            <div style={{ display: 'grid', gap: spacing[6] }}>
+              {swapOptions.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={swapSaving}
+                  onClick={() => handleSwapExercise(opt.name)}
+                  style={{ textAlign: 'left', minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, padding: `${spacing[8]}px ${spacing[12]}px`, cursor: 'pointer' }}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>{opt.name}</span>
+                  <span style={{ fontSize: 11, color: colors.muted, marginLeft: 8 }}>{opt.primaryMuscle}{Array.isArray(opt.equipment) && opt.equipment.length ? ` · ${opt.equipment[0]}` : ''}</span>
+                </button>
+              ))}
+              {swapOptions.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 13, color: colors.muted }}>No matches — try a different search.</p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <ConfirmDialog
         open={endConfirmOpen}
         title="End workout early?"
@@ -1938,9 +2033,20 @@ export default function WorkoutPlayerPage() {
           transition={{ duration: 0.2 }}
         >
           <Card style={{ ...standardCard, padding: spacing[16] }}>
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: colors.text, margin: 0, lineHeight: 1.2 }}>
-              {currentExercise.name}{isRecoveryVariation ? ' (Recovery variation)' : ''}
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing[8] }}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: colors.text, margin: 0, lineHeight: 1.2 }}>
+                {currentExercise.name}{isRecoveryVariation ? ' (Recovery variation)' : ''}
+              </h2>
+              {canSwapExercise ? (
+                <button
+                  type="button"
+                  onClick={() => setSwapSheetOpen(true)}
+                  style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: colors.primary, background: 'none', border: `1px solid ${colors.border}`, borderRadius: radii.button, padding: `${spacing[6]}px ${spacing[10]}px`, cursor: 'pointer', minHeight: 36 }}
+                >
+                  Swap ⇄
+                </button>
+              ) : null}
+            </div>
             {showPreviousSession ? (
               <p style={{ margin: `${spacing[4]}px 0 0`, fontSize: 12, color: colors.muted }}>
                 Last session: {lastSessionDate ? new Date(lastSessionDate).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }) : 'No previous session for this exercise'}

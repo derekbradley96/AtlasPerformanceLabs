@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getSupabase } from '@/lib/supabaseClient';
 import { parsePrescribedRepsForStorage, upsertSet } from '@/lib/workoutSessionApi';
 import {
@@ -105,6 +105,9 @@ export default function ExerciseSetLogger({
   const [exerciseNote, setExerciseNote] = useState('');
   const [savingSet, setSavingSet] = useState(false);
   const [editingSetNumber, setEditingSetNumber] = useState(null);
+  // Ad-hoc extra sets beyond the plan (feeling good, or redoing a bad set).
+  const [extraSets, setExtraSets] = useState(0);
+  useEffect(() => { setExtraSets(0); }, [exercise?.id]);
   const [platesOpenForSet, setPlatesOpenForSet] = useState(null);
   const notesSavedRef = useRef('');
 
@@ -121,17 +124,26 @@ export default function ExerciseSetLogger({
   const configuredSets = useMemo(() => {
     const rows = parseSetsConfig(exercise?.sets_config);
     const count = Math.max(1, Number(exercise?.sets) || 1);
+    let base;
     if (!rows?.length) {
       const reps = exercise?.reps != null ? String(exercise.reps) : '';
-      return Array.from({ length: count }, (_, i) => ({
+      base = Array.from({ length: count }, (_, i) => ({
         set_number: i + 1,
         weight_kg: null,
         reps,
         rir: null,
       }));
+    } else {
+      base = rows.map((r, i) => ({ ...r, set_number: Number(r?.set_number) || i + 1 }));
     }
-    return rows.map((r, i) => ({ ...r, set_number: Number(r?.set_number) || i + 1 }));
-  }, [exercise?.sets, exercise?.reps, exercise?.sets_config]);
+    if (extraSets > 0) {
+      const last = base[base.length - 1] || { weight_kg: null, reps: exercise?.reps != null ? String(exercise.reps) : '', rir: null };
+      for (let i = 0; i < extraSets; i++) {
+        base = [...base, { ...last, set_number: base.length + 1 }];
+      }
+    }
+    return base;
+  }, [exercise?.sets, exercise?.reps, exercise?.sets_config, extraSets]);
 
   const completedMap = useMemo(() => {
     const map = new Map();
@@ -433,6 +445,13 @@ export default function ExerciseSetLogger({
           </div>
         );
       })}
+      <button
+        type="button"
+        onClick={() => setExtraSets((n) => n + 1)}
+        style={{ minHeight: touchTargetMin, borderRadius: radii.button, border: `1px dashed ${colors.border}`, background: 'transparent', color: colors.primary, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+      >
+        + Add set
+      </button>
       <div style={{ marginTop: spacing[10], padding: spacing[10], borderRadius: radii.card, border: `1px solid ${colors.border}`, background: colors.surface1 }}>
         <p style={{ margin: 0, fontSize: 12, color: colors.text, fontWeight: 700 }}>{coached ? 'Note for your coach' : 'Session note'}</p>
         <div style={{ display: 'flex', gap: spacing[6], flexWrap: 'wrap', marginTop: spacing[8] }}>
