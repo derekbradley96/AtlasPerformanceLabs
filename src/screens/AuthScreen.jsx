@@ -786,6 +786,12 @@ export default function AuthScreen() {
       }}
     >
       <div className="w-full max-w-sm min-w-0">
+        <a
+          href="/"
+          style={{ display: 'inline-block', marginTop: 12, fontSize: 13, color: colors.muted, textDecoration: 'none' }}
+        >
+          ← Back to site
+        </a>
         <div
           className="flex flex-col items-center mb-4"
           style={{

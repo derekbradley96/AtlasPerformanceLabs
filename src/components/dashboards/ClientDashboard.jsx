@@ -392,7 +392,7 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
     if (selectedServiceRow?.name) parts.push(`Package: ${selectedServiceRow.name}`);
     else if (profile?.selected_service_id) parts.push('Coaching package on file.');
     if (programAssignment) {
-      parts.push(programAssignment.notes || 'Training program assigned — head to Today or My Program.');
+      parts.push(programAssignment.notes || 'Training programme assigned — head to Today or My programme.');
     } else if (profile && (profile.trainer_id || profile.coach_id)) {
       parts.push('Training assignment from your coach is still on the way.');
     }
@@ -473,7 +473,7 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
       return 'Browse Discover when you want a coach. Until then, explore on your own — connected clients see programs and check-ins here.';
     }
     const name = trainer?.display_name || 'your coach';
-    return `Today = log training · My Program = your block · Nutrition = targets · Messages = ${name}`;
+    return `Today = log training · My programme = your block · Nutrition = targets · Messages = ${name}`;
   }, [hasCoachLinked, trainer?.display_name]);
 
   if (!user) {
@@ -1038,7 +1038,7 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
                 is your coach.
                 {' '}
                 {programAssignment
-                  ? 'Your training program is assigned — log sessions from Today and review the full block in My Program.'
+                  ? 'Your training programme is assigned — log sessions from Today and review the full block in My programme.'
                   : profile?.selected_service_id
                     ? 'Your coaching package is on file — training will appear in Today when your coach assigns it.'
                     : 'Your coach will assign your plan — keep Today open for what&apos;s scheduled.'}

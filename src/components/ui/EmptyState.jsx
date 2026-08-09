@@ -34,7 +34,15 @@ export default function EmptyState({
       }}
     >
       {Icon && (
+        // The icon tile reads as the most tappable thing on screen — when the
+        // empty state HAS an action, a tap here must trigger it (QA: dead
+        // click on the most obvious target).
         <div
+          role={onAction ? 'button' : undefined}
+          tabIndex={onAction ? 0 : undefined}
+          aria-label={onAction ? actionLabel : undefined}
+          onClick={onAction || undefined}
+          onKeyDown={onAction ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAction(); } } : undefined}
           style={{
             width: EMPTY_ICON_CONTAINER_SIZE,
             height: EMPTY_ICON_CONTAINER_SIZE,
@@ -45,6 +53,7 @@ export default function EmptyState({
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: spacing[16],
+            cursor: onAction ? 'pointer' : undefined,
           }}
         >
           <Icon size={28} strokeWidth={1.5} />

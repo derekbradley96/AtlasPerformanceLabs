@@ -28,6 +28,15 @@ function getInputStyle(borderColor = shell.cardBorder) {
   return { ...baseInputStyle, border: `1px solid ${borderColor}` };
 }
 
+/** "90s" reads fine; "1200s" does not — switch to minutes past 90s. */
+function formatRestDuration(seconds) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s < 0) return `${seconds}s`;
+  if (s <= 90) return `${s}s`;
+  const mins = s / 60;
+  return Number.isInteger(mins) ? `${mins} min` : `${Math.round(mins * 10) / 10} min`;
+}
+
 function parseStepperInt(raw, minVal) {
   if (raw === '' || raw == null) return null;
   const n = parseInt(String(raw), 10);
@@ -102,7 +111,7 @@ function formatWeeksAgo(dateIso) {
   return `${weeks} weeks ago`;
 }
 
-function StepperField({ value, placeholder, onChange, min = 0, ariaLabel, invalid = false }) {
+function StepperField({ value, placeholder, onChange, min = 0, step = 1, ariaLabel, invalid = false }) {
   const dupGuard = useRef({ raw: null, open: false });
   // While the user is typing, the DOM text is owned by this draft — parent
   // re-renders (per-keystroke autosave responses landing out of order) used
@@ -111,8 +120,8 @@ function StepperField({ value, placeholder, onChange, min = 0, ariaLabel, invali
   const focused = draft !== null;
   const numFromValue = value != null && value !== '' ? Number(value) : NaN;
   const current = Number.isFinite(numFromValue) ? numFromValue : null;
-  const nextDown = current == null ? min : Math.max(min, current - 1);
-  const nextUp = current == null ? Math.max(min, 1) : current + 1;
+  const nextDown = current == null ? min : Math.max(min, current - step);
+  const nextUp = current == null ? Math.max(min, step) : current + step;
 
   const applyRaw = (raw) => {
     const g = dupGuard.current;
@@ -266,7 +275,7 @@ function ExerciseRowInner({
     else if (setsNum != null) parts.push(`${setsNum} set${setsNum === 1 ? '' : 's'}`);
     else if (repsNum != null) parts.push(`${repsNum} reps`);
     if (!isPersonalBasic && exercise.rest_seconds != null && exercise.rest_seconds !== '') {
-      parts.push(`${exercise.rest_seconds}s rest`);
+      parts.push(`${formatRestDuration(exercise.rest_seconds)} rest`);
     }
     return parts.join(' · ') || 'Tap to set targets';
   })();
@@ -565,6 +574,7 @@ function ExerciseRowInner({
                         <StepperField
                           placeholder="—"
                           min={0}
+                          step={15}
                           value={exercise.rest_seconds}
                           onChange={(n) => onUpdate(exercise.id, { rest_seconds: n })}
                           ariaLabel="Rest seconds"
@@ -783,16 +793,22 @@ function ExerciseRowInner({
                     >
                       <div className="grid gap-2.5 p-3 rounded-xl" style={{ border: `1px solid ${colors.border}`, background: colors.surface1 }}>
                         <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                          <div>
-                            <p style={fieldLabel}>Rest (s)</p>
-                            <StepperField
-                              placeholder="—"
-                              min={0}
-                              value={exercise.rest_seconds}
-                              onChange={(n) => onUpdate(exercise.id, { rest_seconds: n })}
-                              ariaLabel="Rest seconds"
-                            />
-                          </div>
+                          {/* Rest lives on the basic row; duplicating it here
+                              confused QA. Personal-basic hides the basic row,
+                              so keep it for them only. */}
+                          {isPersonalBasic ? (
+                            <div>
+                              <p style={fieldLabel}>Rest (s)</p>
+                              <StepperField
+                                placeholder="—"
+                                min={0}
+                                step={15}
+                                value={exercise.rest_seconds}
+                                onChange={(n) => onUpdate(exercise.id, { rest_seconds: n })}
+                                ariaLabel="Rest seconds"
+                              />
+                            </div>
+                          ) : null}
                           <div>
                             <p style={fieldLabel}>RPE</p>
                             <StepperField

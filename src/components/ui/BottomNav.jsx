@@ -24,7 +24,7 @@ export default function BottomNav({ userRole }) {
   // Client Navigation
   const clientTabs = [
     { name: 'Home', icon: Home, page: 'Home' },
-    { name: 'My Program', icon: BookOpen, page: 'MyProgram' },
+    { name: 'My programme', icon: BookOpen, page: 'MyProgram' },
     { name: 'Progress', icon: TrendingUp, page: 'Progress' },
     { name: 'Messages', icon: MessageSquare, page: 'Messages' },
     { name: 'More', icon: MoreHorizontal, page: 'More' },

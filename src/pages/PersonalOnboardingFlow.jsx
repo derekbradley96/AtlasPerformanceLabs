@@ -498,17 +498,19 @@ export default function PersonalOnboardingFlow() {
       if (competitionShowIntent === 'has_date') setPrepPhaseId('peak');
       if (competitionShowIntent === 'exploring') setPrepPhaseId('early');
     }
-    if (hasSupabase && userId) {
-      const res = await updateProfile({ goal: goalLabel });
-      if (res?.error) toast.error(res.error?.message || 'Could not save goal');
-      const sb = getSupabase();
-      if (sb) {
-        try {
-          await sb.auth.updateUser({ data: { personal_goal: goalLabel } });
-        } catch (_) {}
-      }
-    }
+    // Advance immediately — awaiting two round-trips here left Continue
+    // silently dead for 1.5-2.5s (QA read it as a broken button). The early
+    // save is best-effort; the finish step persists the goal again anyway.
     setStepIndex(1);
+    if (hasSupabase && userId) {
+      void (async () => {
+        const res = await updateProfile({ goal: goalLabel });
+        if (res?.error && import.meta.env.DEV) console.warn('[onboarding] early goal save failed', res.error);
+        try {
+          await getSupabase()?.auth.updateUser({ data: { personal_goal: goalLabel } });
+        } catch (_) { /* finish step re-persists */ }
+      })();
+    }
   };
 
   const goNextFromAbout = () => {

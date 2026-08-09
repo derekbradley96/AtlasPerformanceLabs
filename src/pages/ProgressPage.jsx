@@ -1014,7 +1014,7 @@ export default function ProgressPage() {
                           </linearGradient>
                         </defs>
                         <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} width={40} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fill: colors.muted, fontSize: 10 }} width={40} domain={[(dataMin) => Math.floor(dataMin - 2), (dataMax) => Math.ceil(dataMax + 2)]} />
                         <Tooltip
                           contentStyle={{ background: colors.surface2, border: `1px solid ${shell.cardBorder}`, borderRadius: 8, color: colors.text, fontSize: 12 }}
                           formatter={(v, _k, item) => [formatWeightForViewer(item?.payload?.weightKg, personalViewerWU), 'Weight']}
@@ -1385,6 +1385,9 @@ export default function ProgressPage() {
                       tickLine={false}
                       tick={{ fill: colors.muted, fontSize: 10 }}
                       width={44}
+                      // Zero-based axis flattens a bodyweight series into a
+                      // straight line — scale to the data with padding.
+                      domain={[(dataMin) => Math.floor(dataMin - 2), (dataMax) => Math.ceil(dataMax + 2)]}
                       label={{ value: weightChartAxisLabel(viewerWeightUnit), angle: -90, position: 'insideLeft', fill: colors.muted, fontSize: 10 }}
                     />
                     <Tooltip

@@ -71,8 +71,8 @@ const TODAY_SUBTITLE = {
 };
 
 const TODAY_NO_SESSION_BASIC = {
-  build: 'Build your week in My Program, or train ad hoc from the workout player — you stay in control.',
-  cut: 'Set up your week in My Program, or train ad hoc — consistency beats perfection on a cut.',
+  build: 'Build your week in My programme, or train ad hoc from the workout player — you stay in control.',
+  cut: 'Set up your week in My programme, or train ad hoc — consistency beats perfection on a cut.',
   prep: 'Lay out your week in My Program, or train ad hoc — keep the phase organised.',
   general: 'Create your plan in My Program, or train ad hoc from the workout player.',
 };

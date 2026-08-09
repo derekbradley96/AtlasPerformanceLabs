@@ -612,6 +612,13 @@ export default function PricingPage() {
   const initialTab = (() => {
     const raw = String(searchParams.get('tab') || '').toLowerCase();
     if (raw === 'personal' || raw === 'coaching') return raw;
+    // Solo visitors clicking "Pricing" were shown coach commission tables
+    // by default (QA) — infer the audience from where they came from.
+    try {
+      const ref = String(document.referrer || '');
+      if (/\/(personal|for-clients|why-switch)\b/.test(ref)) return 'personal';
+      if (/\/for-coaches\b/.test(ref)) return 'coaching';
+    } catch { /* referrer unavailable */ }
     return 'coaching';
   })();
 

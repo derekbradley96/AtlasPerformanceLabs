@@ -139,10 +139,10 @@ export default function MarketingHomePage() {
       <Hero
         eyebrow="Coaching, training and nutrition — done properly"
         title="Free barcode scanning. Competition prep built in. The coaching platform your competitors don't have."
-        subtitle="Programs with per-set targets. Check-ins that become coaching evidence. Peak week tools. Posing library. And a barcode scanner that's always free — because MFP shouldn't have put theirs behind a paywall."
+        subtitle="Programs with per-set targets. Check-ins that become coaching evidence. Peak week tools. Posing library. And a barcode scanner that's always free — because MyFitnessPal shouldn't have put theirs behind a paywall."
         primaryCtaLabel="Start coaching — it's free"
         primaryCtaTo={SIGNUP_PUBLIC_PATH}
-        secondaryCtaLabel="Free MFP import →"
+        secondaryCtaLabel="Free MyFitnessPal import →"
         secondaryCtaTo="/why-switch"
         screenshotSrc="mockup"
       />

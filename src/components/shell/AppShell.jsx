@@ -604,6 +604,12 @@ export default function AppShell() {
   const logoTapCount = useRef(0);
   const logoTapTimer = useRef(null);
   const scrollContainerRef = useRef(null);
+  // Route changes must start at the top — the shell's scroll container kept
+  // the previous page's offset, so every navigation opened mid-content (QA).
+  useEffect(() => {
+    if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
   const refreshHandlerRef = useRef(null);
   const [pullDistance, setPullDistance] = useState(0);
   const [ptrRefreshing, setPtrRefreshing] = useState(false);

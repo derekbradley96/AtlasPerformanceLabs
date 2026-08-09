@@ -88,9 +88,13 @@ export default function Achievements() {
     [checkinCount, streakDays, activityCounts.workoutCount, activityCounts.poseCheckCount, daysWithCoach, isCompetitionClient],
   );
 
+  // The personal sidebar labels this destination "Strength bests" — the page
+  // header and empty state must speak the same language (QA: third
+  // mislabelled sidebar destination).
+  const pageTitle = isPersonalRole ? 'Strength bests' : 'Achievements';
   useEffect(() => {
-    document.title = 'Achievements — Atlas';
-  }, []);
+    document.title = `${pageTitle} — Atlas`;
+  }, [pageTitle]);
 
   return (
     <div
@@ -99,12 +103,17 @@ export default function Achievements() {
         paddingBottom: `calc(${spacing[16]} + env(safe-area-inset-bottom, 0px))`,
       }}
     >
+      <h1 className="text-lg font-bold" style={{ color: colors.text, margin: `0 0 ${spacing[12]}px` }}>{pageTitle}</h1>
       {achievements.length === 0 ? (
         <Card style={{ padding: spacing[32], textAlign: 'center' }}>
           <Trophy size={48} style={{ color: colors.muted, margin: '0 auto 16px' }} />
-          <p className="text-[15px] font-medium" style={{ color: colors.text }}>No achievements yet</p>
+          <p className="text-[15px] font-medium" style={{ color: colors.text }}>
+            {isPersonalRole ? 'No personal bests yet' : 'No achievements yet'}
+          </p>
           <p className="text-sm mt-2" style={{ color: colors.muted }}>
-            Complete check-ins and hit goals to unlock achievements.
+            {isPersonalRole
+              ? 'Log a workout and your best set for each lift lands here.'
+              : 'Complete check-ins and hit goals to unlock achievements.'}
           </p>
         </Card>
       ) : (

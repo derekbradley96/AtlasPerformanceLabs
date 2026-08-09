@@ -32,7 +32,7 @@ export default function Sidebar({ userRole }) {
   // Client/Solo navigation
   const clientNavItems = [
     { path: createPageUrl('Home'), page: 'Home', icon: Home, label: 'Home' },
-    { path: createPageUrl('MyProgram'), page: 'MyProgram', icon: ClipboardCheck, label: 'My Program', roles: ['client'] },
+    { path: createPageUrl('MyProgram'), page: 'MyProgram', icon: ClipboardCheck, label: 'My programme', roles: ['client'] },
     { path: '/today', page: 'Today', icon: Dumbbell, label: 'Workouts' },
     { path: createPageUrl('Progress'), page: 'Progress', icon: TrendingUp, label: 'Progress' },
     { path: discoverNavPath, page: 'Discover', icon: Users, label: 'Find a coach' },

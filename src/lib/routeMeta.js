@@ -49,7 +49,7 @@ const ROUTE_TITLES = {
   '/progress': 'Progress',
   '/findtrainer': 'Find a coach',
   '/mytrainer': 'My Trainer',
-  '/myprogram': 'My Program',
+  '/myprogram': 'My programme',
   '/personal-my-program': 'My programme',
   '/clientdetail': 'Client',
   '/clientcheckin': 'Check-in',
