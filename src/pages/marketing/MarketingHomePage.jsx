@@ -4,7 +4,7 @@
 import React, { useEffect } from 'react';
 import { trackPage } from '@/lib/analytics';
 import { Link } from 'react-router-dom';
-import { Hero, CTA } from './MarketingSections';
+import { Hero, CTA, AudienceSwitch } from './MarketingSections';
 import { SIGNUP_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { usePageMeta } from '@/lib/usePageMeta';
 import { colors } from '@/ui/tokens';
@@ -137,13 +137,14 @@ export default function MarketingHomePage() {
   return (
     <>
       <Hero
+        audienceNav={<AudienceSwitch active="coach" />}
         eyebrow="Coaching, training and nutrition — done properly"
         title="Free barcode scanning. Competition prep built in. The coaching platform your competitors don't have."
         subtitle="Programs with per-set targets. Check-ins that become coaching evidence. Peak week tools. Posing library. And a barcode scanner that's always free — because MyFitnessPal shouldn't have put theirs behind a paywall."
         primaryCtaLabel="Start coaching — it's free"
         primaryCtaTo={SIGNUP_PUBLIC_PATH}
-        secondaryCtaLabel="Free MyFitnessPal import →"
-        secondaryCtaTo="/why-switch"
+        secondaryCtaLabel="I train solo — start free →"
+        secondaryCtaTo="/personal"
         screenshotSrc="mockup"
       />
       <div className="text-center -mt-2 sm:-mt-3 mb-7 sm:mb-8">

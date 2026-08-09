@@ -7,6 +7,38 @@ import { colors, spacing } from '@/ui/tokens';
 import { LOGIN_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { clearAuthEntryCarryover } from '@/lib/onboardingStatus';
 
+/**
+ * Above-the-fold audience router. Paid traffic lands coach-first, but organic
+ * solo visitors need their path visible without scrolling — QA's persona
+ * concluded "this product is for someone else" from the hero alone.
+ */
+export function AudienceSwitch({ active = 'coach' }) {
+  const pillStyle = (isActive) => ({
+    padding: '8px 16px',
+    borderRadius: 999,
+    fontSize: 13,
+    fontWeight: 600,
+    color: isActive ? '#fff' : colors.muted,
+    background: isActive ? colors.primary : 'transparent',
+    transition: 'background 150ms ease, color 150ms ease',
+  });
+  return (
+    <div
+      role="navigation"
+      aria-label="Choose your audience"
+      className="inline-flex items-center rounded-full border p-1"
+      style={{ borderColor: colors.border, background: 'rgba(255,255,255,0.04)' }}
+    >
+      <Link to="/" style={pillStyle(active === 'coach')} aria-current={active === 'coach' ? 'page' : undefined}>
+        I coach clients
+      </Link>
+      <Link to="/personal" style={pillStyle(active === 'solo')} aria-current={active === 'solo' ? 'page' : undefined}>
+        I train solo
+      </Link>
+    </div>
+  );
+}
+
 export function Hero({
   title,
   subtitle,
@@ -18,6 +50,7 @@ export function Hero({
   screenshotSrc,
   screenshotAlt,
   embedUrl,
+  audienceNav,
 }) {
   const defaultScreenshotAlt =
     'Atlas coach dashboard showing workload score, priority queue, and roster health';
@@ -36,6 +69,7 @@ export function Hero({
       }}
     >
       <div className="max-w-5xl mx-auto">
+        {audienceNav ? <div className="mb-5">{audienceNav}</div> : null}
         {eyebrow ? (
           <p className="text-[11px] font-semibold tracking-[0.18em] uppercase mb-4" style={{ color: colors.muted }}>
             {eyebrow}

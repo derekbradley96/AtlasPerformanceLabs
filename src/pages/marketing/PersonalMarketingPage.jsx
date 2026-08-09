@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { Check } from 'lucide-react';
-import { Hero, Features, Testimonials, CTA } from './MarketingSections';
+import { Hero, Features, Testimonials, CTA, AudienceSwitch } from './MarketingSections';
 import { PERSONAL_MARKETING_TESTIMONIALS } from './marketingTestimonialsData';
 import { SIGNUP_PUBLIC_PATH } from '@/lib/publicAuthPaths';
 import { usePageMeta } from '@/lib/usePageMeta';
@@ -110,6 +110,7 @@ export default function PersonalMarketingPage() {
   return (
     <>
       <Hero
+        audienceNav={<AudienceSwitch active="solo" />}
         title="Train properly, not randomly"
         subtitle="Log your training, follow a clear plan, and stay consistent — free."
         primaryCtaLabel="Start free"
