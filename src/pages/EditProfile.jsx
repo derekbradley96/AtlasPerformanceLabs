@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { PageLoader } from '@/components/ui/LoadingState';
 import { useAuth } from '@/lib/AuthContext';
 import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
+import { friendlySupabaseError } from '@/lib/supabaseErrors';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { toast } from 'sonner';
@@ -14,7 +15,7 @@ import AccessDenied from '@/components/AccessDenied';
 
 export default function EditProfile() {
   const navigate = useNavigate();
-  const { user: authUser, isDemoMode, role: authRole, isLoadingAuth } = useAuth();
+  const { user: authUser, isDemoMode, role: authRole, isLoadingAuth, refreshProfile } = useAuth();
   const { isAssistant } = useTrainerPermissions();
   const isTrainer = isCoach(authRole);
   const [saving, setSaving] = useState(false);
@@ -62,9 +63,12 @@ export default function EditProfile() {
       const displayName = formData.full_name.trim();
       const { error } = await sb.from('profiles').update({ display_name: displayName }).eq('id', authUser.id);
       if (error) {
-        toast.error(error.message || 'Failed to save profile');
+        toast.error(friendlySupabaseError(error, 'Failed to save profile'));
         return;
       }
+      // Refresh the auth context BEFORE navigating — Profile renders the
+      // context row, which otherwise shows the old name until a full reload.
+      await refreshProfile();
       toast.success('Profile saved successfully!');
       setHasChanges(false);
       navigate(createPageUrl('Profile'));

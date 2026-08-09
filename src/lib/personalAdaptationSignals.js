@@ -5,9 +5,9 @@ import { getSupabase, hasSupabase } from '@/lib/supabaseClient';
 import { listPersonalMealLogs } from '@/lib/personalNutritionStore';
 import { getPersonalProteinProgressPercent } from '@/lib/personalNutritionProfile';
 
-function caloriePctForDay(userId, mealDateISO, mergedTargets) {
+function caloriePctForDay(userId, mealDateISO, mergedTargets, mealsForDay) {
   if (!userId || !mealDateISO) return null;
-  const meals = listPersonalMealLogs(userId, mealDateISO);
+  const meals = Array.isArray(mealsForDay) ? mealsForDay : listPersonalMealLogs(userId, mealDateISO);
   const total = meals.reduce((sum, m) => sum + (Number(m?.calories) || 0), 0);
   const target = Number(mergedTargets?.calories ?? mergedTargets?.target_calories) || 0;
   if (!target) return null;
@@ -31,8 +31,12 @@ function addDays(iso, delta) {
  * @param {string} userId
  * @param {object|null} mergedTargets from fetchMergedPersonalNutritionTargets
  * @param {string} anchorDate YYYY-MM-DD (usually today local)
+ * @param {Map<string, Array<object>>} [mealsByDate] meal rows keyed by log date.
+ *   Pass Supabase meal_logs here — the localStorage fallback only holds data
+ *   when the app runs WITHOUT Supabase, so omitting this in production scores
+ *   every day as unlogged (QA: "NUTRITION 0%" despite a meal logged).
  */
-export function computeNutrition7DaySignals(userId, mergedTargets, anchorDate) {
+export function computeNutrition7DaySignals(userId, mergedTargets, anchorDate, mealsByDate) {
   const out = {
     calorieAdherence7dAvg: null,
     proteinAdherence7dAvg: null,
@@ -55,10 +59,11 @@ export function computeNutrition7DaySignals(userId, mergedTargets, anchorDate) {
 
   for (let i = 0; i < 7; i += 1) {
     const d = addDays(anchorDate, -i);
-    const pPct = hasProtTarget ? getPersonalProteinProgressPercent(userId, d, mergedTargets) : null;
-    const cPct = hasCalTarget ? caloriePctForDay(userId, d, mergedTargets) : null;
+    const dayMeals = mealsByDate ? (mealsByDate.get(d) || []) : null;
+    const pPct = hasProtTarget ? getPersonalProteinProgressPercent(userId, d, mergedTargets, dayMeals) : null;
+    const cPct = hasCalTarget ? caloriePctForDay(userId, d, mergedTargets, dayMeals) : null;
 
-    const meals = listPersonalMealLogs(userId, d);
+    const meals = dayMeals ?? listPersonalMealLogs(userId, d);
     if (meals.length > 0) {
       daysWithLog += 1;
     }

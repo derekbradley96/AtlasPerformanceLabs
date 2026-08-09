@@ -282,6 +282,14 @@ function NativePlatformInit() {
   };
 
   useEffect(() => {
+    // Network monitoring must run on WEB too — it was gated behind the
+    // native-only guard below, so the offline banner could never fire in a
+    // browser (QA: "no offline detection anywhere"). It handles the
+    // native/browser split internally.
+    void initNetworkMonitoring();
+  }, []);
+
+  useEffect(() => {
     if (typeof Capacitor === 'undefined' || !Capacitor.isNativePlatform?.()) return;
 
     let appStateHandle = null;
@@ -290,7 +298,6 @@ function NativePlatformInit() {
 
     const setup = async () => {
       try {
-        await initNetworkMonitoring();
         await createAndroidChannels();
 
         const { App: CapApp } = await import('@capacitor/app');

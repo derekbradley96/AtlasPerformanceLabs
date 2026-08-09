@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { PageLoader } from '@/components/ui/LoadingState';
-import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield, FlaskConical, Download, BarChart2 } from 'lucide-react';
+import { UserCircle, Mail, Award, MessageSquare, HelpCircle, Store, Trash2, LogOut, Shield, FlaskConical, Download, BarChart2, Bell, KeyRound } from 'lucide-react';
 import { getRouteTitle } from '@/lib/routeMeta';
 import { useFeedbackModal } from '@/contexts/FeedbackContext';
 import { createPageUrl } from '@/utils';
@@ -219,6 +219,21 @@ export default function Account() {
           title="Get help"
           showChevron={true}
           onPress={() => { impactLight(); openSupport(); }}
+        />
+        {/* QA: password change and the notifications page existed but were
+            unreachable from here — no pointer, no link. */}
+        <Row
+          left={<KeyRound size={20} style={{ color: colors.muted }} />}
+          title="Sign-in & security"
+          subtitle="Change email, password, units"
+          showChevron={true}
+          onPress={() => { impactLight(); navigate('/profile-account'); }}
+        />
+        <Row
+          left={<Bell size={20} style={{ color: colors.muted }} />}
+          title="Notifications"
+          showChevron={true}
+          onPress={() => { impactLight(); navigate('/settings/notifications'); }}
         />
         {isCoach(role) && (
           <Row

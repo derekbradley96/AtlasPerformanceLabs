@@ -12,6 +12,7 @@ import {
   getPersonalProteinProgressPercent,
 } from '@/lib/personalNutritionProfile';
 import { formatAbsWeightDeltaFromKg, normalizeWeightUnit } from '@/lib/bodyMeasurementUnits';
+import { listPersonalMealLogs } from '@/lib/personalNutritionStore';
 
 function anchorISODate() {
   const d = new Date();
@@ -30,8 +31,12 @@ function addDaysISO(iso, delta) {
   return `${y}-${m}-${day}`;
 }
 
-/** @param {string} userId @param {object|null} merged @param {number} days */
-export function buildNutritionAdherenceSeries(userId, merged, days = 14) {
+/**
+ * @param {string} userId @param {object|null} merged @param {number} days
+ * @param {Map<string, Array<object>>} [mealsByDate] Supabase meal rows by log
+ *   date — omit only when running without Supabase (localStorage fallback).
+ */
+export function buildNutritionAdherenceSeries(userId, merged, days = 14, mealsByDate) {
   if (!userId || !merged) return [];
   const hasCal = Number(merged?.calories ?? merged?.target_calories) > 0;
   const hasProt = Number(merged?.protein_g ?? merged?.target_protein_g) > 0;
@@ -40,8 +45,16 @@ export function buildNutritionAdherenceSeries(userId, merged, days = 14) {
   const out = [];
   for (let i = days - 1; i >= 0; i -= 1) {
     const key = addDaysISO(anchor, -i);
-    const p = hasProt ? getPersonalProteinProgressPercent(userId, key, merged) : null;
-    const c = hasCal ? getPersonalCalorieProgressPercent(userId, key, merged) : null;
+    const dayMeals = mealsByDate ? (mealsByDate.get(key) || []) : null;
+    // A day with nothing logged is a GAP in the chart, not 0% adherence —
+    // QA read the flat zero line as broken tracking.
+    const hasLogs = (dayMeals ?? listPersonalMealLogs(userId, key)).length > 0;
+    if (!hasLogs) {
+      out.push({ date: key, dateLabel: shortDate(key), pct: null });
+      continue;
+    }
+    const p = hasProt ? getPersonalProteinProgressPercent(userId, key, merged, dayMeals) : null;
+    const c = hasCal ? getPersonalCalorieProgressPercent(userId, key, merged, dayMeals) : null;
     const parts = [];
     if (p != null) parts.push(Math.min(100, Number(p)));
     if (c != null) parts.push(Math.min(100, Number(c)));
@@ -83,8 +96,29 @@ export async function fetchPersonalProgressDashboard(profileId) {
     || Number(merged?.protein_g ?? merged?.target_protein_g) > 0;
 
   const anchor = anchorISODate();
-  const nut7 = computeNutrition7DaySignals(profileId, merged, anchor);
-  const nutritionDaily = hasNutritionTargets ? buildNutritionAdherenceSeries(profileId, merged, 14) : [];
+  // One 14-day meal_logs fetch feeds both rollups. Without this, the signal
+  // helpers fall back to localStorage — which production never writes — and
+  // the Progress page reported "NUTRITION 0%" over a freshly logged meal.
+  let mealsByDate = null;
+  try {
+    const { data: mealRows } = await supabase
+      .from('meal_logs')
+      .select('log_date, calories, protein_g')
+      .eq('profile_id', profileId)
+      .gte('log_date', addDaysISO(anchor, -13))
+      .lte('log_date', anchor);
+    mealsByDate = new Map();
+    for (const row of mealRows || []) {
+      const key = String(row.log_date || '').slice(0, 10);
+      if (!key) continue;
+      if (!mealsByDate.has(key)) mealsByDate.set(key, []);
+      mealsByDate.get(key).push(row);
+    }
+  } catch {
+    mealsByDate = null; // fall back to localStorage semantics
+  }
+  const nut7 = computeNutrition7DaySignals(profileId, merged, anchor, mealsByDate ?? undefined);
+  const nutritionDaily = hasNutritionTargets ? buildNutritionAdherenceSeries(profileId, merged, 14, mealsByDate ?? undefined) : [];
 
   const [retention, sessionsRes, checkinsRes] = await Promise.all([
     getRetentionStreaks({ profileId }),
