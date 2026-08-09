@@ -193,7 +193,7 @@ export default function WorkoutPlayerPage() {
   const [rpeSaving, setRpeSaving] = useState(false);
   const [showPreviousSession, setShowPreviousSession] = useState(false);
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
-  const [swapSheetOpen, setSwapSheetOpen] = useState(false);
+  const [exerciseSheetMode, setExerciseSheetMode] = useState(null); // null | 'swap' | 'add'
   const [swapQuery, setSwapQuery] = useState('');
   const [swapSaving, setSwapSaving] = useState(false);
   const [openPrepWhyExerciseId, setOpenPrepWhyExerciseId] = useState(null);
@@ -435,10 +435,18 @@ export default function WorkoutPlayerPage() {
   // Persists onto this week's program_exercises row, so logged sets stay
   // attached and next week's copy keeps the original exercise.
   const canSwapExercise = !clientMode && hasSupabaseConfigured && Boolean(currentExercise?.id);
+  const sessionDayId = currentExercise?.day_id || exercisesForSession[0]?.day_id || assignedWorkout?.day?.id || null;
+  const canAddExercise = !clientMode && hasSupabaseConfigured && Boolean(sessionDayId);
   const swapOptions = useMemo(() => {
-    if (!swapSheetOpen || !currentExercise) return [];
-    const currentName = String(currentExercise.name || '').toLowerCase();
+    if (!exerciseSheetMode) return [];
     const q = swapQuery.trim().toLowerCase();
+    if (exerciseSheetMode === 'add') {
+      // No "current exercise" context — search-first, defaults otherwise.
+      if (q) return LIB_EXERCISES.filter((e) => String(e.name).toLowerCase().includes(q)).slice(0, 8);
+      return LIB_EXERCISES.slice(0, 8);
+    }
+    if (!currentExercise) return [];
+    const currentName = String(currentExercise.name || '').toLowerCase();
     if (q) {
       return LIB_EXERCISES
         .filter((e) => String(e.name).toLowerCase().includes(q) && String(e.name).toLowerCase() !== currentName)
@@ -453,7 +461,7 @@ export default function WorkoutPlayerPage() {
       ? LIB_EXERCISES.filter((e) => e.primaryMuscle === current.primaryMuscle && e.id !== current.id && !subIds.has(e.id))
       : [];
     return [...subs, ...sameMuscle].slice(0, 8);
-  }, [swapSheetOpen, swapQuery, currentExercise]);
+  }, [exerciseSheetMode, swapQuery, currentExercise]);
 
   const handleSwapExercise = async (newName) => {
     if (!currentExercise?.id || swapSaving) return;
@@ -466,12 +474,40 @@ export default function WorkoutPlayerPage() {
         .update({ exercise_name: newName, exercise_library_id: null })
         .eq('id', currentExercise.id);
       if (error) throw error;
-      setSwapSheetOpen(false);
+      setExerciseSheetMode(null);
       setSwapQuery('');
       toast.success(`Swapped to ${newName}`);
       queryClient.invalidateQueries({ queryKey: ['workout-player-assigned'] });
     } catch (e) {
       toast.error(friendlySupabaseError(e, 'Could not swap exercise'));
+    } finally {
+      setSwapSaving(false);
+    }
+  };
+
+  const handleAddExercise = async (name) => {
+    if (!sessionDayId || swapSaving) return;
+    const sb = getSupabase();
+    if (!sb) return;
+    setSwapSaving(true);
+    try {
+      // Same persistence rule as Swap: a real row on THIS week's day, so sets
+      // attach cleanly and next week's copy is untouched.
+      const { error } = await sb.from('program_exercises').insert({
+        day_id: sessionDayId,
+        exercise_name: name,
+        sets: 3,
+        reps: '8-12',
+        rest_seconds: 90,
+        sort_order: exercisesForSession.length,
+      });
+      if (error) throw error;
+      setExerciseSheetMode(null);
+      setSwapQuery('');
+      toast.success(`Added ${name} to today's session`);
+      queryClient.invalidateQueries({ queryKey: ['workout-player-assigned'] });
+    } catch (e) {
+      toast.error(friendlySupabaseError(e, 'Could not add exercise'));
     } finally {
       setSwapSaving(false);
     }
@@ -1881,21 +1917,25 @@ export default function WorkoutPlayerPage() {
         completedSets={completedSets}
         totalSets={totalSets}
       />
-      {swapSheetOpen && currentExercise ? (
+      {exerciseSheetMode && (exerciseSheetMode === 'add' || currentExercise) ? (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Swap exercise"
-          onClick={() => { setSwapSheetOpen(false); setSwapQuery(''); }}
+          aria-label={exerciseSheetMode === 'add' ? 'Add exercise' : 'Swap exercise'}
+          onClick={() => { setExerciseSheetMode(null); setSwapQuery(''); }}
           style={{ position: 'fixed', inset: 0, zIndex: 200, background: colors.overlay, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
             style={{ width: '100%', maxWidth: 560, maxHeight: '70vh', overflowY: 'auto', background: colors.surface1, border: `1px solid ${colors.border}`, borderRadius: `${radii.card}px ${radii.card}px 0 0`, padding: spacing[16], paddingBottom: `calc(${spacing[16]}px + env(safe-area-inset-bottom, 0px))` }}
           >
-            <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.text }}>Swap {currentExercise.name}</p>
+            <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: colors.text }}>
+              {exerciseSheetMode === 'add' ? "Add exercise to today's session" : `Swap ${currentExercise?.name}`}
+            </p>
             <p style={{ margin: `${spacing[4]}px 0 ${spacing[10]}px`, fontSize: 12, color: colors.muted }}>
-              Same targets, different exercise — sets you already logged stay as they are.
+              {exerciseSheetMode === 'add'
+                ? 'Added to this week only — 3 sets × 8-12 to start, edit anything after.'
+                : 'Same targets, different exercise — sets you already logged stay as they are.'}
             </p>
             <input
               type="text"
@@ -1910,7 +1950,7 @@ export default function WorkoutPlayerPage() {
                   key={opt.id}
                   type="button"
                   disabled={swapSaving}
-                  onClick={() => handleSwapExercise(opt.name)}
+                  onClick={() => (exerciseSheetMode === 'add' ? handleAddExercise(opt.name) : handleSwapExercise(opt.name))}
                   style={{ textAlign: 'left', minHeight: touchTargetMin, borderRadius: 8, border: `1px solid ${colors.border}`, background: colors.surface2, color: colors.text, padding: `${spacing[8]}px ${spacing[12]}px`, cursor: 'pointer' }}
                 >
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{opt.name}</span>
@@ -1977,6 +2017,27 @@ export default function WorkoutPlayerPage() {
             </button>
           );
         })}
+        {canAddExercise ? (
+          <button
+            type="button"
+            onClick={() => setExerciseSheetMode('add')}
+            style={{
+              flexShrink: 0,
+              padding: '8px 12px',
+              borderRadius: radii.sm,
+              border: `1px dashed ${colors.border}`,
+              background: 'transparent',
+              fontSize: 11,
+              fontWeight: 700,
+              color: colors.primary,
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+            }}
+            aria-label="Add exercise to today's session"
+          >
+            + Add
+          </button>
+        ) : null}
       </div>
 
       <p style={{ fontSize: 12, color: colors.muted, marginBottom: spacing[8] }}>
@@ -2040,7 +2101,7 @@ export default function WorkoutPlayerPage() {
               {canSwapExercise ? (
                 <button
                   type="button"
-                  onClick={() => setSwapSheetOpen(true)}
+                  onClick={() => setExerciseSheetMode('swap')}
                   style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: colors.primary, background: 'none', border: `1px solid ${colors.border}`, borderRadius: radii.button, padding: `${spacing[6]}px ${spacing[10]}px`, cursor: 'pointer', minHeight: 36 }}
                 >
                   Swap ⇄
