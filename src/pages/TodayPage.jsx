@@ -739,6 +739,8 @@ export default function TodayPage() {
       targetWeight: weightRows[0]?.targetWeight || null,
       recentWeights: weightRows.map((w) => ({ weight: w.weight, date: w.date })),
       clientGoal: clientGoalFromGoalsField(profile?.goals || profile?.goal || profile?.personal_goal),
+      // Coached clients get coach-vocabulary copy; solo users must not.
+      coached: !isPersonalRole,
     }, viewerWeightUnit);
     return interp?.interpretation || null;
   }, [weightRows, profile?.goals, profile?.goal, profile?.personal_goal, viewerWeightUnit]);

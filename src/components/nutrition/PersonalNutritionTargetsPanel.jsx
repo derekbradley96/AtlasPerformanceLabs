@@ -491,7 +491,7 @@ export default function PersonalNutritionTargetsPanel({ user, variant = 'full', 
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
-            minHeight: touchTargetMin - 4,
+            minHeight: touchTargetMin,
             padding: `0 ${spacing[12]}px`,
             borderRadius: radii.button,
             border: `1px solid ${colors.border}`,
@@ -571,7 +571,7 @@ export default function PersonalNutritionTargetsPanel({ user, variant = 'full', 
                       aria-selected={presetId === p.id}
                       onClick={() => handlePreset(p.id)}
                       style={{
-                        minHeight: touchTargetMin - 4,
+                        minHeight: touchTargetMin,
                         padding: `0 ${spacing[12]}px`,
                         borderRadius: radii.button,
                         border: `1px solid ${presetId === p.id ? colors.primary : colors.border}`,

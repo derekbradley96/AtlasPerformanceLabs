@@ -505,6 +505,7 @@ export default function ClientTodayUnifiedPage() {
       targetWeight,
       recentWeights: recentWeightSeries,
       clientGoal,
+      coached: true,
     }, viewerWU);
     return { currentWeight, interp };
   }, [

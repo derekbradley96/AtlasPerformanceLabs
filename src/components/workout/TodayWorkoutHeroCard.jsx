@@ -55,8 +55,11 @@ export default function TodayWorkoutHeroCard({
       emptyProgramHandler = onMessageCoach;
     }
   } else if (!hasWorkoutToday) {
-    title = 'Rest day today';
-    body = 'Rest day today — recovery is part of the plan 💪';
+    // Honest for both real rest days AND plans with no days scheduled —
+    // "Rest day — part of the plan" was fabricated when the plan had no days
+    // at all (QA), and we can't always tell the two apart here.
+    title = 'Nothing scheduled today';
+    body = "No session on today's plan — recovery counts. If that doesn't look right, check your plan.";
     showStart = false;
   }
 

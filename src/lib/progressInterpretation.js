@@ -39,6 +39,10 @@ export function interpretWeightProgress({
   targetWeight: _targetWeight,
   recentWeights = [],
   clientGoal,
+  // Coach vocabulary must never reach solo users — QA's solo persona was
+  // told about "your coach" they don't have. Default OFF; coached surfaces
+  // (client dashboards, coach views) opt in.
+  coached = false,
 }, viewerUnit = 'kg') {
   const unit = normalizeWeightUnit(viewerUnit);
   const cw = Number(currentWeight);
@@ -69,18 +73,18 @@ export function interpretWeightProgress({
       totalChange < -0.05 ? 'trending down on the scale' :
       totalChange > 0.05 ? 'trending up on the scale' :
       'holding near your starting point';
-    interpretation = `Your logged weight is ${dir} since you started with your coach. Keep logging each week so Atlas can describe week-to-week pace, not just the headline direction.`;
+    interpretation = `Your logged weight is ${dir} since you started tracking. Keep logging each week so Atlas can describe week-to-week pace, not just the headline direction.`;
   } else if (isLosing) {
     if (thisWeekChange < -0.1) {
-      interpretation = `Down ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week — ${rateLabel} loss. Your 4-week average is ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} which is ${Math.abs(avgWeeklyChange) > 0.7 ? 'slightly fast — consider a small refeed day' : Math.abs(avgWeeklyChange) < 0.2 ? 'slower than expected — your coach may adjust' : 'within the healthy range for sustainable fat loss'}.`;
+      interpretation = `Down ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week — ${rateLabel} loss. Your 4-week average is ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} which is ${Math.abs(avgWeeklyChange) > 0.7 ? 'slightly fast — consider a small refeed day' : Math.abs(avgWeeklyChange) < 0.2 ? (coached ? 'slower than expected — your coach may adjust' : 'slower than expected — a small calorie tweak may help') : 'within the healthy range for sustainable fat loss'}.`;
     } else if (Math.abs(thisWeekChange) <= 0.1) {
-      interpretation = `Weight held steady this week. Fluctuation is normal — your 4-week trend of ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} is what matters. ${Math.abs(avgWeeklyChange) > 0.15 ? 'The trend is still working.' : 'Check in with your coach about a potential adjustment.'}`;
+      interpretation = `Weight held steady this week. Fluctuation is normal — your 4-week trend of ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} is what matters. ${Math.abs(avgWeeklyChange) > 0.15 ? 'The trend is still working.' : (coached ? 'Check in with your coach about a potential adjustment.' : 'If it stays flat another week, consider a small adjustment.')}`;
     } else {
       interpretation = `Up ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week. This is almost certainly water retention or glycogen from training — not real fat gain. Your 4-week average of ${formatWeeklyRate(Math.abs(avgWeeklyChange), unit)} loss suggests the plan is working.`;
     }
   } else if (isGaining) {
     if (thisWeekChange > 0.1) {
-      interpretation = `Up ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week — ${rateLabel} muscle-building phase. Your 4-week average is ${formatWeeklyRate(avgWeeklyChange, unit)}. ${avgWeeklyChange > 0.5 ? 'Gaining a touch fast — some will be fat. Check in with your coach.' : 'Solid pace for muscle gain with minimal fat.'}`;
+      interpretation = `Up ${formatAbsWeightDeltaFromKg(thisWeekChange, unit)} this week — ${rateLabel} muscle-building phase. Your 4-week average is ${formatWeeklyRate(avgWeeklyChange, unit)}. ${avgWeeklyChange > 0.5 ? (coached ? 'Gaining a touch fast — some will be fat. Check in with your coach.' : 'Gaining a touch fast — some will be fat. Consider easing calories slightly.') : 'Solid pace for muscle gain with minimal fat.'}`;
     } else {
       interpretation = `Weight held or dropped slightly this week during your build phase. This is normal and doesn't mean the programme isn't working — muscle gain is slow and the scale doesn't tell the full story.`;
     }

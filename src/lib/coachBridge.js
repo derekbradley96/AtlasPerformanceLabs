@@ -278,7 +278,10 @@ export function deriveCoachBridgeMoment(input = {}) {
     }
     if (surface === 'nutrition') {
       if (prep && hasNutritionTargets) return nutritionPrepLimitMoment('from_prep');
-      if (weekCons != null && weekCons < 48 && hasNutritionTargets && c28 >= 3) {
+      // weekCons > 0: the card claims "meal logging is happening" — zero logs
+      // scores 0% consistency and used to pass this gate (QA saw the card on
+      // a fresh account with no logs at all).
+      if (weekCons != null && weekCons > 0 && weekCons < 48 && hasNutritionTargets && c28 >= 3) {
         return nutritionRefinementMoment('from_accountability');
       }
       if (isAggressiveBodyCompGoal(targetWeightKg, currentWeightKg)) return goalUrgencyMoment('from_goal_urgency');
@@ -315,7 +318,7 @@ export function deriveCoachBridgeMoment(input = {}) {
 
   if (surface === 'nutrition') {
     if (prep && hasNutritionTargets) return nutritionPrepLimitMoment('from_prep');
-    if (weekCons != null && weekCons < 55 && hasNutritionTargets) return nutritionRefinementMoment('from_accountability');
+    if (weekCons != null && weekCons > 0 && weekCons < 55 && hasNutritionTargets && c28 >= 3) return nutritionRefinementMoment('from_accountability');
     if (weekCons != null && weekCons >= 72 && c28 >= 8) return advancedGoalMoment('from_advanced_refinement');
     if (isAggressiveBodyCompGoal(targetWeightKg, currentWeightKg)) return goalUrgencyMoment('from_goal_urgency');
     return null;

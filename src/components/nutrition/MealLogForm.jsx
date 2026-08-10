@@ -1041,11 +1041,12 @@ export default function MealLogForm({
                   value={webBarcodeInput}
                   onChange={(e) => setWebBarcodeInput(e.target.value)}
                   placeholder="e.g. 5449000000996"
-                  className="bg-slate-800 border-slate-700"
+                  className="bg-slate-800 border-slate-700 min-h-[44px]"
                 />
                 <Button
                   type="button"
                   variant="outline"
+                  className="min-h-[44px]"
                   onClick={() => {
                     setLookupOpen(true);
                     void lookupByBarcode(webBarcodeInput);

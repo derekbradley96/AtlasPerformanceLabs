@@ -322,6 +322,7 @@ export default function ClientDashboard({ user, linkedFromPersonalAt = null }) {
       targetWeight,
       recentWeights: series,
       clientGoal: clientGoalFromGoalsField(profile?.goals),
+      coached: true,
     }, viewerWU);
     return { currentWeight, interp };
   }, [

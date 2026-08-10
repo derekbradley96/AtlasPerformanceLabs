@@ -1150,6 +1150,9 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
               fontWeight: 600,
               cursor: 'pointer',
               textDecoration: 'underline',
+              minHeight: 44,
+              display: 'inline-flex',
+              alignItems: 'center',
             }}
           >
             Full-screen targets editor
@@ -1178,7 +1181,7 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
                   ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }}
                 style={{
-                  minHeight: 40,
+                  minHeight: 44,
                   borderRadius: 10,
                   border: `1px solid ${shell.cardBorder}`,
                   background: activeLogSection === key ? colors.primarySubtle : colors.surface1,
@@ -1828,13 +1831,13 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
               <div style={{ display: 'flex', gap: spacing[8] }}>
                 {viewerWeightUnit === 'st_lb' ? (
                   <>
-                    <Input value={weightStoneEntry} onChange={(e) => setWeightStoneEntry(e.target.value)} placeholder="Stone" type="number" />
-                    <Input value={weightPoundEntry} onChange={(e) => setWeightPoundEntry(e.target.value)} placeholder="Pounds" type="number" />
+                    <Input value={weightStoneEntry} onChange={(e) => setWeightStoneEntry(e.target.value)} placeholder="Stone" type="number" className="min-h-[44px]" />
+                    <Input value={weightPoundEntry} onChange={(e) => setWeightPoundEntry(e.target.value)} placeholder="Pounds" type="number" className="min-h-[44px]" />
                   </>
                 ) : (
-                  <Input value={weightEntry} onChange={(e) => setWeightEntry(e.target.value)} placeholder={`Weight (${weightUnitShortLabel(viewerWeightUnit)})`} type="number" />
+                  <Input value={weightEntry} onChange={(e) => setWeightEntry(e.target.value)} placeholder={`Weight (${weightUnitShortLabel(viewerWeightUnit)})`} type="number" className="min-h-[44px]" />
                 )}
-                <Button type="button" onClick={logPersonalWeight}>Save</Button>
+                <Button type="button" onClick={logPersonalWeight} className="min-h-[44px]">Save</Button>
               </div>
             </Card>
           </div>
@@ -1842,7 +1845,7 @@ function NutritionClientPersonal({ user, profile, effectiveRole }) {
         {isPersonal ? (
           <div ref={bodySectionRef}>
             <Card style={{ padding: spacing[14], border: `1px solid ${shell.cardBorder}` }}>
-              <button type="button" onClick={() => setBodyOpen((v) => !v)} style={{ background: 'none', border: 'none', padding: 0, color: colors.text, fontSize: 15, fontWeight: 600 }}>
+              <button type="button" onClick={() => setBodyOpen((v) => !v)} style={{ background: 'none', border: 'none', padding: 0, color: colors.text, fontSize: 15, fontWeight: 600, minHeight: 44, display: 'inline-flex', alignItems: 'center' }}>
                 Body measurements {bodyOpen ? '▲' : '▼'}
               </button>
               {bodyOpen ? (
