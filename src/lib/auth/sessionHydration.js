@@ -151,6 +151,18 @@ export function setupAuthStateListener(ctx) {
 
   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
     if (import.meta.env.DEV) console.log('[ATLAS] Auth state:', _event, 'user id:', session?.user?.id);
+    // Password-reset links can fall back to the Site URL (home) when the
+    // redirect allowlist rejects /auth/callback — the user lands signed-in
+    // with no reset form in sight. supabase-js still detects the recovery
+    // tokens and fires this event, so catch it anywhere and route to the
+    // reset screen; ResetPassword works off the session alone.
+    if (_event === 'PASSWORD_RECOVERY' && typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      if (path !== '/reset' && path !== '/reset-password' && !path.startsWith('/auth/callback')) {
+        setTimeout(() => window.location.assign('/reset'), 0);
+        return;
+      }
+    }
     if (!isMounted()) return;
     // Guard against transient null sessions on refresh/lock contention.
     // Only treat null as real sign-out when event is SIGNED_OUT.
