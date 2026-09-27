@@ -110,7 +110,7 @@ function fromSupabaseRow(row: supabaseRepo.SupabaseClientRow): localStore.Client
     email: r.email as string | undefined,
     start_date: r.start_date as string | undefined,
     show_date: r.show_date as string | undefined,
-    showDate: r.show_date ?? r.showDate,
+    showDate: (r.show_date ?? r.showDate) as string | null | undefined,
     gym_equipment_json: r.gym_equipment_json,
   };
 }

@@ -6,6 +6,28 @@
 
 import * as storage from '@/lib/persistence/storage';
 
+/**
+ * Local client row. clientsService.ts types against this; rows carry extra
+ * ad-hoc fields (spread from partials), hence the open index signature.
+ * @typedef {{
+ *   id: string,
+ *   trainer_id: string,
+ *   full_name?: string,
+ *   name?: string,
+ *   email?: string,
+ *   goal?: string,
+ *   phase?: string,
+ *   status?: string,
+ *   payment_overdue?: boolean,
+ *   last_check_in_at?: string | null,
+ *   created_date?: string,
+ *   showDate?: string | null,
+ *   federation?: string | null,
+ *   division?: string | null,
+ *   prepPhase?: string | null,
+ * } & Record<string, any>} Client
+ */
+
 const KEY = 'atlas_local_clients_v1';
 const LOCAL_TRAINER_ID = 'local-trainer';
 const DEV = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
