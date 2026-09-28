@@ -23,7 +23,8 @@ export default function ClientAnalyticsSnapshot({
   const { profile } = useAuth();
   const viewerWU = resolveViewerBodyweightUnit(profile);
   const handleViewProgress = () => {
-    if (clientId) navigate(`/clients/${clientId}/progress`);
+    // /clients/:id/progress was never routed — photos is the progress surface.
+    if (clientId) navigate(`/clients/${clientId}/progress-photos`);
     onViewProgress?.();
   };
   const handleReviewCheckins = () => {

@@ -370,6 +370,13 @@ export default function ClientDetail() {
 
   useEffect(() => {
     if (!clientLoaded || !clientId || !tabFromUrl) return undefined;
+    // Deep links (?tab=checkins from review flows, ?tab=program from assign,
+    // ?tab=nutrition from the builder) must SWITCH the tab — scrolling to an
+    // element inside a tab that isn't rendered did nothing, so every
+    // back-link landed on Overview.
+    if (['overview', 'program', 'nutrition', 'checkins', 'notes', 'prep'].includes(tabFromUrl)) {
+      setActiveTab(tabFromUrl);
+    }
     const map = {
       program: 'os-program',
       checkins: 'os-checkins',
@@ -1004,6 +1011,11 @@ export default function ClientDetail() {
   const focusSection = useCallback(
     async (key) => {
       await lightHaptic();
+      // Switch to the owning tab first — scrolling alone can't reach a
+      // section inside an unrendered tab (priority-rail actions did nothing).
+      if (['overview', 'program', 'nutrition', 'checkins', 'notes', 'prep'].includes(key)) {
+        setActiveTab(key);
+      }
       const idMap = {
         overview: 'os-top',
         program: 'os-program',

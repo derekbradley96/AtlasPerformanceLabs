@@ -1,3 +1,5 @@
+import { insertNotificationForRecipient } from '@/lib/notifications';
+
 export async function removeClientFromRoster({
   supabase,
   clientId,
@@ -26,6 +28,8 @@ export async function removeClientFromRoster({
 
   if (clientProfileError) throw clientProfileError;
 
+  // Legacy rows carry trainer_id only — a bare coach_id filter matched zero
+  // rows and the "removed" client silently stayed on the roster.
   const { error } = await supabase
     .from('clients')
     .update({
@@ -34,20 +38,26 @@ export async function removeClientFromRoster({
       billing_status: 'paused',
     })
     .eq('id', clientId)
-    .eq('coach_id', coachId);
+    .or(`coach_id.eq.${coachId},trainer_id.eq.${coachId}`);
 
   if (error) throw error;
 
   if (clientProfile?.user_id) {
-    const { error: notificationError } = await supabase.from('notifications').insert({
-      profile_id: clientProfile.user_id,
-      type: 'coach_removed_client',
-      title: 'Your coaching relationship has ended',
-      message: 'Your coach has ended your coaching relationship on Atlas. Your training history is preserved.',
-      category: 'coaching',
-      is_read: false,
-    });
-    if (notificationError) throw notificationError;
+    // Best-effort, AFTER the removal: the old direct insert violated the
+    // notifications RLS (profile_id must equal auth.uid()) and used a type
+    // outside notifications_type_check, so it threw every time — the coach
+    // saw a raw error and retried an already-completed removal forever.
+    // insertNotificationForRecipient goes through the SECURITY DEFINER RPC
+    // with an allowed type and never throws.
+    await insertNotificationForRecipient(
+      clientProfile.user_id,
+      'automation',
+      'Your coaching relationship has ended',
+      'Your coach has ended your coaching relationship on Atlas. Your training history is preserved.',
+      {},
+      clientId,
+      { dedupeKey: `coach_removed:${clientId}` },
+    );
   }
 
   return { ok: true };
@@ -99,15 +109,17 @@ export async function leaveCoach({
 
   if (error) throw error;
 
-  const { error: notificationError } = await supabase.from('notifications').insert({
-    profile_id: resolvedCoachId,
-    type: 'client_left_coaching',
-    title: 'A client has left your coaching',
-    message: 'One of your clients has ended their coaching relationship with you on Atlas.',
-    category: 'coaching',
-    is_read: false,
-  });
-  if (notificationError) throw notificationError;
+  // Best-effort via the cross-user RPC — the direct insert failed RLS +
+  // type CHECK identically to the coach→client direction above.
+  await insertNotificationForRecipient(
+    resolvedCoachId,
+    'automation',
+    'A client has left your coaching',
+    'One of your clients has ended their coaching relationship with you on Atlas.',
+    {},
+    clientId,
+    { dedupeKey: `client_left:${clientId}` },
+  );
 
   return { ok: true };
 }

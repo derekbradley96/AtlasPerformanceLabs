@@ -848,7 +848,7 @@ export default function ClientOnboardingFlow() {
               style={{ minHeight: touchTargetMin }}
               onClick={() => {
                 clearPendingInvite();
-                navigate('/clientcode', { replace: true });
+                navigate('/client-code', { replace: true });
               }}
             >
               No — retype my code
