@@ -117,7 +117,7 @@ export default function Clients() {
   const filterFromUrl = searchParams.get('filter');
   const [search, setSearch] = useState('');
   const segmentFromUrlBase =
-    ['all', 'active', 'prep', 'at_risk', 'check_in_due'].includes(filterFromUrl)
+    ['all', 'active', 'prep', 'at_risk', 'check_in_due', 'setup_needed'].includes(filterFromUrl)
       ? filterFromUrl
       : filterFromUrl === 'needsReview' || filterFromUrl === 'dueToday'
         ? 'check_in_due'
@@ -137,6 +137,8 @@ export default function Clients() {
   const [clients, setClients] = useState([]);
   const [checkIns, setCheckIns] = useState([]);
   const [threads, setThreads] = useState([]);
+  const [assignedProgramClientIds, setAssignedProgramClientIds] = useState(() => new Set());
+  const [nutritionPlanClientIds, setNutritionPlanClientIds] = useState(() => new Set());
   const [dataLoading, setDataLoading] = useState(true);
   const [clientsLoadError, setClientsLoadError] = useState(false);
   const [clientsLoadErrorMessage, setClientsLoadErrorMessage] = useState(null);
@@ -346,6 +348,24 @@ export default function Clients() {
               });
               setRetentionRiskByClientId(map);
             }
+            // Lifecycle inputs: which clients actually have a program /
+            // nutrition plan. These were hardcoded false, so every joined
+            // client counted as "needs setup" forever.
+            const rosterIds = list.map((c) => c?.id).filter(Boolean);
+            if (rosterIds.length > 0 && !cancelled) {
+              const [assignRes, nutriRes] = await Promise.all([
+                supabase.from('program_block_assignments').select('client_id').eq('is_active', true).in('client_id', rosterIds),
+                supabase.from('client_nutrition_plans').select('client_id').eq('is_active', true).in('client_id', rosterIds),
+              ]);
+              if (!cancelled) {
+                if (!assignRes.error && Array.isArray(assignRes.data)) {
+                  setAssignedProgramClientIds(new Set(assignRes.data.map((r) => r.client_id)));
+                }
+                if (!nutriRes.error && Array.isArray(nutriRes.data)) {
+                  setNutritionPlanClientIds(new Set(nutriRes.data.map((r) => r.client_id)));
+                }
+              }
+            }
           }
         } catch (_) {}
       }
@@ -406,12 +426,12 @@ export default function Clients() {
       map[c.id] = deriveCoachClientLifecycle(c, {
         checkInCount: checkInCountByClientId[c.id] ?? 0,
         hasMessage: Boolean(thread?.last_message_at || (thread?.unread_count ?? 0) > 0),
-        hasProgram: false,
-        hasNutrition: false,
+        hasProgram: assignedProgramClientIds.has(c.id),
+        hasNutrition: nutritionPlanClientIds.has(c.id),
       });
     });
     return map;
-  }, [allClients, threads, checkInCountByClientId]);
+  }, [allClients, threads, checkInCountByClientId, assignedProgramClientIds, nutritionPlanClientIds]);
 
   const rosterLifecycleSummary = useMemo(() => {
     let setupIncomplete = 0;
@@ -437,6 +457,10 @@ export default function Clients() {
         const band = c?.id != null ? retentionRiskByClientId[c.id]?.risk_band : null;
         return band === 'at_risk' || band === 'churn_risk';
       });
+    } else if (segment === 'setup_needed') {
+      // The "View setup-needed" banner used to open the Check-In Due filter —
+      // a different concept — so the promised list never appeared.
+      list = list.filter((c) => c?.id != null && lifecycleByClientId[c.id]?.key === 'joined_unset');
     } else if (segment === 'check_in_due') {
       list = list.filter(
         (c) =>
@@ -497,6 +521,7 @@ export default function Clients() {
     clientIdsWithNeedsReview,
     healthByClientId,
     checkIns,
+    lifecycleByClientId,
     showJourneyLaneFilters,
     journeyLaneFilter,
   ]);
@@ -680,7 +705,7 @@ export default function Clients() {
               <Button variant="secondary" onClick={() => navigate('/get-clients')} style={{ minHeight: 38 }}>
                 Invite more
               </Button>
-              <Button variant="secondary" onClick={() => navigate('/clients?filter=check_in_due')} style={{ minHeight: 38 }}>
+              <Button variant="secondary" onClick={() => navigate('/clients?filter=setup_needed')} style={{ minHeight: 38 }}>
                 View setup-needed
               </Button>
             </div>

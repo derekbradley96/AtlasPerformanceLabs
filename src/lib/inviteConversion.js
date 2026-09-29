@@ -193,13 +193,15 @@ export async function applyInviteCodeForUser({ supabase, user, inviteCode }) {
     const email = String(user?.email ?? user?.user_metadata?.email ?? '').trim();
     const fallbackName = displayName || email;
     if (fallbackName) {
-      try {
-        await supabase
-          .from('clients')
-          .update({ name: fallbackName, full_name: displayName || null, email: email || null })
-          .eq('id', clientProfile.id);
-      } catch (e) {
-        if (import.meta.env.DEV) console.warn('[inviteConversion] roster name sync failed', e);
+      // clients has NO full_name column — including it made PostgREST reject
+      // the whole PATCH (PGRST204) and, unchecked, the sync silently failed:
+      // the roster showed "New client" forever, the exact bug this exists to fix.
+      const { error: nameSyncError } = await supabase
+        .from('clients')
+        .update({ name: fallbackName, email: email || null })
+        .eq('id', clientProfile.id);
+      if (nameSyncError && import.meta.env.DEV) {
+        console.warn('[inviteConversion] roster name sync failed', nameSyncError);
       }
     }
   }

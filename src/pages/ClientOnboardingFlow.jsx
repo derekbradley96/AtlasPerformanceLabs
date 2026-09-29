@@ -538,9 +538,10 @@ export default function ClientOnboardingFlow() {
       try {
         const supabase = getSupabase();
         if (supabase && supabaseUser?.id && patch.full_name) {
+          // clients has no full_name column — including it rejected the PATCH.
           await supabase
             .from('clients')
-            .update({ name: patch.full_name, full_name: patch.full_name })
+            .update({ name: patch.full_name })
             .eq('user_id', supabaseUser.id);
         }
       } catch (_) {

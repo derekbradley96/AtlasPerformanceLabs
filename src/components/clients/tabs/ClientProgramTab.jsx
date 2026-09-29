@@ -63,9 +63,9 @@ export default function ClientProgramTab(props) {
     <>
       <p style={{ ...sectionLabel }}>Active program</p>
       <div style={{ marginBottom: tabGap }}>
-        {activeBlockSummary?.title || clientPlanForDetail?.name ? (
+        {activeBlockSummary?.programName || clientPlanForDetail?.name ? (
           <Card style={{ ...standardCard, padding: spacing[16] }}>
-            <p className="text-[15px] font-medium">{activeBlockSummary?.title ?? clientPlanForDetail?.name ?? 'Current program'}</p>
+            <p className="text-[15px] font-medium">{activeBlockSummary?.programName ?? clientPlanForDetail?.name ?? 'Current program'}</p>
             <p className="text-[13px]">{dashboardData?.current_week != null && dashboardData?.total_weeks != null ? `Week ${dashboardData.current_week} of ${dashboardData.total_weeks}` : 'No week set'}</p>
           </Card>
         ) : (

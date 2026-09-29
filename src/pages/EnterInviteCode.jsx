@@ -11,6 +11,7 @@ import { Users, CheckCircle2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { friendlySupabaseError } from '@/lib/supabaseErrors';
 import { atlasMigrationDataAttributes, deriveInviteCodeRouteState } from '@/lib/atlasMigrationPhases';
 
 export default function EnterInviteCode() {
@@ -38,7 +39,7 @@ export default function EnterInviteCode() {
       navigate('/client-dashboard?from_personal=1');
     },
     onError: (error) => {
-      toast.error(error.message);
+      toast.error(friendlySupabaseError(error, 'Could not join with that code — check it and try again'));
     }
   });
 

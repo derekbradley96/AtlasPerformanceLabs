@@ -25,6 +25,12 @@ const CLIENT_DETAIL_CHECKINS_COLUMNS = [
   'notes',
   'nutrition_adherence',
   'sleep_hours',
+  // Readiness panel reads these — omitting them from the select made
+  // Readiness render as permanently empty (columns exist since
+  // 20250304120000_checkins_engine.sql; the missing-column retry below
+  // degrades older environments gracefully).
+  'sleep_score',
+  'energy_level',
 ];
 
 function getMissingColumnNameFromError(error) {

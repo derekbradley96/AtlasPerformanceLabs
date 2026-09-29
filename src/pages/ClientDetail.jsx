@@ -25,6 +25,7 @@ import { getClientPhase, setClientPhase } from '@/lib/clientPhaseStore';
 import { getClientHealth } from '@/lib/health/healthEngineBridge';
 import HealthBreakdownModal from '@/components/health/HealthBreakdownModal';
 import { getChatContextSnapshot } from '@/lib/chatContextSnapshot';
+import { friendlySupabaseError } from '@/lib/supabaseErrors';
 import { trackFriction, trackRecoverableError } from '@/services/frictionTracker';
 // Local thread row for legacy/offline cache only — NOT the Supabase thread UUID. Prefer data.ensureThreadForClient when available.
 // TODO: Replace openOrCreateThread with data.ensureThreadForClient + Supabase thread id for all send paths.
@@ -675,6 +676,7 @@ export default function ClientDetail() {
   const [createBlockSaving, setCreateBlockSaving] = useState(false);
   const [latestPhaseId, setLatestPhaseId] = useState(null);
   const [activeBlockSummary, setActiveBlockSummary] = useState(null);
+  const [blockSummaryRefreshKey, setBlockSummaryRefreshKey] = useState(0);
 
   // Active program block assignment summary (program_block_assignments + block + current week days).
   useEffect(() => {
@@ -748,7 +750,10 @@ export default function ClientDetail() {
       }
     })();
     return () => { cancelled = true; };
-  }, [clientId]);
+    // blockSummaryRefreshKey: bumped after assigning a programme — this is
+    // plain state, so the react-query invalidations alone never refreshed it
+    // and the Program tab stayed "No program assigned" until a reload.
+  }, [clientId, blockSummaryRefreshKey]);
 
   const handleOpenSetPhase = useCallback(() => {
     setSetPhaseModalError(null);
@@ -1074,10 +1079,12 @@ export default function ClientDetail() {
     setSendingOsMessage(true);
     try {
       await lightHaptic();
-      const thread = await openOrCreateThread({
-        clientId,
-        clientName: client?.full_name || client?.name || 'Client',
-      });
+      // The real Supabase thread — openOrCreateThread returned a LOCAL cache
+      // row with a random uuid, so every send failed the thread FK (the
+      // composer was 100% broken for production coaches).
+      const thread = typeof data?.ensureThreadForClient === 'function'
+        ? await data.ensureThreadForClient(clientId)
+        : null;
       if (thread?.id && typeof data?.sendMessage === 'function') {
         await data.sendMessage(thread.id, osMessageDraft.trim());
         setOsMessageDraft('');
@@ -1157,11 +1164,10 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
       const bodyText = [payload.title, (payload.wins ?? []).join(' · '), (payload.nextSteps ?? []).join(' ')].filter(Boolean).join('\n');
       try {
         let tid = thread?.id;
-        if (!tid) {
-          const ensured = await openOrCreateThread({
-            clientId,
-            clientName: client?.full_name || client?.name || 'Client',
-          });
+        if (!tid && typeof data?.ensureThreadForClient === 'function') {
+          // Same fix as sendOsMessage: the local-store row's random uuid
+          // failed the thread FK on every send.
+          const ensured = await data.ensureThreadForClient(clientId);
           tid = ensured?.id;
         }
         if (!tid) {
@@ -1191,22 +1197,31 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
     if (!hasSupabase || !clientId) return;
     const sb = getSupabase();
     if (!sb) return;
-    await sb.from('program_block_assignments').update({ is_active: false }).eq('client_id', clientId);
-    const start = new Date();
-    const programIds = Array.isArray(pkg?.program_ids) ? pkg.program_ids : [];
-    for (let i = 0; i < programIds.length; i += 1) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i * 28);
-      await sb.from('program_block_assignments').insert({
-        client_id: clientId,
-        program_block_id: programIds[i],
-        start_date: d.toISOString().slice(0, 10),
-        is_active: i === 0,
-      });
+    // Every result used to be ignored — RLS failures still toasted
+    // "Pack deployed" while nothing was written.
+    try {
+      const { error: deactivateError } = await sb.from('program_block_assignments').update({ is_active: false }).eq('client_id', clientId);
+      if (deactivateError) throw deactivateError;
+      const start = new Date();
+      const programIds = Array.isArray(pkg?.program_ids) ? pkg.program_ids : [];
+      for (let i = 0; i < programIds.length; i += 1) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i * 28);
+        const { error: insertError } = await sb.from('program_block_assignments').insert({
+          client_id: clientId,
+          program_block_id: programIds[i],
+          start_date: d.toISOString().slice(0, 10),
+          is_active: i === 0,
+        });
+        if (insertError) throw insertError;
+      }
+      setMethodologySheetOpen(false);
+      setBlockSummaryRefreshKey((n) => n + 1);
+      toast.success('Pack deployed to client');
+      navigate(`/clients/${clientId}?tab=program`);
+    } catch (err) {
+      toast.error(friendlySupabaseError(err, 'Could not deploy the pack — nothing was assigned'));
     }
-    setMethodologySheetOpen(false);
-    toast.success('Pack deployed to client');
-    navigate(`/clients/${clientId}?tab=program`);
   }, [clientId, navigate]);
 
   const hasValidClient = client != null && typeof client === 'object' && !Array.isArray(client) && client?.id != null;
@@ -1949,6 +1964,7 @@ h1{font-size:20px;margin-bottom:8px;} .muted{color:#9CA3AF;font-size:12px;} .row
               await queryClient.invalidateQueries({ queryKey: ['client-programme', clientId] });
               await queryClient.invalidateQueries({ queryKey: ['program-assignments', clientId] });
               await queryClient.invalidateQueries({ queryKey: ['client-daily-snapshot', clientId] });
+              setBlockSummaryRefreshKey((n) => n + 1);
 
               setAssignSheetOpen(false);
               toast.success('Programme assigned');
